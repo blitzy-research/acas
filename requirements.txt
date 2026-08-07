@@ -38,10 +38,21 @@
 # --------------------------------------------------------------------------
 # SECTION 1 -- THE SHIPPED RUNTIME SET
 # --------------------------------------------------------------------------
-# A flat mirror of `pyproject.toml`'s [project].dependencies. This is the only
-# section the shipped `acas_posting` package needs at run time; the build backend
-# is deliberately not here but in section 3, because it is a BUILD requirement the
-# cycle never imports.
+# A flat mirror of `pyproject.toml`'s [project].dependencies, which is the
+# DECLARED runtime closure of the shipped `acas_posting` package. The build
+# backend is deliberately not here but in section 3, because it is a BUILD
+# requirement the cycle never imports.
+#
+# DECLARED is not the same as IMPORTED, and this section states both so neither
+# can be inferred wrongly from the other. Agent Action Plan section 0.5.1 fixes
+# the closure at four names -- mysql-connector-python, SQLAlchemy and, as
+# SQLAlchemy's own requirements, greenlet and typing_extensions -- and the plan is
+# frozen, so this manifest reproduces that closure exactly. An AST import census
+# over `acas_posting/` yields exactly ONE third-party top-level module, `mysql`;
+# the census is asserted in both directions by
+# `tests/arithmetic/test_deployment_contract_boundaries.py`, which also asserts
+# that this file and `pyproject.toml` declare the plan's closure and nothing more.
+# Each entry below records which of the two it is.
 
 # The ONLY third-party module acas_posting imports (in dal/connection.py). Ships
 # a compiled C extension for CPython 3.12 and materialises DECIMAL columns as
@@ -56,29 +67,61 @@ mysql-connector-python==26.7.0 \
     --hash=sha256:43ee453b53556f690e4f4b795d3f17a1c6d4b45f729657bb0d999c8dfc9261d5 \
     --hash=sha256:d8ff5ee236ea46661ee639336323e124ed868e37f3ea991bdc5de5a146f39fd5
 
-# --------------------------------------------------------------------------
-#  SQLAlchemy, greenlet AND typing_extensions ARE DELIBERATELY ABSENT (MJ-20)
+# DECLARED BY AAP SECTION 0.5.1, INSTALLED, AND NOT IMPORTED. The plan pins
+# SQLAlchemy at this exact version and describes it as used "at Core level only --
+# text() statements executed on an explicit Connection", with no ORM entity layer.
+# The shipped package does not take that path: `dal/connection.py` reaches MariaDB
+# through mysql-connector-python, which AAP section 0.5.1 itself calls "the primary
+# database path", and AAP section 0.8.2 preserves the user requirement as an
+# either/or. The reason the connector is the path taken is recorded in full beside
+# `pyproject.toml`'s dependency list -- in one sentence, the frozen bridges own
+# their connections in a way an Engine is built to own instead, and re-routing
+# would change which physical session a statement runs on, which rules R-4 and R-6
+# forbid.
 #
-#  They were pinned here, SQLAlchemy carrying a comment that described it as the
-#  active Core-level data-access boundary, with the other two as its transitive
-#  requirements. Nothing under acas_posting/ imported any of them: an
-#  AST census over the package yields exactly one third-party top-level module,
-#  `mysql`, and pyproject.toml already stated that while listing all three as
-#  runtime dependencies. A lock file that installs an execution path the code
-#  does not take makes the shipped architecture unauditable from the artifact,
-#  and a hashed install is what the container and the parity protocol use.
-#
-#  The requirement permits either option. AAP section 0.8.2 preserves it
-#  verbatim as an either/or -- "MySQL access via `mysql-connector-python` OR
-#  SQLAlchemy Core with no ORM entity layer" -- and AAP section 0.5.1 calls
-#  mysql-connector-python "the primary database path". The frozen
-#  connection-ownership semantics that `acas_posting/dal/connection.py`
-#  reproduces decide between them; pyproject.toml records that reasoning in full
-#  next to the dependency list, and it is not repeated here.
-#
-#  `pip show` records greenlet and typing_extensions as SQLAlchemy's
-#  requirements and nothing else's; mysql-connector-python requires nothing.
-# --------------------------------------------------------------------------
+# It is pinned here regardless, because the plan is FROZEN and a manifest that
+# silently narrows the plan's closure is a divergence from it. Declaring it while
+# not importing it is stated as such rather than implied: the entry is installed by
+# every hashed route, `harness/Dockerfile.gnucobol` asserts it is importable in the
+# image AND that no shipped module routes through it, and the deployment-contract
+# tests assert the same pair. Nothing here creates an Engine, a MetaData, a mapped
+# class or a session, so R-3's ban on an ORM entity layer and on schema-generating
+# metadata holds by construction and not by trust.
+
+SQLAlchemy==2.0.51 \
+    --hash=sha256:7d78702b26ba1c18b2d0fb2ea940ba7f17a9581b42e8361ff93920ebbee1235a \
+    --hash=sha256:581921d849d6e6f994d560389192955e80e2950e18fcdfe2ccea863e01158e6e \
+    --hash=sha256:1d21ce524ab86c23046e992a5b81cb54c21079c6df6e78b8fc77d77cac70a6b9 \
+    --hash=sha256:c5d98a2709840027f5a347c3af0a7c3d5f6c1ff93af2ca1c54494e23cba8f389 \
+    --hash=sha256:1181256e0f16479691b5616d36375dc2620ad8332b25978763c3d206ad3f3f1d \
+    --hash=sha256:9f380393be5abeb6815f68fd39271b95127173511b6706b0a630a9995d53f8f5 \
+    --hash=sha256:2cf39aabdf48e87c1c2c2ed6d20d33ffa0733b3071ce9c5f66357947dd009080 \
+    --hash=sha256:bb024d8b621d0be75f4f44ecc7c950450026e76d66dc8f791bb5331d7fed59d5 \
+    --hash=sha256:804dccd8a4a6242c4e30ad961e540e18a588f6527202f2d6791b01845d59fdc9
+
+# SQLAlchemy's own requirements, named as such by AAP section 0.5.1 ("Pulls
+# `greenlet` 3.5.4 as a transitive dependency") and pinned here so the closure is
+# reproducible rather than resolved. `pip show` records both as SQLAlchemy's
+# requirements and nothing else's; mysql-connector-python requires nothing at all.
+# Nothing in acas_posting/, tests/ or harness/ imports either, and nothing calls
+# create_async_engine: execution is strictly sequential (R-3).
+
+greenlet==3.5.4 \
+    --hash=sha256:3d66250e8b09f182ede05490998c818b5961f7a3640332d44c4927caec7bbfe4 \
+    --hash=sha256:c90e930c9c192e5b3ee9fb8bcd920ea3926155e2e3ded39fc697323addecee17 \
+    --hash=sha256:791fdfeeb9c6e0c7b10fa151bf110d2a6974866f13dcb5b1c7efae698245893a \
+    --hash=sha256:b7c895310363f310361e0fe2072af85269d2a2a285cd04c0c59e79a5e3670dcf \
+    --hash=sha256:f88193799d43dbf8c8a806d6405c9c52fe2af40bf75072a606357b33cc336c7f \
+    --hash=sha256:13b980043cb1b3134e81ea469da1250ddcc6bfe6d245bbaa59168d9cdc8f228f \
+    --hash=sha256:b7a5f095767c4493afcd06067f2bb3b8716e3f3f9e92b99c88e7e99f885b3d4d \
+    --hash=sha256:42afdc1ab5f66da8c586c32af9224a74a706b4f0ea0dc3a4188a0860a09c65c9 \
+    --hash=sha256:60149df8f462d1b230038e6590c23c3b4768bb5d6c022b3b6e82532b34b0b8a3 \
+    --hash=sha256:77d6ce04fed0d9aeed42e0f37923cc43eba9b027bdd9c34546bb4ccd143d0fe0 \
+    --hash=sha256:0232ae1de90a8e07867bb127d7a6ba2301e859145489f25cda8a6096dabe1d20
+
+typing_extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
+    --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5
 
 # --------------------------------------------------------------------------
 # SECTION 2 -- THE ORACLE HARNESS SET

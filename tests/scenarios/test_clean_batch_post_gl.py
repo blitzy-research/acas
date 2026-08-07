@@ -1046,7 +1046,7 @@ def test_clean_batch_post_gl_state_parity(parity, harness) -> None:
         f"compiled oracle, reproduce whatever it does (a defect reproduced is "
         f"correct; a defect fixed is a failure), and record the arbitration in "
         f"docs/migration/ambiguity-resolutions.md.\n"
-        f"{harness.diff_states.render(run.tree)}\n"
+        f"{run.diagnose()}\n"
         f"{run.describe()}"
     )
 

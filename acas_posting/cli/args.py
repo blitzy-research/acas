@@ -3387,7 +3387,8 @@ def report_configuration_failure(
 
     Returns:
         The frozen return code the error carries, which the route returns as its
-        process exit status.
+        process exit status. Resolved through `boundary_exit_status`, so the value
+        is ALWAYS an `int` - see the note below.
     """
     logger.error(
         "%s: the ACAS_DB_* deployment contract for the database connection is "
@@ -3396,7 +3397,19 @@ def report_configuration_failure(
         subject,
         error,
     )
-    return error.return_code
+    #  ⭐ THROUGH THE ONE GUARDED HELPER, NOT `error.return_code` DIRECTLY
+    #  (finding SEC-01). `boundary_exit_status` reads the attribute and returns it
+    #  only when it `isinstance(..., int)`, falling back to the smallest status the
+    #  frozen menu treats as a serious error. Reading the attribute here instead
+    #  meant an exception whose `return_code` was not an integer - which a reversed
+    #  `RdbmsParamError(message, code)` produced, silently - became a route's
+    #  return value: `SystemExit` printed the formatted text on a direct
+    #  invocation, and `__main__`'s `is_serious_error(term_code)` compared a `str`
+    #  against an `int` and raised, turning a configuration mistake into a
+    #  traceback that discloses installation paths (CWE-209, CWE-704). The two
+    #  invocation routes must not be able to disagree about a status, and reading
+    #  it through the one implementation is what makes them agree by construction.
+    return boundary_exit_status(error)
 
 
 def irs_run_date_x8(to_day: str) -> str:

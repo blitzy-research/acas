@@ -2086,7 +2086,7 @@ def test_clean_batch_post_sl_state_parity(
         f"reproduced "
         f"is correct and a defect fixed is a failure (R-4).\n"
         f"\n"
-        f"{harness.diff_states.render(parity.tree)}"
+        f"{parity.diagnose()}"
         f"\n"
         f"  Full report at {parity.outcome.report}; every stage's outcome follows.\n"
         f"{parity.describe()}\n"
@@ -2220,7 +2220,9 @@ def test_a1_missing_period_gl_posting_close_not_executed(
         f"{SCENARIO}: A-1's WITNESS TABLE `{GL_POSTING_TABLE}` DIFFERS between the two "
         f"sides - {finding.total_differences} finding(s).\n"
         f"\n"
-        f"{harness.diff_states.render(harness.diff_states.TreeDiff(tables=(finding,)))}"
+        f"{harness.diff_states.summarise(
+            harness.diff_states.TreeDiff(tables=(finding,)), report_path=None
+        )}"
         f"\n"
         f"  READ THE `{SIDE_COBOL}` COLUMN AS THE SPECIFICATION. In pure General "
         f"Ledger "
@@ -2580,6 +2582,7 @@ def test_sign_narrowing_at_the_bridge_agrees(
     parity: Any,
     harness: Any,
     frozen_schema: Mapping[str, Mapping[str, Any]],
+    withheld: object,
 ) -> None:
     """A-11: the sign is lost AT THE BRIDGE, and both sides lose it identically.
 
@@ -2679,11 +2682,11 @@ def test_sign_narrowing_at_the_bridge_agrees(
             for side, value in ((SIDE_COBOL, expected), (SIDE_PYTHON, produced)):
                 assert isinstance(value, int) and not isinstance(value, bool), (
                     f"`{SALES_LEDGER_TABLE}`.`{column}` row {key!r} arrived from the "
-                    f"{side} side as {type(value).__name__} ({value!r}); the column is "
+                    f"{side} side as {type(value).__name__} ({withheld(value)}); the column is "
                     f"{declared.sql_type!r} and must reach the dump as a JSON integer."
                 )
                 assert value >= 0, (
-                    f"`{SALES_LEDGER_TABLE}`.`{column}` row {key!r} is {value} on the "
+                    f"`{SALES_LEDGER_TABLE}`.`{column}` row {key!r} is {withheld(value)} on the "
                     f"{side} side - NEGATIVE, in a column the frozen schema declares "
                     f"{declared.sql_type!r} at [mysql/ACASDB.sql:L{declared.line}].\n"
                     f"  A-11 is that the sign is lost AT THE BRIDGE: the copybook "
@@ -2732,6 +2735,7 @@ def test_dump_is_wellformed_on_both_sides(
     harness: Any,
     frozen_schema: Mapping[str, Mapping[str, Any]],
     definition: Mapping[str, Any],
+    withheld: object,
 ) -> None:
     """Both normalised trees carry the shape the protocol guarantees, for all ten
     tables.
@@ -2874,7 +2878,7 @@ def test_dump_is_wellformed_on_both_sides(
                     value = row[position]
                     assert not isinstance(value, float), (
                         f"{side} `{table}`.`{column}` row {row_index} is a `float` "
-                        f"({value!r}). NO ACCOUNTING VALUE MAY PASS THROUGH A BINARY "
+                        f"({withheld(value)}). NO ACCOUNTING VALUE MAY PASS THROUGH A BINARY "
                         f"FLOATING-POINT TYPE at any point - not in computation, not "
                         f"in "
                         f""
@@ -2898,7 +2902,7 @@ def test_dump_is_wellformed_on_both_sides(
                     if declared.kind == KIND_DECIMAL:
                         assert isinstance(value, str), (
                             f"{side} `{table}`.`{column}` row {row_index} is "
-                            f"{type(value).__name__} ({value!r}); the schema declares "
+                            f"{type(value).__name__} ({withheld(value)}); the schema declares "
                             f"it "
                             f"{declared.sql_type!r} "
                             f"[mysql/ACASDB.sql:L{declared.line}], and a DECIMAL value "
@@ -2913,7 +2917,7 @@ def test_dump_is_wellformed_on_both_sides(
                     elif declared.kind == KIND_INTEGER:
                         assert isinstance(value, int) and not isinstance(value, bool), (
                             f"{side} `{table}`.`{column}` row {row_index} is "
-                            f"{type(value).__name__} ({value!r}); the schema declares "
+                            f"{type(value).__name__} ({withheld(value)}); the schema declares "
                             f"it "
                             f"{declared.sql_type!r} "
                             f"[mysql/ACASDB.sql:L{declared.line}], so it must reach "
@@ -2930,7 +2934,7 @@ def test_dump_is_wellformed_on_both_sides(
                     else:
                         assert isinstance(value, str), (
                             f"{side} `{table}`.`{column}` row {row_index} is "
-                            f"{type(value).__name__} ({value!r}); the schema declares "
+                            f"{type(value).__name__} ({withheld(value)}); the schema declares "
                             f"it "
                             f"{declared.sql_type!r} "
                             f"[mysql/ACASDB.sql:L{declared.line}], a fixed-character "

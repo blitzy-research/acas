@@ -1281,6 +1281,105 @@ def _probe_compiled_oracle(
             f"compiled without the shim"
         )
 
+    # THE ORACLE MUST BE THE FROZEN SPECIFICATION, NOT A REPAIRED ONE.
+    #
+    # Everything above establishes that an oracle EXISTS. None of it establishes that
+    # the oracle is the thing R-6 makes the specification: the frozen checkout. A
+    # build carrying source transformations has repaired executable logic - IF scope,
+    # connection lifetime, credential propagation, stale reply pairs - so agreement
+    # with it cannot show that the migrated cycle reproduces the frozen system. A
+    # scenario tier that PASSED against such a build would publish a parity claim
+    # nobody had measured, which is worse than a skip because a skip is visible.
+    #
+    # So the tier reports itself UNAVAILABLE, with the reason, and the reason names
+    # the measured cause rather than a hypothesis. `harness/run_parity.sh` refuses
+    # the same condition with exit 77; this is the same judgement at the tier
+    # boundary, so the two cannot disagree.
+    _probe_oracle_is_frozen(build_root, missing, detail)
+
+
+def _probe_oracle_is_frozen(
+    build_root: Path, missing: list[str], detail: list[str]
+) -> None:
+    """Check the oracle was compiled from the frozen checkout, appending any faults.
+
+    Reads `oracle-source-is-frozen` from the provenance attestation
+    `harness/build_oracle.sh` publishes. Absent, unreadable or `no` all make the
+    oracle tiers unavailable, because none of them supports a claim about the frozen
+    specification.
+
+    Set `ACAS_ACCEPT_TRANSFORMED_ORACLE=1` to run the tiers against a transformed
+    build for diagnosis. That mirrors `harness/run_parity.sh
+    --accept-transformed-oracle`, and like it, results obtained that way are not
+    parity claims.
+
+    Args:
+        build_root: The oracle build tree, already known to be a directory.
+        missing: The machine-readable fault list, appended to in place.
+        detail: The human-readable lines, appended to in place.
+    """
+    if os.environ.get("ACAS_ACCEPT_TRANSFORMED_ORACLE", "").strip() == "1":
+        return
+
+    attestation = build_root / "oracle-attestation.txt"
+    remedy = (
+        "    A frozen build is the DEFAULT: run `harness/build_oracle.sh` with no "
+        "flags.\n"
+        "    ON THIS CHECKOUT THAT BUILD FAILS, measured: exit 74, because 22 frozen "
+        "common/*MT.cbl\n"
+        "    bridges COPY ACAS-SQLstate-error-list.cob and that member is absent from "
+        "the checkout\n"
+        "    and from presql2-latest.zip alike. It carries the SQLSTATE list the "
+        "bridges document and\n"
+        "    cannot be fabricated (R-3, R-4); it must be supplied by the maintainer. "
+        "See\n"
+        "    README-python-migration.md section 8.7 and "
+        "docs/migration/scenario-diff-evidence.md section 0.\n"
+        "    To run these tiers anyway, for DIAGNOSIS ONLY and with no parity claim, "
+        "set\n"
+        "    ACAS_ACCEPT_TRANSFORMED_ORACLE=1."
+    )
+
+    if not attestation.is_file():
+        missing.append("oracle:attestation")
+        detail.append(
+            f"  {attestation} is absent, so nothing attests which bytes were "
+            f"compiled. Under R-6 the compiled program IS the specification, so an "
+            f"oracle of unrecorded provenance cannot support a parity claim.\n"
+            f"{remedy}"
+        )
+        return
+
+    frozen = ""
+    transforms = ""
+    try:
+        for line in attestation.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition("\t")
+            if key == "oracle-source-is-frozen":
+                frozen = value.strip()
+            elif key == "source-transforms":
+                transforms = value.strip()
+    except OSError as error:
+        missing.append("oracle:attestation-unreadable")
+        detail.append(
+            f"  {attestation} could not be read ({error}), so the oracle's "
+            f"provenance is unestablished.\n{remedy}"
+        )
+        return
+
+    if frozen != "yes":
+        missing.append("oracle:not-frozen")
+        detail.append(
+            f"  {attestation} records oracle-source-is-frozen="
+            f"{frozen or '<absent>'}"
+            + (f" with {transforms} transformed source path(s)" if transforms else "")
+            + ". The oracle was NOT compiled from the frozen checkout, so an empty "
+            "diff against it would show agreement with a partly REPAIRED "
+            "specification rather than with the frozen one. That is not the "
+            "question these tiers exist to answer, so they do not run.\n"
+            f"{remedy}"
+        )
+
 
 def _find_oracle_module(build_root: Path, name: str) -> Path | None:
     """Locate one dynamically loadable handler module under the build tree.
@@ -2018,14 +2117,46 @@ def scenario_staged_data_dir(scenario: str) -> Path:
     return Path(data_dir) / scenario
 
 
+#: The administrative pair. Only `harness/reset_db.sh` and the `harness/seed.sh` it
+#: delegates to hold any reference to either name - a census across the whole harness
+#: finds none in the cycle runners, the oracle build, the dump, the normalisation or
+#: the comparison. So every other child runs without them (finding SEC-04).
+_ADMIN_ENV_NAMES: Final[tuple[str, ...]] = (ENV_DB_ADMIN_USER, ENV_DB_ADMIN_PASSWORD)
+
+
+def without_admin_credentials(env: Mapping[str, str]) -> dict[str, str]:
+    """Copy an environment with the database superuser credential removed.
+
+    `harness/docker-compose.yml` sets the administrative pair on the whole `gnucobol`
+    service, because protocol stages 1 and 5 need DDL rights to drop and re-apply the
+    frozen schema. A service-wide variable is inherited by every descendant, so without
+    this the superuser password reached the GnuCOBOL compiler, the preSQL translator,
+    every bridge and menu binary, the migrated Python cycle and pytest itself.
+
+    Removed rather than left unused, so a child cannot reach the credential even by
+    accident. Application access is untouched: `ACAS_DB_USER` and `ACAS_DB_PASSWORD`
+    remain, and that account holds only DML on the one schema.
+
+    Args:
+        env: The environment to copy.
+
+    Returns:
+        A new mapping without the administrative pair.
+    """
+    return {
+        name: value for name, value in env.items() if name not in _ADMIN_ENV_NAMES
+    }
+
+
 def scenario_runtime_environment(scenario: str) -> dict[str, str]:
     """Build the environment shared by the COBOL and Python run stages.
 
     Copied from `os.environ`, so a run id bound by `bound_run_id` reaches both
-    runners without either helper having to know about it.
+    runners without either helper having to know about it - MINUS the administrative
+    credential, which neither run stage uses and neither should be able to (SEC-04).
     """
     staged = str(scenario_staged_data_dir(scenario))
-    environment = dict(os.environ)
+    environment = without_admin_credentials(os.environ)
     environment[ENV_DATA] = staged
     environment[ENV_LEDGERS] = staged
     return environment
@@ -2339,6 +2470,9 @@ def parity_stage_registry() -> tuple[tuple[int, str], ...]:
                 stdin=subprocess.DEVNULL,
                 check=False,
                 cwd=REPO_ROOT,
+                # A read-only listing of the stage registry: no credential of any kind
+                # is needed, so the administrative pair is not handed over (SEC-04).
+                env=without_admin_credentials(os.environ),
             )
         except (OSError, subprocess.SubprocessError):
             completed = None
@@ -2528,6 +2662,7 @@ def _run_script(
     stage: str,
     timeout: int,
     env: Mapping[str, str] | None = None,
+    administrative: bool = False,
 ) -> StageResult:
     """Run one harness shell script as a subprocess, non-interactively.
 
@@ -2536,10 +2671,17 @@ def _run_script(
         argv: Its arguments, already stringified.
         stage: The `STAGE_*` name, recorded in the result.
         timeout: The wall-clock ceiling for THIS wait.
-        env: The environment; the current one when omitted. It is passed through
-            rather than filtered, because the scripts read `ACAS_*` and
-            `ACAS_SEED_STRICT` from it and this module has no business deciding what
-            they see.
+        env: The environment; the current one when omitted. Everything the scripts read
+            is passed through - `ACAS_*`, `ACAS_SEED_STRICT` and the rest - because this
+            module has no business deciding what they see. The ONE exception is the
+            administrative credential, below.
+        administrative: Whether this stage performs schema administration and therefore
+            needs `ACAS_DB_ADMIN_USER` / `ACAS_DB_ADMIN_PASSWORD`. FALSE BY DEFAULT, and
+            the default is the point (finding SEC-04): the database superuser password
+            is removed from the child's environment unless the stage is one of the two
+            that drops and re-applies the schema. Exactly three call sites pass True -
+            the seed and the two resets - and every other child, including both cycle
+            runners, runs without the credential rather than merely not using it.
 
     Returns:
         The captured result. A non-zero status is RETURNED, never raised: the caller
@@ -2560,6 +2702,8 @@ def _run_script(
         )
 
     command = (str(script), *(str(item) for item in argv))
+    source: Mapping[str, str] = os.environ if env is None else env
+    child_env = dict(source) if administrative else without_admin_credentials(source)
     try:
         completed = subprocess.run(  # noqa: S603 - a fixed, repository-owned script
             command,
@@ -2569,7 +2713,7 @@ def _run_script(
             timeout=timeout,
             stdin=subprocess.DEVNULL,
             cwd=str(REPO_ROOT),
-            env=dict(os.environ if env is None else env),
+            env=child_env,
         )
     except subprocess.TimeoutExpired as exc:
         raise HarnessFaultError(
@@ -2954,8 +3098,11 @@ def seed(
     if dry_run:
         argv.append("--dry-run")
     argv.append(str(scenario_file(scenario)))
+    # administrative: seeding opens the autocommit window with SET GLOBAL, which the
+    # application account may not do [harness/seed.sh].
     return _run_script(
-        SEED_SCRIPT, argv, stage=STAGE_SEED, timeout=STAGE_TIMEOUT_SEED
+        SEED_SCRIPT, argv, stage=STAGE_SEED, timeout=STAGE_TIMEOUT_SEED,
+        administrative=True,
     )
 
 
@@ -3004,8 +3151,10 @@ def reset(
     if dry_run:
         argv.append("--dry-run")
     argv.append(str(scenario_file(scenario)))
+    # administrative: this drops and re-applies the frozen schema.
     return _run_script(
-        RESET_SCRIPT, argv, stage=STAGE_RESET, timeout=STAGE_TIMEOUT_RESET
+        RESET_SCRIPT, argv, stage=STAGE_RESET, timeout=STAGE_TIMEOUT_RESET,
+        administrative=True,
     )
 
 
@@ -3023,8 +3172,10 @@ def prepare_scenario(scenario: str) -> StageResult:
         str(scenario_fixture_dir(scenario)),
         str(scenario_file(scenario)),
     ]
+    # administrative: this drops and re-applies the frozen schema, then seeds.
     return _run_script(
-        RESET_SCRIPT, argv, stage=STAGE_SEED, timeout=STAGE_TIMEOUT_RESET
+        RESET_SCRIPT, argv, stage=STAGE_SEED, timeout=STAGE_TIMEOUT_RESET,
+        administrative=True,
     )
 
 
@@ -3600,6 +3751,109 @@ def normalize(
         STAGE_NORMALIZE_COBOL if side == SIDE_COBOL else STAGE_NORMALIZE_PYTHON
     )
     return _drive_harness_main(harness_normalize(), argv, stage=stage)
+
+
+# ---------------------------------------------------------------------------
+#  THE VALUE-FREE DIAGNOSTIC ROUTE (finding SEC-05)
+#
+#  A scenario test compares two database states. When it fails, the useful question is
+#  WHICH table and WHICH column disagreed - not what the figures were. The two are
+#  easily conflated because `harness/diff_states.py` ships both renderers:
+#
+#    render(tree)     every differing value AND every primary key. Its purpose is the
+#                     on-disk report, where that detail belongs.
+#    summarise(tree)  table, column name and ordinal, and counts. No value, no key.
+#
+#  The tier used to interpolate `render` into assertion messages, which put real ledger
+#  balances, VAT amounts and account identifiers into pytest output. The figures are not
+#  lost by withholding them: they are in the report, and the digest below ties a message
+#  to the exact file. So this route costs a reader one `cat` and costs a log scraper
+#  everything.
+#
+#  Reached as `ParityRun.diagnose()`, `DeterminismRun.diagnose()`, and the `withheld`
+#  fixture for a bare row value. `tests/arithmetic/` has a static test that refuses a
+#  new `render(` in this tier, so the route cannot quietly be abandoned again.
+# ---------------------------------------------------------------------------
+
+
+def _report_digest(report: Path | None) -> str | None:
+    """Digest one report file, so a message can be tied to the artifact it describes.
+
+    Args:
+        report: The report's path, or None when the run produced none.
+
+    Returns:
+        The report's SHA-256, or None if there is no readable file at `report`.
+    """
+    if report is None:
+        return None
+    try:
+        import hashlib
+
+        return hashlib.sha256(Path(report).read_bytes()).hexdigest()
+    except OSError:
+        # A message about a missing report must still be printable.
+        return None
+
+
+def _diagnose_tree(tree: Any, *, report: Path | None) -> str:
+    """Summarise a comparison for a failure message, withholding every value.
+
+    Args:
+        tree: The `TreeDiff` to summarise.
+        report: Where the full report - values included - was written.
+
+    Returns:
+        `harness/diff_states.py`'s own value-free summary. The empty string when the
+        trees are identical, matching the zero-byte report a passing run writes.
+    """
+    return str(
+        harness_diff_states().summarise(
+            tree, report_path=report, report_digest=_report_digest(report)
+        )
+    )
+
+
+def _withheld(value: Any, *, column: str | None = None, artifact: Any = None) -> str:
+    """Describe a row value's SHAPE for a failure message, never its content.
+
+    The stand-in for interpolating a dumped row, a row collection or one column's
+    value. What a failure needs is that something differed, how much of it, and where
+    the detail is; what it does not need is the figure itself (finding SEC-05).
+
+    Args:
+        value: Whatever would have been interpolated - a scalar, a sequence of rows, a
+            set of keys or a mapping.
+        column: The column the value came from, if it is one column's.
+        artifact: The dump or report the content can be read from, if there is one.
+
+    Returns:
+        A bracketed value-free description, safe to place in any message.
+    """
+    if isinstance(value, Mapping):
+        shape = f"{len(value)} column(s)"
+    elif isinstance(value, (str, bytes)) or not isinstance(value, Sequence | set | frozenset):
+        shape = "1 value"
+    else:
+        shape = f"{len(value)} value(s)"
+
+    parts = [shape]
+    if column is not None:
+        parts.append(f"of {column}")
+    parts.append("withheld")
+    if artifact is not None:
+        parts.append(f"- see {artifact}")
+    return f"<{' '.join(parts)}>"
+
+
+@pytest.fixture
+def withheld() -> Callable[..., str]:
+    """A value-free stand-in for a dumped row value, for assertion messages.
+
+    Returns:
+        `_withheld`, callable as `withheld(value, column=..., artifact=...)`.
+    """
+    return _withheld
 
 
 @dataclass(frozen=True)
@@ -4270,13 +4524,14 @@ def assert_runtime_autocommit_on(connection: Any) -> None:
     `harness/seed.sh` is the ONLY place the mode is ever changed - it opens a seeding
     window immediately before the first frozen load program, verifies the mode from a
     fresh session, and restores the runtime mode from its exit trap on every path,
-    exiting 73 if it cannot. WHICH mode that window runs is `seed.sh`'s own R-6
-    arbitration and was MEASURED against the compiled loaders: `@@GLOBAL.autocommit =
-    1` is its default because it is the only mode in which they leave a durable row,
-    and `ACAS_SEED_AUTOCOMMIT=off` selects the AAP-literal `0`, under which seven
-    loaders report success, the tables read empty and `seed.sh` exits 76. The loader
-    return codes are identical under both, so the mode is invisible to the frozen
-    code. Either way the window is closed before this assertion is ever reached. `harness/reset_db.sh` (83)
+    exiting 73 if it cannot. WHICH mode that window runs follows the Agent Action
+    Plan: `@@GLOBAL.autocommit = 0` is its default, per AAP sections 0.2.1.1, 0.4.1.7
+    and 0.5.2, and under it seven loaders report success, the tables read empty and
+    `seed.sh` exits 76 - the frozen no-COMMIT defect, reproduced and refused rather
+    than papered over. `ACAS_SEED_AUTOCOMMIT=on` selects `1`, the only mode MEASURED
+    to leave a durable row, as an explicitly declared deviation. The loader return
+    codes are identical under both, so the mode is invisible to the frozen code,
+    which is why the deviation is available at all - not why it could be silent. Either way the window is closed before this assertion is ever reached. `harness/reset_db.sh` (83)
     and `harness/run_cobol_scenario.sh` (73) assert this same runtime mode. A fixture
     that quietly issued `SET autocommit` would put the test runner in charge of a
     setting the harness owns.
@@ -4558,6 +4813,27 @@ class ParityRun:
             f"{self.outcome.report}"
         )
         return "\n".join(blocks)
+
+    def diagnose(self) -> str:
+        """What differed, WITHOUT any differing value. For a failure message.
+
+        THE VALUE-FREE ROUTE (finding SEC-05). Use this and never
+        `harness/diff_states.py`'s `render`: `render` exists to write the on-disk
+        report and it prints every differing value AND every primary key, so
+        interpolating it into an assertion message copies real accounting figures and
+        real account identifiers into pytest output and from there into any log that
+        collects it.
+
+        Nothing is lost by withholding them, because they are not discarded - they are
+        in the report this names, and the digest ties this message to that exact file.
+        A reader who needs the figures opens the artifact; a log that scrapes stdout
+        does not get them.
+
+        Returns:
+            The table, column and count summary, with the report's path and digest.
+            The empty string when the two trees are identical.
+        """
+        return _diagnose_tree(self.tree, report=self.outcome.report)
 
 
 #: One completed :class:`ParityRun` per distinct request, for the lifetime of the

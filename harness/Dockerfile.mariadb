@@ -27,7 +27,7 @@
 FROM --platform=linux/amd64 mariadb:10.11.7@sha256:27292753bb759cd22be72e3c8192f1259ef47010c8634b5da0bc886845efe9fd
 
 LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
-      org.opencontainers.image.description="MariaDB 10.11.7 serving the frozen ACASDB schema for COBOL-vs-Python posting-cycle parity comparison. Runtime application access is served with autocommit ON. harness/seed.sh owns a SEEDING WINDOW around the frozen loaders and establishes the mode MEASURED to leave durable rows, which is ON; ACAS_SEED_AUTOCOMMIT=off selects the AAP-literal OFF mode, under which the frozen loaders reproduce their no-COMMIT defect and the durability gate refuses the seed." \
+      org.opencontainers.image.description="MariaDB 10.11.7 serving the frozen ACASDB schema for COBOL-vs-Python posting-cycle parity comparison. Runtime application access is served with autocommit ON. harness/seed.sh owns a SEEDING WINDOW around the frozen loaders and defaults it to the mode the Agent Action Plan mandates, which is OFF; under it the frozen loaders reproduce their no-COMMIT defect, nothing persists and the durability gate refuses the seed with exit 76. Requesting ACAS_SEED_AUTOCOMMIT=on per invocation selects the only mode measured to leave durable rows, as a declared deviation that yields a working fixture rather than AAP-conformant evidence." \
       org.opencontainers.image.base.name="docker.io/library/mariadb:10.11.7@sha256:27292753bb759cd22be72e3c8192f1259ef47010c8634b5da0bc886845efe9fd" \
       org.opencontainers.image.base.digest="sha256:27292753bb759cd22be72e3c8192f1259ef47010c8634b5da0bc886845efe9fd" \
       acas.harness.platform="linux/amd64" \

@@ -761,7 +761,7 @@ Fourteen primary entries. The status column is the one to read first.
 | [`Q-7`](#q-7) | What the menu shells' unconditional `overrewrite` writes on exit — **and whether the Python CLI has a counterpart for it: it does, at all seven routes** | **`RESOLVED BY ORACLE`** | `acas_posting/cli/args.py`, `harness/dump_tables.py`, `harness/diff_states.py` |
 | [`Q-8`](#q-8) | Whether `Post-Date (7:2)` holds a **year** or a **century** — a year on the Sales and Purchase paths, a century on `irs030`'s own | **`RESOLVED BY CONSTRUCTION`** | `acas_posting/dal/acasirsub4_irs_posting.py`, `acas_posting/dal/acas006_gl_posting.py`, `harness/normalize.py` |
 | [`Q-9`](#q-9) | Whether `HV-POST-RRN` being declared and fetched but never loaded is the maintainer's stated convention or the field he doubted | **`PARTIALLY RESOLVED BY ORACLE`** | `acas_posting/dal/acas006_gl_posting.py`, `acas_posting/dal/cursor_state.py` |
-| [`Q-10`](#q-10) | Whether the AAP's autocommit-OFF requirement governs the seeding stage or every connection the harness makes | **`RESOLVED BY ORACLE`** | `harness/seed.sh`, `harness/Dockerfile.mariadb`, `harness/reset_db.sh`, `harness/run_cobol_scenario.sh` |
+| [`Q-10`](#q-10) | Whether the AAP's autocommit-OFF requirement governs the seeding stage or every connection the harness makes | **`RESOLVED BY ORACLE`** — scope is seeding only; the seeding default is the AAP-mandated OFF, and the measured-durable ON is a declared deviation | `harness/seed.sh`, `harness/Dockerfile.mariadb`, `harness/reset_db.sh`, `harness/run_cobol_scenario.sh` |
 | [`Q-SYS4-SPARE-SENTINEL`](#q-sys4-spare-sentinel) | Where the two cycles' disagreement over `SYSTOT-REC`'s four spare columns comes from, and which value is the specification — **the loader stamps a sentinel the menu then erases, so the difference was a defect in the SEED and in neither cycle** | **`RESOLVED BY ORACLE`** | `harness/scenarios/*.yaml`, `harness/make_fixtures.py`, `harness/diff_states.py` |
 
 `RESOLVED BY ORACLE` appears only for questions a compiled run or a focused compiled probe **directly
@@ -2629,8 +2629,8 @@ than assumed:
 a **fresh** session each time:
 
 ```text
-ACAS_SEED_AUTOCOMMIT=off  harness/reset_db.sh --seed-dir "$F" "$S"   # the AAP-literal window
-                          harness/reset_db.sh --seed-dir "$F" "$S"   # the canonical mode -- NO FLAG NEEDED
+                          harness/reset_db.sh --seed-dir "$F" "$S"   # the AAP-mandated window -- THE DEFAULT
+ACAS_SEED_AUTOCOMMIT=on   harness/reset_db.sh --seed-dir "$F" "$S"   # the declared deviation -- the durable mode
 ```
 
 Two things a run settles that reading cannot: whether a loader leaves **any** row behind under the OFF window
@@ -2653,21 +2653,39 @@ Both halves of the question are answered:
 - **The mode is invisible to the frozen code.** The loader return codes are *identical* under both windows,
   so the choice is observable only to the server. It changes no behaviour the migration is reproducing.
 
-**⭐ THE DEFAULT FOLLOWS FROM THE MEASUREMENT.** `ACAS_SEED_AUTOCOMMIT` unset now means **on** — the measured
-durable mode — because a shipped default must not be a mode the script itself proves always fails. It is a
-deterministic protocol input rather than a ritual every caller has to remember; the previous arrangement left
-the standard documented invocation exiting 76 with no tracked caller selecting the working mode. `off` remains
-selectable, is the AAP-literal reading, and **reproduces the frozen no-COMMIT defect end to end** — which is
-precisely what exit 76 reports, and why the mode is kept rather than removed (R-4).
+**⭐ THE MEASUREMENT SETTLES THE BEHAVIOUR; THE AAP SETTLES THE DEFAULT.** These are two different
+questions, and an earlier revision of this entry ran them together. `ACAS_SEED_AUTOCOMMIT` unset means
+**off** — the mode AAP §0.2.1.1, §0.4.1.7 and §0.5.2 mandate — and the measurement above is what the harness
+*discloses* about that mode rather than a warrant for overriding it. `on` remains selectable, is the only mode
+measured to leave a durable row, and is how a working fixture is obtained; it is a **declared deviation**,
+requested per invocation so that it appears in the command that ran, and a fixture produced under it is not
+AAP-conformant evidence. The default **reproduces the frozen no-COMMIT defect end to end** — which is precisely
+what exit 76 reports, and is the outcome R-4 requires rather than a fault to be configured away.
 
 Runtime application access remains autocommit ON. Both runners assert that mode and then reproduce the frozen
 absence of explicit transaction boundaries. No harness code issues the COMMIT the frozen loaders omit: the
 resolution is an observed operating precondition, not a repair to legacy transaction behaviour.
 
-`tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py::test_the_seeding_window_defaults_to_the_measured_durable_mode`
-asserts the default against the shipped script, so a revert to the always-failing mode fails the suite.
+`tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py::test_the_seeding_window_defaults_to_the_aap_mandated_mode`
+asserts the default against the shipped script, and
+`::test_no_harness_file_pins_the_seeding_window_to_the_deviation` asserts that no Compose service or image
+bakes the deviation in — the earlier `ACAS_SEED_AUTOCOMMIT: "on"` pin in `harness/docker-compose.yml` made the
+mandated default unreachable through the harness for anyone who never opened `seed.sh`. A revert to either
+arrangement fails the suite.
 
-⭐ **Why the default was moved, and why that is faithful rather than a liberty.**
+⭐ **Why the deviation is available, and why it is NOT the default.**
+An earlier revision of this entry used the reasoning below to move the default to
+`on`. The reasoning is sound as far as it goes, and it is retained because it is what
+makes the deviation safe to offer — but it does not reach the conclusion it was put
+to. The AAP is the frozen, agreed specification for this migration, and a harness that
+silently seeded in a mode the AAP does not sanction would leave a reader of a parity
+result unable to tell that the configuration had been changed underneath them. The
+measurement licenses *availability*, not *silence*. The default is therefore the
+mandated `off`, and the consequence — that no seeded oracle state, and hence no
+AAP-conformant evidence, can be produced from this checkout — is disclosed in
+`scenario-diff-evidence.md` §0 rather than engineered around.
+
+The supporting observations, unchanged:
 The AAP's requirement rests entirely on `[common/glbatchLD.cbl:L9-L13]`, and that
 citation is an *operator banner*, not code — evidence (b) establishes that no COBOL
 program in the checkout can change the setting at all. The maintainer then
@@ -2680,13 +2698,20 @@ out every call site, leaving 77 dead references and not one live `perform`. The 
 even concedes the server default at its own L11-L12: "It is as default set ON."
 
 So the banner is a stale comment that the code and the maintainer's later notes both
-contradict. Rule R-6 makes compiled behaviour the arbiter, and compiled behaviour is
-unambiguous: under OFF the loaders persist nothing. Defaulting to a mode in which the
-oracle cannot be seeded would make the AAP's own acceptance criterion (§0.8.5, an
-empty diff over a real comparison) unreachable, and would leave the canonical driver
-guaranteed to exit 76. **This is a divergence from the letter of AAP §0.2.1.1, §0.5.2
-and §0.4.1.7, recorded as such**, taken in service of the AAP's own validation
-requirement rather than against it. Nothing here fixes the legacy defect — the missing
+contradict, and compiled behaviour is unambiguous: under OFF the loaders persist
+nothing. What follows is narrow and it is worth stating exactly. Because the loader
+return codes are *identical* under both windows, the mode is invisible to the frozen
+code, so **requesting `on` corrupts nothing** — that is why the deviation is offered
+at all. What does **not** follow is that `on` may be the default: the AAP says off,
+and R-6 arbitrates ambiguous *COBOL* semantics, not the instructions of the governing
+plan, which are not ambiguous here.
+
+**The honest consequence is recorded rather than removed.** In the mandated
+configuration this repository cannot seed the oracle, so the AAP's own acceptance
+criterion (§0.8.5, an empty diff over a real comparison) is unreachable without a
+declared deviation. That is a finding about the frozen system — the loaders' missing
+`COMMIT` — and it belongs in the evidence register, which is where it now is
+(`scenario-diff-evidence.md` §0). Nothing here fixes the legacy defect: the missing
 COMMIT is still missing, and `acas_assert_seed_durability` still refuses to hide it.
 
 **Measured on the live stack when the default was moved** (all three from one session):

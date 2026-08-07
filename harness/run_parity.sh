@@ -49,6 +49,19 @@ umask 077
 readonly EX_OK=0
 readonly EX_USAGE=70          # bad command line
 readonly EX_PRECONDITION=71   # environment or scenario assertion
+#  EVIDENCE UNAVAILABLE (finding SEC-02). Distinct from every difference status on
+#  purpose: 69 and 1 mean "the two states disagree", which is a finding ABOUT the
+#  migration, whereas this means nothing was compared at all because the oracle cannot
+#  arbitrate. Conflating the two is how a missing specification gets reported as a
+#  passing one - or as a failing one, which is no better.
+readonly EX_EVIDENCE_UNAVAILABLE=77
+
+#  Set by --accept-transformed-oracle. 0 refuses a transformed oracle outright; 1
+#  proceeds for DIAGNOSIS and forces every verdict to be reported as no parity claim.
+ACAS_PARITY_ACCEPT_TRANSFORMED_ORACLE=0
+#  Raised once a transformed oracle has been accepted, so the verdict reporter can say
+#  so regardless of what the comparison found.
+ACAS_PARITY_ORACLE_IS_DIAGNOSTIC=0
 # THERE IS NO "A STAGE FAILED" CODE, DELIBERATELY. The exit status of a failed run
 # is the failing stage's OWN status, passed through verbatim. A driver that
 # flattened every failure into one code would throw away the thing an operator
@@ -245,6 +258,14 @@ Options:
                   one per line, and exit. This is the machine-readable form the
                   composed recipes and tests/conftest.py consume, so that no consumer
                   restates the stage names. harness/parity_stages.sh defines them.
+  --accept-transformed-oracle
+                  proceed even though the oracle was compiled from TRANSFORMED
+                  sources. Without this, such a run is refused with status 77,
+                  EVIDENCE UNAVAILABLE -- not a difference, but nothing to compare
+                  against, because rule R-6 makes the compiled program the
+                  specification and rule R-4 requires its defects reproduced rather
+                  than repaired. With it, the cycle is driven for diagnosis and EVERY
+                  verdict is reported as NO PARITY CLAIM.
   -h, --help      this text.
 
 Environment: the same contract the five scripts assert -- ACAS_REPO, ACAS_BUILD,
@@ -254,6 +275,10 @@ adds none of its own and sets none of them.
 
 Exit codes:
   0        every stage ran and stage 10 found the two states IDENTICAL
+  77       EVIDENCE UNAVAILABLE -- the oracle was compiled from transformed sources,
+           so nothing was compared. Distinct from any difference status: a difference
+           is a finding about the migration, this is the absence of a specification
+           to find it against (finding SEC-02)
   70       usage        71  precondition (environment or scenario)
   <other>  the exit status of the first stage that failed, verbatim. The common
            ones: 75 the scenario's seed fixtures are not staged, 76 the seed
@@ -320,6 +345,12 @@ acas_parity_parse_args() {
         ;;
       --keep-going)
         ACAS_PARITY_KEEP_GOING=1
+        shift
+        ;;
+      --accept-transformed-oracle)
+        #  Acknowledges a non-frozen oracle for DIAGNOSIS (finding SEC-02). It does not
+        #  make the run evidence: every verdict is then reported as no parity claim.
+        ACAS_PARITY_ACCEPT_TRANSFORMED_ORACLE=1
         shift
         ;;
       --dry-run)
@@ -502,17 +533,22 @@ acas_parity_assert_environment() {
   #  THE SEED MODE, VALIDATED HERE SO STAGE 1 CANNOT FAIL FOR A REASON THE
   #  OPERATOR COULD HAVE BEEN TOLD ABOUT UP FRONT.
   #
-  #  The canonical durable mode is autocommit ON, and it needs no flag: unset
-  #  means on, harness/seed.sh defaults to it and harness/docker-compose.yml
-  #  declares it. It is the ONLY mode in which the frozen loaders leave a durable
-  #  row -- across all 28 common/*LD.cbl loaders there are 77 references to
-  #  `perform aa030-Commit' and `perform aa020-Rollback' and not one is live, and
-  #  the vendored cobmysqlapi38.c never calls mysql_autocommit. That diverges from
-  #  the letter of the Agent Action Plan (sections 0.2.1.1, 0.4.1.7, 0.5.2), whose
-  #  premise is the operator banner at [common/glbatchLD.cbl:L9-L13] -- superseded
-  #  by the maintainer himself in the same frozen files at
-  #  [common/glbatchLD.cbl:L386-L387] and [common/glbatchLD.cbl:L453]. Arbitrated
-  #  under R-6; see docs/migration/ambiguity-resolutions.md.
+  #  The DEFAULT is the mode the Agent Action Plan mandates -- autocommit OFF
+  #  during seeding, sections 0.2.1.1, 0.4.1.7 and 0.5.2 -- and it needs no flag:
+  #  unset means off and harness/seed.sh defaults to it. Under it the frozen
+  #  loaders persist nothing, so stage 1 exits 76 and NO EVIDENCE IS PRODUCED.
+  #  That is disclosed, not worked around: across all 28 common/*LD.cbl loaders
+  #  there are 77 references to `perform aa030-Commit' and `perform aa020-Rollback'
+  #  and not one is live, and the vendored cobmysqlapi38.c never calls
+  #  mysql_autocommit, so no frozen program can establish the mode for itself.
+  #
+  #  autocommit ON is the only mode measured to leave a durable row, and it is
+  #  available as an explicitly DECLARED DEVIATION rather than as a default. The
+  #  supporting observations -- the AAP's premise is the operator banner at
+  #  [common/glbatchLD.cbl:L9-L13], superseded by the maintainer himself at
+  #  [common/glbatchLD.cbl:L386-L387] and [common/glbatchLD.cbl:L453] -- explain why
+  #  the deviation corrupts nothing, NOT why it could be silent. See
+  #  docs/migration/ambiguity-resolutions.md.
   #
   #  A CLOSED SPELLING SET, and unrecognised text is REFUSED rather than guessed --
   #  the same discipline the transport flag uses, because a value silently read as
@@ -520,20 +556,19 @@ acas_parity_assert_environment() {
   # ---------------------------------------------------------------------------
   local seed_mode="${ACAS_SEED_AUTOCOMMIT-}"
   case "${seed_mode,,}" in
-    ''|on|1|true|yes)
-      : # the canonical durable mode
+    ''|off|0|false|no)
+      acas_parity_note 'the seeding window is autocommit OFF -- the mode the Agent Action Plan mandates (sections 0.2.1.1, 0.4.1.7, 0.5.2) and seed.sh'"'"'s default. Under it the frozen loaders reach no live COMMIT and therefore persist NOTHING, so stage 1 will refuse the seed with exit 76 rather than hand an all-empty capture to the differ: an empty capture yields an EMPTY DIFF and an empty diff is this protocol'"'"'s only pass condition. THE CONSEQUENCE IS THAT NO PARITY EVIDENCE CAN BE PRODUCED IN THE MANDATED CONFIGURATION, which is a finding about the frozen system rather than a fault in this harness. ACAS_SEED_AUTOCOMMIT=on requests the measured-durable window as an explicitly DECLARED DEVIATION; it yields a working fixture, not AAP-conformant evidence. The arbitration is recorded in docs/migration/ambiguity-resolutions.md.'
       ;;
-    off|0|false|no)
-      acas_parity_note 'ACAS_SEED_AUTOCOMMIT=off selects the AAP-LITERAL seeding window, in which the frozen loaders reach no live COMMIT and therefore persist NOTHING. Stage 1 will refuse it with exit 76 rather than hand an all-empty capture to the differ, because an empty capture yields an EMPTY DIFF and an empty diff is this protocol'"'"'s only pass condition. Unset the variable, or set it to on, to run the canonical durable mode. The arbitration is recorded in docs/migration/ambiguity-resolutions.md.'
+    on|1|true|yes)
+      acas_parity_warn 'ACAS_SEED_AUTOCOMMIT=on was requested, which DEVIATES from the seeding mode the Agent Action Plan mandates (autocommit off, sections 0.2.1.1, 0.4.1.7, 0.5.2). It is the only mode measured to leave a durable row, so it is how a working fixture is obtained -- but a result produced from a fixture seeded outside the mandated configuration is not AAP-conformant evidence, and this run will not be described as though it were.'
       ;;
     *)
       acas_parity_die "$EX_USAGE" \
         "ACAS_SEED_AUTOCOMMIT does not recognise '${seed_mode}'." \
-        'It takes on (or 1/true/yes), off (or 0/false/no), or nothing at all.' \
-        'Unset means on, which is the canonical durable seeding mode. An' \
-        'unrecognised value is refused rather than guessed at, because reading it' \
-        'as its opposite would silently change whether this run can produce' \
-        'evidence.'
+        'It takes off (or 0/false/no), on (or 1/true/yes), or nothing at all.' \
+        'Unset means off, the AAP-mandated seeding mode. An unrecognised value is' \
+        'refused rather than guessed at, because reading it as its opposite would' \
+        'silently change whether this run can produce evidence.'
       ;;
   esac
 
@@ -956,14 +991,33 @@ acas_parity_assert_oracle_attestation() {
     'harness/docker-compose.yml sets ACAS_BUILD: /build.'
 
   local attestation="$ACAS_BUILD/$ACAS_PARITY_ATTESTATION_BASENAME"
-  [[ -f "$attestation" ]] || acas_parity_die "$EX_PRECONDITION" \
-    "the oracle carries no provenance attestation: $attestation is absent." \
+  #  AN ABSENT ATTESTATION IS EVIDENCE UNAVAILABLE, NOT A BEHAVIOURAL DIFFERENCE.
+  #  build_oracle.sh writes it as the LAST act of a full run, so its absence means no
+  #  oracle was produced -- and on this checkout that is the MEASURED outcome of the
+  #  default frozen build, not a hypothetical: a zero-transformation build of the
+  #  frozen sources fails with exit 74 because 22 of the frozen common/*MT.cbl
+  #  bridges `copy "ACAS-SQLstate-error-list.cob"' and that member is absent from the
+  #  checkout and from presql2-latest.zip alike. See README-python-migration.md
+  #  section 8.7. Reporting that as EX_PRECONDITION would file it alongside "you
+  #  forgot to build", when what it actually means is that the specification cannot
+  #  presently be compiled and NOTHING WAS COMPARED.
+  [[ -f "$attestation" ]] || acas_parity_die "$EX_EVIDENCE_UNAVAILABLE" \
+    "ORACLE UNAVAILABLE: no provenance attestation exists, so no compiled specification was produced." \
+    "  attestation        $attestation (absent)" \
+    'THIS IS NOT A BEHAVIOURAL DIFFERENCE. Nothing was compared, so nothing is' \
+    'known about whether the Python cycle agrees with the frozen COBOL.' \
     'Stage 2 runs the compiled COBOL and its output IS the specification, so this' \
     'driver will not accept whatever modules happen to be lying in the build tree.' \
-    'harness/build_oracle.sh writes the attestation after a FULL five-step run, so' \
-    'an absent file means the oracle was never built, or was built with --only or' \
-    '--from and is therefore only partly this repository'"'"'s.' \
-    'Build it: harness/build_oracle.sh'
+    'build_oracle.sh writes the attestation as the last act of a FULL five-step run,' \
+    'so an absent file means the oracle was never built, was built with --only or' \
+    '--from and is therefore only partly this repository'"'"'s, or FAILED TO BUILD.' \
+    'ON THIS CHECKOUT THE DEFAULT FROZEN BUILD FAILS, and that is measured rather' \
+    'than predicted: 22 frozen common/*MT.cbl bridges copy ACAS-SQLstate-error-list.cob,' \
+    'which exists in neither the checkout nor presql2-latest.zip. The member carries' \
+    'the SQLSTATE-to-FS-Reply mapping that DEFINES the oracle'"'"'s rejection behaviour,' \
+    'and rejection behaviour is precisely what this migration must reproduce, so it' \
+    'cannot be fabricated (R-3, R-4) and must be supplied by the maintainer.' \
+    'Build it: harness/build_oracle.sh   (see README-python-migration.md section 8.7)'
 
   local version='' overrides='' recorded_digest='' recorded_count=''
   local presql_actual='' presql_pinned='' digest_override='' matches_pin=''
@@ -1088,9 +1142,53 @@ acas_parity_assert_oracle_attestation() {
 
   if [[ "$ACAS_PARITY_SOURCE_IS_FROZEN" == 'yes' ]]; then
     acas_parity_log 'oracle sources: the frozen checkout, with no build-copy transformation'
-  else
-    acas_parity_warn "ORACLE SOURCES ARE TRANSFORMED, DISCLOSED: ${ACAS_PARITY_SOURCE_TRANSFORMS:-?} build-copy file(s) differ from the frozen checkout (transform-set digest ${ACAS_PARITY_TRANSFORM_DIGEST:-<unrecorded>}). Every one is listed in $attestation with its frozen and build digests and the reason for it, and the frozen checkout itself is untouched. They are connectivity and IF-scope repairs without which the compiled cycle cannot reach MySQL; none alters an accounting computation, a posting order, a control total or a rejection path. A verdict from this run is a verdict against a DISCLOSED-TRANSFORMED oracle and must not be reported as one against the unmodified frozen specification."
+    return 0
   fi
+
+  #  ⭐ A TRANSFORMED ORACLE IS REFUSED, NOT WARNED ABOUT (finding SEC-02)
+  #
+  #  This used to be a warning, and a warning was not enough. Rule R-6 makes the
+  #  COMPILED PROGRAM the behavioural specification and rule R-4 requires its defects to
+  #  be REPRODUCED rather than repaired. The catalogued transforms repair IF scope,
+  #  connection lifetime and stale reply status in the frozen programs - so a build that
+  #  applies them has repaired the specification, and an empty diff against it says the
+  #  migrated cycle matches a PATCHED system. That is not the claim this protocol
+  #  exists to make, and publishing it as though it were is the evidence-integrity
+  #  defect itself.
+  #
+  #  Refusing is reported as EVIDENCE UNAVAILABLE, with its own exit status, because it
+  #  must never be confused with a behavioural difference: a difference is a finding
+  #  about the migration, and this is the absence of anything to find it against.
+  if (( ! ACAS_PARITY_ACCEPT_TRANSFORMED_ORACLE )); then
+    acas_parity_die "$EX_EVIDENCE_UNAVAILABLE" \
+      'EVIDENCE UNAVAILABLE: THE ORACLE WAS COMPILED FROM TRANSFORMED SOURCES.' \
+      "  attestation              $attestation" \
+      "  oracle-source-is-frozen  no" \
+      "  transformed files        ${ACAS_PARITY_SOURCE_TRANSFORMS:-?}" \
+      "  transform-set digest     ${ACAS_PARITY_TRANSFORM_DIGEST:-<unrecorded>}" \
+      '' \
+      'THIS IS NOT A BEHAVIOURAL DIFFERENCE. Nothing was compared. The compiled' \
+      'program IS the behavioural specification (rule R-6) and its defects must be' \
+      'reproduced rather than repaired (rule R-4), so an oracle whose sources were' \
+      'repaired cannot arbitrate anything: an empty diff against it would say the' \
+      'migrated cycle matches a PATCHED system, which is not the claim this protocol' \
+      'makes.' \
+      '' \
+      'Every transformed path is listed in the attestation with its frozen and build' \
+      'digests and the reason for it, and the frozen checkout itself is untouched.' \
+      '' \
+      'To obtain evidence, build a frozen oracle - which is now the DEFAULT:' \
+      '    harness/build_oracle.sh' \
+      'See README-python-migration.md section 8.7 for what that does on this' \
+      'checkout, which is measured rather than predicted.' \
+      '' \
+      'To drive the cycle against this oracle for DIAGNOSIS, acknowledge it:' \
+      '    --accept-transformed-oracle' \
+      'The run then proceeds and every verdict it prints is marked NO PARITY CLAIM.'
+  fi
+
+  ACAS_PARITY_ORACLE_IS_DIAGNOSTIC=1
+  acas_parity_warn "PROCEEDING AGAINST A TRANSFORMED ORACLE BECAUSE --accept-transformed-oracle WAS GIVEN. ${ACAS_PARITY_SOURCE_TRANSFORMS:-?} build-copy file(s) differ from the frozen checkout (transform-set digest ${ACAS_PARITY_TRANSFORM_DIGEST:-<unrecorded>}), each listed in $attestation with its frozen and build digests and its reason. NO VERDICT FROM THIS RUN IS A PARITY CLAIM, and the summary will say so however the comparison turns out: the oracle is a diagnostic build, not the frozen specification."
 }
 
 acas_parity_argv() {
@@ -1264,10 +1362,31 @@ acas_parity_run_stage() {
   fi
   acas_parity_argv "$stage"
   acas_parity_log "command: $(acas_parity_join "${ACAS_PARITY_ARGV[@]}")"
+
+  #  THE ADMINISTRATIVE CREDENTIAL REACHES TWO STAGES, NOT TEN (finding SEC-04).
+  #
+  #  Stages 1 and 5 are both harness/reset_db.sh: they drop and re-apply the frozen
+  #  schema, so they need DDL rights. NO OTHER STAGE DOES -- across the whole harness
+  #  only reset_db.sh and the seed.sh it delegates to hold any reference to
+  #  ACAS_DB_ADMIN_USER or ACAS_DB_ADMIN_PASSWORD. Every remaining stage runs as the
+  #  application account, which holds SELECT, INSERT, UPDATE and DELETE on the one
+  #  schema and nothing more.
+  #
+  #  The pair is therefore REMOVED from the environment of the other eight stages
+  #  rather than merely unused by them, so the compiled oracle, the migrated cycle,
+  #  the dump, the normalisation and the comparison cannot reach the database
+  #  superuser password even by accident. `env -u` is used rather than `unset`
+  #  because this shell must keep the value for the reset stages that follow.
+  local -a scrub=()
+  case "$stage" in
+    1|5) : ;;                       # administrative by definition: keep the pair
+    *)   scrub=(env -u ACAS_DB_ADMIN_USER -u ACAS_DB_ADMIN_PASSWORD) ;;
+  esac
+
   # `set +e' around exactly one command, so a non-zero status is a value to report
   # rather than an unexpected failure for the ERR trap.
   set +e
-  "${ACAS_PARITY_ARGV[@]}"
+  "${scrub[@]}" "${ACAS_PARITY_ARGV[@]}"
   rc=$?
   set -e
 
@@ -1581,12 +1700,36 @@ acas_parity_report() {
   else
     case "$ACAS_PARITY_VERDICT_STATE" in
       identical)
-        claim='identical'
-        printf '\n    VERDICT: the two states are IDENTICAL -- an empty diff, which is the\n'
-        printf '             pass condition and the only one (AAP section 0.8.5).\n'
-        printf '             Evidence: %s\n' "$ACAS_PARITY_VERDICT_PATH"
-        printf '             (%s; run id %s)\n' \
-          "$ACAS_PARITY_VERDICT_DETAIL" "$ACAS_PARITY_RUN_ID"
+        #  ⭐ AN EMPTY DIFF AGAINST A DIAGNOSTIC ORACLE IS NOT A PARITY CLAIM
+        #  (finding SEC-02). Reaching here with a transformed oracle requires
+        #  --accept-transformed-oracle, and the acknowledgement buys a diagnosis, not a
+        #  claim: the comparison was made against a specification whose defects had been
+        #  repaired, so "identical" says the migrated cycle matches a PATCHED system.
+        #  The distinction is made HERE, in the block a reader quotes, because this is
+        #  the line that would otherwise be copied into a status report as parity.
+        if (( ACAS_PARITY_ORACLE_IS_DIAGNOSTIC )); then
+          claim='identical-against-diagnostic-oracle'
+          printf '\n    VERDICT: NO PARITY CLAIM. Stage %s found an empty diff, but the oracle\n' \
+            "$ACAS_PARITY_VERDICT_STAGE"
+          printf '             it compared against was compiled from TRANSFORMED sources\n'
+          printf '             (%s file(s); --accept-transformed-oracle was given).\n' \
+            "${ACAS_PARITY_SOURCE_TRANSFORMS:-?}"
+          printf '             An empty diff against a repaired specification says the\n'
+          printf '             migrated cycle matches a PATCHED system, which is not the\n'
+          printf '             claim this protocol makes: rule R-6 makes the compiled\n'
+          printf '             program the specification and rule R-4 requires its defects\n'
+          printf '             be reproduced rather than repaired.\n'
+          printf '             Diagnosis: %s\n' "$ACAS_PARITY_VERDICT_PATH"
+          printf '             For evidence, build a frozen oracle (now the default) and\n'
+          printf '             re-run without --accept-transformed-oracle.\n'
+        else
+          claim='identical'
+          printf '\n    VERDICT: the two states are IDENTICAL -- an empty diff, which is the\n'
+          printf '             pass condition and the only one (AAP section 0.8.5).\n'
+          printf '             Evidence: %s\n' "$ACAS_PARITY_VERDICT_PATH"
+          printf '             (%s; run id %s)\n' \
+            "$ACAS_PARITY_VERDICT_DETAIL" "$ACAS_PARITY_RUN_ID"
+        fi
         ;;
       different)
         # Reachable when --keep-going carried the run past stage 10's non-zero exit.

@@ -468,6 +468,28 @@ set -Eeuo pipefail
 # A newline-and-tab field separator, so an unquoted expansion cannot be split on
 # a space. Every deliberate word split below is done with an explicit local IFS.
 IFS=$'\n\t'
+
+# ---------------------------------------------------------------------------
+#  DROP THE ADMINISTRATIVE CREDENTIAL BEFORE ANYTHING IS SPAWNED (finding SEC-04)
+#
+#  `harness/docker-compose.yml` puts ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD in
+#  the `gnucobol` service environment because protocol stages 1 and 5 -- and only
+#  those two, both `harness/reset_db.sh` -- drop and re-apply the frozen schema and
+#  so need DDL rights. A service-wide variable is inherited by every descendant,
+#  which put the database SUPERUSER password into the environment of the GnuCOBOL
+#  compiler, the preSQL translator, every bridge and menu binary, the migrated
+#  Python cycle and pytest itself.
+#
+#  THIS SCRIPT NEVER USES THAT PAIR -- it holds no reference to either name and
+#  invokes neither reset_db.sh nor seed.sh -- so it removes them from its own
+#  environment here, before the first child exists. Least privilege by
+#  construction rather than by convention: a compile or a cycle run cannot reach
+#  the credential even by accident, because it is not there to reach.
+#
+#  Application access is unaffected: ACAS_DB_USER / ACAS_DB_PASSWORD remain, and
+#  that account holds SELECT, INSERT, UPDATE and DELETE on the one schema.
+# ---------------------------------------------------------------------------
+unset ACAS_DB_ADMIN_USER ACAS_DB_ADMIN_PASSWORD
 # `set -e' alone is NOT enough and is not relied on. A failure inside a command
 # substitution, or on the left of a pipe, is not necessarily fatal, and a
 # function called in a condition has `errexit' suspended for its whole body. So

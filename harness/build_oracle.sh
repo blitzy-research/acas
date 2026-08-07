@@ -36,6 +36,28 @@ shopt -s nullglob
 # 0077 by default: nothing this script writes is world- or group-readable.
 umask 077
 
+# ---------------------------------------------------------------------------
+#  DROP THE ADMINISTRATIVE CREDENTIAL BEFORE ANYTHING IS SPAWNED (finding SEC-04)
+#
+#  `harness/docker-compose.yml` puts ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD in
+#  the `gnucobol` service environment because protocol stages 1 and 5 -- and only
+#  those two, both `harness/reset_db.sh` -- drop and re-apply the frozen schema and
+#  so need DDL rights. A service-wide variable is inherited by every descendant,
+#  which put the database SUPERUSER password into the environment of the GnuCOBOL
+#  compiler, the preSQL translator, every bridge and menu binary, the migrated
+#  Python cycle and pytest itself.
+#
+#  THIS SCRIPT NEVER USES THAT PAIR -- it holds no reference to either name and
+#  invokes neither reset_db.sh nor seed.sh -- so it removes them from its own
+#  environment here, before the first child exists. Least privilege by
+#  construction rather than by convention: a compile or a cycle run cannot reach
+#  the credential even by accident, because it is not there to reach.
+#
+#  Application access is unaffected: ACAS_DB_USER / ACAS_DB_PASSWORD remain, and
+#  that account holds SELECT, INSERT, UPDATE and DELETE on the one schema.
+# ---------------------------------------------------------------------------
+unset ACAS_DB_ADMIN_USER ACAS_DB_ADMIN_PASSWORD
+
 readonly EX_OK=0
 readonly EX_USAGE=64            # bad command line
 readonly EX_PRECONDITION=65     # environment, directory or toolchain assertion
@@ -134,6 +156,38 @@ ACAS_START_STEP=1                   # --from N
 ACAS_ONLY_STEP=0                    # --only N (0 = run the whole sequence)
 ACAS_REFRESH_TREE=1                 # refresh $ACAS_BUILD before step 1
 ACAS_RUN_PREFLIGHT_LINK=1           # reproduce the vendored worked example
+
+# ---------------------------------------------------------------------------
+#  THE FROZEN BUILD IS THE DEFAULT (finding SEC-02)
+#
+#  This script used to apply the whole source-transform block unconditionally, so
+#  EVERY oracle was built from 41 modified frozen files and no invocation existed that
+#  could produce an unmodified one. The transforms were disclosed in the attestation,
+#  which is necessary but not sufficient: rule R-6 makes the COMPILED PROGRAM the
+#  specification, and rule R-4 requires its defects to be reproduced rather than
+#  repaired. A build that repairs IF scope, connection lifetime and stale reply status
+#  in the oracle has repaired the specification, so an empty diff against it is not
+#  evidence of parity with the frozen system - it is evidence of parity with a patched
+#  one.
+#
+#  0 = FROZEN. Not one byte of the build copy differs from the checkout, and the
+#      attestation records `oracle-source-is-frozen yes`. This is the ONLY mode whose
+#      output `harness/run_parity.sh` will accept as evidence.
+#  1 = TRANSFORMED. The catalogued transforms are applied. Must be asked for
+#      explicitly, by `--transformed-oracle` or ACAS_ORACLE_ALLOW_TRANSFORMS=1, and the
+#      resulting oracle is a diagnostic tool rather than a specification.
+#
+#  Defaulting to frozen is what makes the difference visible: see §8.7 of
+#  README-python-migration.md for what a frozen build actually does on this checkout,
+#  which is measured rather than predicted.
+# ---------------------------------------------------------------------------
+ACAS_ALLOW_SOURCE_TRANSFORMS=0
+
+#: The transforms ACTUALLY applied by this build. Empty in the default frozen mode. The
+#: catalogue below (ACAS_SOURCE_TRANSFORMS) is what WOULD be applied in transformed
+#: mode; this is what was. The attestation and the measured register check both read
+#: THIS array, so a frozen build cannot report itself transformed or the reverse.
+declare -a ACAS_SOURCE_TRANSFORMS_APPLIED=()
 ACAS_LOG_DIR=''                     # $ACAS_OUT/build, created in preflight
 ACAS_PRESQL2_DIR=''                 # resolved unpacked package directory
 ACAS_COBMYSQLAPI_SRC=''             # resolved cobmysqlapi.o to distribute
@@ -1120,6 +1174,17 @@ Options:
   --skip-preflight-link
                       Skip the step-3 toolchain proof that reproduces the
                       vendored worked example [presql2-latest.zip:presql2-package/ACAS/comp-stockMT.sh].
+  --transformed-oracle
+                      Apply the catalogued source transformations to the BUILD COPY
+                      before compiling. NOT the default, and not a mode whose output
+                      may be used as parity evidence: it repairs IF scope, connection
+                      lifetime and stale reply status in the frozen programs, which
+                      rule R-4 requires be reproduced rather than repaired. The
+                      attestation then records `oracle-source-is-frozen no' and
+                      harness/run_parity.sh REFUSES the resulting oracle. Use it to
+                      diagnose the cycle, never to make a claim about it.
+                      ACAS_ORACLE_ALLOW_TRANSFORMS=1 has the same effect.
+  --frozen-oracle     State the default explicitly: transform nothing.
   -h, --help          Print this help and exit 0.
 
 Required environment (harness/docker-compose.yml supplies all of it):
@@ -1268,6 +1333,15 @@ acas_assert_step_number() {
 
 acas_parse_args() {
   local explicit_refresh=0
+
+  #  The environment route, read BEFORE the command line so an explicit
+  #  `--frozen-oracle` still wins over an inherited variable. Only the exact string
+  #  `1` enables it: a truthy-looking value such as `false` or `no` must not quietly
+  #  turn on a mode whose output cannot be used as evidence (finding SEC-02).
+  if [[ "${ACAS_ORACLE_ALLOW_TRANSFORMS-}" == '1' ]]; then
+    ACAS_ALLOW_SOURCE_TRANSFORMS=1
+  fi
+
   while (( $# > 0 )); do
     case "$1" in
       -h|--help)
@@ -1310,6 +1384,14 @@ acas_parse_args() {
         ;;
       --skip-preflight-link)
         ACAS_RUN_PREFLIGHT_LINK=0
+        shift
+        ;;
+      --transformed-oracle)
+        ACAS_ALLOW_SOURCE_TRANSFORMS=1
+        shift
+        ;;
+      --frozen-oracle)
+        ACAS_ALLOW_SOURCE_TRANSFORMS=0
         shift
         ;;
       --)
@@ -2424,7 +2506,9 @@ acas_assert_transform_register_complete() {
     LC_ALL=C comm -3 <(LC_ALL=C sort "$before") <(LC_ALL=C sort "$after") \
       | awk '{ print $NF }' | LC_ALL=C sort -u
   )
-  for entry in "${ACAS_SOURCE_TRANSFORMS[@]}"; do
+  # The APPLIED register, not the catalogue: in frozen mode nothing was applied, so
+  # `measured` must also be empty and any difference is an undisclosed patch.
+  for entry in "${ACAS_SOURCE_TRANSFORMS_APPLIED[@]}"; do
     registered+=("${entry%%|*}")
   done
 
@@ -2438,20 +2522,28 @@ acas_assert_transform_register_complete() {
 
   if (( ${#unregistered[@]} )); then
     acas_die "$EX_BUILDTREE" \
-      "the shim block changed build-copy sources that ACAS_SOURCE_TRANSFORMS does not declare:" \
+      "build-copy sources changed that this build did not declare it would change:" \
       "  $(printf '%s ' "${unregistered[@]}")" \
       'Every source transformation must be REGISTERED, because the attestation' \
       'publishes the register and a transformation missing from it is an undisclosed' \
-      'behavioural patch in the oracle (finding CR-01). Add the path and its reason.'
+      'behavioural patch in the oracle (findings CR-01, SEC-02). Add the path and its' \
+      'reason to ACAS_SOURCE_TRANSFORMS.' \
+      'IF THIS IS A FROZEN BUILD the register is empty by design and ANY change is' \
+      'unregistered: something modified the build copy outside the shim block, and a' \
+      'frozen oracle is exactly what that destroys.'
   fi
   if (( ${#unmeasured[@]} )); then
     acas_die "$EX_BUILDTREE" \
-      "ACAS_SOURCE_TRANSFORMS declares paths the shim block did not change:" \
+      "this build declared source transformations it did not make:" \
       "  $(printf '%s ' "${unmeasured[@]}")" \
       'A register entry with no transformation behind it overstates what was patched,' \
       'which is as misleading as omitting one. Remove the stale entry, or fix the shim.'
   fi
-  acas_log "verified: ${#registered[@]} declared source transformation(s), and no others were made"
+  if (( ${#registered[@]} == 0 )); then
+    acas_log 'verified by MEASUREMENT: zero source transformations; the build copy is byte-for-byte the frozen checkout'
+  else
+    acas_log "verified: ${#registered[@]} declared source transformation(s), and no others were made"
+  fi
 }
 
 acas_install_sqlstate_comment_shim() {
@@ -3157,15 +3249,26 @@ acas_prepare_build_tree() {
       "could not digest the build-tree sources into $before_listing."
   fi
 
-  acas_install_sqlstate_comment_shim
-  acas_install_loader_open_scope_shims
-  acas_install_system_secondary_loader_credential_shims
-  acas_install_handler_connection_refresh_shims
-  acas_install_handler_status_reset_shims
-  acas_install_process_connection_ownership_shims
-  acas_install_menu_rdb_mode_restore_shims
-  acas_install_irs_default_connection_ownership_shim
-  acas_install_irs_eoj_connection_ownership_shim
+  #  THE TRANSFORMS ARE APPLIED ONLY WHEN ASKED FOR (finding SEC-02). In the default
+  #  frozen mode the applied register stays EMPTY, so the attestation reports
+  #  `oracle-source-is-frozen yes` because nothing was changed - not because the check
+  #  was skipped. Both facts are then measured on either side of this block.
+  if (( ACAS_ALLOW_SOURCE_TRANSFORMS )); then
+    acas_warn "BUILDING A TRANSFORMED ORACLE BECAUSE IT WAS EXPLICITLY REQUESTED. ${#ACAS_SOURCE_TRANSFORMS[@]} catalogued source transformation(s) will be applied to the build copy. The result is a DIAGNOSTIC oracle: harness/run_parity.sh refuses it as evidence, because rule R-4 requires the frozen defects be reproduced rather than repaired and these repairs change the specification the migration is measured against."
+    acas_install_sqlstate_comment_shim
+    acas_install_loader_open_scope_shims
+    acas_install_system_secondary_loader_credential_shims
+    acas_install_handler_connection_refresh_shims
+    acas_install_handler_status_reset_shims
+    acas_install_process_connection_ownership_shims
+    acas_install_menu_rdb_mode_restore_shims
+    acas_install_irs_default_connection_ownership_shim
+    acas_install_irs_eoj_connection_ownership_shim
+    ACAS_SOURCE_TRANSFORMS_APPLIED=("${ACAS_SOURCE_TRANSFORMS[@]}")
+  else
+    ACAS_SOURCE_TRANSFORMS_APPLIED=()
+    acas_log 'frozen oracle: no source transformation applied; the build copy is byte-for-byte the checkout'
+  fi
 
   if (( ACAS_REFRESH_TREE )); then
     acas_source_digest_listing > "$after_listing" || acas_die "$EX_BUILDTREE" \
@@ -3273,6 +3376,35 @@ acas_explain_missing_sqlstate_copybook() {
 
          It must be supplied by the maintainer. Until it is, the oracle can be
          built only for the bridges that do not reference it.
+
+         THEREFORE, ON THIS CHECKOUT, THE FROZEN ORACLE IS UNAVAILABLE. That is
+         a measurement, not a prediction: a default (frozen, zero-transformation)
+         build of this repository fails with exit 74 and 22 compile errors, one
+         per affected bridge. No attestation is written, and run_parity.sh
+         reports exit 77 EVIDENCE UNAVAILABLE rather than any verdict.
+
+         WHAT THE SHIM DOES, MEASURED RATHER THAN ASSUMED. Only an explicitly
+         requested --transformed-oracle build installs
+         harness/copybook-shims/ACAS-SQLstate-error-list.cob, which is
+         comment-only. Its CONTENT provably does not matter: compiling
+         glpostingMT.cbl to C (cobc -C) with the comment-only shim, with a
+         zero-byte member, and with arbitrary different comment text yields a
+         BYTE-IDENTICAL translation in all three cases. Only the COPY resolving
+         matters. That follows from where the COPY sits -- line 160 of
+         glpostingMT.cbl, between `identification division.' (L9) and
+         `environment division.' (L201), a region in which only comments are
+         legal -- so the absent member cannot have carried data or procedure
+         code, and the executable SQLSTATE handling is in the frozen PROCEDURE
+         DIVISION already (`move WS-MYSQL-SqlState to SQL-State', 8 sites).
+
+         SO THIS ONE TRANSFORM IS BEHAVIOUR-NEUTRAL, AND IT IS NOT THE REASON A
+         TRANSFORMED ORACLE CANNOT BE EVIDENCE. The other 40 entries in
+         ACAS_SOURCE_TRANSFORMS are: they restore IF scope in flat-file
+         open-error branches, propagate RDBMS credentials, retain connections
+         across calls, and reset stale reply pairs -- all of them changes to
+         EXECUTABLE logic in the handlers. A build carrying those has repaired
+         the specification, which is why run_parity.sh refuses to call any
+         verdict from it a parity claim.
          --------------------------------------------------------------------
 EXPLAIN
 }
@@ -4204,7 +4336,7 @@ acas_file_digest() {
 # the checkout does not contain.
 acas_source_transform_records() {
   local entry path reason
-  for entry in "${ACAS_SOURCE_TRANSFORMS[@]}"; do
+  for entry in "${ACAS_SOURCE_TRANSFORMS_APPLIED[@]}"; do
     path="${entry%%|*}"
     reason="${entry#*|}"
     printf 'source-transform\t%s\t%s\t%s\t%s\n' \
@@ -4294,7 +4426,7 @@ acas_publish_attestation() {
   #  The value exists so that a tree in which they became unnecessary would say `yes'
   #  and be believed, and so that no consumer has to infer the answer from a count.
   local source_is_frozen='yes' transform_digest
-  (( ${#ACAS_SOURCE_TRANSFORMS[@]} == 0 )) || source_is_frozen='no'
+  (( ${#ACAS_SOURCE_TRANSFORMS_APPLIED[@]} == 0 )) || source_is_frozen='no'
   transform_digest="$(acas_source_transform_set_digest)"
 
   {
@@ -4345,7 +4477,7 @@ acas_publish_attestation() {
     printf 'oracle-source-is-frozen	%s
 ' "$source_is_frozen"
     printf 'source-transforms	%s
-' "${#ACAS_SOURCE_TRANSFORMS[@]}"
+' "${#ACAS_SOURCE_TRANSFORMS_APPLIED[@]}"
     printf 'source-transform-set-sha256	%s
 ' "$transform_digest"
     acas_source_transform_records
@@ -4363,9 +4495,9 @@ acas_publish_attestation() {
   acas_log "  toolchain           $cobc_version / $cc_version"
   acas_log "  modules             $module_count (*.so), set digest $module_digest"
   acas_log "  frozen sources      $source_is_frozen"
-  acas_log "  source transforms   ${#ACAS_SOURCE_TRANSFORMS[@]}, set digest $transform_digest"
+  acas_log "  source transforms   ${#ACAS_SOURCE_TRANSFORMS_APPLIED[@]}, set digest $transform_digest"
   if [[ "$source_is_frozen" != 'yes' ]]; then
-    acas_warn "THIS ORACLE WAS COMPILED FROM TRANSFORMED SOURCES, and the attestation now says so. ${#ACAS_SOURCE_TRANSFORMS[@]} build-copy file(s) differ from the frozen checkout; every one is listed in $target as a source-transform record carrying its frozen and build digests and the reason for it. They are connectivity and IF-scope repairs without which the compiled cycle cannot reach MySQL, and none alters an accounting computation, a posting order, a control total or a rejection path -- but a parity verdict produced against this build is a verdict against a DISCLOSED-TRANSFORMED oracle and must never be described as one against the unmodified frozen specification. The frozen checkout itself is untouched: diff $ACAS_REPO against $ACAS_BUILD to see every difference."
+    acas_warn "THIS ORACLE WAS COMPILED FROM TRANSFORMED SOURCES, and the attestation now says so. ${#ACAS_SOURCE_TRANSFORMS_APPLIED[@]} build-copy file(s) differ from the frozen checkout; every one is listed in $target as a source-transform record carrying its frozen and build digests and the reason for it. They are connectivity and IF-scope repairs without which the compiled cycle cannot reach MySQL, and none alters an accounting computation, a posting order, a control total or a rejection path -- but a parity verdict produced against this build is a verdict against a DISCLOSED-TRANSFORMED oracle and must never be described as one against the unmodified frozen specification. The frozen checkout itself is untouched: diff $ACAS_REPO against $ACAS_BUILD to see every difference."
   fi
   if [[ "$overrides" == 'yes' ]]; then
     acas_warn "THIS ORACLE CANNOT PRODUCE EVIDENCE: its identity was not established from the reviewed sources alone (presql2-digest-override=$digest_override, presql2-matches-pin=$archive_matches_pin, cobmysqlapi-redirected=$object_redirected, cobmysqlapi-provenance=$object_provenance). The attestation records that and harness/run_parity.sh will refuse to run the compiled cycle against this build. Rebuild without ACAS_PRESQL2_SHA256, and without pointing ACAS_COBMYSQLAPI_OBJ anywhere other than $ACAS_CANONICAL_COBMYSQLAPI_OBJ. To replace either legitimately, make it a REVIEWED SOURCE CHANGE -- update the vendored archive and ACAS_PRESQL2_SHA256_EXPECTED together in the same commit."

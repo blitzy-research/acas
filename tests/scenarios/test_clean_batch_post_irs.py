@@ -959,20 +959,12 @@ def _table_diff(parity: object, table: str) -> object:
     )
 
 
-def _render(harness: object, parity: object) -> str:
-    """The deterministic difference report, for a failure message.
-
-    Args:
-        harness: The three harness modules.
-        parity: The completed `ParityRun`.
-
-    Returns:
-        The report. THE EMPTY STRING when the two trees are identical, which is the
-        same zero-byte result the comparison writes to its own report file on a pass:
-        an existing empty report says "compared, and identical" while an absent one
-        says nothing at all.
-    """
-    return harness.diff_states.render(parity.tree)
+# THE FAILURE-MESSAGE ROUTE IS `parity.diagnose()`, defined once in tests/conftest.py.
+# This module used to wrap `harness.diff_states.render` in a local `_render` helper,
+# which printed every differing value and every primary key into pytest output
+# (finding SEC-05). The wrapper is gone rather than repointed, so there is no
+# module-local name left that looks like the old route. The values are not lost: they
+# are in the report `diagnose()` names, with its digest.
 
 
 # ---------------------------------------------------------------------------
@@ -1888,7 +1880,7 @@ def test_clean_batch_post_irs_state_parity(
         f"  {parity.tree.total_differences} finding(s) across "
         f"{len(parity.tree.differing)} of the {len(parity.tables)} bounded table(s) "
         f"{list(parity.tables)}. Report at {parity.outcome.report}.\n"
-        f"{_render(harness, parity)}\n"
+        f"{parity.diagnose()}\n"
         f"  Every stage of the run:\n"
         f"{parity.describe()}"
     )
@@ -1964,7 +1956,7 @@ def test_a4_half_posted_double_entry_reproduced(
         f"  missing on the Python side: {list(ledger.missing_in_python)}\n"
         f"  missing on the COBOL side:  {list(ledger.missing_in_cobol)}\n"
         f"  rows differing in a value:  {ledger.value_difference_count}\n"
-        f"{_render(harness, parity)}"
+        f"{parity.diagnose()}"
     )
 
     # THE POSTING RECORDS AGREE, INCLUDING THE ONES THAT ARE ABSENT. A transaction that
@@ -1987,7 +1979,7 @@ def test_a4_half_posted_double_entry_reproduced(
     )
     assert posting.is_empty, (
         f"A-4 IS NOT REPRODUCED: the two sides disagree about `IRSPOSTING-REC`.\n"
-        f"{_render(harness, parity)}"
+        f"{parity.diagnose()}"
     )
 
     # THE IMBALANCE ITSELF, COMPARED ACROSS SIDES AND NEVER AGAINST ITSELF. Summed in
@@ -2026,6 +2018,7 @@ def test_a4_half_posted_double_entry_reproduced(
 def test_a5_lost_update_on_vat_control_accounts_reproduced(
     parity: object,
     harness: object,
+    withheld: object,
 ) -> None:
     """A-5: accounts 31 and 32 hold the SNAPSHOT outcome, identically on both sides.
 
@@ -2084,7 +2077,7 @@ def test_a5_lost_update_on_vat_control_accounts_reproduced(
         f"A-5 IS NOT REPRODUCED: the two sides disagree about `IRSNL-REC`.\n"
         f"  missing on the Python side: {list(ledger.missing_in_python)}\n"
         f"  missing on the COBOL side:  {list(ledger.missing_in_cobol)}\n"
-        f"{_render(harness, parity)}"
+        f"{parity.diagnose()}"
     )
 
     defaults = {
@@ -2112,15 +2105,16 @@ def test_a5_lost_update_on_vat_control_accounts_reproduced(
                 f"them the section leaves through abort 2 or abort 3 "
                 f"([irs/irs030.cbl:L1597-L1601], [irs/irs030.cbl:L1607-L1611]) and "
                 f"BYPASSES `EOJ` entirely, so the scenario would measure nothing. "
-                f"Keys present: {sorted(rows, key=str)}."
+                f"The dump holds {withheld(rows, column='DEF-REC-KEY')}."
             )
             codes.append(int(str(_cell(dump, row, "DEF-ACS"))))
         control_codes[side] = tuple(codes)
 
     assert control_codes["cobol"] == control_codes["python"], (
         f"HARNESS FAULT: the two sides read the VAT control accounts from different "
-        f"default codes - COBOL {control_codes['cobol']}, Python "
-        f"{control_codes['python']}. `IRSDFLT-REC` is READ ONLY on this route "
+        f"default codes - COBOL {withheld(control_codes['cobol'], column='DEF-ACS')}, "
+        f"Python {withheld(control_codes['python'], column='DEF-ACS')}. "
+        f"`IRSDFLT-REC` is READ ONLY on this route "
         f"(`acasirsub3` is performed with zero facade verbs, "
         f"[irs/irs030.cbl:L1585-L1586]), so a difference here means the two runs were "
         f"not seeded from the same fixture."
@@ -2154,8 +2148,8 @@ def test_a5_lost_update_on_vat_control_accounts_reproduced(
                 f"`03 NL-Key pic 9(10).` [common/irsnominalMT.cbl:L225]. The account "
                 f"MUST exist or [irs/irs030.cbl:L1597-L1601] and "
                 f"[irs/irs030.cbl:L1607-L1611] abort the section before the loop and "
-                f"neither snapshot is ever rewritten. Keys present: "
-                f"{sorted(rows, key=str)}."
+                f"neither snapshot is ever rewritten. The dump holds "
+                f"{withheld(rows, column='NL-KEY')}."
             )
             observed[side] = tuple(
                 _cell(dump, row, column) for column in money_columns
@@ -2165,8 +2159,8 @@ def test_a5_lost_update_on_vat_control_accounts_reproduced(
             f"A-5 IS NOT REPRODUCED for VAT control account `def-acs ({entry})` = "
             f"{code} (key {key}).\n"
             f"  columns {list(money_columns)}\n"
-            f"  COBOL  {list(observed['cobol'])}\n"
-            f"  Python {list(observed['python'])}\n"
+            f"  COBOL  {withheld(observed['cobol'])}\n"
+            f"  Python {withheld(observed['python'])}\n"
             f"\n"
             f"  THE EXPECTED OUTCOME IS THE SNAPSHOT ONE, NOT THE ACCUMULATED ONE. "
             f"The record read at [irs/irs030.cbl:L1596] or [irs/irs030.cbl:L1606] and "
@@ -2227,7 +2221,7 @@ def test_psirspost_rec_clear_reproduces_the_frozen_high_key_threshold(
         f"{transfer.python_row_count}\n"
         f"  missing on the Python side: {list(transfer.missing_in_python)}\n"
         f"  missing on the COBOL side:  {list(transfer.missing_in_cobol)}\n"
-        f"{_render(harness, parity)}"
+        f"{parity.diagnose()}"
     )
 
     definition = scenario_loader(SCENARIO)
@@ -2354,7 +2348,7 @@ def test_a6_rewrite_verb_can_never_succeed(
         f"  missing on the Python side: {list(transfer.missing_in_python)}\n"
         f"  missing on the COBOL side:  {list(transfer.missing_in_cobol)}\n"
         f"  rows differing in a value:  {transfer.value_difference_count}\n"
-        f"{_render(harness, parity)}"
+        f"{parity.diagnose()}"
     )
     assert transfer.value_differences == (), (
         f"`PSIRSPOST-REC` rows present on both sides differ in a value, which on this "
@@ -2362,7 +2356,7 @@ def test_a6_rewrite_verb_can_never_succeed(
         f"unconditionally at [common/acas008.cbl:L299-L307], so no in-place update can "
         f"occur. If the migrated data-access layer now performs one, A-6 HAS BEEN "
         f"FIXED - and a defect fixed is a failure (R-4).\n"
-        f"{_render(harness, parity)}"
+        f"{parity.diagnose()}"
     )
     assert transfer.row_count_differs is False, (
         f"`PSIRSPOST-REC` holds {transfer.cobol_row_count} row(s) on the COBOL side "
@@ -2388,7 +2382,7 @@ def test_a6_rewrite_verb_can_never_succeed(
     posting = _table_diff(parity, "IRSPOSTING-REC")
     assert posting.is_empty, (
         f"`IRSPOSTING-REC` differs between the two sides, which corroborates a "
-        f"divergence in what the transfer walk saw.\n{_render(harness, parity)}"
+        f"divergence in what the transfer walk saw.\n{parity.diagnose()}"
     )
 
 
@@ -2398,6 +2392,7 @@ def test_a7_partial_date_component_derivation_is_dumped_as_stored(
     parity: object,
     harness: object,
     scenario_loader: object,
+    withheld: object,
 ) -> None:
     """A-7: the three bridge-derived date components agree, partial zeros included.
 
@@ -2480,7 +2475,7 @@ def test_a7_partial_date_component_derivation_is_dumped_as_stored(
     posting = _table_diff(parity, "IRSPOSTING-REC")
     assert posting.is_empty, (
         f"A-7 IS NOT REPRODUCED: the two sides disagree about `IRSPOSTING-REC`.\n"
-        f"{_render(harness, parity)}"
+        f"{parity.diagnose()}"
     )
 
     derived = ("POST4-DAY", "POST4-MONTH", "POST4-YEAR")
@@ -2511,10 +2506,10 @@ def test_a7_partial_date_component_derivation_is_dumped_as_stored(
 
         assert observed["cobol"] == observed["python"], (
             f"A-7 IS NOT REPRODUCED for `IRSPOSTING-REC` key {key!r}.\n"
-            f"  COBOL  POST4-DAT={observed['cobol'][0]!r} "
-            f"{list(derived)}={list(observed['cobol'][1])}\n"
-            f"  Python POST4-DAT={observed['python'][0]!r} "
-            f"{list(derived)}={list(observed['python'][1])}\n"
+            f"  COBOL  POST4-DAT={withheld(observed['cobol'][0], column='POST4-DAT')} "
+            f"{list(derived)}={withheld(observed['cobol'][1])}\n"
+            f"  Python POST4-DAT={withheld(observed['python'][0], column='POST4-DAT')} "
+            f"{list(derived)}={withheld(observed['python'][1])}\n"
             f"\n"
             f"  THE THREE COMPONENTS ARE DERIVED BY THE BRIDGE UNDER THREE "
             f"INDEPENDENT GUARDS [common/irspostingMT.cbl:L982-L987], none of which "
@@ -2631,10 +2626,10 @@ def test_irsdflt_rec_is_a_readonly_witness(
     assert defaults.value_differences == (), (
         f"`IRSDFLT-REC` values differ between the two sides, which is impossible if "
         f"the table is read-only: the only access is the read at "
-        f"[irs/irs030.cbl:L1585-L1586].\n{_render(harness, parity)}"
+        f"[irs/irs030.cbl:L1585-L1586].\n{parity.diagnose()}"
     )
     assert defaults.is_empty, (
-        f"`IRSDFLT-REC` differs between the two sides.\n{_render(harness, parity)}"
+        f"`IRSDFLT-REC` differs between the two sides.\n{parity.diagnose()}"
     )
 
     # The two sides' dumps are compared WHOLE, not only through the comparison's

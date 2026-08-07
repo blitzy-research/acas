@@ -1234,6 +1234,182 @@ def test_the_shared_loader_rejects_a_duplicate_key() -> None:
         module.load_scenario_yaml("!!python/object/apply:os.system ['true']\n")
 
 
+def test_every_committed_scenario_parses_within_the_budgets() -> None:
+    """The budgets admit every committed definition unchanged (finding SEC-07).
+
+    Stated FIRST and separately from the refusal test, because this is the half that
+    would make the hardening a regression. A budget derived from anything other than the
+    measured maxima could reject a real scenario, and the failure would surface as a
+    parity run that cannot start rather than as an obviously wrong limit.
+    """
+    root = Path(__file__).resolve().parents[2]
+    module = _scenario_yaml_module()
+
+    definitions = sorted((root / "harness" / "scenarios").glob("*.yaml"))
+    assert definitions, "no scenario definition was found; this test would be vacuous"
+
+    widest = 0
+    for path in definitions:
+        text = path.read_text(encoding="utf-8")
+        widest = max(widest, len(text.encode("utf-8")))
+        parsed = module.load_scenario_yaml(text)
+        assert isinstance(parsed, dict) and parsed, (
+            f"{path.name} did not parse to a non-empty mapping under the parse "
+            "budgets, so a budget is rejecting a committed definition."
+        )
+
+    # Headroom, asserted rather than assumed: a budget that the committed set already
+    # sits near is one edit away from rejecting a real file.
+    assert widest * 4 <= module.MAX_DOCUMENT_BYTES, (
+        f"the largest committed definition is {widest} bytes against a budget of "
+        f"{module.MAX_DOCUMENT_BYTES}, which leaves under 4x headroom. Raise the "
+        "budget rather than trimming a scenario."
+    )
+
+
+def test_the_shared_loader_refuses_an_over_budget_document() -> None:
+    """Each parse budget refuses what it exists for, and an alias is refused outright.
+
+    The DISCRIMINATING half: constants alone prove nothing, since a limit that is never
+    consulted reads exactly like one that is. Every budget is driven past its bound here
+    and the alias case is a real multiplicative-expansion document, not a token one.
+    """
+    yaml = pytest.importorskip("yaml")
+    module = _scenario_yaml_module()
+
+    # 1. Size, checked BEFORE the parser sees the text.
+    oversized = "a: " + "x" * (module.MAX_DOCUMENT_BYTES + 1)
+    with pytest.raises(module.ScenarioBudgetError) as size_error:
+        module.load_scenario_yaml(oversized)
+    assert "parse budget" in str(size_error.value)
+
+    # 2. An alias, which is the multiplicative-expansion class. Refused, not counted.
+    laughs = (
+        'a: &anchor ["x","x","x","x","x","x","x","x","x"]\n'
+        "b: [*anchor,*anchor,*anchor,*anchor,*anchor,*anchor,*anchor,*anchor,*anchor]\n"
+        "c: [*anchor,*anchor,*anchor,*anchor,*anchor,*anchor,*anchor,*anchor,*anchor]\n"
+    )
+    with pytest.raises(module.ScenarioBudgetError) as alias_error:
+        module.load_scenario_yaml(laughs)
+    assert "ALIAS" in str(alias_error.value)
+
+    # 3. Depth.
+    deep = (
+        "a:\n"
+        + "".join("  " * level + "k:\n" for level in range(1, module.MAX_DEPTH + 4))
+        + "  " * (module.MAX_DEPTH + 4)
+        + "v"
+    )
+    with pytest.raises(module.ScenarioBudgetError) as depth_error:
+        module.load_scenario_yaml(deep)
+    assert "nests deeper" in str(depth_error.value)
+
+    # 4. Node count.
+    wide = "root: [" + ",".join(str(n) for n in range(module.MAX_NODES + 10)) + "]"
+    with pytest.raises(module.ScenarioBudgetError) as node_error:
+        module.load_scenario_yaml(wide)
+    assert "nodes" in str(node_error.value)
+
+    # Every budget rejection is a `yaml.YAMLError`, so the eight consumers -- all of
+    # which already handle that -- report one with no change of their own.
+    assert issubclass(module.ScenarioBudgetError, yaml.YAMLError)
+
+
+def test_the_dictionary_reader_bounds_what_it_reads() -> None:
+    """The dictionary read is bounded in size and depth, and still reads the artifact.
+
+    Both halves in one test because they are one contract: the committed dictionary must
+    load exactly as before, and a document that is oversized, deeper than the budget, or
+    deep enough to exhaust the interpreter's own recursion limit must be refused as a
+    named `DictionaryParseError` rather than crashing the reader (finding SEC-07).
+    """
+    import json
+    import tempfile
+
+    loader = importlib.import_module("acas_posting.dictionary.loader")
+
+    # The real artifact, unchanged.
+    document = loader.load_dictionary()
+    assert document.entries, "the committed dictionary no longer loads"
+
+    root = Path(__file__).resolve().parents[2]
+    artifact = root / "data_dictionary" / "acas_posting_dictionary.json"
+    measured = artifact.stat().st_size
+    assert measured * 4 <= loader._MAX_DOCUMENT_BYTES, (
+        f"the committed dictionary is {measured} bytes against a read budget of "
+        f"{loader._MAX_DOCUMENT_BYTES}, which leaves under 4x headroom."
+    )
+
+    # The depth helper does not recurse, so it can bound a document too deep to walk
+    # recursively. Asserted directly, since that is the property that makes it usable.
+    assert not loader._document_depth_exceeds(json.loads(artifact.read_text()), 64)
+    assert loader._document_depth_exceeds(json.loads("[" * 200 + "]" * 200), 64)
+
+    with tempfile.TemporaryDirectory() as directory:
+        scratch = Path(directory)
+
+        oversized = scratch / "oversized.json"
+        oversized.write_bytes(
+            b'{"x":"' + b"a" * (loader._MAX_DOCUMENT_BYTES + 16) + b'"}'
+        )
+        with pytest.raises(loader.DictionaryParseError) as size_error:
+            loader.load_dictionary(oversized)
+        assert "read budget" in str(size_error.value)
+
+        # Deeper than the budget, but shallow enough that `json.loads` itself succeeds --
+        # so this exercises the post-parse bound rather than the recursion guard.
+        over_depth = scratch / "deep.json"
+        over_depth.write_text('{"a":' * 100 + "1" + "}" * 100, encoding="utf-8")
+        with pytest.raises(loader.DictionaryParseError) as depth_error:
+            loader.load_dictionary(over_depth)
+        assert "nests deeper" in str(depth_error.value)
+
+        # Deep enough that the JSON scanner exhausts the recursion limit. Without the
+        # guard this leaves the reader as a bare RecursionError.
+        recursive = scratch / "recursive.json"
+        recursive.write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8")
+        with pytest.raises(loader.DictionaryParseError) as recursion_error:
+            loader.load_dictionary(recursive)
+        assert "too deeply" in str(recursion_error.value)
+
+
+def test_no_artifact_recommends_an_unhashed_install() -> None:
+    """Install guidance names the hash-verified route, never a bare `pip install` (DEP-02).
+
+    A `pip install <name>==<version>` in remediation text teaches the reader to fetch an
+    unverified artifact, which is exactly the route the rest of this project refuses. The
+    editable routes are permitted where they are labelled as development conveniences,
+    so what is banned is an unqualified install of a PINNED DISTRIBUTION.
+    """
+    root = Path(__file__).resolve().parents[2]
+    checked = (
+        "pyproject.toml",
+        "requirements.txt",
+        "README-python-migration.md",
+        "harness/run_cobol_scenario.sh",
+        "harness/Dockerfile.gnucobol",
+    )
+
+    # `pip install name==version` with no --require-hashes on the same line.
+    unhashed = re.compile(r"pip install(?![^\n]*--require-hashes)[^\n]*[A-Za-z0-9_.-]+==")
+
+    offenders: list[str] = []
+    for relative in checked:
+        path = root / relative
+        assert path.is_file(), f"a checked artifact is absent: {path}"
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            if unhashed.search(line):
+                offenders.append(f"{relative}:{number}: {line.strip()[:96]}")
+
+    assert not offenders, (
+        "these lines recommend installing a pinned distribution without hash "
+        "verification, which is the DEP-02 defect:\n  " + "\n  ".join(offenders) + "\n"
+        "  Point at `pip install --require-hashes -r requirements.txt` instead."
+    )
+
+
 def test_every_scenario_yaml_consumer_uses_the_shared_loader() -> None:
     """No consumer calls `yaml.safe_load` on a scenario definition.
 
@@ -1778,22 +1954,45 @@ def test_no_scenario_declares_an_input_its_runners_refuse() -> None:
 
 
 # ---------------------------------------------------------------------------
-#  MJ-20 - THE DECLARED RUNTIME DEPENDENCIES ARE THE IMPORTED ONES
+#  DEP-01 / MJ-20 - THE DECLARED CLOSURE IS THE PLAN'S, AND THE IMPORTED SET IS
+#  EXACTLY THE DRIVER
 #
-#  `pyproject.toml` declared `SQLAlchemy`, `greenlet` and `typing_extensions` as runtime
-#  dependencies, SQLAlchemy described as "CORE LEVEL ONLY: text() statements on an
-#  explicit Connection", and `requirements.txt` pinned all three with hashes, and the
-#  README documented the boundary as active. No module under `acas_posting/` imported any
-#  of them. The same file that declared them also stated, correctly, that the package
-#  imports "exactly one third-party top-level module, `mysql`".
+#  This section has been wrong in BOTH directions, and it now locks both.
 #
-#  The individual package is not the point. The point is that nothing checked, so the
-#  architecture the artifacts describe and the architecture that executes were free to
-#  disagree - and they did, across three artifacts at once. This holds them together in
-#  BOTH directions: a declared package that nothing imports is as much a defect as an
-#  imported package that nothing declares, the first because it makes the shipped
-#  execution path unauditable from the manifest, the second because an install
-#  reproduced from the manifest would fail at import.
+#  MJ-20 was the first direction. `pyproject.toml` declared `SQLAlchemy`, `greenlet` and
+#  `typing_extensions` as runtime dependencies, SQLAlchemy described as "CORE LEVEL ONLY:
+#  text() statements on an explicit Connection"; `requirements.txt` pinned all three with
+#  hashes; and the README documented that boundary as ACTIVE. No module under
+#  `acas_posting/` imported any of them. The same file that declared them also stated,
+#  correctly, that the package imports "exactly one third-party top-level module,
+#  `mysql`". Three artifacts described an execution path the code did not take.
+#
+#  DEP-01 was the correction over-shooting. The response to MJ-20 deleted the three pins
+#  from both manifests so that declared and imported coincided. That made the artifacts
+#  self-consistent and made them NARROWER THAN THE FROZEN PLAN: AAP section 0.5.1 states
+#  the runtime inventory as four names at exact versions -- mysql-connector-python
+#  26.7.0, SQLAlchemy 2.0.51, and in its own words "Pulls `greenlet` 3.5.4 as a
+#  transitive dependency", with typing_extensions travelling with it. The plan is the
+#  agreed contract for what this distribution DECLARES and is not editable by the
+#  implementation, so a manifest that drops one of its names diverges from it.
+#
+#  WHAT IS LOCKED, THEREFORE, IS THE PAIR AND NOT EITHER HALF:
+#    * the DECLARED runtime closure is EXACTLY the plan's four names - no wider, so a
+#      package cannot be smuggled into the shipped graph, and no narrower, so the plan
+#      cannot be quietly re-written by deletion;
+#    * the IMPORTED third-party set under `acas_posting/` is EXACTLY {mysql}, so the
+#      execution path stays auditable from the source;
+#    * the DIFFERENCE between them is exactly the three names the plan declares as the
+#      alternative Core-level boundary, so a fourth declared-and-unimported package
+#      cannot join them unnoticed;
+#    * `requirements.txt` pins exactly the union of the manifest's sets, so the hashed
+#      route the container and the parity protocol use installs neither more nor less;
+#    * and no artifact describes the Core boundary as ACTIVE, which is the MJ-20 defect
+#      itself and is a property of prose that no import census can see.
+#
+#  Declaring more than is imported is therefore permitted HERE AND ONLY HERE, only for
+#  the names the plan itself declares, and only while every artifact says so in as many
+#  words. That is what makes it an auditable decision rather than the drift MJ-20 found.
 _PACKAGE_ROOT = "acas_posting"
 
 #: Distribution name -> the top-level module it provides, for the runtime set. A
@@ -1801,12 +2000,6 @@ _PACKAGE_ROOT = "acas_posting"
 _DISTRIBUTION_MODULES: Mapping[str, str] = MappingProxyType(
     {
         "mysql-connector-python": "mysql",
-        # ⭐ MAPPED BUT NOT DECLARED, DELIBERATELY. These three are the packages MJ-20
-        # was raised about. Keeping their import names here means that re-declaring one
-        # is reported as "declared and never imported" -- the actual defect, naming the
-        # package -- rather than as "this census cannot say", which is a true but much
-        # less useful refusal. Presence in this mapping is not an endorsement: it is
-        # what lets the assertion below be specific about them.
         "sqlalchemy": "sqlalchemy",
         "greenlet": "greenlet",
         "typing_extensions": "typing_extensions",
@@ -1814,19 +2007,82 @@ _DISTRIBUTION_MODULES: Mapping[str, str] = MappingProxyType(
     }
 )
 
+#: The runtime closure AAP section 0.5.1 fixes, canonicalised the way pip canonicalises
+#: a distribution name (lower-case, `_` and `.` folded to `-`). Changing this set means
+#: claiming the plan says something different, so it is spelled out here rather than
+#: derived from the manifest it is used to check.
+_PLAN_RUNTIME_CLOSURE: Mapping[str, str] = MappingProxyType(
+    {
+        "mysql-connector-python": "26.7.0",
+        "sqlalchemy": "2.0.51",
+        "greenlet": "3.5.4",
+        "typing-extensions": "4.16.0",
+    }
+)
+
+#: The names the plan declares that the code deliberately does not import. Their
+#: presence in the manifest is an auditable decision; a FOURTH name in this position
+#: would be drift, so the tests pin the set rather than merely tolerating a non-empty
+#: difference.
+_DECLARED_AND_NOT_IMPORTED: frozenset[str] = frozenset(
+    {"sqlalchemy", "greenlet", "typing-extensions"}
+)
+
+#: The one third-party top-level module the shipped package may import.
+_IMPORTED_THIRD_PARTY_SET: frozenset[str] = frozenset({"mysql"})
+
+
+def _canonical_distribution(name: str) -> str:
+    """Canonicalise a distribution name the way pip does.
+
+    Args:
+        name: A distribution name as written in a manifest or a lock file.
+
+    Returns:
+        The name lower-cased with runs of `-`, `_` and `.` folded to a single `-`.
+    """
+    return re.sub(r"[-_.]+", "-", name.strip().lower())
+
 
 def _declared_runtime_distributions() -> list[str]:
     """Return `pyproject.toml`'s `[project].dependencies`, names only.
 
     Returns:
-        The distribution names, lower-cased, in declaration order.
+        The canonicalised distribution names, in declaration order.
+    """
+    parsed = _parsed_manifest()
+    declared = parsed["project"]["dependencies"]
+    return [
+        _canonical_distribution(re.split(r"[=<>!~\[;]", entry, maxsplit=1)[0])
+        for entry in declared
+    ]
+
+
+def _parsed_manifest() -> dict[str, Any]:
+    """Return `pyproject.toml`, parsed.
+
+    Returns:
+        The parsed manifest.
     """
     root = Path(__file__).resolve().parents[2]
     manifest = root / "pyproject.toml"
     assert manifest.is_file(), f"the manifest is absent: {manifest}"
-    parsed = tomllib.loads(manifest.read_text(encoding="utf-8"))
-    declared = parsed["project"]["dependencies"]
-    return [re.split(r"[=<>!~\[;]", entry, maxsplit=1)[0].strip().lower() for entry in declared]
+    return tomllib.loads(manifest.read_text(encoding="utf-8"))
+
+
+def _declared_runtime_pins() -> dict[str, str]:
+    """Return `pyproject.toml`'s `[project].dependencies` as name -> pinned version.
+
+    Returns:
+        Canonical distribution name -> the exact version it is pinned to. An entry that
+        is not pinned with `==` maps to the empty string, which the caller reports.
+    """
+    parsed = _parsed_manifest()
+    pins: dict[str, str] = {}
+    for entry in parsed["project"]["dependencies"]:
+        name, separator, remainder = entry.partition("==")
+        pins[_canonical_distribution(name)] = remainder.strip() if separator else ""
+    return pins
 
 
 def _imported_third_party_modules() -> dict[str, set[str]]:
@@ -1859,9 +2115,93 @@ def _imported_third_party_modules() -> dict[str, set[str]]:
     return found
 
 
-def test_every_declared_runtime_dependency_is_actually_imported() -> None:
-    """No runtime dependency is declared that the package does not import (MJ-20)."""
-    declared = _declared_runtime_distributions()
+def test_the_declared_runtime_closure_is_exactly_the_plans_closure() -> None:
+    """`[project].dependencies` is the plan's four names at the plan's versions (DEP-01).
+
+    Both directions matter and for different reasons. A name the plan does not declare
+    would put a package into the shipped dependency graph on no authority. A plan name
+    that is missing would narrow the frozen closure by deletion, which is the defect
+    DEP-01 records -- the response to MJ-20 removed three of these four.
+    """
+    declared = _declared_runtime_pins()
+
+    extra = sorted(set(declared) - set(_PLAN_RUNTIME_CLOSURE))
+    assert not extra, (
+        "pyproject.toml declares these RUNTIME dependencies and AAP section 0.5.1's "
+        f"dependency inventory does not name them: {', '.join(extra)}.\n"
+        "  The plan fixes the runtime closure at "
+        f"{', '.join(sorted(_PLAN_RUNTIME_CLOSURE))}. A package outside it belongs in "
+        "an optional-dependency group, or nowhere."
+    )
+
+    missing = sorted(set(_PLAN_RUNTIME_CLOSURE) - set(declared))
+    assert not missing, (
+        "AAP section 0.5.1 declares these in the runtime dependency inventory and "
+        f"pyproject.toml no longer does: {', '.join(missing)}.\n"
+        "  This is finding DEP-01. The plan is FROZEN: aligning the manifest to it is "
+        "the standing rule, and a name may not be dropped because nothing imports it. "
+        "Declaring a name the code does not import is permitted for exactly "
+        f"{', '.join(sorted(_DECLARED_AND_NOT_IMPORTED))} and is stated as such in "
+        "pyproject.toml, requirements.txt and README-python-migration.md."
+    )
+
+    wrong = sorted(
+        f"{name}: manifest {declared[name] or '(not pinned with ==)'}, "
+        f"plan {_PLAN_RUNTIME_CLOSURE[name]}"
+        for name in sorted(_PLAN_RUNTIME_CLOSURE)
+        if name in declared and declared[name] != _PLAN_RUNTIME_CLOSURE[name]
+    )
+    assert not wrong, (
+        "these runtime dependencies are not pinned to the version AAP section 0.5.1 "
+        "states:\n  " + "\n  ".join(wrong) + "\n"
+        "  Every version in section 0.5.1 was resolved rather than recalled, and a "
+        "driver or runtime change can move a stored penny (R-6)."
+    )
+
+
+def test_the_imported_third_party_set_is_exactly_the_driver() -> None:
+    """`acas_posting/` imports exactly one third-party module, `mysql` (MJ-20).
+
+    This is the half MJ-20 was raised about, expressed positively. The manifest declares
+    four names; the source may reach for only one of them, so that the execution path
+    stays auditable from the source rather than inferred from the manifest.
+    """
+    imported = _imported_third_party_modules()
+    observed = frozenset(imported)
+
+    unexpected = sorted(
+        f"{module} (imported by {', '.join(sorted(imported[module]))})"
+        for module in observed - _IMPORTED_THIRD_PARTY_SET
+    )
+    assert not unexpected, (
+        "acas_posting imports third-party modules beyond the one driver:\n  "
+        + "\n  ".join(unexpected)
+        + "\n  The shipped package's third-party surface is exactly "
+        f"{{{', '.join(sorted(_IMPORTED_THIRD_PARTY_SET))}}}. In particular an "
+        "`import sqlalchemy` here would take the Core-level data-access path the "
+        "project deliberately does not take: acas_posting/dal/connection.py reproduces "
+        "the frozen bridges' connection ownership, which an Engine is built to own "
+        "instead, and re-routing it would change which physical session a statement "
+        "runs on (R-4, R-6)."
+    )
+
+    absent = sorted(_IMPORTED_THIRD_PARTY_SET - observed)
+    assert not absent, (
+        f"acas_posting no longer imports {', '.join(absent)}. The database driver is "
+        "the package's one third-party import; if it has genuinely gone, this census "
+        "and every document describing it need re-stating, not this assertion relaxing."
+    )
+
+
+def test_the_declared_but_unimported_set_is_exactly_the_three_the_plan_declares() -> None:
+    """Declaring-without-importing is confined to the plan's three names (DEP-01/MJ-20).
+
+    The difference between the declared closure and the imported set is where MJ-20's
+    drift lived. Leaving it merely "allowed to be non-empty" would let a fourth package
+    settle there unnoticed, which is the same defect with a different name in it, so the
+    set is pinned exactly.
+    """
+    declared = set(_declared_runtime_distributions())
     imported = _imported_third_party_modules()
 
     unmapped = sorted(name for name in declared if name not in _DISTRIBUTION_MODULES)
@@ -1871,16 +2211,28 @@ def test_every_declared_runtime_dependency_is_actually_imported() -> None:
         "distribution-to-module mapping rather than removing the assertion."
     )
 
-    unused = sorted(
-        name for name in declared if _DISTRIBUTION_MODULES[name] not in imported
-    )
-    assert not unused, (
-        "these packages are declared as RUNTIME dependencies of acas_posting and no "
-        f"module in the package imports them: {', '.join(unused)}.\n"
+    unused = {name for name in declared if _DISTRIBUTION_MODULES[name] not in imported}
+
+    joined = sorted(unused - _DECLARED_AND_NOT_IMPORTED)
+    assert not joined, (
+        "these packages are declared as RUNTIME dependencies of acas_posting, no module "
+        f"in the package imports them, and the plan does not declare them either: "
+        f"{', '.join(joined)}.\n"
         "  A manifest that advertises an execution path the code does not take makes "
-        "the shipped architecture unauditable from the artifact (MJ-20). Either use "
-        "the package or stop declaring it -- and if it belongs to the harness or the "
-        "test tooling, declare it in the matching optional-dependency group instead."
+        "the shipped architecture unauditable from the artifact (MJ-20). Either use the "
+        "package or stop declaring it -- and if it belongs to the harness or the test "
+        "tooling, declare it in the matching optional-dependency group instead."
+    )
+
+    started_being_imported = sorted(_DECLARED_AND_NOT_IMPORTED - unused)
+    assert not started_being_imported, (
+        "these packages are recorded across pyproject.toml, requirements.txt, "
+        "README-python-migration.md and harness/Dockerfile.gnucobol as DECLARED AND NOT "
+        f"IMPORTED, and acas_posting now imports them: {', '.join(started_being_imported)}"
+        ".\n  If that is intended it is a change of data-access architecture, not a "
+        "test to relax: those four artifacts state the opposite, and "
+        "test_no_document_claims_an_unused_data_access_boundary forbids describing the "
+        "Core boundary as active while it is not taken."
     )
 
 
@@ -1911,41 +2263,159 @@ def test_every_imported_third_party_module_is_declared() -> None:
 
 
 def test_the_manifests_agree_on_the_runtime_set() -> None:
-    """`requirements.txt` pins exactly the runtime set, with no orphan (MJ-20).
+    """`requirements.txt` pins exactly the manifest's names, with no orphan (MJ-20).
 
-    The lock file is what the container and the parity protocol install from, so a pin
-    surviving there after leaving `pyproject.toml` would keep the unused package in
-    every environment that matters while the manifest looked clean.
+    The lock file is what the container and the parity protocol install from, so it is
+    the artifact that decides what actually lands in every environment that matters. A
+    name pinned there and not declared in `pyproject.toml` would install silently; a name
+    declared and not pinned would be missing from the one route that is hash-verified.
+    Both are asserted, over the WHOLE manifest -- runtime, harness, dev and the build
+    backend -- because a hashed install of this file installs all of them at once.
     """
     root = Path(__file__).resolve().parents[2]
     lock = (root / "requirements.txt").read_text(encoding="utf-8")
 
     pinned = {
-        match.group(1).lower()
-        for match in re.finditer(r"^([A-Za-z][A-Za-z0-9_.-]*)==", lock, re.MULTILINE)
+        _canonical_distribution(match.group(1)): match.group(2)
+        for match in re.finditer(
+            r"^([A-Za-z][A-Za-z0-9_.-]*)==([^\s\\]+)", lock, re.MULTILINE
+        )
     }
-    for name in _declared_runtime_distributions():
-        assert name in pinned, (
-            f"{name} is a declared runtime dependency and requirements.txt does not "
-            "pin it, so a hashed install would not provide it."
+
+    parsed = _parsed_manifest()
+    manifest_entries: list[str] = list(parsed["project"]["dependencies"])
+    for group, entries in parsed["project"]["optional-dependencies"].items():
+        for entry in entries:
+            # The `test` group is defined BY REFERENCE (`acas-posting[dev,harness]`) so
+            # the two sets can never drift apart; it names no distribution of its own.
+            if _canonical_distribution(
+                re.split(r"[=<>!~\[;]", entry, maxsplit=1)[0]
+            ) == _canonical_distribution(parsed["project"]["name"]):
+                continue
+            manifest_entries.append(entry)
+    manifest_entries.extend(parsed["build-system"]["requires"])
+
+    declared_pins: dict[str, str] = {}
+    for entry in manifest_entries:
+        name, separator, remainder = entry.partition("==")
+        declared_pins[_canonical_distribution(name)] = (
+            remainder.strip() if separator else ""
         )
 
-    # The three MJ-20 packages must be gone from BOTH artifacts, not just one.
-    for stale in ("sqlalchemy", "greenlet", "typing_extensions"):
-        assert stale not in pinned, (
-            f"requirements.txt still pins {stale}, which nothing in acas_posting "
-            "imports. A hashed install would place it in the container and the parity "
-            "environment while pyproject.toml no longer declares it (MJ-20)."
+    missing = sorted(set(declared_pins) - set(pinned))
+    assert not missing, (
+        f"pyproject.toml declares {', '.join(missing)} and requirements.txt does not "
+        "pin them, so the hash-verified route -- the one the container and the parity "
+        "protocol use -- would not provide them."
+    )
+
+    orphans = sorted(set(pinned) - set(declared_pins))
+    assert not orphans, (
+        f"requirements.txt pins {', '.join(orphans)} and no group of pyproject.toml "
+        "declares them. A hashed install would place them in the container and the "
+        "parity environment while the manifest looked clean, which is how MJ-20's "
+        "divergence survived in the first place."
+    )
+
+    disagreements = sorted(
+        f"{name}: pyproject {declared_pins[name] or '(not pinned with ==)'}, "
+        f"requirements.txt {pinned[name]}"
+        for name in sorted(declared_pins)
+        if declared_pins[name] != pinned[name]
+    )
+    assert not disagreements, (
+        "these names are pinned to different versions in the two dependency "
+        "artifacts:\n  " + "\n  ".join(disagreements) + "\n"
+        "  A version that differs between them is a defect, not a variation: the two "
+        "install routes would then produce different environments and only one of them "
+        "could be the one parity evidence was taken on (R-6)."
+    )
+
+
+def test_every_pin_in_the_lock_is_hash_verified() -> None:
+    """Every `requirements.txt` pin carries at least one `--hash`, so nothing floats.
+
+    `pip install --require-hashes` refuses the whole file if ANY requirement lacks a
+    hash, so a missing one does not weaken the install quietly -- it breaks the
+    documented route outright, including the image build in
+    `harness/Dockerfile.gnucobol`. Asserting it here names the offending pin instead.
+    """
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "requirements.txt").read_text(encoding="utf-8")
+
+    # A requirement is its `name==version` line plus the continuation lines it joins
+    # with a trailing backslash. Splitting on that keeps each pin with its own hashes.
+    logical = re.sub(r"\\\n\s*", " ", text)
+    unhashed = [
+        match.group(1)
+        for match in re.finditer(
+            r"^([A-Za-z][A-Za-z0-9_.-]*==[^\s]+)([^\n]*)$", logical, re.MULTILINE
         )
+        if "--hash=sha256:" not in match.group(2)
+    ]
+    assert not unhashed, (
+        "these requirements.txt pins carry no --hash, which makes "
+        "`pip install --require-hashes -r requirements.txt` refuse the entire file:\n  "
+        + "\n  ".join(unhashed)
+    )
+
+
+def test_the_documented_pin_and_hash_counts_match_the_lock() -> None:
+    """README section 7 quotes the pin and hash counts; both must be measured, not stale.
+
+    This is the third symptom of DEP-01 specifically: when three pins were removed the
+    documented figure was left behind, so the README described a 13-pin lock that had
+    become a 10-pin lock. A count in prose is a claim about the tree, and this ties it
+    to the tree so the next pin change cannot leave it behind again.
+    """
+    root = Path(__file__).resolve().parents[2]
+    lock = (root / "requirements.txt").read_text(encoding="utf-8")
+    readme_text = (root / "README-python-migration.md").read_text(encoding="utf-8")
+    # The claim wraps across source lines, so compare against unwrapped text.
+    readme = " ".join(readme_text.split())
+
+    pins = len(set(re.findall(r"^([A-Za-z][A-Za-z0-9_.-]*)==", lock, re.MULTILINE)))
+    hashes = lock.count("--hash=sha256:")
+
+    quoted = re.search(r"\*\*(\d+) hashes across (\d+) pins\*\*", readme)
+    assert quoted, (
+        "README section 7 no longer states the pin and hash counts in the form "
+        "'**<N> hashes across <M> pins**'. Restore the claim or update this test -- the "
+        "install section is where a reader checks the lock is complete."
+    )
+
+    documented_hashes, documented_pins = int(quoted.group(1)), int(quoted.group(2))
+    assert (documented_hashes, documented_pins) == (hashes, pins), (
+        f"README section 7 documents {documented_hashes} hashes across "
+        f"{documented_pins} pins; requirements.txt actually carries {hashes} hashes "
+        f"across {pins} pins.\n"
+        "  A stale count here is how DEP-01 presented: the prose kept describing the "
+        "closure the lock used to have."
+    )
+
+    # The prose also spells the pin count as a word ("all thirteen pinned
+    # distributions"), and a spelled count drifts just as silently as a digit.
+    spelled = [
+        word
+        for word, value in _NUMBER_WORDS.items()
+        if f"all {word} pinned distributions" in readme.lower() and value != pins
+    ]
+    assert not spelled, (
+        f"README section 7 spells the pin count as {', '.join(spelled)} while "
+        f"requirements.txt pins {pins} distributions."
+    )
 
 
 def test_no_document_claims_an_unused_data_access_boundary() -> None:
     """No artifact describes SQLAlchemy Core as the active boundary (MJ-20).
 
     Text rather than imports, because the defect was three documents describing an
-    execution path the code did not take, and no import census can see prose. A
-    sentence RECORDING that the boundary was considered and not taken is the decision
-    record and is exempt; a sentence asserting it is active is not.
+    execution path the code did not take, and no import census can see prose. This
+    survives DEP-01 unchanged in substance: restoring the pins restored what the
+    manifests DECLARE, not what the code executes, so a document may say the name is
+    declared and may quote what the plan contemplates -- and may not say the boundary is
+    live. A sentence recording the decision is exempt; a sentence asserting the boundary
+    is active is not.
     """
     root = Path(__file__).resolve().parents[2]
     # The ASSERTIVE forms only. A decision record has to be able to quote what the
@@ -1960,8 +2430,16 @@ def test_no_document_claims_an_unused_data_access_boundary() -> None:
         "| **core level only**",
         "sqlalchemy core is",
     )
-    # And a sentence that names the finding is the record of the decision, not a claim.
-    exempt = ("mj-20", "deliberately absent", "is absent from")
+    # And a sentence that names a finding, or that states the declared-not-imported pair
+    # in as many words, is the record of the decision rather than a claim.
+    exempt = (
+        "mj-20",
+        "dep-01",
+        "deliberately absent",
+        "is absent from",
+        "not imported",
+        "does not take",
+    )
     offenders: list[str] = []
     for relative in (
         "pyproject.toml",
@@ -1980,6 +2458,559 @@ def test_no_document_claims_an_unused_data_access_boundary() -> None:
     assert not offenders, (
         "these lines describe a SQLAlchemy Core boundary as active, while no module in "
         "acas_posting imports SQLAlchemy at all (MJ-20):\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_the_declared_and_unimported_decision_is_stated_in_every_artifact() -> None:
+    """Every artifact that carries the three pins also says they are not imported.
+
+    Declaring a package the code does not import is only auditable if the artifact says
+    so. MJ-20 was exactly this omission: three artifacts carried the pins and none
+    recorded that nothing imported them, so a reader could not tell the difference
+    between a decision and a mistake. Restoring the pins under DEP-01 therefore restores
+    the obligation to state the pair, and this test holds the two together.
+    """
+    root = Path(__file__).resolve().parents[2]
+    # Each artifact must contain a phrase asserting the DECLARED / NOT IMPORTED pair. The
+    # alternatives per file are wording variants of one statement, not different claims.
+    required: Mapping[str, tuple[str, ...]] = MappingProxyType(
+        {
+            "pyproject.toml": ("declared here and is not imported",),
+            "requirements.txt": ("declared is not the same as imported",),
+            "README-python-migration.md": ("declared and is not imported",),
+            "harness/Dockerfile.gnucobol": ("declared is not imported",),
+        }
+    )
+    missing: list[str] = []
+    for relative, phrases in required.items():
+        path = root / relative
+        assert path.is_file(), f"a declared artifact is absent: {path}"
+        lowered = path.read_text(encoding="utf-8").lower()
+        if not any(phrase in lowered for phrase in phrases):
+            missing.append(f"{relative} (expected one of: {', '.join(phrases)})")
+    assert not missing, (
+        "these artifacts carry the SQLAlchemy pin, or assert on it, and none of them "
+        "states that nothing imports it:\n  " + "\n  ".join(missing) + "\n"
+        "  A declared-and-unimported dependency is an auditable decision only while "
+        "every artifact says so; unstated, it is the MJ-20 drift again."
+    )
+
+
+# ---------------------------------------------------------------------------
+#  SEC-04 - THE DATABASE SUPERUSER CREDENTIAL REACHES TWO STAGES OF TEN
+#
+#  `harness/docker-compose.yml` must declare ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD
+#  at service level, because `run_parity.sh` drives all ten protocol stages from one
+#  invocation and stages 1 and 5 - both `reset_db.sh` - drop and re-apply the frozen
+#  schema. A service-level variable is inherited by every descendant, so that put the
+#  superuser password into the environment of the GnuCOBOL compiler, the preSQL
+#  translator, every bridge and menu binary, the migrated Python cycle and pytest.
+#
+#  Three independent mechanisms now remove it everywhere it is not needed, and the
+#  tests below assert each one plus the CENSUS that makes all three safe.
+# ---------------------------------------------------------------------------
+
+#: The two names. Spelled here rather than imported, so the test would notice a rename
+#: in either direction instead of following it silently.
+_ADMIN_CREDENTIAL_NAMES: tuple[str, ...] = (
+    "ACAS_DB_ADMIN_USER",
+    "ACAS_DB_ADMIN_PASSWORD",
+)
+
+#: The harness scripts that perform NO schema administration. Each must drop the pair
+#: at entry, so a direct invocation is scoped just as a driven one is.
+_NON_ADMINISTRATIVE_SCRIPTS: tuple[str, ...] = (
+    "harness/build_oracle.sh",
+    "harness/build_fixtures.sh",
+    "harness/run_cobol_scenario.sh",
+    "harness/run_python_scenario.sh",
+)
+
+#: The only two scripts that legitimately consume the credential.
+_ADMINISTRATIVE_SCRIPTS: tuple[str, ...] = ("harness/reset_db.sh", "harness/seed.sh")
+
+
+def test_only_the_administrative_scripts_consume_the_credential() -> None:
+    """THE CENSUS THAT MAKES THE SCRUB SAFE, and that would notice it stopping to be.
+
+    Removing a variable from a child's environment is only correct while no child needs
+    it. So rather than trusting that, this counts actual references: the pair may be
+    consumed by the two schema-administration scripts and named in documentation
+    anywhere, but a NON-administrative script that started reading it would mean the
+    scrub had begun breaking something - and this test is how that surfaces, instead of
+    as a confusing authentication failure inside a stage.
+    """
+    root = Path(__file__).resolve().parents[2]
+
+    for relative in _ADMINISTRATIVE_SCRIPTS:
+        text = (root / relative).read_text(encoding="utf-8")
+        assert any(name in text for name in _ADMIN_CREDENTIAL_NAMES), (
+            f"{relative} no longer references the administrative credential at all. "
+            "If schema administration has moved elsewhere, the scrub lists in this "
+            "module and in run_parity.sh have to move with it."
+        )
+
+    offenders: list[str] = []
+    for relative in _NON_ADMINISTRATIVE_SCRIPTS:
+        path = root / relative
+        assert path.is_file(), f"a declared script is absent: {path}"
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            stripped = line.strip()
+            # A comment may name it - the scrub block itself does - and the `unset`
+            # is the point of this whole exercise.
+            if stripped.startswith("#") or stripped.startswith("unset "):
+                continue
+            if any(name in line for name in _ADMIN_CREDENTIAL_NAMES):
+                offenders.append(f"{relative}:{number}: {stripped[:80]}")
+
+    assert not offenders, (
+        "these scripts are declared non-administrative and drop the superuser "
+        "credential at entry, yet they now READ it, so they cannot work:\n  "
+        + "\n  ".join(offenders)
+        + "\n  Either the reference is wrong, or the script has become administrative "
+        "and must be moved out of the scrub list deliberately."
+    )
+
+
+def test_every_non_administrative_script_drops_the_credential_at_entry() -> None:
+    """Mechanism 2: the pair is gone before the script's first child exists.
+
+    Asserted as ordering, not just presence: an `unset` placed after the first
+    subprocess would leave exactly the exposure it is meant to close. `set -Eeuo
+    pipefail` is used as the marker for "the script has started", and the `unset` must
+    come within the header rather than somewhere down in a function.
+    """
+    root = Path(__file__).resolve().parents[2]
+    problems: list[str] = []
+
+    for relative in _NON_ADMINISTRATIVE_SCRIPTS:
+        lines = (root / relative).read_text(encoding="utf-8").splitlines()
+        unset_at = next(
+            (
+                number
+                for number, line in enumerate(lines, start=1)
+                if line.strip().startswith("unset ")
+                and all(name in line for name in _ADMIN_CREDENTIAL_NAMES)
+            ),
+            None,
+        )
+        if unset_at is None:
+            problems.append(
+                f"{relative}: never unsets {' and '.join(_ADMIN_CREDENTIAL_NAMES)}"
+            )
+            continue
+        # It must be in the script's header, before any function body or command that
+        # could spawn something.
+        first_function = next(
+            (
+                number
+                for number, line in enumerate(lines, start=1)
+                if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\(\)\s*\{", line)
+            ),
+            len(lines),
+        )
+        if unset_at > first_function:
+            problems.append(
+                f"{relative}: unsets the pair at line {unset_at}, AFTER the first "
+                f"function at line {first_function} - too late to be a guarantee"
+            )
+
+    assert not problems, (
+        "the administrative credential is not dropped early enough to be a guarantee "
+        "(finding SEC-04):\n  " + "\n  ".join(problems)
+    )
+
+
+def test_the_parity_driver_scopes_the_credential_to_the_reset_stages() -> None:
+    """Mechanism 1: only stages 1 and 5 keep the pair; the other eight run without it."""
+    root = Path(__file__).resolve().parents[2]
+    driver = (root / "harness" / "run_parity.sh").read_text(encoding="utf-8")
+
+    expected = "env -u ACAS_DB_ADMIN_USER -u ACAS_DB_ADMIN_PASSWORD"
+    assert expected in driver, (
+        "harness/run_parity.sh no longer strips the administrative credential from a "
+        f"stage's environment; expected the scrub {expected!r}. Without it every stage "
+        "inherits the database superuser password from the service environment."
+    )
+    assert "1|5)" in driver, (
+        "harness/run_parity.sh no longer distinguishes the two administrative stages, "
+        "so either every stage now gets the credential or the two resets have lost it."
+    )
+    # And it must be applied where the stage is actually executed, not merely defined.
+    assert '"${scrub[@]}" "${ACAS_PARITY_ARGV[@]}"' in driver, (
+        "the scrub is declared but is not applied at the point the stage runs, which "
+        "would leave it inert."
+    )
+
+
+def test_the_test_protocol_scrubs_the_credential_by_default() -> None:
+    """Mechanism 3: `_run_script` withholds the pair unless a caller asks for it.
+
+    The POLARITY is what is asserted. A helper that scrubbed only when asked would put
+    the burden on every future call site to remember; scrubbing by default means a new
+    stage is least-privileged unless someone deliberately says otherwise.
+    """
+    conftest = importlib.import_module("conftest")
+
+    signature = inspect.signature(conftest._run_script)
+    administrative = signature.parameters.get("administrative")
+    assert administrative is not None, (
+        "tests/conftest.py::_run_script no longer takes `administrative`, so every "
+        "stage it runs receives the database superuser password again (SEC-04)."
+    )
+    assert administrative.default is False, (
+        f"`administrative` defaults to {administrative.default!r}; it must default to "
+        "False so a stage is least-privileged unless it deliberately opts in."
+    )
+
+    # The helper itself, exercised rather than read.
+    scrubbed = conftest.without_admin_credentials(
+        {
+            "ACAS_DB_ADMIN_USER": "root",
+            "ACAS_DB_ADMIN_PASSWORD": "SENTINEL-SUPERUSER-SECRET",
+            "ACAS_DB_USER": "acas",
+            "ACAS_DB_PASSWORD": "app-secret",
+        }
+    )
+    for name in _ADMIN_CREDENTIAL_NAMES:
+        assert name not in scrubbed, f"{name} survived the scrub"
+    assert "SENTINEL-SUPERUSER-SECRET" not in scrubbed.values(), (
+        "the superuser password survived the scrub under some other name"
+    )
+    # Application access must be untouched, or every scrubbed stage loses the database.
+    assert scrubbed["ACAS_DB_USER"] == "acas"
+    assert scrubbed["ACAS_DB_PASSWORD"] == "app-secret"
+
+    # Exactly the schema-administration stages opt in: the seed and the two resets.
+    source = (Path(conftest.__file__).read_text(encoding="utf-8"))
+    assert source.count("administrative=True") == 3, (
+        f"{source.count('administrative=True')} call site(s) request the "
+        "administrative credential; exactly three should - the seed and the two "
+        "resets. A fourth means some other stage has been handed the superuser."
+    )
+
+
+# ---------------------------------------------------------------------------
+#  SEC-05 - NO ACCOUNTING VALUE REACHES AN ASSERTION MESSAGE
+#
+#  `harness/diff_states.py` ships two renderers and only one of them is safe to put in
+#  a failure message:
+#
+#    render(tree)     every differing value AND every primary key. Its purpose is the
+#                     on-disk report, where that detail belongs.
+#    summarise(tree)  table, column name and ordinal, counts. No value, no key.
+#
+#  The scenario and determinism tiers interpolated `render` into assertion messages, so
+#  a failing parity run printed real ledger balances, VAT amounts and account
+#  identifiers into pytest output and from there into any log that collects it. The
+#  route is now `ParityRun.diagnose()`, `DeterminismRun.diagnose()` and the `withheld`
+#  fixture, all defined once in `tests/conftest.py`.
+#
+#  This is a STATIC test on purpose. The tier it polices is stack-bound - without the
+#  Compose stack those tests skip - so the messages themselves are not exercised by an
+#  ordinary run, and a regression here would otherwise be invisible until the day a
+#  parity run actually failed. Reading the source needs no stack.
+# ---------------------------------------------------------------------------
+
+#: The tiers whose assertion messages describe a comparison of real table state.
+_STATE_ASSERTING_TIERS: tuple[str, ...] = ("tests/scenarios", "tests/determinism")
+
+
+def _assertion_message_interpolations(path: Path) -> list[tuple[int, str]]:
+    """Every expression interpolated into an `assert` MESSAGE in one module.
+
+    The message is what reaches a log. An expression in the assert CONDITION is not
+    printed by pytest unless it is also in the message, so only the message is read.
+
+    Args:
+        path: The module to read.
+
+    Returns:
+        `(line number, source of the interpolated expression)` for each one.
+    """
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+        if isinstance(node, ast.Assert) and node.msg is not None:
+            for inner in ast.walk(node.msg):
+                if isinstance(inner, ast.FormattedValue):
+                    found.append((inner.lineno, ast.unparse(inner.value)))
+    return found
+
+
+def test_no_assertion_message_renders_a_value_bearing_report() -> None:
+    """No `diff_states.render` reaches an assertion message (finding SEC-05).
+
+    `render` is not banned outright, because it is the right function for writing the
+    report and for asserting that an EMPTY comparison renders to nothing. What is
+    banned is putting its output where pytest will print it.
+    """
+    root = Path(__file__).resolve().parents[2]
+    offenders: list[str] = []
+
+    for tier in _STATE_ASSERTING_TIERS:
+        directory = root / tier
+        assert directory.is_dir(), f"a declared tier is absent: {directory}"
+        modules = sorted(directory.glob("test_*.py"))
+        assert modules, f"{tier} holds no test module; this test would be vacuous"
+        for module in modules:
+            for line, expression in _assertion_message_interpolations(module):
+                if re.search(r"(^|\.)_?render\s*\(", expression):
+                    offenders.append(f"{tier}/{module.name}:{line}: {expression[:74]}")
+
+    assert not offenders, (
+        "these assertion messages interpolate the value-bearing report, which copies "
+        "real accounting figures and account identifiers into pytest output:\n  "
+        + "\n  ".join(offenders)
+        + "\n  Use `parity.diagnose()` / `run.diagnose()` instead - the same comparison, "
+        "summarised without values, naming the report and its digest so the figures are "
+        "still reachable by anyone who should see them."
+    )
+
+
+def test_the_value_free_route_exists_and_actually_withholds() -> None:
+    """The DISCRIMINATING half: `summarise` and `withheld` withhold what they promise.
+
+    A test that only banned `render` would pass just as well against a `diagnose()`
+    that had been quietly repointed back at the value-bearing renderer. So sentinel
+    values and a sentinel key are pushed through both value-free routes and the output
+    is searched for them. `render` is checked too, in the same breath, because the ban
+    above is only worth having while the two really do differ.
+    """
+    root = Path(__file__).resolve().parents[2]
+    # Loaded by explicit path, like `_scenario_yaml_module` above, so this tier keeps
+    # importing no harness module by package path (rule R-1).
+    path = root / "harness" / "diff_states.py"
+    assert path.is_file(), f"the comparison module is absent: {path}"
+    module_name = "acas_diff_states_probe"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    diff_states = importlib.util.module_from_spec(spec)
+    # Registered BEFORE execution, and removed again on failure, exactly as
+    # `tests/conftest.py` does it: the module's records are `@dataclass(slots=True)`,
+    # and that decorator resolves `cls.__module__` through `sys.modules` while the
+    # class is being built, so an unregistered module fails to execute at all.
+    sys.modules[module_name] = diff_states
+    try:
+        spec.loader.exec_module(diff_states)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+
+    value_difference = diff_states.ValueDifference(
+        column="LEDGER-BALANCE", ordinal=7,
+        cobol="SENTINEL-COBOL-VALUE", python="SENTINEL-PYTHON-VALUE",
+    )
+    tree = diff_states.TreeDiff(
+        tables=(
+            diff_states.TableDiff(
+                table="GLLEDGER-REC", primary_key="LEDGER-KEY",
+                in_cobol=True, in_python=True,
+                cobol_columns=("LEDGER-KEY", "LEDGER-BALANCE"),
+                python_columns=("LEDGER-KEY", "LEDGER-BALANCE"),
+                cobol_row_count=1, python_row_count=1,
+                missing_in_python=("SENTINEL-MISSING-KEY",), missing_in_cobol=(),
+                value_differences=(
+                    diff_states.RowDifference(
+                        key="SENTINEL-ROW-KEY", values=(value_difference,)
+                    ),
+                ),
+                rows_compared=1,
+                cobol_key_types=("str",), python_key_types=("str",),
+            ),
+        ),
+        cobol_dir=None, python_dir=None,
+    )
+    sentinels = (
+        "SENTINEL-COBOL-VALUE", "SENTINEL-PYTHON-VALUE",
+        "SENTINEL-ROW-KEY", "SENTINEL-MISSING-KEY",
+    )
+
+    summary = diff_states.summarise(tree, report_path=None)
+    leaked = [sentinel for sentinel in sentinels if sentinel in summary]
+    assert not leaked, (
+        f"`summarise` disclosed {leaked}, so the route the scenario tier now relies on "
+        "is no longer value-free and finding SEC-05 is reopened."
+    )
+    # It must still be a USEFUL diagnosis: naming the table and column is the whole
+    # point of summarising rather than saying nothing.
+    assert "GLLEDGER-REC" in summary and "LEDGER-BALANCE" in summary, (
+        "`summarise` withheld the values AND the table and column names, which leaves a "
+        f"failure message that cannot be acted on at all: {summary!r}"
+    )
+
+    # And the ban above is only meaningful while `render` really does disclose them.
+    rendered = diff_states.render(tree)
+    assert all(sentinel in rendered for sentinel in sentinels), (
+        "`render` no longer discloses values or keys, so the two renderers no longer "
+        "differ and this test pair has stopped measuring anything. Re-derive the "
+        "SEC-05 policy against what the module now does."
+    )
+
+
+def test_the_withheld_helper_handles_every_shape_the_tier_passes_it() -> None:
+    """`withheld` is exercised here because a failure message is not exercised anywhere.
+
+    An assertion message is only formatted WHEN THE ASSERTION FAILS, and the tier that
+    calls `withheld` is stack-bound, so on a green run these expressions are never
+    evaluated - not locally, and not inside the harness image either. A `TypeError`
+    raised while formatting a failure message would therefore stay hidden until the one
+    moment it destroys a real diagnosis.
+
+    So every argument SHAPE the call sites actually pass is driven through the helper
+    here: a scalar string, an integer, a mapping (one dumped row), a sequence of rows, a
+    set of keys, and a tuple of projected cells. Each is checked to render and to
+    withhold.
+    """
+    conftest = importlib.import_module("conftest")
+    withheld = conftest._withheld
+
+    sentinel = "SENTINEL-9876.54"
+    shapes: tuple[tuple[str, Any], ...] = (
+        ("scalar string", sentinel),
+        ("integer", 4242),
+        ("one dumped row", {"LEDGER-KEY": sentinel, "LEDGER-BALANCE": sentinel}),
+        ("a sequence of rows", [{"k": sentinel}, {"k": sentinel}]),
+        ("a set of keys", {sentinel, sentinel + "-B"}),
+        ("a tuple of cells", (sentinel, 1, None)),
+        ("None", None),
+    )
+
+    for label, value in shapes:
+        rendered = withheld(value, column="LEDGER-BALANCE", artifact="/out/x.json")
+        assert isinstance(rendered, str) and rendered.startswith("<") and rendered.endswith(">"), (
+            f"withheld({label}) produced {rendered!r}, which is not the bracketed "
+            "stand-in every call site interpolates."
+        )
+        assert sentinel not in rendered, (
+            f"withheld({label}) disclosed the value it exists to withhold: {rendered!r}"
+        )
+        assert "LEDGER-BALANCE" in rendered, (
+            f"withheld({label}) dropped the column name, which is the part of the "
+            f"message a reader acts on: {rendered!r}"
+        )
+
+    # Called the way most sites call it - no column, no artifact - it must still render.
+    assert withheld(sentinel).startswith("<"), "withheld() needs its optional arguments"
+
+
+# ---------------------------------------------------------------------------
+#  ADV-01 - THE ADVISORY REGISTER STAYS TRUE TO WHAT THE TREE ACTUALLY DOES
+#
+#  README section 7.1 records an advisory review of every pinned component. A review is
+#  a point-in-time record and no offline test can re-run the queries, so what IS tested
+#  here is the two claims the register makes ABOUT THIS REPOSITORY -- the parts that can
+#  silently stop being true:
+#
+#    1. every pinned distribution was actually reviewed, so adding a pin without
+#       reviewing it is a failure rather than an omission nobody notices; and
+#    2. none of the standard-library modules named by the ten applicable CPython
+#       advisories is imported anywhere, which is the register's stated reason those
+#       advisories are unreachable rather than merely accepted.
+#
+#  Neither test asserts a vulnerability verdict. They assert that the register cannot
+#  drift away from the tree it describes.
+# ---------------------------------------------------------------------------
+
+#: The standard-library modules named by the ten CPython advisories that apply to the
+#: pinned interpreter. Recorded as top-level module names because that is the
+#: granularity an import census can decide.
+_ADVISORY_NAMED_STDLIB: Mapping[str, str] = MappingProxyType(
+    {
+        "plistlib": "CVE-2025-13837",
+        "xml": "CVE-2025-12084, CVE-2026-7210",
+        "base64": "CVE-2025-12781",
+        "tarfile": "CVE-2025-13462",
+        "http": "CVE-2026-3644, CVE-2026-6019",
+        "html": "CVE-2026-15308",
+        "webbrowser": "CVE-2026-4519",
+    }
+)
+
+#: Named separately because it is a CALL, not an import: `shutil` is entirely fine.
+_ADVISORY_NAMED_CALL = "unpack_archive"
+
+_CENSUS_ROOTS: tuple[str, ...] = ("acas_posting", "harness", "tests")
+
+
+def test_every_pinned_distribution_appears_in_the_advisory_register() -> None:
+    """A pin nobody reviewed is the ADV-01 gap reopening.
+
+    The register in README section 7.1 lists the distributions it reviewed. If a pin is
+    added to the lock and the register is not extended, the project is carrying a
+    component whose advisory status was never examined -- which is precisely the state
+    the finding was raised about. Asserted against the lock rather than against
+    `pyproject.toml` because the lock is what every environment installs from.
+    """
+    root = Path(__file__).resolve().parents[2]
+    register = (root / "README-python-migration.md").read_text(encoding="utf-8").lower()
+    lock = (root / "requirements.txt").read_text(encoding="utf-8")
+
+    pinned = sorted(
+        {
+            _canonical_distribution(match.group(1))
+            for match in re.finditer(
+                r"^([A-Za-z][A-Za-z0-9_.-]*)==", lock, re.MULTILINE
+            )
+        }
+    )
+    assert pinned, "no pin was parsed from requirements.txt; the census is vacuous"
+
+    unreviewed = [
+        name
+        for name in pinned
+        # The register may spell a name either way round, as PyPI itself does.
+        if name not in register and name.replace("-", "_") not in register
+    ]
+    assert not unreviewed, (
+        "requirements.txt pins these distributions and README section 7.1 does not "
+        f"name them, so their advisory status is unrecorded: {', '.join(unreviewed)}\n"
+        "  Re-run the two queries the register documents and extend it; do not edit "
+        "the verdict by hand."
+    )
+
+
+def test_no_advisory_named_stdlib_module_is_imported() -> None:
+    """The register calls ten CPython advisories unreachable. This is why.
+
+    Every one of them lives in a module this migration does not use -- consistent with
+    the plan's own list of load-bearing standard-library modules (`decimal`, `datetime`,
+    `dataclasses`, `argparse`, `pathlib`, `csv`, `json`). Importing one does not create a
+    vulnerability by itself, but it DOES falsify the register's stated basis, so the
+    correct response to this test failing is to re-review and rewrite section 7.1 --
+    not to work around the assertion.
+    """
+    root = Path(__file__).resolve().parents[2]
+    offenders: list[str] = []
+
+    for relative in _CENSUS_ROOTS:
+        for path in sorted((root / relative).rglob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            shown = path.relative_to(root)
+            if f".{_ADVISORY_NAMED_CALL}(" in text or f" {_ADVISORY_NAMED_CALL}(" in text:
+                offenders.append(f"{shown}: calls {_ADVISORY_NAMED_CALL} (CVE-2026-3087)")
+            for node in ast.walk(ast.parse(text, filename=str(path))):
+                imported: list[str] = []
+                if isinstance(node, ast.Import):
+                    imported = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    imported = [node.module]
+                for name in imported:
+                    top = name.split(".")[0]
+                    if top in _ADVISORY_NAMED_STDLIB:
+                        offenders.append(
+                            f"{shown}:{node.lineno}: imports {name} "
+                            f"({_ADVISORY_NAMED_STDLIB[top]})"
+                        )
+
+    assert not offenders, (
+        "README section 7.1 records that no module named by an applicable CPython "
+        "advisory is imported, and that is the register's basis for calling those "
+        "advisories unreachable. These imports contradict it:\n  "
+        + "\n  ".join(offenders)
+        + "\n  Re-review the affected advisories and rewrite section 7.1 to say what is "
+        "actually true."
     )
 
 
@@ -2145,3 +3176,280 @@ def test_no_consumer_describes_a_resolved_question_as_open() -> None:
         + _REGISTER_RELATIVE
         + " is the single place a status is declared."
     )
+
+
+def _repo_root() -> Path:
+    """The repository root, by this module's own convention."""
+    return Path(__file__).resolve().parents[2]
+
+
+def _harness_dir() -> Path:
+    """The harness tree, which is a SIBLING of the package (rule R-1)."""
+    return _repo_root() / "harness"
+
+
+def _tests_dir() -> Path:
+    """The test tree, which owns the tier-availability probe."""
+    return _repo_root() / "tests"
+
+
+# ---------------------------------------------------------------------------
+#  THE ORACLE'S PROVENANCE IS THE IDENTITY OF THE SPECIFICATION (finding SEC-02)
+#
+#  Under R-6 the compiled COBOL *is* the behavioural specification, so "which bytes
+#  were compiled" is not an operational detail -- it decides what the migration is
+#  being measured against. A build that repairs IF scope, connection lifetime,
+#  credential propagation and stale reply pairs has repaired the specification, and
+#  an empty diff against it shows agreement with a PATCHED system.
+#
+#  The defect these close is a quiet one. The transformations were applied
+#  unconditionally, so no frozen build was reachable at all, and `run_parity.sh`
+#  merely WARNED about the result before printing `identical`. A reader taking the
+#  verdict at face value would have read a parity claim that nothing established.
+# ---------------------------------------------------------------------------
+
+
+def test_the_frozen_oracle_is_the_default_and_transformation_is_opt_in() -> None:
+    """A build with no flags applies no source transformation.
+
+    The catalogue of available transformations must not be the register of applied
+    ones: the attestation's `oracle-source-is-frozen` is derived from what was
+    APPLIED, so a build that applies nothing can answer `yes`. When the two were the
+    same array, and that array was a non-empty `readonly`, the answer could only ever
+    be `no`.
+    """
+    build = (_harness_dir() / "build_oracle.sh").read_text(encoding="utf-8")
+
+    # The default is frozen, and the opt-in is a distinct, explicit request. The
+    # check is ^-anchored to the DECLARATION: `--frozen-oracle` also assigns 0, but
+    # indented, and an unanchored substring test is satisfied by that assignment even
+    # when the declaration itself has been flipped to 1.
+    declaration = re.search(
+        r"^ACAS_ALLOW_SOURCE_TRANSFORMS=(\d+)", build, re.MULTILINE
+    )
+    assert declaration is not None, "build_oracle.sh declares no transform switch"
+    assert declaration.group(1) == "0", (
+        "the shipped default applies source transformations, so no frozen oracle is "
+        f"reachable and `oracle-source-is-frozen=yes` is unattainable; got "
+        f"{declaration.group(1)!r}"
+    )
+    assert "--transformed-oracle" in build
+    assert "--frozen-oracle" in build
+
+    # The APPLIED register exists and is what the attestation is derived from.
+    assert "ACAS_SOURCE_TRANSFORMS_APPLIED" in build
+    assert "if (( ACAS_ALLOW_SOURCE_TRANSFORMS )); then" in build
+
+    # `source_is_frozen` must be computed from the APPLIED register. Deriving it
+    # from the available catalogue is the original defect: that catalogue is a
+    # non-empty `readonly` array, so `yes` was unreachable by construction. The
+    # assertion is on the ASSIGNMENT's own line so a comment cannot satisfy it.
+    derivations = [
+        line.strip()
+        for line in build.splitlines()
+        if "source_is_frozen=" in line and not line.strip().startswith("#")
+    ]
+    assert derivations, "nothing assigns source_is_frozen"
+    assert any("ACAS_SOURCE_TRANSFORMS_APPLIED" in line for line in derivations), (
+        "source_is_frozen is not derived from the APPLIED transform register: "
+        f"{derivations!r}. Deriving it from the available catalogue makes `yes` "
+        "unreachable, which is how a transformed oracle passed as frozen."
+    )
+    assert not any(
+        "ACAS_SOURCE_TRANSFORMS[@]" in line
+        and "APPLIED" not in line
+        for line in derivations
+    ), f"source_is_frozen still reads the available catalogue: {derivations!r}"
+
+
+def test_the_parity_driver_refuses_a_transformed_oracle_as_evidence() -> None:
+    """A non-frozen oracle ends the run, and not with a difference status.
+
+    The distinction is the point. `69`/`1` mean the two states disagree, which is a
+    finding ABOUT the migration. `77` means nothing was compared, which is a finding
+    about the harness's inputs. Collapsing them would let "we could not measure" be
+    read as "we measured and it matched", or as a behavioural defect that does not
+    exist.
+    """
+    parity = (_harness_dir() / "run_parity.sh").read_text(encoding="utf-8")
+
+    assert "EX_EVIDENCE_UNAVAILABLE=77" in parity
+    # Distinct from every other status the driver uses.
+    for other in ("EX_OK=0", "EX_USAGE=70", "EX_PRECONDITION=71"):
+        assert other in parity, f"{other} is missing, so 77's distinctness is unproven"
+        assert not other.endswith("=77")
+
+    # The refusal is a die, not a warn.
+    assert 'acas_parity_die "$EX_EVIDENCE_UNAVAILABLE"' in parity
+
+    # An ABSENT attestation is the same class of answer, because the commonest reason
+    # for one on this checkout is that the default frozen build failed.
+    absent_gate = parity.split("$ACAS_PARITY_ATTESTATION_BASENAME")[1][:1500]
+    assert "EX_EVIDENCE_UNAVAILABLE" in absent_gate, (
+        "an absent attestation is still reported as a precondition rather than as "
+        "evidence-unavailable, so a failed frozen build reads as operator error"
+    )
+
+    # The escape hatch exists, is explicit, and taints the verdict rather than
+    # silently restoring it.
+    assert "--accept-transformed-oracle" in parity
+    assert "ACAS_PARITY_ORACLE_IS_DIAGNOSTIC" in parity
+    assert "identical-against-diagnostic-oracle" in parity
+    assert "NO PARITY CLAIM" in parity
+
+
+def test_the_test_tier_skips_rather_than_asserting_parity_on_a_stale_oracle() -> None:
+    """The scenario tier reports itself unavailable against a transformed oracle.
+
+    A tier that PASSED here would publish a parity claim nobody had measured, and a
+    passing test is far less visible than a skip. The judgement must match
+    `run_parity.sh`'s so the two cannot disagree about what counts as evidence.
+    """
+    conftest = (_tests_dir() / "conftest.py").read_text(encoding="utf-8")
+
+    assert "_probe_oracle_is_frozen" in conftest
+    assert "oracle-source-is-frozen" in conftest
+    assert "oracle:not-frozen" in conftest
+    # Wired into the probe that decides tier availability, not merely defined.
+    assert "_probe_oracle_is_frozen(build_root, missing, detail)" in conftest
+    # The diagnosis opt-in mirrors the driver's flag.
+    assert "ACAS_ACCEPT_TRANSFORMED_ORACLE" in conftest
+    # And the skip reason must carry the measured cause, not a vague pointer.
+    assert "exit 74" in conftest
+    assert "ACAS-SQLstate-error-list.cob" in conftest
+
+
+def test_the_missing_member_is_never_written_into_the_frozen_tree() -> None:
+    """The absent copybook is not fabricated, and the shim stays comment-only.
+
+    Inventing a frozen source file would breach R-3 (no new validations) and R-4
+    (reproduce, never fix). The shim exists only under the writable build copy, and
+    its being comment-only is what makes it behaviour-neutral -- measured: the
+    generated C is byte-identical with the shim, with a zero-byte member, and with
+    different comment text.
+    """
+    repo = _harness_dir().parent
+    assert not (repo / "copybooks" / "ACAS-SQLstate-error-list.cob").exists(), (
+        "the missing archive member has been written into the FROZEN tree; R-3 and "
+        "R-4 forbid inventing it, and it must be supplied by the maintainer"
+    )
+
+    shim = _harness_dir() / "copybook-shims" / "ACAS-SQLstate-error-list.cob"
+    assert shim.is_file(), "the build-copy shim is absent"
+    for number, line in enumerate(shim.read_text(encoding="utf-8").splitlines(), 1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        assert stripped.startswith("*>"), (
+            f"{shim} line {number} is not a comment: {stripped!r}. Executable text "
+            f"here would make the shim a behavioural change rather than a "
+            f"compatibility include"
+        )
+
+
+# ---------------------------------------------------------------------------
+#  THE EVIDENCE VOLUME HAS A STATED LIFETIME (finding PRIV-01, CWE-459)
+#
+#  THE DEFECT THIS CLOSES. The harness publishes every parity run into a named
+#  volume and said nothing about how long it is kept, what protects it, or how it is
+#  disposed of. Measured on this clone: 1410 files, 11.5 MB, nine scenario trees, and
+#  the captures are `SELECT *` over the in-scope tables -- so they carry monetary
+#  amounts and the primary keys identifying the accounts, customers and suppliers
+#  those amounts belong to. An accumulating store of accounting data with no
+#  documented disposal is the finding, and the fix is a contract a reader can follow.
+#
+#  WHY THE DISPOSAL COMMAND'S SHAPE IS ASSERTED, NOT JUST ITS PRESENCE. Sibling
+#  clones each own an `acas-harness-<CLONE_INDEX>-out` volume in the same daemon, so
+#  `docker volume prune` -- the command an operator reaches for by reflex -- destroys
+#  other runs' evidence. Documenting a guarded command and leaving an unguarded one
+#  in the same file would defeat the point, so the unguarded forms are asserted
+#  ABSENT outside a prohibition.
+# ---------------------------------------------------------------------------
+
+#: Every document that must carry the retention and disposal contract.
+_RETENTION_DOCUMENTS: tuple[str, ...] = (
+    "README-python-migration.md",
+    "docs/migration/scenario-diff-evidence.md",
+    "harness/docker-compose.yml",
+)
+
+#: Commands that reach volumes this clone does not own. Each may appear only as a
+#: prohibition -- on a line that also warns against it.
+_UNGUARDED_DISPOSAL: tuple[str, ...] = (
+    "docker volume prune",
+    "docker volume rm $(docker volume ls -q)",
+)
+
+
+@pytest.mark.parametrize("relative_path", _RETENTION_DOCUMENTS)
+def test_the_evidence_retention_and_disposal_contract_is_stated(
+    relative_path: str,
+) -> None:
+    """Retention, protection and disposal are documented where an operator looks.
+
+    All three of these files are read by someone deciding what to do with a finished
+    run: the README is the narrative, the evidence register is what cites the
+    artifacts, and the Compose file is where the volume is declared. A contract
+    stated in only one of them is a contract most readers never see.
+    """
+    text = (_repo_root() / relative_path).read_text(encoding="utf-8")
+    lowered = text.lower()
+
+    assert "retention" in lowered or "retain" in lowered, (
+        f"{relative_path} says nothing about how long evidence is kept"
+    )
+    assert "dispos" in lowered, (
+        f"{relative_path} says nothing about how evidence is disposed of"
+    )
+    # The guarded, clone-scoped command, which is the whole mechanism.
+    assert "acas-harness-${CLONE_INDEX}-out" in text, (
+        f"{relative_path} does not name the clone-scoped volume, so a reader has no "
+        f"target-guarded command to copy"
+    )
+
+
+@pytest.mark.parametrize("relative_path", _RETENTION_DOCUMENTS)
+def test_no_document_offers_an_unguarded_disposal_command(
+    relative_path: str,
+) -> None:
+    """A broad delete may appear only as a prohibition, never as instruction.
+
+    `docker volume prune` reaches every sibling clone's evidence in the same daemon.
+    Naming it is useful -- an operator who has been told not to run it is better
+    informed than one who has not -- so the test allows the mention and requires the
+    warning on the same line.
+    """
+    text = (_repo_root() / relative_path).read_text(encoding="utf-8")
+    for number, line in enumerate(text.splitlines(), start=1):
+        for command in _UNGUARDED_DISPOSAL:
+            if command not in line:
+                continue
+            assert "never" in line.lower() or "not" in line.lower(), (
+                f"{relative_path} line {number} offers `{command}` without warning "
+                f"against it. It reaches every sibling clone's evidence volume in "
+                f"this daemon: {line.strip()!r}"
+            )
+
+
+def test_the_evidence_volume_cannot_default_to_a_sibling_clone() -> None:
+    """`CLONE_INDEX` is required for the evidence volume, not defaulted.
+
+    This is what makes the documented disposal command safe: the volume cannot
+    silently resolve to a name another run owns, so `docker volume rm
+    "acas-harness-${CLONE_INDEX}-out"` either names this clone's volume or fails.
+    A `${CLONE_INDEX:-000}` style default would reintroduce the hazard.
+    """
+    compose = (_harness_dir() / "docker-compose.yml").read_text(encoding="utf-8")
+    out_declaration = [
+        line for line in compose.splitlines() if "-out" in line and "name:" in line
+    ]
+    assert out_declaration, "the evidence volume declares no name"
+    for line in out_declaration:
+        assert "${CLONE_INDEX:?" in line, (
+            f"the evidence volume's name does not REQUIRE CLONE_INDEX, so it can "
+            f"resolve to a sibling clone's volume: {line.strip()!r}"
+        )
+        assert "${CLONE_INDEX:-" not in line, (
+            f"the evidence volume's name DEFAULTS CLONE_INDEX, which is the hazard "
+            f"the required form exists to prevent: {line.strip()!r}"
+        )

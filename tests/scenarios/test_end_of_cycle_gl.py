@@ -523,7 +523,9 @@ def test_end_of_cycle_state_parity(parity: object, protocol: object) -> None:
 @pytest.mark.database
 @pytest.mark.oracle
 def test_phase_three_delete_walk_deletes_nothing(
-    dumps: dict[str, dict[str, object]], scenario_loader: object
+    dumps: dict[str, dict[str, object]],
+    scenario_loader: object,
+    withheld: object,
 ) -> None:
     """THE FINDING THIS SCENARIO PRODUCED: `del-process` deletes nothing.
 
@@ -569,8 +571,8 @@ def test_phase_three_delete_walk_deletes_nothing(
         )
         assert POSTING_RRN_UNDER_N_RRN in rows, (
             f"{side}: the row's primary key must be {POSTING_RRN_UNDER_N_RRN}, "
-            f"because anomaly N-RRN means POST-RRN is never loaded; keys are "
-            f"{sorted(rows)}"
+            f"because anomaly N-RRN means POST-RRN is never loaded; the dump holds "
+            f"{withheld(rows, column='POST-RRN')}"
         )
         row = rows[POSTING_RRN_UNDER_N_RRN]
 
@@ -578,10 +580,12 @@ def test_phase_three_delete_walk_deletes_nothing(
         # or a partial rewrite would disturb.
         assert row["POST-LEGEND"] == seeded["Post-Legend"], (
             f"{side}: POST-LEGEND changed; the row should not have been written at "
-            f"all. Got {row['POST-LEGEND']!r}, seeded {seeded['Post-Legend']!r}"
+            f"all. Observed {withheld(row['POST-LEGEND'], column='POST-LEGEND')}, "
+            f"seeded {seeded['Post-Legend']!r}"
         )
         assert row["POST-AMOUNT"] == seeded["Post-Amount"], (
-            f"{side}: POST-AMOUNT changed; got {row['POST-AMOUNT']!r}"
+            f"{side}: POST-AMOUNT changed; observed "
+            f"{withheld(row['POST-AMOUNT'], column='POST-AMOUNT')}"
         )
         assert int(row["POST-DR"]) == int(seeded["Post-DR"])
         assert int(row["POST-CR"]) == int(seeded["Post-CR"])
@@ -644,7 +648,9 @@ def test_anomaly_n_rrn_is_why_one_posting_is_the_maximum(
 @pytest.mark.database
 @pytest.mark.oracle
 def test_phase_three_stamped_only_the_closing_cycles_batch(
-    dumps: dict[str, dict[str, object]], scenario_loader: object
+    dumps: dict[str, dict[str, object]],
+    scenario_loader: object,
+    withheld: object,
 ) -> None:
     """The three stamps, and the untouched neighbour.
 
@@ -665,22 +671,24 @@ def test_phase_three_stamped_only_the_closing_cycles_batch(
         assert BATCH_IN_CYCLE in rows, f"{side}: the closing cycle's batch is missing"
         stamped = rows[BATCH_IN_CYCLE]
         assert int(stamped["CLEARED-STATUS"]) == 2, (
-            f"{side}: CLEARED-STATUS must be 2 (88 Archived); got "
-            f"{stamped['CLEARED-STATUS']}"
+            f"{side}: CLEARED-STATUS must be 2 (88 Archived); observed "
+            f"{withheld(stamped['CLEARED-STATUS'], column='CLEARED-STATUS')}"
         )
         assert int(stamped["STORED"]) == int(run_date), (
-            f"{side}: STORED must carry the pinned run date {run_date}; got "
-            f"{stamped['STORED']}"
+            f"{side}: STORED must carry the pinned run date {run_date}; observed "
+            f"{withheld(stamped['STORED'], column='STORED')}"
         )
         assert int(stamped["BATCH-START"]) == 0, (
-            f"{side}: BATCH-START must be zeroed; got {stamped['BATCH-START']}"
+            f"{side}: BATCH-START must be zeroed; observed "
+            f"{withheld(stamped['BATCH-START'], column='BATCH-START')}"
         )
 
         assert BATCH_OTHER_CYCLE in rows, f"{side}: the other cycle's batch vanished"
         untouched = rows[BATCH_OTHER_CYCLE]
         assert int(untouched["CLEARED-STATUS"]) == 0, (
             f"{side}: the other cycle's batch must be untouched (88 Waiting), which "
-            f"is what proves the bcycle filter held; got {untouched['CLEARED-STATUS']}"
+            f"is what proves the bcycle filter held; observed "
+            f"{withheld(untouched['CLEARED-STATUS'], column='CLEARED-STATUS')}"
         )
         assert int(untouched["BATCH-STATUS"]) == 0, f"{side}: still 88 Status-Open"
         assert int(untouched["STORED"]) == 0, f"{side}: never stamped"
@@ -691,6 +699,7 @@ def test_phase_three_stamped_only_the_closing_cycles_batch(
 @pytest.mark.oracle
 def test_phase_five_wrote_q1_and_ledger_last_and_left_q2_q3_q4(
     dumps: dict[str, dict[str, object]],
+    withheld: object,
 ) -> None:
     """ANOMALY A-3, asserted as a positive fact about the state.
 
@@ -710,7 +719,8 @@ def test_phase_five_wrote_q1_and_ledger_last_and_left_q2_q3_q4(
     for side, tables in dumps.items():
         rows = _rows_by_key(tables["GLLEDGER-REC"])
         assert set(rows) == set(SEEDED_QUARTERS), (
-            f"{side}: expected the three seeded accounts, got {sorted(rows)}"
+            f"{side}: expected the three seeded accounts, and the dump holds "
+            f"{withheld(rows, column='LEDGER-KEY')}"
         )
 
         for key, (_q1, q2, q3, q4) in SEEDED_QUARTERS.items():
@@ -720,13 +730,15 @@ def test_phase_five_wrote_q1_and_ledger_last_and_left_q2_q3_q4(
             # The subscript wrote Q1.
             assert row["LEDGER-Q1"] == balance, (
                 f"{side} account {key}: LEDGER-Q1 must hold the balance - the "
-                f"subscript a is 1 - but holds {row['LEDGER-Q1']!r} against a "
-                f"balance of {balance!r}"
+                f"subscript a is 1 - but holds "
+                f"{withheld(row['LEDGER-Q1'], column='LEDGER-Q1')} against a balance "
+                f"of {withheld(balance, column='LEDGER-BALANCE')}"
             )
             # The counter wrote Ledger-Last.
             assert row["LEDGER-LAST"] == balance, (
                 f"{side} account {key}: LEDGER-LAST must hold the balance, because "
-                f"current-quarter was 4 when Phase 5 ran; holds {row['LEDGER-LAST']!r}"
+                f"current-quarter was 4 when Phase 5 ran; holds "
+                f"{withheld(row['LEDGER-LAST'], column='LEDGER-LAST')}"
             )
             # And the other three quarters are untouched - including Q4, which is
             # the quarter the counter named. That is A-3 in one line.
@@ -744,6 +756,7 @@ def test_phase_five_wrote_q1_and_ledger_last_and_left_q2_q3_q4(
 @pytest.mark.oracle
 def test_the_cycle_advanced_and_the_quarter_counter_wrapped(
     dumps: dict[str, dict[str, object]],
+    withheld: object,
 ) -> None:
     """The only trace Phase 5's counter arithmetic leaves anywhere.
 
@@ -767,12 +780,13 @@ def test_the_cycle_advanced_and_the_quarter_counter_wrapped(
         row = next(iter(rows.values()))
 
         assert int(row["CYCLEA"]) == 2, (
-            f"{side}: CYCLEA must have advanced 1 -> 2 by `add 1 to scycle`; got "
-            f"{row['CYCLEA']}. Scycle redefines Cyclea, so they are one byte."
+            f"{side}: CYCLEA must have advanced 1 -> 2 by `add 1 to scycle`; observed "
+            f"{withheld(row['CYCLEA'], column='CYCLEA')}. Scycle redefines Cyclea, "
+            f"so they are one byte."
         )
         assert int(row["CURRENT-QUARTER"]) == 1, (
-            f"{side}: CURRENT-QUARTER must have wrapped 4 -> 5 -> 1; got "
-            f"{row['CURRENT-QUARTER']}"
+            f"{side}: CURRENT-QUARTER must have wrapped 4 -> 5 -> 1; observed "
+            f"{withheld(row['CURRENT-QUARTER'], column='CURRENT-QUARTER')}"
         )
         assert int(row["PERIOD"]) == 1, f"{side}: PERIOD is an input and must not move"
 
@@ -781,6 +795,7 @@ def test_the_cycle_advanced_and_the_quarter_counter_wrapped(
 @pytest.mark.oracle
 def test_anomaly_n_edit_still_drops_the_seeded_sign(
     dumps: dict[str, dict[str, object]],
+    withheld: object,
 ) -> None:
     """ANOMALY N-EDIT: the bridge cannot render a minus sign, and still does not.
 
@@ -811,7 +826,8 @@ def test_anomaly_n_edit_still_drops_the_seeded_sign(
                 f"never a float (R-2); {column} is {type(value).__name__}"
             )
             assert not value.startswith("-"), (
-                f"{side}: {column} holds {value!r}. The seed declared -2500.00 and "
+                f"{side}: {column} holds a value beginning {value[:1]!r} "
+                f"({withheld(value, column=column)}). The seed declared -2500.00 and "
                 f"anomaly N-EDIT means the sign CANNOT survive the bridge's "
                 f"WS-MYSQL-EDIT windows. A negative value here means the sign is "
                 f"now being rendered - the anomaly fixed rather than reproduced, "
@@ -819,8 +835,8 @@ def test_anomaly_n_edit_still_drops_the_seeded_sign(
             )
 
         assert row["LEDGER-BALANCE"] == "2500.00", (
-            f"{side}: the absolute value is what reaches the column; got "
-            f"{row['LEDGER-BALANCE']!r}"
+            f"{side}: the absolute value is what reaches the column; observed "
+            f"{withheld(row['LEDGER-BALANCE'], column='LEDGER-BALANCE')}"
         )
 
 

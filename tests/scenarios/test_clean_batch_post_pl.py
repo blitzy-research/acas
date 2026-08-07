@@ -1570,7 +1570,7 @@ def test_clean_batch_post_pl_state_parity(
         f"[purchase/purchase.cbl:L645-L650] against a Python entry point that has no "
         f"menu - and it is settled by REPRODUCING the paragraph, in "
         f"docs/migration/ambiguity-resolutions.md.\n"
-        f"\n{diff_states.render(parity.tree)}"
+        f"\n{parity.diagnose()}"
         f"\n{parity.describe()}"
     )
 
@@ -1772,7 +1772,7 @@ def test_a1_control_pl060_terminating_period_is_present(
             f"whole evidence that A-1 is an accident rather than an idiom, and "
             f"deleting it would be a failure under rule R-4. See A-1 and A-NEW-10 in "
             f"docs/migration/anomaly-log.md.\n"
-            f"\n{diff_states.render(parity.tree)}"
+            f"\n{parity.diagnose()}"
         )
 
     # The whole comparison, so a divergence elsewhere is not mistaken for A-1's control
@@ -1780,7 +1780,7 @@ def test_a1_control_pl060_terminating_period_is_present(
     assert parity.is_empty, (
         f"the A-1 control witnesses agree, but clean_batch_pl diverged elsewhere: "
         f"{parity.tree.total_differences} finding(s).\n"
-        f"{diff_states.render(parity.tree)}"
+        f"{parity.diagnose()}"
     )
 
 
@@ -1887,20 +1887,21 @@ def test_a_new_1_second_apportionment_pass_never_runs(
         f"The dead transfer must stay dead. The unmeasured end state the pass would "
         f"have left is Q-CR-NOTES-SECOND-PASS; see A-NEW-1 in "
         f"docs/migration/anomaly-log.md.\n"
-        f"\n{diff_states.render(parity.tree)}"
+        f"\n{parity.diagnose()}"
     )
 
     assert parity.is_empty, (
         f"PUITM5-REC agrees, but clean_batch_pl diverged elsewhere: "
         f"{parity.tree.total_differences} finding(s).\n"
-        f"{diff_states.render(parity.tree)}"
+        f"{parity.diagnose()}"
     )
 
 
 @pytest.mark.database
 @pytest.mark.oracle
 def test_moving_average_fields_agree(
-    parity: object, protocol: object, harness: object, frozen_schema: object
+    parity: object, protocol: object, harness: object, frozen_schema: object,
+    withheld: object,
 ) -> None:
     """A-8, A-9 and A-10's PURCHASE HALF, witnessed in `PULEDGER-REC`.
 
@@ -2021,7 +2022,7 @@ def test_moving_average_fields_agree(
         for key, value in cobol_averages[column_name].items():
             assert isinstance(value, int) and not isinstance(value, bool), (
                 f"`{PURCHASE_LEDGER_TABLE}`.`{column_name}` row {key!r} arrived from "
-                f"the oracle as {type(value).__name__} ({value!r}). A `binary-long` "
+                f"the oracle as {type(value).__name__} ({withheld(value)}). A `binary-long` "
                 f"column [copybooks/wspl.cob:L35, L38] must reach the dump as a JSON "
                 f"INTEGER: carry it as a decimal and A-8's second truncation - the "
                 f"remainder discarded by the divide at [purchase/pl060.cbl:L751] - "
@@ -2082,13 +2083,13 @@ def test_moving_average_fields_agree(
         f"sign "
         f"question is separately open as Q-PURCH-AVERAGE-SIGN; see A-8, A-9, A-10 and "
         f"A-11 in docs/migration/anomaly-log.md.\n"
-        f"\n{diff_states.render(parity.tree)}"
+        f"\n{parity.diagnose()}"
     )
 
     assert parity.is_empty, (
         f"PULEDGER-REC agrees, but clean_batch_pl diverged elsewhere: "
         f"{parity.tree.total_differences} finding(s).\n"
-        f"{diff_states.render(parity.tree)}"
+        f"{parity.diagnose()}"
     )
 
 
@@ -2189,13 +2190,13 @@ def test_valueanal_written_by_pl055_only(
             f"[purchase/pl055.cbl:L323-L325], which is a different capture from the "
             f"one this scenario describes. Then check the two sign flips at "
             f"[purchase/pl055.cbl:L376] and [purchase/pl055.cbl:L387].\n"
-            f"\n{diff_states.render(parity.tree)}"
+            f"\n{parity.diagnose()}"
         )
 
     assert parity.is_empty, (
         f"the value-analysis tables agree, but clean_batch_pl diverged elsewhere: "
         f"{parity.tree.total_differences} finding(s).\n"
-        f"{diff_states.render(parity.tree)}"
+        f"{parity.diagnose()}"
     )
 
 
@@ -2356,7 +2357,8 @@ def test_diff_exit_contract_is_honoured(
 @pytest.mark.database
 @pytest.mark.oracle
 def test_dump_is_wellformed_on_both_sides(
-    parity: object, harness: object, frozen_schema: object
+    parity: object, harness: object, frozen_schema: object,
+    withheld: object,
 ) -> None:
     """Both captures have the shape the protocol guarantees, for all eleven tables.
 
@@ -2473,7 +2475,7 @@ def test_dump_is_wellformed_on_both_sides(
                         f"`int`."
                     )
                     assert not isinstance(value, float), (
-                        f"{site}: the binary floating-point value {value!r}. No "
+                        f"{site}: the binary floating-point value {withheld(value)}. No "
                         f"accounting value may pass through binary floating point at "
                         f"any point (rule R-2)."
                     )
@@ -2553,13 +2555,13 @@ def test_dump_is_wellformed_on_both_sides(
             f"{table}: the two sides present DIFFERENT primary-key sequences, so the "
             f"captures are not byte-comparable. That is a behavioural difference in "
             f"which rows exist, and the bounded diff reports it in full - "
-            f"{diff_states.render(parity.tree)}"
+            f"{parity.diagnose()}"
         )
 
     assert parity.is_empty, (
         f"both captures are well formed, but clean_batch_pl diverged: "
         f"{parity.tree.total_differences} finding(s).\n"
-        f"{diff_states.render(parity.tree)}"
+        f"{parity.diagnose()}"
     )
 
 

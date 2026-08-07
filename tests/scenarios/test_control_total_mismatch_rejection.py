@@ -1517,7 +1517,7 @@ def test_control_total_mismatch_state_parity(parity_run, harness) -> None:
         f"the hard gate is [general/general.cbl:L810-L811] and the raise is "
         f"[general/gl070.cbl:L289].\n"
         f"  Rendered report (also written to {parity_run.outcome.report}):\n"
-        f"{harness.diff_states.render(parity_run.tree)}\n"
+        f"{parity_run.diagnose()}\n"
         f"  Stages:\n{parity_run.describe()}"
     )
 
@@ -1550,7 +1550,7 @@ def test_control_total_mismatch_state_parity(parity_run, harness) -> None:
         f"empty diff. The renderer returns the empty string when the two trees are "
         f"identical, so the two views disagree and neither can be trusted."
     )
-    assert diff_states.render(parity_run.tree) == ""
+    assert parity_run.diagnose() == ""
 
 
 @pytest.mark.database
@@ -1739,7 +1739,7 @@ def test_gl071_and_gl072_never_ran(
             f"  IN THE REPORT BELOW `cobol` IS {label} AND `python` IS THE SEED "
             f"BASELINE - the differ has exactly two labels and they are not "
             f"configurable.\n"
-            f"{harness.diff_states.render(against_seed)}"
+            f"{harness.diff_states.summarise(against_seed, report_path=None)}"
         )
 
     # And the pairwise verdict, restated here so this test stands on its own rather than
@@ -1939,7 +1939,7 @@ def test_diagnostic_display_has_no_database_effect(
         f"must have no database effect, and gl070 is read-only throughout.\n"
         f"  In the report below `cobol` is the oracle's post-run tree and `python` is "
         f"the seed baseline.\n"
-        f"{harness.diff_states.render(against_seed)}"
+        f"{harness.diff_states.summarise(against_seed, report_path=None)}"
     )
 
 

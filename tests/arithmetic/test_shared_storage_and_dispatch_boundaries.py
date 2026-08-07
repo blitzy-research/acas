@@ -903,28 +903,95 @@ def test_the_python_derivation_matches_the_shell_precedence() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_seeding_window_defaults_to_the_measured_durable_mode() -> None:
-    """Unset `ACAS_SEED_AUTOCOMMIT` selects ON, the mode measured to persist rows.
+def test_the_seeding_window_defaults_to_the_aap_mandated_mode() -> None:
+    """Unset `ACAS_SEED_AUTOCOMMIT` selects OFF, the mode the AAP mandates.
 
-    MEASURED against the compiled loaders, both modes, `clean_batch_gl`: under OFF
-    all seven loaders return zero and a fresh session sees zero rows in all seven
-    seeded tables, and `seed.sh` exits 76; under ON the same seven return zero and a
+    The Agent Action Plan is the frozen, agreed-upon specification and says
+    autocommit is off during seeding in three places -- sections 0.2.1.1, 0.4.1.7
+    and 0.5.2. A harness that defaulted to the other mode would be reinterpreting
+    its own governing document, and a reader of a parity result would have no way
+    to know the configuration had been changed underneath them.
+
+    The measured consequence is disclosed rather than worked around. Against the
+    compiled loaders, `clean_batch_gl`, both modes: under OFF all seven loaders
+    return zero and a fresh session sees zero rows in all seven seeded tables, and
+    `seed.sh` exits 76 (EX_NOT_DURABLE); under ON the same seven return zero and a
     fresh session sees 8 rows across those 7 tables. The loader return codes are
-    IDENTICAL either way, so the mode is invisible to the frozen code.
+    IDENTICAL either way, so the mode is invisible to the frozen code -- which is
+    why ON remains selectable as an explicitly DECLARED DEVIATION, and is NOT a
+    licence to make it the default.
 
-    The shipped default must therefore be ON. `off` stays selectable and reproduces
-    the frozen no-COMMIT defect end to end, which is what exit 76 reports (R-4).
+    So the default must reproduce the frozen no-COMMIT defect and let the
+    durability gate refuse it (R-4: a defect reproduced is correct), rather than
+    quietly seeding in a mode the AAP does not sanction.
     """
     seed = (_harness_dir() / "seed.sh").read_text(encoding="utf-8")
 
-    # The unset case is grouped with the ON spellings, not with the OFF ones.
-    assert "    ''|on|1|true|yes)\n" in seed
-    assert "    off|0|false|no)\n" in seed
-    assert "    ''|off|0|false|no)\n" not in seed
+    # The unset case is grouped with the OFF spellings, not with the ON ones.
+    assert "    ''|off|0|false|no)\n" in seed
+    assert "    on|1|true|yes)\n" in seed
+    assert "    ''|on|1|true|yes)\n" not in seed
 
     # And the initial value of the target agrees with that grouping, so a code path
-    # that skipped the parse would still open the durable window.
-    assert "ACAS_SEED_WINDOW_TARGET=1" in seed
+    # that skipped the parse would still open the AAP-mandated window rather than
+    # falling through into an unsanctioned one.
+    # Scoped to the DECLARATION, because the ON branch legitimately assigns 1 when
+    # the deviation is requested; what must not happen is the variable starting at 1.
+    declaration = re.search(
+        r"^ACAS_SEED_WINDOW_TARGET=(\d+)", seed, re.MULTILINE
+    )
+    assert declaration is not None, "seed.sh declares no initial window target"
+    assert declaration.group(1) == "0", (
+        "the seeding window's initial value is the AAP-mandated OFF; a code path "
+        f"that skipped the parse must not open a durable window, got {declaration.group(1)!r}"
+    )
+
+    # The refusal the default leads to must still exist: reproducing the defect is
+    # only half of it, and reporting an empty seed as a success would be the other
+    # half undone.
+    assert "EX_NOT_DURABLE=76" in seed
+    assert "acas_assert_seed_durability" in seed
+
+    # And nothing may supply the COMMIT the frozen loaders omit (R-4). The file is
+    # required to DISCUSS the missing commit at length -- and does, across wrapped
+    # multi-line prose arguments -- so the match is deliberately narrow: a quoted
+    # token that is a COMPLETE statement, which is what would reach the server.
+    # Prose never closes its quote immediately after the word.
+    issued = re.findall(r"""["'][ \t]*(commit|rollback)[ \t]*;?["']""", seed, re.I)
+    assert not issued, (
+        "seed.sh issues a COMMIT or ROLLBACK on a frozen loader's behalf "
+        f"({issued!r}). R-4 makes a defect fixed a failure, and the missing COMMIT "
+        "is precisely the defect this seeding mode reproduces."
+    )
+
+
+def test_no_harness_file_pins_the_seeding_window_to_the_deviation() -> None:
+    """The AAP-mandated default must be reachable, not overridden by the harness.
+
+    `harness/docker-compose.yml` used to set `ACAS_SEED_AUTOCOMMIT: "on"` on the
+    `gnucobol` service. Because Compose environment beats the script default, that
+    made the mandated mode unreachable through the harness for every operator who
+    never opened `seed.sh` -- the default existed but nothing could run it. A
+    per-invocation `-e ACAS_SEED_AUTOCOMMIT=on` is the supported way to request the
+    deviation, precisely because it appears in the command that ran.
+    """
+    for name in ("docker-compose.yml", "Dockerfile.mariadb", "Dockerfile.gnucobol"):
+        text = (_harness_dir() / name).read_text(encoding="utf-8")
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue  # prose explaining the mode is expected, and required
+            # An ASSIGNMENT, not a mention: the files are required to explain the
+            # mode in prose, and a matcher that banned the name would forbid the
+            # very disclosure this finding asks for.
+            assert not re.match(r"ACAS_SEED_AUTOCOMMIT\s*:", stripped), (
+                f"{name} pins the seeding window as Compose environment, "
+                f"overriding the AAP-mandated default for every invocation: "
+                f"{stripped!r}"
+            )
+            assert not re.match(
+                r"(ENV|ARG)\s+ACAS_SEED_AUTOCOMMIT[\s=]", stripped
+            ), f"{name} bakes a seeding window into the image: {stripped!r}"
 
 
 def test_the_seed_transport_is_control_free_and_length_prefixed() -> None:

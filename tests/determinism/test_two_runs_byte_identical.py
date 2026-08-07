@@ -774,8 +774,11 @@ class DeterminismEvidence:
         second: Run B.
         tree: The `TreeDiff` between the two relocated trees. `is_empty` is THE PASS
             CONDITION.
-        render: `harness/diff_states.py`'s own deterministic report for that
-            `TreeDiff` - the EMPTY STRING when the two agree.
+        diagnosis: `harness/diff_states.py`'s VALUE-FREE summary of that `TreeDiff` -
+            table, column and counts, with no differing value and no primary key
+            (finding SEC-05). The EMPTY STRING when the two agree, exactly as the
+            report itself is zero bytes on a pass. The values are not discarded: they
+            are in the two normalised trees this evidence already names.
         filenames: The filename set both trees hold, already asserted equal.
     """
 
@@ -785,7 +788,7 @@ class DeterminismEvidence:
     first: RelocatedRun
     second: RelocatedRun
     tree: Any
-    render: str
+    diagnosis: str
     filenames: tuple[str, ...]
 
     @property
@@ -1700,10 +1703,12 @@ def determinism_pair(
         f"table, in the scenario's declared order, immediately before each run. A "
         f"difference means one reset loaded something other than the scenario fixture, "
         f"so every downstream difference would be unattributable. The frozen loaders "
-        f"have no live COMMIT; the harness therefore seeds under autocommit ON - the "
-        f"canonical durable mode, the default, needing no flag - and refuses a "
-        f"nominally successful seed that leaves zero rows. Loader exit codes and "
-        f"persisted counts are tested rather than assumed."
+        f"have no live COMMIT, so the AAP-mandated seeding window (autocommit OFF, "
+        f"the default) persists nothing and is refused with exit 76; a durable "
+        f"fixture requires ACAS_SEED_AUTOCOMMIT=on as a declared deviation. Either "
+        f"way a nominally successful seed that leaves zero rows is refused rather "
+        f"than reported. Loader exit codes and persisted counts are tested rather "
+        f"than assumed."
     )
 
     # ------------------------------------------------------------------
@@ -1727,7 +1732,7 @@ def determinism_pair(
         first=first,
         second=second,
         tree=tree_diff,
-        render=diff_states.render(tree_diff),
+        diagnosis=diff_states.summarise(tree_diff, report_path=None),
         filenames=filenames,
     )
 
@@ -1831,7 +1836,7 @@ def test_two_python_runs_are_byte_identical(
         f"  {evidence.tree.total_differences} finding(s) across "
         f"{len(evidence.tree.differing)} table(s) of "
         f"{list(evidence.tables)}:\n"
-        f"{evidence.render}"
+        f"{evidence.diagnosis}"
         f"\n"
         f"  WHAT TO SUSPECT, in order. Anything that varies between two runs of the "
         f"same code over the same data: an unordered iteration whose result reaches a "

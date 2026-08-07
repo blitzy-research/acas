@@ -16,10 +16,22 @@
 #    R-6  determinism: every dependency pinned exactly, interpreter pinned to
 #         the 3.12 series.
 #
-#  Install routes, all with identical pins:
-#      pip install -e "."                                shipped runtime only
-#      pip install -e ".[harness,dev]"                   everything, unhashed
-#      pip install --require-hashes -r requirements.txt  everything, hash-verified
+#  HOW TO INSTALL. One route is hash-verified and it is the one to use -- for the
+#  harness image, for CI-less validation, and for anyone reproducing a scenario diff:
+#
+#      pip install --require-hashes -r requirements.txt
+#
+#  `--require-hashes` refuses the whole file if any requirement lacks a hash, so it
+#  cannot silently degrade to an unverified install. It is what
+#  `harness/Dockerfile.gnucobol` builds from, which is why an image and a workstation
+#  resolve to the same artifacts and not merely to the same version numbers.
+#
+#  The editable routes below install the SAME exact pins through this manifest, but
+#  pip verifies no hash on that path, so they are development conveniences rather than
+#  an equivalent alternative (finding DEP-02). Use them on top of the hashed install,
+#  not instead of it:
+#      pip install --no-build-isolation -e "."             shipped runtime only
+#      pip install --no-build-isolation -e ".[harness,dev]" adds harness and dev
 #
 #  requirements.txt is ONE file carrying all three sets in three labelled
 #  sections. Agent Action Plan section 0.2.1.2 names exactly two dependency
@@ -59,69 +71,90 @@ requires-python = "==3.12.*"
 #   [project].dependencies                    -> requirements.txt section 1
 #   [project.optional-dependencies].harness    -> requirements.txt section 2
 #   [project.optional-dependencies].dev        -> requirements.txt section 3
-# The split is mechanical, not a matter of taste: an AST import census over the
+# The split is not a matter of taste. The runtime set is the closure AAP section
+# 0.5.1 declares, name for name and version for version; the other two are what the
+# harness and the verification toolchain add on top. An AST import census over the
 # repository records that acas_posting/ imports exactly one third-party top-level
 # module, `mysql`, while `yaml` is imported only by the harness scripts and only
-# inside the function that reads a scenario file. A version that differs between
-# this manifest and the lock file is a defect. Keeping the sets distinct HERE while
-# locking them in ONE file loses nothing: `pip install -e ".[harness]"` still
-# resolves the harness set alone, and the hashed route installs all three because a
-# hashed install is what the container and the parity protocol use, where all three
-# are needed anyway.
+# inside the function that reads a scenario file -- so the runtime set is DECLARED
+# wider than it is IMPORTED, deliberately, for the reason set out below the list. A
+# version that differs between this manifest and the lock file is a defect, as is a
+# name in either that the plan does not declare. Keeping the sets distinct HERE while
+# locking them in ONE file loses nothing: the `harness` extra below still names the
+# harness set alone, and the hashed route installs all three because a hashed install
+# is what the container and the parity protocol use, where all three are needed
+# anyway.
 dependencies = [
     # The ONLY third-party module acas_posting imports. Ships a compiled C
     # extension for CPython 3.12 and materialises DECIMAL as decimal.Decimal.
     "mysql-connector-python==26.7.0",
+    # DECLARED BY THE PLAN, INSTALLED, AND NOT IMPORTED -- see the block below,
+    # which states which of the two each of these three is and why the pair is
+    # not a contradiction.
+    "SQLAlchemy==2.0.51",
+    # SQLAlchemy's own requirements. AAP section 0.5.1 names greenlet 3.5.4 as
+    # its transitive dependency explicitly; typing_extensions travels with it.
+    "greenlet==3.5.4",
+    "typing_extensions==4.16.0",
 ]
 
 # =============================================================================
-#  WHY SQLAlchemy IS NOT IN THAT LIST  (finding MJ-20)
+#  SQLAlchemy IS DECLARED HERE AND IS NOT IMPORTED, AND BOTH HALVES ARE MEANT
 #
-#  It used to be, described as "CORE LEVEL ONLY: text() statements on an explicit
-#  Connection", together with `greenlet` and `typing_extensions` as its transitive
-#  requirements. No module under acas_posting/ ever imported it. The AST import
-#  census quoted a dozen lines above -- "acas_posting/ imports exactly one
-#  third-party top-level module, `mysql`" -- was therefore TRUE while this very list
-#  contradicted it, and re-running that census today still yields exactly `mysql`.
-#  A manifest advertising an execution path the code does not take is a defect in
-#  its own right: it makes the shipped architecture unauditable from the artifact.
+#  DECLARED, because AAP section 0.5.1 fixes the runtime closure at exactly these
+#  four names and pins each one -- "SQLAlchemy 2.0.51 ... Pulls `greenlet` 3.5.4 as
+#  a transitive dependency" -- and the plan is FROZEN. A manifest may not narrow the
+#  plan's closure on implementation grounds, however good those grounds are: the
+#  plan is the agreed contract for what this distribution declares, and aligning
+#  code to it is the standing rule. So all four are declared, pinned to the plan's
+#  exact versions, and hash-verified in requirements.txt section 1.
 #
-#  THE REQUIREMENT PERMITS EITHER, AND THE PLAN NAMES WHICH IS PRIMARY.
-#  AAP section 0.8.2 preserves the user requirement verbatim, and it is an
-#  either/or: "MySQL access via `mysql-connector-python` OR SQLAlchemy Core with no
-#  ORM entity layer". AAP section 0.5.1 then calls mysql-connector-python
-#  "Oracle's official MySQL driver and THE PRIMARY DATABASE PATH", and section
-#  0.1.2's own diagram labels the edge "SQLAlchemy Core / connector" -- an
-#  alternative, not a stack. Shipping the connector alone satisfies the requirement
-#  and matches the path the plan calls primary.
+#  NOT IMPORTED, because the code takes the other of two permitted paths. AAP
+#  section 0.8.2 preserves the user requirement verbatim and it is an either/or --
+#  "MySQL access via `mysql-connector-python` OR SQLAlchemy Core with no ORM entity
+#  layer" -- AAP section 0.5.1 calls mysql-connector-python "Oracle's official MySQL
+#  driver and THE PRIMARY DATABASE PATH", and section 0.1.2's own diagram labels the
+#  edge "SQLAlchemy Core / connector", an alternative rather than a stack. An AST
+#  import census over acas_posting/ yields exactly one third-party top-level module,
+#  `mysql`, which is what the paragraph above this list states and what
+#  `tests/arithmetic/test_deployment_contract_boundaries.py` asserts.
 #
-#  AND THE FROZEN SEMANTICS DECIDE IT. `dal/connection.py` does not merely open a
-#  connection; it reproduces the frozen bridges' CONNECTION OWNERSHIP. It re-opens
-#  one specific connection object in place (`established.connect(...)`), keeps a
-#  single process handle that handlers deliberately share, and lets a handler opt
-#  OUT of sharing when the bridge it mirrors keeps its own SQL state across CALLs --
-#  `dal/acas016_invoice.py` says so at its own call site: "slinvoiceMT keeps its own
-#  SQL state across CALLs. A live handle owned by another bridge is not that state
-#  and must not be reused." An Engine owns connection lifecycle by design and has no
-#  supported way to re-connect a given connection in place, so routing this through
-#  one would mean reimplementing that ownership model on top of an abstraction built
-#  to own it, and changing WHICH PHYSICAL SESSION a statement runs on. Under rules
-#  R-4 and R-6 that is not a refactor, it is a behavioural risk taken for a claim.
+#  WHY THE CONNECTOR IS THE PATH TAKEN -- the frozen semantics decide it, not taste.
+#  `dal/connection.py` does not merely open a connection; it reproduces the frozen
+#  bridges' CONNECTION OWNERSHIP. It re-opens one specific connection object in place
+#  (`established.connect(...)`), keeps a single process handle that handlers
+#  deliberately share, and lets a handler opt OUT of sharing when the bridge it
+#  mirrors keeps its own SQL state across CALLs -- `dal/acas016_invoice.py` says so at
+#  its own call site: "slinvoiceMT keeps its own SQL state across CALLs. A live handle
+#  owned by another bridge is not that state and must not be reused." An Engine owns
+#  connection lifecycle by design and has no supported way to re-connect a given
+#  connection in place, so routing this through one would mean reimplementing that
+#  ownership model on top of an abstraction built to own it, and changing WHICH
+#  PHYSICAL SESSION a statement runs on. Under rules R-4 and R-6 that is not a
+#  refactor, it is a behavioural risk taken for a claim.
 #
-#  R-2 loses nothing either: the exact-decimal guarantee is enforced by
-#  `AcasConverter` plus a live per-connection probe in `dal/connection.py`, which
-#  is driver-level and is what a Core boundary would have had to pass through
-#  `connect_args` anyway.
+#  R-2 loses nothing: the exact-decimal guarantee is enforced by `AcasConverter`
+#  plus a live per-connection probe in `dal/connection.py`, which is driver-level and
+#  is what a Core boundary would have had to pass through `connect_args` anyway.
 #
-#  `greenlet` and `typing_extensions` go with it: `pip show` records them as
-#  SQLAlchemy's requirements and nothing else's, mysql-connector-python requires
-#  nothing at all, and no file in acas_posting/, tests/ or harness/ imports either.
-#  This manifest already admitted the first half of that -- "Nothing here imports
-#  greenlet".
+#  R-3 STILL HOLDS BY CONSTRUCTION, not by trust. The ban is on an ORM entity layer,
+#  on declarative metadata that could emit DDL, and on async/thread/pool libraries --
+#  not on the distribution being present. No file in this repository imports
+#  sqlalchemy or greenlet, and none constructs an Engine, a MetaData, a Table, a
+#  mapped class, a Session or an async engine, so no schema can be generated and no
+#  coroutine scheduled even by accident. Two independent checks assert that rather than
+#  assuming it. `tests/arithmetic/test_deployment_contract_boundaries.py` censuses
+#  every import in the tree and requires the imported third-party set to be exactly
+#  {mysql}, requires this list to be exactly the plan's closure, and requires no
+#  document to describe the Core boundary as active. `harness/Dockerfile.gnucobol`
+#  asserts inside the built image that all four declared names are importable at
+#  these versions and that importing SQLAlchemy pulls in neither `sqlalchemy.orm`
+#  nor `greenlet` -- the image cannot check the checkout, since only requirements.txt
+#  is COPYed into it, so it checks what it can see and says so.
 #
-#  `tests/arithmetic/test_deployment_contract_boundaries.py` now asserts that this
-#  list and the AST census agree, in both directions, so the two cannot drift apart
-#  again -- which is the root cause of MJ-20 rather than either name in isolation.
+#  WHAT WOULD BE A DEFECT: a version here differing from requirements.txt; any
+#  `import sqlalchemy` under acas_posting/; any document describing the Core boundary
+#  as active. Each is asserted against.
 # =============================================================================
 
 [project.optional-dependencies]

@@ -204,11 +204,35 @@ class RdbmsParamError(ValueError):
     def __init__(self, return_code: int, message: str) -> None:
         """Build the error with its frozen return code.
 
+        THE ARGUMENTS ARE CHECKED, and the reason is finding SEC-01 rather than
+        defensiveness for its own sake. Two raise sites in this module once passed
+        `(message, return_code)`, and nothing noticed: `return_code` became the
+        formatted text, `str(self)` became the integer, and the wrong-typed status
+        travelled all the way to the process boundary before failing - on one
+        invocation route as a printed string exit status, on the other as a
+        `TypeError` traceback disclosing internal paths. A transposition is a
+        one-token mistake that the annotations alone cannot catch at run time, so it
+        is refused HERE, at the raise site, where the diagnosis is unambiguous.
+
         Args:
             return_code: `RDB_RETURN_NO_SOURCE` or `RDB_RETURN_MALFORMED`.
             message: What is wrong and what to do about it. Must not contain a parameter
                 value.
+
+        Raises:
+            TypeError: The arguments were not `(int, str)` - almost always because
+                they were given in the other order.
         """
+        if not isinstance(return_code, int) or isinstance(message, int):
+            raise TypeError(
+                "RdbmsParamError takes (return_code: int, message: str) in that "
+                f"order; it was given ({type(return_code).__name__}, "
+                f"{type(message).__name__}). Swap the arguments. A reversed pair "
+                "makes `return_code` a string, which a caller then returns as a "
+                "process exit status (finding SEC-01). Neither value is echoed "
+                "here: the message may name a variable read from the same "
+                "transport as ACAS_DB_PASSWORD."
+            )
         super().__init__(message)
         self.return_code: int = return_code
 
@@ -1055,7 +1079,29 @@ def _optional_seconds(
             exceeds :data:`_TIMEOUT_CEILING_SECONDS`. A malformed budget is
             refused rather than silently replaced, because a deployment that
             asked for a bound is entitled to know its request was not honoured.
+            Carries :data:`RDB_RETURN_MALFORMED` in the FIRST argument position,
+            which is where the constructor declares it - see the note below.
     """
+    #  ⭐ THE ARGUMENT ORDER IS `(return_code, message)`, AND BOTH RAISES BELOW ONCE
+    #  HAD IT REVERSED (finding SEC-01). `RdbmsParamError.__init__` takes the frozen
+    #  return code first, so passing the message first made `error.return_code` the
+    #  FORMATTED TEXT and `str(error)` the integer code. Nothing here failed: the
+    #  exception constructed cleanly and travelled outward carrying a `str` where
+    #  every consumer expects an `int`. `args.report_configuration_failure` returned
+    #  that string as a route's exit status, which `SystemExit` then printed
+    #  verbatim on a direct invocation, while the package router applied
+    #  `is_serious_error(term_code)` - an integer comparison - to it and raised a
+    #  `TypeError` whose traceback discloses internal paths. One transposition,
+    #  three distinct failures, none of them at the point of the mistake.
+    #
+    #  AND THE MESSAGES CARRY NO VALUE. The class docstring already promises
+    #  "Must not contain a parameter value", and it means it: these three variables
+    #  are read from the same transport as `ACAS_DB_PASSWORD`, so a value mistyped
+    #  one line up from a credential - or a credential pasted into the wrong
+    #  variable - must not be echoed into a log or a traceback (CWE-532, CWE-209).
+    #  The message names the VARIABLE and the accepted range, which is everything
+    #  an operator needs to correct it, and `audit_deployment_contract` reports the
+    #  concern without the value as well.
     raw = env.get(variable, "").strip()
     if not raw:
         return default
@@ -1063,14 +1109,19 @@ def _optional_seconds(
         seconds = int(raw, 10)
     except ValueError as exc:
         raise RdbmsParamError(
-            f"{variable} must be a whole number of seconds; it is {raw!r}",
             RDB_RETURN_MALFORMED,
+            f"{variable} must be a whole number of seconds, written in decimal "
+            f"digits with no sign, unit or separator. Leave it unset for the "
+            f"built-in default. The value is not repeated here because this "
+            f"variable is read from the same transport as ACAS_DB_PASSWORD.",
         ) from exc
     if seconds <= 0 or seconds > _TIMEOUT_CEILING_SECONDS:
         raise RdbmsParamError(
-            f"{variable} must be between 1 and {_TIMEOUT_CEILING_SECONDS} "
-            f"seconds; it is {seconds}",
             RDB_RETURN_MALFORMED,
+            f"{variable} must be between 1 and {_TIMEOUT_CEILING_SECONDS} "
+            f"seconds. Leave it unset for the built-in default. The value is not "
+            f"repeated here because this variable is read from the same transport "
+            f"as ACAS_DB_PASSWORD.",
         )
     return seconds
 

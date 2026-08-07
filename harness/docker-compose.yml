@@ -558,6 +558,41 @@ services:
       ACAS_DB_USER: ${ACAS_DB_USER:?export ACAS_DB_USER before starting the stack - use `acas`, the account the frozen `common/*LD` loaders and `~/ACAS/acas.param` expect; 12 characters or fewer, per DB-UName pic x(12) at copybooks/wsfnctn.cob}
       ACAS_DB_PASSWORD: ${ACAS_DB_PASSWORD:?export ACAS_DB_PASSWORD before starting the stack; 12 characters or fewer, per DB-UPass pic x(12) at copybooks/wsfnctn.cob - a longer value is silently truncated. This is the same value the mariadb service provisions}
       ACAS_DB_SOCKET: ""
+      #  THE ADMINISTRATIVE PAIR IS DECLARED HERE AND REACHES TWO STAGES OF TEN
+      #  (finding SEC-04).
+      #
+      #  It has to be declared at service level, because `harness/run_parity.sh` drives
+      #  all ten stages from ONE invocation and stages 1 and 5 - both
+      #  `harness/reset_db.sh` - drop and re-apply the frozen schema, which needs DDL
+      #  rights the application account does not have.
+      #
+      #  A service-level variable is otherwise inherited by EVERY descendant, which put
+      #  the database superuser password into the environment of the GnuCOBOL compiler,
+      #  the preSQL translator, every bridge and menu binary, the migrated Python cycle
+      #  and pytest itself. Three mechanisms now remove it everywhere it is not needed,
+      #  and each is independent of the others:
+      #
+      #    1. `run_parity.sh` runs stages 2, 3, 4, 6, 7, 8, 9 and 10 through
+      #       `env -u ACAS_DB_ADMIN_USER -u ACAS_DB_ADMIN_PASSWORD`, keeping the pair
+      #       only for the two reset stages.
+      #    2. `build_oracle.sh`, `build_fixtures.sh`, `run_cobol_scenario.sh` and
+      #       `run_python_scenario.sh` each `unset` the pair at entry, before their
+      #       first child exists - so a DIRECT invocation of any of them is scoped too,
+      #       not only one routed through the driver. None of the four holds a single
+      #       reference to either name.
+      #    3. `tests/conftest.py` scrubs it in `_run_script` unless the caller asks for
+      #       `administrative=True`, which exactly three of its five call sites do - the
+      #       seed and the two resets.
+      #
+      #  So the credential is scoped by CONSTRUCTION rather than by convention: a
+      #  compile or a cycle run cannot reach it even by accident, because it is not in
+      #  the environment to reach. Only `reset_db.sh` and the `seed.sh` it delegates to
+      #  hold any reference to either name anywhere in the harness.
+      #
+      #  RETAIN `root` HERE rather than provisioning a second DDL account: GATE 1 of
+      #  reset_db.sh requires an administrative account DISTINCT from ACAS_DB_USER, and
+      #  the mariadb service already owns root. Adding another privileged account would
+      #  widen the surface, not narrow it.
       ACAS_DB_ADMIN_USER: root
       ACAS_DB_ADMIN_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set MARIADB_ROOT_PASSWORD before invoking compose - reset_db.sh GATE 1 requires an administrative account distinct from ACAS_DB_USER}
 
@@ -565,22 +600,31 @@ services:
     # distinct from ACAS_DB_USER -- it drops and re-applies the whole schema.
       ACAS_RESET_CONSENT: DESTROY ACASDB@mariadb:3306
       ACAS_DB_ALLOW_PLAINTEXT: "1"
-      #  THE CANONICAL DURABLE SEED MODE, declared rather than left implicit even
-      #  though `harness/seed.sh` already defaults to it -- an operator reading this
-      #  file should see which transaction mode the seed runs under. `on` is the ONLY
-      #  mode in which the frozen loaders leave a durable row: across all 28
-      #  `common/*LD.cbl` loaders there are 77 references to `perform aa030-Commit`
-      #  and `perform aa020-Rollback` and NOT ONE is live, and the vendored
-      #  `cobmysqlapi38.c` never calls `mysql_autocommit`. The Agent Action Plan asks
-      #  for `off` here (sections 0.2.1.1, 0.4.1.7, 0.5.2) on the strength of the
-      #  operator banner at [common/glbatchLD.cbl:L9-L13] -- which the maintainer
-      #  superseded in the same frozen files at [common/glbatchLD.cbl:L386-L387] and
-      #  [common/glbatchLD.cbl:L453] ("These do not work during testing with mariadb
-      #  - Non transactional model or autocommit set ON"). The divergence is
-      #  deliberate and arbitrated under R-6; see
-      #  `docs/migration/ambiguity-resolutions.md`. Set `off` to run the AAP-literal
-      #  window, which `seed.sh` will correctly refuse as non-durable.
-      ACAS_SEED_AUTOCOMMIT: "on"
+      #  THE SEEDING TRANSACTION MODE IS DELIBERATELY NOT SET HERE.
+      #
+      #  `harness/seed.sh` defaults to the mode the Agent Action Plan mandates --
+      #  autocommit OFF during seeding, per sections 0.2.1.1, 0.4.1.7 and 0.5.2 --
+      #  and pinning `on` in this file would override that mandate for every
+      #  invocation of the service, silently, for any operator who never opens
+      #  `seed.sh`. That is what this key used to do, and it is why the AAP-mandated
+      #  default was not reachable through the harness at all.
+      #
+      #  WHAT TO EXPECT FROM THE DEFAULT: the frozen loaders reach no live COMMIT, so
+      #  under the mandated window nothing persists and `seed.sh` exits 76
+      #  (EX_NOT_DURABLE) rather than reporting a seed the tables do not show. Across
+      #  all 28 `common/*LD.cbl` loaders there are 77 references to
+      #  `perform aa030-Commit` and `perform aa020-Rollback` and NOT ONE is live, and
+      #  the vendored `cobmysqlapi38.c` never calls `mysql_autocommit`, so no COBOL
+      #  program in the checkout can establish the mode for itself. That is the
+      #  reproduced legacy defect (R-4), not a harness fault.
+      #
+      #  TO OBTAIN A WORKING FIXTURE, request the deviation explicitly and per
+      #  invocation, so it appears in the command that ran:
+      #      docker compose ... run --rm -T -e ACAS_SEED_AUTOCOMMIT=on gnucobol ...
+      #  `on` is the only mode measured to leave a durable row. It is a DECLARED
+      #  DEVIATION from the AAP and yields a usable fixture, NOT AAP-conformant
+      #  parity evidence. The measurements and the arbitration are recorded in
+      #  `docs/migration/ambiguity-resolutions.md`.
       ACAS_REPO: /repo
       ACAS_BUILD: /build
       ACAS_DATA: /data
@@ -654,6 +698,42 @@ volumes:
   acas_data:
     name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so this volume cannot be shared with a sibling clone}-data
 
+  #  EVIDENCE VOLUME -- RETENTION AND DISPOSAL ARE A STATED CONTRACT, NOT A HABIT.
+  #
+  #  This volume holds the only durable record of every parity run: both sides'
+  #  table dumps, their normalised forms, the run manifests, the diff reports and the
+  #  verdicts. Two facts about its contents govern how it must be handled.
+  #
+  #  1. IT CARRIES ACCOUNTING DATA. The dumps are `SELECT *` over the in-scope
+  #     tables, so they contain monetary amounts and the primary keys that identify
+  #     the accounts, customers and suppliers they belong to. Measured on this clone:
+  #     1410 files, 11.5 MB, across nine scenario trees. Every artifact is written
+  #     mode 600 by the producing script for that reason.
+  #
+  #  2. IT IS NOT REPRODUCIBLE BY RE-READING IT. A verdict can only be re-derived by
+  #     re-running the protocol against the same seed and the same oracle, so
+  #     deleting this volume destroys the evidence rather than inconveniencing a
+  #     reader. That is why disposal is deliberate and never automatic: nothing in
+  #     this harness rotates, prunes or expires it.
+  #
+  #  RETENTION. Keep a run's tree for as long as any document cites it -- in this
+  #  repository that is `docs/migration/scenario-diff-evidence.md`, which cites
+  #  artifacts by digest. Once a scenario has been re-run and the register updated to
+  #  the new digests, the superseded tree has no citation and may be disposed of.
+  #
+  #  DISPOSAL IS TARGET-SCOPED, AND THAT IS THE WHOLE POINT. Sibling clones each own
+  #  their own `acas-harness-<CLONE_INDEX>-out`, so a broad command destroys another
+  #  run's evidence. Use the clone-namespaced name and nothing wider:
+  #
+  #      docker compose -f harness/docker-compose.yml down                  # release it
+  #      docker volume rm "acas-harness-${CLONE_INDEX}-out"                 # dispose
+  #
+  #  NEVER `docker volume prune`, never `docker volume rm $(docker volume ls -q)`,
+  #  and never `rm -rf` a host path: all three reach volumes and working trees this
+  #  clone does not own. `CLONE_INDEX` is required below precisely so the name cannot
+  #  silently widen to a sibling's.
+  #
+  #  See README-python-migration.md section 11.1c for the full contract.
   acas_out:
     name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so this volume cannot be shared with a sibling clone}-out
 

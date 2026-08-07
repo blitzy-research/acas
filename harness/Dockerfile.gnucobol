@@ -621,11 +621,24 @@ RUN set -eu; \
     echo '--- the pinned set must import ---'; \
     python3 -c 'import mysql.connector, yaml, pytest; print("mysql-connector-python", mysql.connector.__version__); print("PyYAML", yaml.__version__); print("pytest", pytest.__version__)'; \
     \
-    echo '--- and SQLAlchemy must be ABSENT (finding MJ-20) ---'; \
-    if python3 -c 'import sqlalchemy' > /dev/null 2>&1; then \
-        echo 'FATAL: SQLAlchemy is installed. Nothing under acas_posting/ imports it -- an AST census over the package yields exactly one third-party top-level module, mysql -- and it was removed from requirements.txt because three artifacts had been advertising a Core-level data-access boundary the code does not take (MJ-20). Its presence here means requirements.txt has regained the pin, or something else pulled it in.' >&2; exit 1; \
-    fi; \
-    echo 'OK: SQLAlchemy absent, as the reconciled manifest specifies.'; \
+    echo '--- the DECLARED runtime closure must be installed in full, SQLAlchemy included (finding DEP-01) ---'; \
+    python3 -c 'import sqlalchemy, greenlet, typing_extensions; print("SQLAlchemy", sqlalchemy.__version__); print("greenlet", greenlet.__version__)' \
+      || { echo 'FATAL: the declared runtime closure is incomplete. AAP section 0.5.1 fixes it at four names -- mysql-connector-python 26.7.0, SQLAlchemy 2.0.51 and, as SQLAlchemy s own requirements, greenlet 3.5.4 and typing_extensions 4.16.0 -- and requirements.txt section 1 pins all four hash-verified, so a --require-hashes install of that file must leave every one of them importable. One of them is not. Either a pin was dropped from the manifest or the install did not complete.' >&2; exit 1; }; \
+    python3 -c 'import sqlalchemy, greenlet; assert sqlalchemy.__version__ == "2.0.51", f"FATAL: expected SQLAlchemy 2.0.51, found {sqlalchemy.__version__}"; assert greenlet.__version__ == "3.5.4", f"FATAL: expected greenlet 3.5.4, found {greenlet.__version__}"'; \
+    echo 'OK: the declared closure is installed at the plan-pinned versions.'; \
+    \
+    echo '--- DECLARED IS NOT IMPORTED: importing SQLAlchemy must not engage its ORM entity layer (R-3) ---'; \
+    python3 -c 'import sys, sqlalchemy; assert "sqlalchemy.orm" not in sys.modules, "FATAL: importing sqlalchemy pulled in sqlalchemy.orm, so the ORM entity layer is reachable without asking for it; R-3 forbids an ORM entity layer and any declarative metadata that could emit DDL against the frozen schema."; print("import sqlalchemy leaves sqlalchemy.orm unloaded; loaded submodules:", sum(1 for m in sys.modules if m.startswith("sqlalchemy")))'; \
+    echo 'OK: SQLAlchemy is present as the plan declares and its ORM layer is not engaged.'; \
+    echo '    NOTE, measured rather than assumed: `import sqlalchemy` DOES load `greenlet`, because'; \
+    echo '    SQLAlchemy 2.0 imports its concurrency shim eagerly. That is why greenlet is in the'; \
+    echo '    declared closure. It schedules nothing on its own: no file in this repository imports'; \
+    echo '    sqlalchemy or greenlet, and none calls create_async_engine, so no coroutine is ever'; \
+    echo '    scheduled and execution stays strictly sequential (R-3).'; \
+    echo '    Whether any SHIPPED module routes through it is a property of the checkout, not of this'; \
+    echo '    image -- only requirements.txt is COPYed in here, and /repo is mounted at run time. That'; \
+    echo '    half is asserted by tests/arithmetic/test_deployment_contract_boundaries.py, which censuses'; \
+    echo '    every import in the tree and requires the imported third-party set to be exactly {mysql}.'; \
     \
     echo '--- R-2 self-check: pandas and numpy MUST be absent ---'; \
     if python3 -c 'import pandas' > /dev/null 2>&1; then \

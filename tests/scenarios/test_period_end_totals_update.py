@@ -1557,15 +1557,15 @@ def _assert_sites_agree(
     return cobol
 
 
-def _verdict(run: Any, harness_modules: Any, *, bearing: str = "") -> str:
+def _verdict(run: Any, *, bearing: str = "") -> str:
     """Render a completed parity run as a failure message.
 
     Args:
-        run: The `ParityRun`.
-        harness_modules: The `harness` fixture's three loaded modules. `render` is
-            `harness/diff_states.py`'s own deterministic renderer, and it returns THE
-            EMPTY STRING when the two trees are identical, which is the same zero-byte
-            report a passing stage 10 writes.
+        run: The `ParityRun`. Its `diagnose()` is the VALUE-FREE summary - table,
+            column and counts, naming the report and its digest rather than quoting any
+            figure (finding SEC-05). It returns THE EMPTY STRING when the two trees are
+            identical, which is the same zero-byte report a passing stage 10 writes, so
+            the harness modules are no longer needed here at all.
         bearing: What the finding bears on - normally one or more register identifiers -
             appended so a reader knows which recorded question to consult.
 
@@ -1580,7 +1580,7 @@ def _verdict(run: Any, harness_modules: Any, *, bearing: str = "") -> str:
         f"REAL BEHAVIOURAL DIFFERENCE and never an artefact of the comparison.",
         f"{run.tree.total_differences} finding(s) across "
         f"{len(run.tables)} bounded table(s).",
-        harness_modules.diff_states.render(run.tree),
+        run.diagnose(),
         run.describe(),
     ]
     if bearing:
@@ -2409,7 +2409,6 @@ def test_period_end_totals_state_parity(parity: Any, harness: Any) -> None:
     """
     assert parity.is_empty, _verdict(
         parity,
-        harness,
         bearing=(
             f"If the finding is on {FOCAL_TABLE}, it bears on "
             f"{AMBIGUITY_SYSTOT_OVERLAP} and, because this is the only scenario that "
@@ -2420,7 +2419,7 @@ def test_period_end_totals_state_parity(parity: Any, harness: Any) -> None:
     #  The renderer's own statement of the same verdict. It returns THE EMPTY STRING
     #  when the two trees are identical, which is the zero-byte stdout the contract
     #  promises for exit 0.
-    assert harness.diff_states.render(parity.tree) == "", (
+    assert parity.diagnose() == "", (
         f"{SCENARIO}: the comparison reports itself empty, yet the deterministic "
         f"renderer produced output. Exit 0 means the trees are identical AND that "
         f"stdout is EMPTY - zero bytes, not a banner - so the two disagree and neither "
@@ -2501,7 +2500,9 @@ def test_both_run_statuses_are_the_declared_ones(parity: Any, protocol: Any) -> 
 
 @pytest.mark.database
 @pytest.mark.oracle
-def test_both_flag_p_latches_are_cleared_by_the_run(parity: Any, protocol: Any) -> None:
+def test_both_flag_p_latches_are_cleared_by_the_run(
+    parity: Any, protocol: Any, withheld: Any
+) -> None:
     """THE TWO ONE-SHOT LATCHES ARE CLEARED ON BOTH SIDES - each read from its own run.
 
     `[sales/sl100.cbl:L474]` is `move zero to S-Flag-P.` and
@@ -2621,8 +2622,9 @@ def test_both_flag_p_latches_are_cleared_by_the_run(parity: Any, protocol: Any) 
 
         assert int(observed["cobol"][column]) == int(observed["python"][column]), (
             f"{SCENARIO}: the two sides left `{SYSTEM_TABLE}`.`{column}` in different "
-            f"states - cobol {observed['cobol'][column]!r}, python "
-            f"{observed['python'][column]!r}. This column is NOT in the compared "
+            f"states - cobol {withheld(observed['cobol'][column], column=column)}, python "
+            f"{withheld(observed['python'][column], column=column)}. This column is "
+            f"NOT in the compared "
             f"dump, so the diff cannot report it; this marker comparison is the only "
             f"thing standing between a one-sided latch clear and a green run."
         )
@@ -2703,7 +2705,6 @@ def test_systot_rec_reflects_the_nine_write_sites(
     )
     assert diff.is_empty, _verdict(
         parity,
-        harness,
         bearing=(
             f"THE FINDING IS ON {FOCAL_TABLE}, this scenario's focal table and the one "
             f"Agent Action Plan section 0.6.4 calls the sole writee of the nine "
@@ -2811,7 +2812,6 @@ def test_unconditional_totals_adds_are_reproduced(
     )
     assert diff.is_empty, _verdict(
         parity,
-        harness,
         bearing=(
             f"{FOCAL_TABLE} differs, and the two sites this test guards are "
             f"{described}. Both add UNCONDITIONALLY, immediately after a print block "
@@ -2890,7 +2890,6 @@ def test_two_receiver_payment_adds_are_reproduced(
     )
     assert diff.is_empty, _verdict(
         parity,
-        harness,
         bearing=(
             f"{FOCAL_TABLE} differs, and the two sites this test guards are "
             f"{described}. Each is ONE `ADD` with TWO receivers; DO NOT SPLIT EITHER "
@@ -2947,7 +2946,6 @@ def test_invoice_headers_are_stamped_on_both_ledgers(
         diff = _table_diff(parity, table)
         assert diff.is_empty, _verdict(
             parity,
-            harness,
             bearing=(
                 f"THE FINDING IS ON {table}, which is on the bound because the extract "
                 f"programs stamp the invoice header: {stamp}. DO NOT HARMONISE THE "
@@ -3005,7 +3003,6 @@ def test_open_items_are_rewritten_on_both_ledgers(parity: Any, harness: Any) -> 
         diff = _table_diff(parity, table)
         assert diff.is_empty, _verdict(
             parity,
-            harness,
             bearing=(
                 f"THE FINDING IS ON {table}. The cash program walks the open items and "
                 f"rewrites them at [{locator}] using {verb}, so a row present on one "
@@ -3026,7 +3023,6 @@ def test_open_items_are_rewritten_on_both_ledgers(parity: Any, harness: Any) -> 
         diff = _table_diff(parity, table)
         assert diff.is_empty, _verdict(
             parity,
-            harness,
             bearing=(
                 f"THE FINDING IS ON {table}, where the posting programs rewrite the "
                 f"{side} statistics. THREE ANOMALIES LAND HERE AND ALL THREE ARE "
@@ -3090,7 +3086,6 @@ def test_deduction_analysis_tables_agree(parity: Any, harness: Any) -> None:
         diff = _table_diff(parity, table)
         assert diff.is_empty, _verdict(
             parity,
-            harness,
             bearing=(
                 f"THE FINDING IS ON {table}: {TABLE_REASONS[table]}. Site 3 adds "
                 f"unconditionally at [sales/sl060.cbl:L641] and the value file is "
@@ -3137,7 +3132,6 @@ def test_general_ledger_fan_out_tables_agree(parity: Any, harness: Any) -> None:
         diff = _table_diff(parity, table)
         assert diff.is_empty, _verdict(
             parity,
-            harness,
             bearing=(
                 f"THE FINDING IS ON {table}: {TABLE_REASONS[table]}. The fan-out "
                 f"switch is pinned to {IRS_INSTEAD_GL_ONLY!r}, pure General Ledger, so "
@@ -3374,8 +3368,9 @@ def test_diff_exit_contract_is_honoured(
     assert empty.total_differences == 0, (
         f"an empty comparison reports {empty.total_differences} finding(s)."
     )
-    assert diff_states.render(empty) == "", (
-        f"the deterministic renderer produced {diff_states.render(empty)!r} for a "
+    rendered_empty = diff_states.render(empty)
+    assert rendered_empty == "", (
+        f"the deterministic renderer produced {len(rendered_empty)} byte(s) for a "
         f"comparison with no findings, where exit 0 requires EMPTY output - zero "
         f"bytes, not a banner. The evidence in {DOC_EVIDENCE} distinguishes 'compared, "
         f"and "

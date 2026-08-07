@@ -202,6 +202,35 @@ _SUGGESTION_LIMIT: Final[int] = 5
 _ABSENT_VIEW: Final[str] = "absent"
 
 
+# --------------------------------------------------------------------------------------
+#  READ BUDGETS (finding SEC-07)
+#
+#  The read below is otherwise unbounded in two ways: it loops until the file ends, and
+#  `json.loads` recurses once per level of nesting. Neither is a code-execution risk -
+#  the reader constructs no objects of its own and admits only four scalar shapes - but
+#  both are unbounded cost driven by the file's contents, and the path this reads is not
+#  always the committed artifact: `load` accepts a caller-supplied path.
+#
+#  BOTH LIMITS ARE DERIVED FROM THE COMMITTED ARTIFACTS WITH WIDE HEADROOM, so neither
+#  changes how the real dictionary reads. Measured: `acas_posting_dictionary.json` is
+#  2,558,638 bytes at depth 7 with 144,414 nodes, and the schema beside it is 97,129
+#  bytes at depth 8.
+#
+#  No node budget is stated because JSON has no aliases and therefore no multiplicative
+#  expansion: every node costs at least one byte of source, so the byte budget already
+#  bounds the node count. There is nothing here to validate a dictionary's CONTENTS with
+#  - these are bounds on the document as a document, the same footing as the existing
+#  refusal of a repeated member or a non-object root, and not the content validation
+#  rule R-3 forbids.
+# --------------------------------------------------------------------------------------
+
+#: Largest artifact read, in bytes. Measured 2,558,638 (~2.44 MiB); this is ~13x that.
+_MAX_DOCUMENT_BYTES: Final[int] = 32 * 1024 * 1024
+
+#: Deepest nesting accepted. Measured 7 for the dictionary, 8 for its schema.
+_MAX_DOCUMENT_DEPTH: Final[int] = 64
+
+
 #: The artifact's file name, taken from the repository constant so that the packaged
 #: candidate and the repository candidate can never name different files.
 _DOCUMENT_NAME: Final[str] = DATA_DICTIONARY_PATH.name
@@ -361,6 +390,32 @@ def _object_from_pairs(
     return obj
 
 
+def _document_depth_exceeds(tree: object, limit: int) -> bool:
+    """Report whether `tree` nests deeper than `limit`, without recursing to find out.
+
+    Walked with an explicit stack rather than recursively: a depth guard that recursed
+    once per level would be liable to the very exhaustion it exists to prevent. Returns
+    as soon as the limit is passed, so an over-budget document is not walked in full.
+
+    Args:
+        tree: The parsed document, or any part of one.
+        limit: The deepest nesting accepted.
+
+    Returns:
+        True if any path through `tree` is deeper than `limit`.
+    """
+    stack: list[tuple[object, int]] = [(tree, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if depth > limit:
+            return True
+        if isinstance(node, dict):
+            stack.extend((value, depth + 1) for value in node.values())
+        elif isinstance(node, list):
+            stack.extend((value, depth + 1) for value in node)
+    return False
+
+
 def _read_text_without_following_links(path: Path) -> str:
     """Read one file's text, refusing a symbolic link or anything but a plain file.
 
@@ -376,6 +431,9 @@ def _read_text_without_following_links(path: Path) -> str:
     Raises:
         DictionaryNotFoundError: Nothing is at `path`, or what is there is not a plain
             file.
+        DictionaryParseError: The file is larger than `_MAX_DOCUMENT_BYTES`. Raised
+            while reading rather than afterwards, so an oversized file is never held in
+            memory whole just to be rejected.
         OSError: The file exists and is plain but cannot be read.
     """
     try:
@@ -397,10 +455,23 @@ def _read_text_without_following_links(path: Path) -> str:
                 "is not the committed artifact."
             )
         chunks: list[bytes] = []
+        read_so_far = 0
         while True:
             chunk = os.read(descriptor, 1 << 20)
             if not chunk:
                 break
+            read_so_far += len(chunk)
+            if read_so_far > _MAX_DOCUMENT_BYTES:
+                raise DictionaryParseError(
+                    f"The file at {path} is larger than the "
+                    f"{_MAX_DOCUMENT_BYTES}-byte read budget, so it was not read to "
+                    f"the end.\n"
+                    "The committed artifact is about 2.44 MiB, so nothing legitimate "
+                    "is near this limit. Either the path names something other than a "
+                    "data dictionary, or the artifact is not the one this project "
+                    "generates -- regenerate it with "
+                    "python -m acas_posting.dictionary.generate."
+                )
             chunks.append(chunk)
     finally:
         os.close(descriptor)
@@ -436,6 +507,18 @@ def _read_document(path: Path) -> DataDictionary:
     try:
         tree = json.loads(text, parse_float=str,
                           object_pairs_hook=_object_from_pairs)
+    except RecursionError as error:
+        # Nesting deeper than the interpreter's recursion limit. Caught so the read
+        # fails as a refusal naming the cause, rather than as a bare RecursionError
+        # from inside the JSON scanner (finding SEC-07).
+        raise DictionaryParseError(
+            f"The data dictionary at {path} nests too deeply to parse: the JSON "
+            f"reader exhausted the interpreter's recursion limit.\n"
+            f"The committed artifact nests 7 levels, and this reader accepts up to "
+            f"{_MAX_DOCUMENT_DEPTH}. Deep nesting is how a small file forces unbounded "
+            "recursion, so nothing is retried at a raised limit: correct the file, or "
+            "pass the path of an intact copy."
+        ) from error
     except json.JSONDecodeError as error:
         raise DictionaryParseError(
             f"The data dictionary at {path} could not be parsed as JSON: "
@@ -461,6 +544,15 @@ def _read_document(path: Path) -> DataDictionary:
             "artifact with "
             "python -m acas_posting.dictionary.generate."
         ) from error
+    if _document_depth_exceeds(tree, _MAX_DOCUMENT_DEPTH):
+        raise DictionaryParseError(
+            f"The data dictionary at {path} nests deeper than "
+            f"{_MAX_DOCUMENT_DEPTH} levels, which is the read budget.\n"
+            "The committed artifact nests 7 levels and its schema nests 8, so nothing "
+            "legitimate is near this limit. Either the path names something other than "
+            "a data dictionary, or the artifact is not the one this project generates "
+            "-- regenerate it with python -m acas_posting.dictionary.generate."
+        )
     _admit_json_value(tree, "<document>", path)
     if not isinstance(tree, dict):
         raise DictionaryParseError(

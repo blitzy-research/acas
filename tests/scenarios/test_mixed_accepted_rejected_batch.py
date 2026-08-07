@@ -1362,7 +1362,7 @@ def test_mixed_accepted_rejected_state_parity(parity: object, harness: object) -
         f"than an artefact of the comparison (section 0.6.6): the schema's tables all "
         f"have a single-column primary key, no secondary index, no TIMESTAMP and no "
         f"AUTO_INCREMENT, so the dump order is total and stable.\n"
-        f"{harness.diff_states.render(parity.tree)}\n"
+        f"{parity.diagnose()}\n"
         f"{parity.describe()}"
     )
 
@@ -1387,7 +1387,7 @@ def test_mixed_accepted_rejected_state_parity(parity: object, harness: object) -
         f"disagreement means the trees changed between two reads and NEITHER view can "
         f"be trusted."
     )
-    rendered = diff_states.render(parity.tree)
+    rendered = parity.diagnose()
     assert (rendered == "") is parity.is_empty, (
         f"`render` must return the EMPTY STRING exactly when the trees are identical "
         f"(Agent Action Plan section 0.8.5); is_empty={parity.is_empty} and it "
@@ -1485,7 +1485,7 @@ def test_a13_non_numeric_batch_number_skipped_silently(
             f"two "
             f"sides disposed of the same record differently, whether by skipping it on "
             f"one side and posting it on the other or the reverse.\n"
-            f"{harness.diff_states.render(parity.tree)}"
+            f"{parity.diagnose()}"
         )
         # A one-sided row is the shape a rejection that left a TRACE would take, so it
         # is named separately from the value comparison rather than folded into it.
@@ -1597,7 +1597,7 @@ def test_a13_we_error_999_record_skipped_silently(
         f"(b) at [general/gl072.cbl:L306-L307] observable, and the only way a silent "
         f"skip "
         f"is observable is as an ABSENCE that matches.\n"
-        f"{harness.diff_states.render(parity.tree)}"
+        f"{parity.diagnose()}"
     )
 
     # THE TWO STAMPED COLUMNS, PER BATCH KEY. [general/gl072.cbl:L375-L376] is the whole
@@ -1657,6 +1657,7 @@ def test_the_run_reproduced_the_measured_no_op_rather_than_posting(
     protocol: object,
     scenario_loader: object,
     harness: object,
+    withheld: object,
 ) -> None:
     """THE DISCRIMINATION, AND IT POINTS THE OPPOSITE WAY FROM INTUITION.
 
@@ -1795,7 +1796,7 @@ def test_the_run_reproduced_the_measured_no_op_rather_than_posting(
                 assert int(observed[column]) == int(seeded[field]), (
                     f"the {side} cycle changed `{BATCH_TABLE}`.`{column}` on the {role} "
                     f"batch {key}: the seed declares {seeded[field]!r} and the dump "
-                    f"carries {observed[column]!r}.\n"
+                    f"carries {withheld(observed[column], column=column)}.\n"
                     f"  THE MEASURED BEHAVIOUR IS THAT NEITHER BATCH MOVES. The one "
                     f"seeded posting is persisted under key ZERO because the bridge "
                     f"never loads `HV-POST-RRN`, its primary key (ambiguity `Q-9`), "
@@ -1810,12 +1811,13 @@ def test_the_run_reproduced_the_measured_no_op_rather_than_posting(
                     f"changed, re-measure it and update `Q-9`, this scenario's "
                     f"`expected_table_effect` and "
                     f"docs/migration/scenario-diff-evidence.md together.\n"
-                    f"{harness.diff_states.render(parity.tree)}"
+                    f"{parity.diagnose()}"
                 )
             assert observed["DESCRIPTION"].rstrip() == seeded["Description"].rstrip(), (
                 f"the {side} cycle changed `{BATCH_TABLE}`.`DESCRIPTION` on the {role} "
                 f"batch {key}: the seed declares {seeded['Description']!r} and the dump "
-                f"carries {observed['DESCRIPTION']!r}. Nothing on this route writes that "
+                f"carries {withheld(observed['DESCRIPTION'], column='DESCRIPTION')}. "
+                f"Nothing on this route writes that "
                 f"column at all - `end-batch` touches `cleared-status` and `posted` "
                 f"only [general/gl072.cbl:L375-L376]."
             )
@@ -1962,7 +1964,7 @@ def test_skipped_postings_do_not_perturb_sequential_nominal_cursor(
         f"docs/migration/ambiguity-resolutions.md, which the oracle ANSWERED: the "
         f"compiled sort preserves input order for equal keys, so a tie should NOT "
         f"produce a difference here and one that appears is a real divergence rather "
-        f"than the open question it used to be.\n{harness.diff_states.render(parity.tree)}"
+        f"than the open question it used to be.\n{parity.diagnose()}"
     )
 
 
@@ -2051,7 +2053,7 @@ def test_batch_stamp_columns_agree_on_both_sides(
             f"so the two sides stamped different batches, or stamped the same batch "
             f"differently. The claim is AGREEMENT and not a particular value: whatever "
             f"the compiled cycle left is the specification (R-6), including if it "
-            f"surprises a reader.\n{harness.diff_states.render(parity.tree)}"
+            f"surprises a reader.\n{parity.diagnose()}"
         )
         assert left, (
             f"GLBATCH-REC came back with no rows, so the {column} comparison is "
@@ -2149,7 +2151,7 @@ def test_unwaiting_batch_is_not_stamped(
         f"declared-length contradiction at [copybooks/wsbatch.cob:L7-L9] carried as "
         f"Q-4, "
         f"which would surface here as a trailing-field "
-        f"misalignment.\n{harness.diff_states.render(parity.tree)}"
+        f"misalignment.\n{parity.diagnose()}"
     )
     assert batch[0]["row_count"] == len(batch[0]["rows"]), (
         f"GLBATCH-REC declares row_count {batch[0]['row_count']} and carries "
@@ -2206,6 +2208,7 @@ def _declared_batch_rows(definition: object) -> dict[int, dict[str, str]]:
 def test_no_work_record_is_emitted_so_nothing_can_post(
     parity: object, normalized_dumps: object, column_by_key: object, harness: object,
     scenario_loader: object,
+    withheld: object,
 ) -> None:
     """ANOMALY N-KEY's consequence, asserted against the seed: NO BATCH IS STAMPED.
 
@@ -2247,7 +2250,8 @@ def test_no_work_record_is_emitted_so_nothing_can_post(
                 expected = int(seeded_row[field_name])
                 assert int(observed[key]) == expected, (
                     f"GLBATCH-REC.{column} for BATCH-KEY {key} is "
-                    f"{observed[key]!r} on the {side} side and the scenario seeded "
+                    f"{withheld(observed[key], column=column)} on the {side} side and "
+                    f"the scenario seeded "
                     f"{expected!r}. A CHANGED value means gl072 reached `end-batch` "
                     f"for a work record [general/gl072.cbl:L375-L377] - which ANOMALY "
                     f"N-KEY says it cannot, because gl070 discards every seeded "
@@ -2255,7 +2259,7 @@ def test_no_work_record_is_emitted_so_nothing_can_post(
                     f"pretrans.tmp zero bytes long. Either the frozen bridge's "
                     f"POST-KEY handling has changed or this scenario's narrative is "
                     f"now wrong; re-measure before adjusting either.\n"
-                    f"{harness.diff_states.render(parity.tree)}"
+                    f"{parity.diagnose()}"
                 )
 
 
@@ -2264,6 +2268,7 @@ def test_no_work_record_is_emitted_so_nothing_can_post(
 def test_every_bounded_row_is_unchanged_relative_to_the_declared_seed(
     parity: object, normalized_dumps: object, column_by_key: object, harness: object,
     scenario_loader: object,
+    withheld: object,
 ) -> None:
     """THE NOMINAL BALANCES ARE UNCHANGED RELATIVE TO THE SEED, on both sides.
 
@@ -2325,12 +2330,13 @@ def test_every_bounded_row_is_unchanged_relative_to_the_declared_seed(
                 f"`add post-amount to ledger-balance` [general/gl072.cbl:L331] ran, "
                 f"which ANOMALY N-KEY says it cannot for a seeded posting row. "
                 f"Re-measure before adjusting this test.\n"
-                f"{harness.diff_states.render(parity.tree)}"
+                f"{parity.diagnose()}"
             )
         for key in signed_declarations:
             assert decimal.Decimal(str(observed[key])) >= 0, (
                 f"LEDGER-KEY {key} was seeded negative and the column holds "
-                f"{observed[key]!r}. ANOMALY N-EDIT says the bridge's edit field can "
+                f"{withheld(observed[key])}. ANOMALY N-EDIT says the bridge's edit "
+                f"field can "
                 f"never render the sign [common/nominalMT.cbl:L232]; a negative value "
                 f"here means it now can, and every citation of N-EDIT in this "
                 f"repository must be re-measured."
@@ -2472,7 +2478,7 @@ def test_glposting_rec_is_an_unchanged_witness(
         f"and Close. Any finding here means one side wrote, mutated or deleted a "
         f"posting "
         f"row, which would also destroy the only evidence the rejected transactions "
-        f"have.\n{harness.diff_states.render(parity.tree)}"
+        f"have.\n{parity.diagnose()}"
     )
     assert not witness.missing_in_python and not witness.missing_in_cobol, (
         f"GLPOSTING-REC carries rows on one side only: "
@@ -2586,7 +2592,8 @@ def test_diff_exit_contract_is_honoured(
 @pytest.mark.database
 @pytest.mark.oracle
 def test_dump_is_wellformed_on_both_sides(
-    normalized_dumps: object, harness: object, frozen_schema: object
+    normalized_dumps: object, harness: object, frozen_schema: object,
+    withheld: object,
 ) -> None:
     """Every dump on both sides has the shape the protocol guarantees, and no other.
 
@@ -2717,7 +2724,7 @@ def test_dump_is_wellformed_on_both_sides(
                     )
                     assert not isinstance(value, float), (
                         f"{where} carries a binary floating-point value in column "
-                        f"{name!r}: {value!r}. R-2 forbids binary floating point in "
+                        f"{name!r}: {withheld(value)}. R-2 forbids binary floating point in "
                         f"any accounting value, in computation, in storage and in "
                         f"transport."
                     )
@@ -2725,7 +2732,7 @@ def test_dump_is_wellformed_on_both_sides(
                         assert isinstance(value, str), (
                             f"{where} carries column {name!r} ({declared.sql_type}, "
                             f"declared at [mysql/ACASDB.sql:L{declared.line}]) as a "
-                            f"{type(value).__name__}: {value!r}. A DECIMAL is rendered "
+                            f"{type(value).__name__}: {withheld(value, column=name)}. A DECIMAL is rendered "
                             f"as a canonical JSON STRING at its declared scale, "
                             f"because JSON has no exact decimal and a bare number "
                             f"would be read back as a float (R-2)."
@@ -2734,7 +2741,7 @@ def test_dump_is_wellformed_on_both_sides(
                         assert type(value) is int, (
                             f"{where} carries column {name!r} ({declared.sql_type}, "
                             f"declared at [mysql/ACASDB.sql:L{declared.line}]) as a "
-                            f"{type(value).__name__}: {value!r}. An integer width "
+                            f"{type(value).__name__}: {withheld(value, column=name)}. An integer width "
                             f"arrives "
                             f"as a JSON integer, and `1` against `\"1\"` IS a "
                             f"difference."

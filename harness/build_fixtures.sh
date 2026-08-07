@@ -32,6 +32,28 @@ IFS=$'\n\t'
 # An unmatched glob expands to nothing rather than to the pattern text.
 shopt -s nullglob
 
+# ---------------------------------------------------------------------------
+#  DROP THE ADMINISTRATIVE CREDENTIAL BEFORE ANYTHING IS SPAWNED (finding SEC-04)
+#
+#  `harness/docker-compose.yml` puts ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD in
+#  the `gnucobol` service environment because protocol stages 1 and 5 -- and only
+#  those two, both `harness/reset_db.sh` -- drop and re-apply the frozen schema and
+#  so need DDL rights. A service-wide variable is inherited by every descendant,
+#  which put the database SUPERUSER password into the environment of the GnuCOBOL
+#  compiler, the preSQL translator, every bridge and menu binary, the migrated
+#  Python cycle and pytest itself.
+#
+#  THIS SCRIPT NEVER USES THAT PAIR -- it holds no reference to either name and
+#  invokes neither reset_db.sh nor seed.sh -- so it removes them from its own
+#  environment here, before the first child exists. Least privilege by
+#  construction rather than by convention: a compile or a cycle run cannot reach
+#  the credential even by accident, because it is not there to reach.
+#
+#  Application access is unaffected: ACAS_DB_USER / ACAS_DB_PASSWORD remain, and
+#  that account holds SELECT, INSERT, UPDATE and DELETE on the one schema.
+# ---------------------------------------------------------------------------
+unset ACAS_DB_ADMIN_USER ACAS_DB_ADMIN_PASSWORD
+
 # Nothing this script writes is group- or world-readable, and the builder sets the
 # same mask for itself so the files the generated writers create match.
 umask 077

@@ -34,6 +34,69 @@ and the Python cycle from the same loader-built seed, normalising both captures,
 and requiring an empty state diff. Where nothing was observed, the entry says
 so in those words.
 
+---
+
+## 0. EVIDENCE STATUS — READ THIS BEFORE ANY OTHER SECTION
+
+**Parity against the frozen COBOL specification is NOT established by this
+document, and cannot presently be established from this repository.** Every empty
+diff recorded below is a real measurement, and none of them is a parity claim
+against the frozen checkout. Two independent, measured obstacles stand in the way,
+and both are now enforced by the tooling rather than left to a reader's diligence.
+
+**Obstacle 1 — the frozen oracle does not compile.** `harness/build_oracle.sh`
+defaults to a zero-transformation build of the frozen sources. Measured on
+2026-08-07, that build **fails with exit 74**: 22 of the 28 generated
+`common/*MT.cbl` bridges `COPY "ACAS-SQLstate-error-list.cob"`, and that member is
+absent from the checkout and from `presql2-latest.zip` alike. It is not fabricated,
+because inventing a frozen source would breach R-3 and R-4; it must be supplied by
+the maintainer. No attestation is written, and `harness/run_parity.sh` reports exit
+**77 — EVIDENCE UNAVAILABLE**, a status deliberately distinct from the ones meaning
+the two states differ. See README §8.7.
+
+**Obstacle 2 — the runs below used a transformed oracle.** They were produced
+before the frozen build became the default, against a build carrying **41**
+transformed paths. One of those (the missing-member shim) is measured
+behaviour-neutral: translating `glpostingMT.cbl` with `cobc -C` under the
+comment-only shim, a zero-byte member, and different comment text yields
+byte-identical C, and the `COPY` site sits in the `IDENTIFICATION DIVISION` where
+only comments are legal. The other **40** are not neutral — they repair `IF` scope,
+connection lifetime, credential propagation and stale reply pairs, all executable
+logic. A build carrying them has repaired the specification, so agreement with it
+cannot show that the migration reproduces the frozen one.
+`harness/run_parity.sh` now **refuses** such a build with exit 77 unless
+`--accept-transformed-oracle` is given, and then marks every verdict
+`identical-against-diagnostic-oracle` / **NO PARITY CLAIM**. See README §8.10.
+
+**A third condition also applies to the seed.** The seeding window now defaults to
+the mode the AAP mandates (autocommit **off**, §0.2.1.1/§0.4.1.7/§0.5.2). Measured
+under that default, `clean_batch_gl` stage 1 exits **76**: seven loaders run, all
+return success, and all seven seeded tables read **zero rows** — the frozen
+no-COMMIT defect, reproduced and refused rather than papered over. The runs below
+were therefore also produced under an explicitly declared seeding deviation
+(`ACAS_SEED_AUTOCOMMIT=on`), which is the only mode measured to leave a durable row
+(8 rows across 7 tables). See README §9.4.
+
+### 0.1 What the sections below therefore do and do not establish
+
+| Claim | Status |
+|---|---|
+| The protocol executes end to end — ten stages, both cycles, dump, normalise, diff | **ESTABLISHED.** Observed, repeatedly, and reproducible |
+| The Python cycle agrees, table for table, with a **disclosed-transformed diagnostic** oracle on nine scenarios | **ESTABLISHED as measured.** This is what the empty diffs below are |
+| The Python cycle reproduces the **frozen** COBOL specification | **NOT ESTABLISHED.** The frozen specification does not compile (Obstacle 1) |
+| Two Python runs under one pinned clock are byte-identical | **ESTABLISHED.** It depends on neither obstacle — see §12 |
+| A seeded oracle state can be produced in the AAP-mandated configuration | **NOT ESTABLISHED**, and measured to be impossible with the frozen loaders |
+
+**What a human must do to close this.** Obtain
+`copybooks/ACAS-SQLstate-error-list.cob` from the maintainer and commit it to the
+frozen tree; then `harness/build_oracle.sh` with no flags either succeeds — in which
+case re-run §15 and every row below becomes a parity claim against the frozen
+specification — or fails for a new reason that is then the next finding. Nothing in
+this repository should be changed to make it pass.
+
+The measurements below are retained verbatim rather than deleted, because they are
+observations and deleting them would destroy evidence. Read them as what they are.
+
 ## 1. Rules provenance
 
 **There is no user rules document for this project.** The Agent Action Plan
@@ -923,6 +986,11 @@ may be used.
 Every row below was produced by the protocol in §4, driven first-hand on
 **2026-08-07** through `harness/run_parity.sh`, all ten stages, exit 0, with no
 stage skipped and no flag supplied beyond `--seed-dir`. The commands are in §9.
+
+⚠️ **These rows measure agreement with a TRANSFORMED oracle, not with the frozen
+specification, and the tooling now refuses to call such a run evidence.** See §0 for
+the two measured obstacles and for what these rows do and do not establish. They are
+retained verbatim because they are observations.
 
 **The oracle that produced it is named, not assumed.** All eight runs executed the
 same attested build — module-set digest
@@ -2222,6 +2290,34 @@ For each scenario `<name>`, under the harness output area:
 artifact back to a row of §8 and what lets stage 10 refuse two captures that are
 not two halves of one attempt.
 
+### 14.1 Retention and disposal of this tree
+
+**This tree is evidence, and it carries accounting data.** The captures are
+`SELECT *` over the in-scope tables, so they hold monetary amounts and the primary
+keys identifying the accounts, customers and suppliers those amounts belong to.
+Every file is written mode `600`, and the tree lives in a Docker named volume —
+`acas-harness-<CLONE_INDEX>-out` — rather than under the checkout, so no `git add`
+can capture it and no sibling clone shares it.
+
+**Retain a scenario's tree for as long as this document cites it.** §8 and §10 cite
+artifacts by digest, so a tree whose digests appear here is load-bearing. Once a
+scenario has been re-run and its digests in this file updated, the superseded tree
+is no longer cited and may be disposed of. Nothing rotates or expires it
+automatically, deliberately: a verdict cannot be re-derived by re-reading the tree,
+only re-produced by re-running the protocol against the same seed and the same
+oracle, so automatic deletion would destroy evidence rather than tidy it.
+
+**Disposal is target-scoped**, because sibling clones each own their own volume:
+
+```bash
+docker compose -f harness/docker-compose.yml down
+docker volume rm "acas-harness-${CLONE_INDEX}-out"
+```
+
+Never `docker volume prune`, never `docker volume rm $(docker volume ls -q)`, and
+never `rm -rf` a host path under the shared workspace root — each reaches evidence
+this clone does not own. The full contract is in README-python-migration.md §11.1c.
+
 The four fingerprints live under `run-logs/` and **never** inside a compared tree,
 so none of them can be diffed as though it were posted data. Each is one line per
 declared table plus the parameter row (§7.1). The two pairs answer two different
@@ -2245,27 +2341,42 @@ owner-only directory.
 Nothing here auto-builds or auto-runs; each stage is invoked explicitly.
 
 ```bash
+# ACAS_SEED_AUTOCOMMIT=on is a DECLARED DEVIATION from the AAP-mandated seeding
+# window (see section 0). Without it stage 1 exits 76, because the frozen loaders
+# reach no live COMMIT and persist nothing. It is passed per invocation, and never
+# pinned in harness/docker-compose.yml, so it appears in the command that ran.
 C="docker compose -f harness/docker-compose.yml exec -T \
-   -e PYTHONDONTWRITEBYTECODE=1 gnucobol"
+   -e PYTHONDONTWRITEBYTECODE=1 -e ACAS_SEED_AUTOCOMMIT=on gnucobol"
 
-# once per image
-$C /repo/harness/build_oracle.sh
+# once per image. THE DEFAULT IS A FROZEN BUILD, and on this checkout it FAILS with
+# exit 74: 22 frozen common/*MT.cbl bridges COPY ACAS-SQLstate-error-list.cob, which
+# the archive does not contain (README section 8.7). The member must NOT be
+# fabricated (R-3, R-4). --transformed-oracle builds the diagnostic oracle instead,
+# and every verdict obtained from it is marked NO PARITY CLAIM.
+$C /repo/harness/build_oracle.sh                        # frozen: fails, exit 74
+$C /repo/harness/build_oracle.sh --transformed-oracle    # diagnostic oracle
 
 # once per scenario change
 $C /repo/harness/build_fixtures.sh
 
-# one scenario, all ten stages, aborting at the first non-zero
-$C /repo/harness/run_parity.sh /repo/harness/scenarios/clean_batch_gl.yaml
+# one scenario, all ten stages, aborting at the first non-zero. Against a
+# transformed oracle this REFUSES with exit 77 EVIDENCE UNAVAILABLE unless
+# --accept-transformed-oracle is given, which taints every verdict it prints.
+$C /repo/harness/run_parity.sh /repo/harness/scenarios/clean_batch_gl.yaml \
+     --accept-transformed-oracle
 ```
 
 `-T` is required on every scripted stage: a tty is allocated by default and a
-piped stage would appear to hang. No seed-mode flag appears above because none is
-needed: autocommit **on** is the canonical durable mode, declared by Compose and
-defaulted by `harness/seed.sh` (§4.3). `--seed-dir` also defaults to the canonical
+piped stage would appear to hang. **A seed-mode flag IS needed**: the commands in
+§15 pass `-e ACAS_SEED_AUTOCOMMIT=on` because `harness/seed.sh` now defaults to the
+AAP-mandated `off`, nothing pins the mode, and without the flag stage 1 exits 76
+(§0, §4.3). `--seed-dir` also defaults to the canonical
 fixture root `$ACAS_FIXTURES` — or `$ACAS_DATA/fixtures` — plus the scenario name,
 which is exactly where `build_fixtures.sh` writes. Passing
-`ACAS_SEED_AUTOCOMMIT=off` selects the AAP-literal window instead, and the seed
-then exits **76** rather than producing an all-empty capture.
+The seeding window now DEFAULTS to the AAP-mandated `off`, under which the seed
+exits **76** rather than producing an all-empty capture; the reproduction commands
+in this section therefore pass `-e ACAS_SEED_AUTOCOMMIT=on` explicitly, which is a
+declared deviation yielding a working fixture rather than AAP-conformant evidence.
 
 An empty diff from stage 10 is the pass condition and the only one. A stage that
 exits non-zero has produced no evidence, so re-seed rather than carrying a partial
@@ -2273,11 +2384,21 @@ capture forward.
 
 ## 16. Conclusion
 
-**All nine committed scenarios carry `EMPTY DIFF — OBSERVED`** — the eight that
-discharge AAP §0.8.5's mandate, plus `end_of_cycle_gl` beyond it. The result was
-obtained through the rigid protocol of §4, with the comparison bounded by each
-scenario's declared affected-table list, the pass condition checked as **both**
-exit 0 **and** zero-byte stdout, and attestation enforced rather than waived. The
+**All nine committed scenarios carry `EMPTY DIFF — OBSERVED` against a
+disclosed-transformed diagnostic oracle, and none of them carries a parity claim
+against the frozen specification.** Read §0 before this section: the frozen oracle
+does not compile on this checkout (exit 74, 22 bridges, a missing archive member),
+so `harness/run_parity.sh` now reports exit 77 EVIDENCE UNAVAILABLE by default and
+these rows were obtained under `--accept-transformed-oracle` conditions with a
+declared seeding deviation. Eight of the nine correspond to AAP §0.8.5's mandated
+set, plus `end_of_cycle_gl` beyond it; what they establish is agreement with a
+partly repaired specification, which is a genuine and useful measurement and is not
+the acceptance criterion.
+
+The results were obtained through the rigid protocol of §4, with the comparison
+bounded by each scenario's declared affected-table list, the pass condition checked
+as **both** exit 0 **and** zero-byte stdout, and attestation enforced rather than
+waived. The
 determinism tier passes (6) and so does the committed scenario tier — 107 tests
 under `pytest -m scenario` — and re-deriving stage 10 from the retained captures
 republishes a byte-identical verdict.

@@ -173,9 +173,10 @@ ACAS_SEED_DIR_OVERRIDE=''      # --seed-dir: WHERE the declared files live. It n
 # application access -- the compiled posting run, the Python cycle, the reset and
 # the dumps -- is left in the mode harness/Dockerfile.mariadb declares, which is
 # ON. Nothing here ever issues a COMMIT on a loader's behalf (R-4).
-ACAS_SEED_WINDOW_TARGET=1      # the mode the loaders run under: 1 (ON), the canonical
-                               # durable mode, unless ACAS_SEED_AUTOCOMMIT=off asks for
-                               # the AAP-literal window instead
+ACAS_SEED_WINDOW_TARGET=0      # the mode the loaders run under: 0 (OFF), which is what
+                               # the Agent Action Plan mandates, unless
+                               # ACAS_SEED_AUTOCOMMIT=on explicitly asks for the
+                               # measured-durable window as a declared deviation
 ACAS_SEED_WINDOW_OPEN=0        # 1 once the window has been entered
 ACAS_SEED_WINDOW_RESTORE=''    # @@GLOBAL.autocommit as it was BEFORE the window
 ACAS_SEED_WINDOW_SET=0         # 1 if this script actually issued SET GLOBAL
@@ -875,15 +876,22 @@ the administrative account harness/docker-compose.yml already supplies
 asserted rather than established, which is the older, weaker behaviour and is
 reported as such.
 
-  ACAS_SEED_AUTOCOMMIT unset or `on'  the DEFAULT, and the mode MEASURED to be
-                                      the only one in which the frozen loaders
-                                      leave a durable row. See the measurement
-                                      table above acas_open_seed_autocommit_window.
-  ACAS_SEED_AUTOCOMMIT=off            the AAP-LITERAL mode. Reproduces the frozen
-                                      no-COMMIT defect: seven loaders report
-                                      success and the tables read empty, and the
-                                      durability gate exits 76 rather than
-                                      reporting a seed that is not there.
+  ACAS_SEED_AUTOCOMMIT unset or `off' the DEFAULT, and the mode the Agent Action
+                                      Plan mandates (sections 0.2.1.1, 0.4.1.7,
+                                      0.5.2). Reproduces the frozen no-COMMIT
+                                      defect: the loaders report success and the
+                                      tables read empty, so the durability gate
+                                      exits 76 rather than reporting a seed that
+                                      is not there. In this mode no seeded state,
+                                      and therefore no parity evidence, can be
+                                      produced from this checkout.
+  ACAS_SEED_AUTOCOMMIT=on             a DECLARED DEVIATION from the AAP, and the
+                                      mode MEASURED to be the only one in which
+                                      the frozen loaders leave a durable row. Use
+                                      it to obtain a working fixture; it does not
+                                      yield AAP-conformant evidence. See the
+                                      measurement table above
+                                      acas_open_seed_autocommit_window.
 
 Either way the seeded row counts are MEASURED when the window closes, and an
 empty result exits 76 instead of reporting a success the tables do not show. No
@@ -1763,12 +1771,27 @@ acas_read_autocommit() {
 }
 
 # =============================================================================
-# THE SEEDING WINDOW -- autocommit ON BY DEFAULT, AND ONLY HERE
+# THE SEEDING WINDOW -- autocommit OFF BY DEFAULT, AND ONLY HERE
 #
-# THE CANONICAL MODE IS AUTOCOMMIT ON, because it is the only mode in which the
-# frozen loaders are durable. That is an R-6 arbitration against compiled
-# behaviour, not a preference, and it is written up in
-# docs/migration/ambiguity-resolutions.md. The measurements behind it:
+# THE DEFAULT IS THE MODE THE AGENT ACTION PLAN MANDATES: autocommit OFF, per
+# sections 0.2.1.1, 0.4.1.7 and 0.5.2. The AAP is the frozen, agreed-upon
+# specification for this migration; a harness that quietly seeded in the other
+# mode would be reinterpreting its own governing document, and the reader of a
+# parity result would have no way to know the configuration had been changed
+# underneath them.
+#
+# THE MEASURED CONSEQUENCE IS THAT THIS MODE CANNOT PRODUCE A SEEDED STATE, and
+# it is disclosed rather than worked around: the frozen loaders reach no live
+# COMMIT, so MariaDB discards each loader's session at disconnect and every
+# seeded table reads EMPTY. acas_assert_seed_durability measures the row counts
+# when the window closes and exits EX_NOT_DURABLE. Nothing here supplies the
+# missing COMMIT, because R-4 makes a defect fixed a failure.
+#
+# The measurements below were taken against the frozen tree and are the reason
+# ACAS_SEED_AUTOCOMMIT=on remains SELECTABLE as an explicitly declared deviation.
+# They are NOT a licence to make it the default: they establish that the mode is
+# invisible to the frozen code, not that the AAP may be silently overridden.
+# They are written up in docs/migration/ambiguity-resolutions.md.
 #   * The AAP's premise is a COMMENT, not code. All three provisions -- section
 #     0.2.1.1 ("the batch loader turns autocommit off"), section 0.5.2
 #     ("autocommit must be off during seeding ... because the batch loader sets it
@@ -1789,8 +1812,11 @@ acas_read_autocommit() {
 #     !!!!!". The banner itself concedes the server default at L11-L12: "It is as
 #     default set ON."
 # So the banner is a stale comment that the code and the maintainer's own later
-# notes contradict, and reproducing the SYSTEM means seeding in the mode its
-# loaders actually require.
+# notes contradict. What follows from that is narrow: the seeding mode changes no
+# behaviour this migration reproduces, so requesting ON when a working fixture is
+# needed corrupts nothing. What does NOT follow is that ON may be the default --
+# the AAP says off, and a fixture seeded under a deviation is a fixture, not
+# evidence.
 #
 # ACAS_SEED_AUTOCOMMIT=off selects the AAP-LITERAL window instead. It remains
 # available deliberately, because the AAP is the frozen agreement and a reader
@@ -1845,22 +1871,27 @@ acas_open_seed_autocommit_window() {
   local requested="${ACAS_SEED_AUTOCOMMIT-}"
   local window_label
   case "${requested,,}" in
-    ''|on|1|true|yes)
-      # Unset means the MEASURED DURABLE MODE, not the AAP-literal one. See the
-      # measurement table above for why the literal reading cannot be a default.
-      ACAS_SEED_WINDOW_TARGET=1
-      window_label='autocommit ON -- the canonical durable mode'
-      ;;
-    off|0|false|no)
+    ''|off|0|false|no)
+      # Unset means the AAP-MANDATED mode. The Agent Action Plan is the frozen
+      # agreement and says autocommit is off during seeding in three places
+      # (sections 0.2.1.1, 0.4.1.7, 0.5.2); a harness default that quietly chose
+      # the other mode would be this migration reinterpreting its own governing
+      # document. The consequence is measured and disclosed rather than hidden:
+      # the frozen loaders reach no live COMMIT under it, so nothing persists and
+      # acas_assert_seed_durability refuses the seed with EX_NOT_DURABLE.
       ACAS_SEED_WINDOW_TARGET=0
-      window_label='autocommit OFF -- the AAP-literal window, which the frozen loaders cannot make durable'
+      window_label='autocommit OFF -- the AAP-mandated window; the frozen loaders cannot make it durable'
+      ;;
+    on|1|true|yes)
+      ACAS_SEED_WINDOW_TARGET=1
+      window_label='autocommit ON -- a DECLARED DEVIATION from the AAP, explicitly requested'
       ;;
     *)
       acas_die "$EX_USAGE" \
-        "ACAS_SEED_AUTOCOMMIT must be 'on' (the measured durable default) or 'off' (the AAP-literal mode, which reproduces the frozen no-COMMIT defect); got '$requested'." \
+        "ACAS_SEED_AUTOCOMMIT must be 'off' (the AAP-mandated default, which reproduces the frozen no-COMMIT defect) or 'on' (a declared deviation: the only mode measured to leave a durable row); got '$requested'." \
         'It selects the autocommit mode the frozen load programs run under, and' \
         'nothing else; runtime application access is unaffected either way.' \
-        'Unset means on.'
+        'Unset means off.'
       ;;
   esac
   acas_stage "Preconditions 8/8: the seeding window ($window_label)"
@@ -1871,7 +1902,7 @@ acas_open_seed_autocommit_window() {
   ACAS_SEED_WINDOW_RESTORE="$before_global"
 
   if (( ACAS_SEED_WINDOW_TARGET == 1 )); then
-    acas_note 'the seeding window runs with autocommit ON -- the mode MEASURED to be the only one in which the frozen loaders leave a durable row, and therefore this protocol'"'"'s default. It departs from the literal wording of Agent Action Plan sections 0.2.1.1, 0.4.1.7 and 0.5.2, whose stated premise ("the seeded state depends on its commit boundaries") does not hold of the frozen source: every "perform aa030-Commit" and "perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out and the vendored cobmysqlapi38.c exposes no mysql_autocommit at all. Measured under both windows the loader return codes are IDENTICAL, so the mode is invisible to the frozen code and changes no behaviour being reproduced. Across all 28 loaders there are 77 references to those two paragraphs and not one is live, and the maintainer superseded his own banner at [common/glbatchLD.cbl:L11-L12], [common/glbatchLD.cbl:L386-L387] and [common/glbatchLD.cbl:L453]. Arbitrated under R-6 and written up in docs/migration/ambiguity-resolutions.md. Pass ACAS_SEED_AUTOCOMMIT=off for the literal mode, which reproduces the no-COMMIT defect and is refused by the durability gate.'
+    acas_note 'the seeding window runs with autocommit ON, WHICH IS A DECLARED DEVIATION FROM THE AGENT ACTION PLAN AND WAS EXPLICITLY REQUESTED -- it is not the default. It is the mode MEASURED to be the only one in which the frozen loaders leave a durable row. It departs from the literal wording of Agent Action Plan sections 0.2.1.1, 0.4.1.7 and 0.5.2, whose stated premise ("the seeded state depends on its commit boundaries") does not hold of the frozen source: every "perform aa030-Commit" and "perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out and the vendored cobmysqlapi38.c exposes no mysql_autocommit at all. Measured under both windows the loader return codes are IDENTICAL, so the mode is invisible to the frozen code and changes no behaviour being reproduced. Across all 28 loaders there are 77 references to those two paragraphs and not one is live, and the maintainer superseded his own banner at [common/glbatchLD.cbl:L11-L12], [common/glbatchLD.cbl:L386-L387] and [common/glbatchLD.cbl:L453]. That measurement is why the mode remains selectable at all, and it is written up in docs/migration/ambiguity-resolutions.md. It does NOT license a silent default: the AAP is the frozen agreement, so UNSET means off. A seed produced under this deviation is a working fixture, NOT parity evidence -- the attestation records the mode and the reader is entitled to know the seed did not come from the mandated configuration.'
   fi
 
   # Already in the requested mode? Then nothing is set, and nothing will be
@@ -1933,7 +1964,7 @@ acas_open_seed_autocommit_window() {
     # WARNING here and a REFUSAL later: R-4 forbids issuing the COMMIT the frozen
     # code omits, and R-6 forbids passing the result off as evidence, so the run
     # continues and acas_assert_seed_durability judges the outcome.
-    acas_warn 'ACAS_SEED_AUTOCOMMIT=off was selected explicitly. The frozen loaders reach no COMMIT, so inside this AAP-literal window their writes are NOT durable: the tables may read EMPTY after a seed that reports success. Measured across the frozen tree -- every "perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out (78 sites, none live) and "perform aa030-Commit" occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented out as well; [common/systemLD.cbl] declares both paragraphs at L406 and L420 with no perform site at all. This is the reproduced legacy defect (R-4), not a fault in this script -- the maintainer recorded the same observation at [common/analLD.cbl:L442] ("These do not work during testing with mariadb - Non transactional model or autocommit set ON"). Nothing here issues the missing COMMIT, because a defect fixed is a failure; instead the seeded row counts are MEASURED when the window closes and an empty result is refused rather than reported as a success.'
+    acas_warn 'the seeding window is autocommit OFF -- the mode the Agent Action Plan mandates (sections 0.2.1.1, 0.4.1.7, 0.5.2) and therefore this script'"'"'s default. The frozen loaders reach no COMMIT, so inside this AAP-mandated window their writes are NOT durable: the tables may read EMPTY after a seed that reports success. Measured across the frozen tree -- every "perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out (78 sites, none live) and "perform aa030-Commit" occurs exactly once anywhere, at [common/irsdfltLD.cbl:L437], commented out as well; [common/systemLD.cbl] declares both paragraphs at L406 and L420 with no perform site at all. This is the reproduced legacy defect (R-4), not a fault in this script -- the maintainer recorded the same observation at [common/analLD.cbl:L442] ("These do not work during testing with mariadb - Non transactional model or autocommit set ON"). Nothing here issues the missing COMMIT, because a defect fixed is a failure; instead the seeded row counts are MEASURED when the window closes and an empty result is refused rather than reported as a success. THE CONSEQUENCE, STATED PLAINLY: in the configuration the AAP mandates, this repository cannot produce a seeded oracle state, so parity evidence cannot be produced either. That is a finding about the frozen system, not a defect in this harness. ACAS_SEED_AUTOCOMMIT=on requests the measured-durable window as an explicitly DECLARED DEVIATION, which yields a usable fixture but not AAP-conformant evidence.'
   fi
 }
 
@@ -2021,17 +2052,25 @@ acas_assert_seed_durability() {
     'empty diff is the only pass condition the protocol has (AAP section 0.8.5),' \
     'so a run that continued would certify the migration exact having compared' \
     'nothing at all.' \
-    'HOW THIS RUN GOT HERE: ACAS_SEED_AUTOCOMMIT=off was selected explicitly.' \
-    'It is not the default -- unset means ON, the mode MEASURED to be the only' \
-    'one in which these loaders leave a durable row, and the measurement shows' \
-    'their return codes are identical either way, so the mode is invisible to' \
-    'the frozen code. Unset the variable, or set it to on, to seed.' \
-    'Selecting off is a legitimate thing to do -- it reproduces the frozen defect' \
-    'end to end, which is exactly what this exit code reports.' \
-    'TO SEED, simply UNSET ACAS_SEED_AUTOCOMMIT, or set it to on. That is the' \
-    'CANONICAL mode and needs no flag; it diverges from the AAP-mandated seeding' \
-    'mode deliberately, and the R-6 arbitration behind that choice is written up' \
-    'in docs/migration/ambiguity-resolutions.md.'
+    'HOW THIS RUN GOT HERE: the seeding window was autocommit OFF, which is the' \
+    'mode the Agent Action Plan mandates (sections 0.2.1.1, 0.4.1.7, 0.5.2) and is' \
+    'therefore this script'"'"'s DEFAULT. Reaching this exit code from the default is' \
+    'the expected outcome on this checkout, not a misconfiguration: it is the' \
+    'frozen no-COMMIT defect reproduced end to end, which is exactly what this' \
+    'exit code reports (R-4).' \
+    'WHAT IT MEANS: in the configuration the AAP mandates, this repository cannot' \
+    'produce a seeded oracle state, and therefore cannot produce parity evidence.' \
+    'That is a finding about the frozen system. It is recorded in' \
+    'docs/migration/scenario-diff-evidence.md rather than worked around here.' \
+    'TO OBTAIN A WORKING FIXTURE, request the deviation explicitly:' \
+    '    ACAS_SEED_AUTOCOMMIT=on   (or -e ACAS_SEED_AUTOCOMMIT=on under Compose)' \
+    'That is the only mode MEASURED to leave a durable row, and the measurement' \
+    'shows the loader return codes are identical either way, so the mode is' \
+    'invisible to the frozen code. It is a DECLARED DEVIATION: the fixture it' \
+    'produces is usable for development and diagnosis, but a result obtained from' \
+    'it is not AAP-conformant evidence, and this harness will not describe it as' \
+    'though it were. The measurements are written up in' \
+    'docs/migration/ambiguity-resolutions.md.'
 }
 
 

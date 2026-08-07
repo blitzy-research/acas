@@ -77,6 +77,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import importlib
+import logging
 import sys
 import types
 from collections.abc import Iterator
@@ -927,19 +928,24 @@ def test_a_present_contract_resolves_as_the_frozen_reader_would() -> None:
         assert cut.host == "db.internal"
 
 
-def test_the_malformed_code_is_published_and_surfaced_but_never_raised_here() -> None:
-    """⚠ 1 IS PART OF THE FROZEN SET AND NO PATH IN THIS MODULE RAISES IT.
+def test_the_malformed_code_is_published_and_surfaced_by_the_boundary() -> None:
+    """⚠ 1 IS PART OF THE FROZEN SET, AND THE SIX-FIELD RESOLVER NEVER RAISES IT.
 
-    [common/acas-get-params.cbl:L37-L42] publishes four codes, of which the migrated
-    resolver can express one: 8, "no source". The malformed code, 1, belongs to the frozen
-    reader's `if WS-RDB-Equal not = "="` test [common/acas-get-params.cbl:L200-L203] -
-    a keyword terminator that is neither `=` nor `:` - and an environment variable HAS no
-    keyword terminator, so the condition cannot arise over this transport.
+    [common/acas-get-params.cbl:L37-L42] publishes four codes, of which
+    `resolve_rdbms_params` can express one: 8, "no source". The malformed code, 1,
+    belongs to the frozen reader's `if WS-RDB-Equal not = "="` test
+    [common/acas-get-params.cbl:L200-L203] - a keyword terminator that is neither `=`
+    nor `:` - and an environment variable HAS no keyword terminator, so the condition
+    cannot arise over this transport for the six CONNECTION parameters.
 
-    THE HONEST STATEMENT OF THAT IS WHAT THIS TEST MAKES: the constant is 1, the boundary
-    surfaces whatever code an error carries - so a future path that did raise 1 would be
-    reported as 1 without another change - and the resolver's own refusal is 8. Claiming
-    coverage of a malformed contract would be claiming a path that does not exist.
+    IT IS RAISED BY THE DEPLOYMENT SETTINGS BESIDE THEM, which have no frozen
+    counterpart at all: an unrecognised transport flag [`read_declared_flag`] and a
+    malformed driver deadline [`_optional_seconds`] both refuse with 1 rather than
+    guessing. Those paths have their own tests in section 8 below.
+
+    WHAT THIS TEST STATES: the constant is 1, and the boundary surfaces whatever code
+    an error carries, so each refusal reaches a caller as its own status without
+    another change.
     """
     with _shipped("acas_posting.cli.rdbms_params", "acas_posting.cli.args") as (
         rdbms_params,
@@ -1443,3 +1449,260 @@ def test_no_module_claims_the_clear_answer_defaults_on() -> None:
         "an explicit Y or N and the frozen prompt has no default at all (MN-05):\n  "
         + "\n  ".join(offenders)
     )
+
+
+# ---------------------------------------------------------------------------
+#  8.  SEC-01 - THE CONFIGURATION-FAILURE STATUS IS AN INTEGER ON BOTH ROUTES
+#
+#  ⭐ THE DEFECT THIS SECTION CLOSES. `RdbmsParamError.__init__` takes
+#  `(return_code: int, message: str)`. Two raise sites inside `_optional_seconds`
+#  passed them the other way round, so for a malformed `ACAS_DB_CONNECT_TIMEOUT`,
+#  `ACAS_DB_READ_TIMEOUT` or `ACAS_DB_WRITE_TIMEOUT` the exception carried the
+#  FORMATTED MESSAGE in `return_code` and the integer code in `str(error)`. Nothing
+#  raised at the point of the mistake. What happened instead:
+#
+#    * `report_configuration_failure` returned `error.return_code` - the string -
+#      as the route's status. Run directly, `python -m acas_posting.cli.<route>`
+#      handed that string to `SystemExit`, which prints it verbatim, so the
+#      "status" became a sentence and the shell saw 1 (CWE-704).
+#    * Run through the router, `__main__` applied `args.is_serious_error(term_code)`
+#      - `term_code > 7` - to a `str` and raised `TypeError`, whose traceback
+#      discloses installation paths and internals (CWE-209).
+#    * Both messages interpolated the raw value with `{raw!r}`, and these three
+#      variables are read from the same transport as `ACAS_DB_PASSWORD`, so a value
+#      pasted into the wrong variable reached the log (CWE-532).
+#
+#  ⛔ NO ACCOUNTING BEHAVIOUR IS IN SCOPE HERE. Every assertion below is about the
+#  DEPLOYMENT boundary - the three driver deadlines and the transport flags have no
+#  frozen counterpart at all, and are read before any statement with a COBOL
+#  counterpart runs (rules R-3, R-6).
+# ---------------------------------------------------------------------------
+
+
+_TIMEOUT_VARIABLES: Final[tuple[str, ...]] = (
+    "ACAS_DB_CONNECT_TIMEOUT",
+    "ACAS_DB_READ_TIMEOUT",
+    "ACAS_DB_WRITE_TIMEOUT",
+)
+
+#: Malformed values, each chosen to be recognisable if it is ever echoed. The two
+#: numeric ones are out of range rather than unparseable, so both refusal branches
+#: of `_optional_seconds` are covered.
+_MALFORMED_TIMEOUTS: Final[tuple[str, ...]] = (
+    "abc-XYZ",
+    "s3cr3t-Passw0rd",
+    "1 2",
+    "-77771",
+    "918273645",
+)
+
+
+def test_every_rdbms_param_error_carries_an_integer_return_code() -> None:
+    """The exception's fields are `(int, str)` at every raise site in the module.
+
+    Driven rather than read: each of the three refusal paths the module can reach
+    over this transport is provoked, and the constructed exception is inspected. A
+    reversed argument pair puts a `str` in `return_code`, which is exactly what
+    `boundary_exit_status` and the router then mishandle.
+    """
+    with _shipped("acas_posting.cli.rdbms_params") as (rdbms_params,):
+        provoked: list[rdbms_params.RdbmsParamError] = []
+
+        #  1. no source at all - the frozen reader's code 8.
+        with pytest.raises(rdbms_params.RdbmsParamError) as absent:
+            rdbms_params.resolve_rdbms_params({})
+        provoked.append(absent.value)
+
+        #  2. an unrecognised transport flag - code 1.
+        with pytest.raises(rdbms_params.RdbmsParamError) as flag:
+            rdbms_params.read_declared_flag(
+                {"ACAS_DB_ALLOW_PLAINTEXT": "perhaps"}, "ACAS_DB_ALLOW_PLAINTEXT"
+            )
+        provoked.append(flag.value)
+
+        #  3. a malformed driver deadline - code 1, and the SEC-01 site.
+        for variable in _TIMEOUT_VARIABLES:
+            for value in _MALFORMED_TIMEOUTS:
+                with pytest.raises(rdbms_params.RdbmsParamError) as deadline:
+                    rdbms_params.resolve_transport_policy(
+                        {variable: value, "ACAS_DB_ALLOW_PLAINTEXT": "1"}
+                    )
+                provoked.append(deadline.value)
+
+        for error in provoked:
+            assert type(error.return_code) is int, (
+                f"return_code is {type(error.return_code).__name__} carrying "
+                f"{error.return_code!r}. RdbmsParamError takes "
+                f"(return_code, message) in that order (SEC-01)."
+            )
+            assert error.return_code in {
+                rdbms_params.RDB_RETURN_NO_SOURCE,
+                rdbms_params.RDB_RETURN_MALFORMED,
+            }, f"{error.return_code} is not one of the frozen codes 8 and 1."
+            assert str(error) and not str(error).isdigit(), (
+                f"str(error) is {str(error)!r}, which is the shape a reversed "
+                f"argument pair produces: the integer code where the message "
+                f"belongs (SEC-01)."
+            )
+
+
+def test_a_malformed_deadline_names_its_variable_and_never_its_value() -> None:
+    """The refusal is diagnosable without echoing what was typed.
+
+    These three variables arrive over the same transport as `ACAS_DB_PASSWORD`, so a
+    value pasted into the wrong one must not reach a log or a traceback (CWE-532).
+    The message therefore names the VARIABLE and the accepted range, which is all an
+    operator needs in order to correct it.
+    """
+    with _shipped("acas_posting.cli.rdbms_params") as (rdbms_params,):
+        for variable in _TIMEOUT_VARIABLES:
+            for value in _MALFORMED_TIMEOUTS:
+                with pytest.raises(rdbms_params.RdbmsParamError) as raised:
+                    rdbms_params.resolve_transport_policy(
+                        {variable: value, "ACAS_DB_ALLOW_PLAINTEXT": "1"}
+                    )
+                message = str(raised.value)
+                assert variable in message, (
+                    f"the refusal for {variable}={value!r} does not name the "
+                    f"variable, so an operator cannot tell which one to correct."
+                )
+                assert value not in message and repr(value) not in message, (
+                    f"the refusal for {variable} echoes the value {value!r}: "
+                    f"{message!r}. This transport also carries the password."
+                )
+
+
+def test_the_error_refuses_a_reversed_argument_pair() -> None:
+    """A transposition fails at the raise site instead of at the process boundary.
+
+    The annotations cannot catch it at run time, and the consequence was three
+    distinct downstream failures none of which pointed at the raise. So the
+    constructor refuses the pair, and the diagnosis names the order it wants.
+    """
+    with _shipped("acas_posting.cli.rdbms_params") as (rdbms_params,):
+        #  The declared order is accepted.
+        good = rdbms_params.RdbmsParamError(
+            rdbms_params.RDB_RETURN_MALFORMED, "a value-free diagnosis"
+        )
+        assert good.return_code == rdbms_params.RDB_RETURN_MALFORMED
+        assert str(good) == "a value-free diagnosis"
+
+        #  The reversed one is not, and the refusal echoes neither argument.
+        with pytest.raises(TypeError) as raised:
+            rdbms_params.RdbmsParamError(
+                "a value-free diagnosis", rdbms_params.RDB_RETURN_MALFORMED
+            )
+        assert "(return_code: int, message: str)" in str(raised.value)
+        assert "a value-free diagnosis" not in str(raised.value)
+
+
+def test_the_configuration_boundary_cannot_return_a_non_integer_status() -> None:
+    """`report_configuration_failure` resolves through the one guarded helper.
+
+    The regression is expressed as the condition itself rather than as the shape of
+    the code: an error whose `return_code` is NOT an integer must still produce an
+    integer status, and it must be the same integer `boundary_exit_status` produces,
+    because the router and a direct invocation read the route's value through
+    different machinery and must not be able to disagree.
+    """
+    with _shipped("acas_posting.cli.args", "acas_posting.cli.rdbms_params") as (
+        args,
+        rdbms_params,
+    ):
+        class _MisconstructedError(rdbms_params.RdbmsParamError):
+            """An error carrying a string where the frozen code belongs.
+
+            Built by bypassing the constructor's guard, so that the BOUNDARY's own
+            robustness is what this test measures rather than the guard's.
+            """
+
+            def __init__(self) -> None:
+                ValueError.__init__(self, "1")
+                self.return_code = "ACAS_DB_READ_TIMEOUT must be a whole number"
+
+        broken = _MisconstructedError()
+        status = args.report_configuration_failure(
+            broken, logger=logging.getLogger(__name__), subject="General Ledger"
+        )
+        assert type(status) is int, (
+            f"the boundary returned {status!r}, a "
+            f"{type(status).__name__}. A route returns this value as its process "
+            f"exit status and the router compares it with `> 7` (SEC-01)."
+        )
+        assert status == args.boundary_exit_status(broken)
+        #  And the router's own predicate accepts it, which is the comparison that
+        #  raised `TypeError` before.
+        assert args.is_serious_error(status) in {True, False}
+
+        #  A well-formed error still surfaces its own frozen code unchanged.
+        for code in (
+            rdbms_params.RDB_RETURN_NO_SOURCE,
+            rdbms_params.RDB_RETURN_MALFORMED,
+        ):
+            sound = rdbms_params.RdbmsParamError(code, "a value-free diagnosis")
+            assert (
+                args.report_configuration_failure(
+                    sound, logger=logging.getLogger(__name__), subject="Sales"
+                )
+                == code
+            )
+
+
+def test_a_malformed_deadline_reaches_a_route_as_an_integer_status() -> None:
+    """Direct and routed execution agree, and neither runs a program.
+
+    The route is driven for real with a malformed `ACAS_DB_READ_TIMEOUT` in the
+    environment it resolves from, TWICE: once as a direct call, the way
+    `python -m acas_posting.cli.gl_post_cycle` reaches it, and once through
+    `run_entry_point`, which is the single boundary both that guard and the package
+    router pass through. The two statuses must be equal and both must be integers -
+    the divergence SEC-01 produced was exactly here, one route printing a sentence
+    as its status while the other raised `TypeError` comparing it with 7.
+
+    The three General Ledger program modules are doubles that record every dispatch,
+    and the list must stay empty on both passes: the refusal happens while the
+    deployment contract is still being read, before any database is contacted or any
+    program entered, so a run that reports it has changed no table.
+    """
+    with _shipped(
+        "acas_posting.cli.gl_post_cycle",
+        "acas_posting.cli.args",
+        "acas_posting.cli.rdbms_params",
+    ) as (cycle, args, rdbms_params):
+        #  The router is reached with `importlib` rather than through `_shipped`,
+        #  because `acas_posting.__main__` is resident for the whole session - the
+        #  tier's isolation vocabulary deliberately does not evict it - so asking
+        #  `_shipped` for a fresh import of it would fail its own precondition.
+        package_main = importlib.import_module("acas_posting.__main__")
+        dispatched: list[str] = []
+        original_bind = args.bind_gl_linkage
+
+        def refuse(*_arguments: object, **_keywords: object) -> object:
+            #  Raised the way `resolve_transport_policy` raises it, from the real
+            #  reader, so the test cannot drift from the module it is about.
+            return rdbms_params.resolve_transport_policy(
+                {
+                    "ACAS_DB_READ_TIMEOUT": "s3cr3t-Passw0rd",
+                    "ACAS_DB_ALLOW_PLAINTEXT": "1",
+                }
+            )
+
+        args.bind_gl_linkage = refuse
+        try:
+            with _programs(cycle, dispatched, term_codes={}):
+                direct = cycle.main(["--run-date", _RUN_DATE_TEXT])
+                routed = package_main.run_entry_point(
+                    cycle.main,
+                    ["--run-date", _RUN_DATE_TEXT],
+                    command="post-cycle",
+                )
+        finally:
+            args.bind_gl_linkage = original_bind
+
+        for status in (direct, routed):
+            assert type(status) is int
+            assert status == rdbms_params.RDB_RETURN_MALFORMED
+            #  The router's own predicate, which raised on a `str` before.
+            assert args.is_serious_error(status) is False
+        assert direct == routed
+        assert dispatched == []

@@ -1199,7 +1199,7 @@ def test_empty_batch_state_parity(
         f"THE MIGRATED CYCLE DIVERGED FROM THE COMPILED ORACLE on the empty "
         f"batch: {run.tree.total_differences} finding(s) across "
         f"{len(run.tables)} bounded table(s).\n"
-        f"{harness.diff_states.render(run.tree)}\n"
+        f"{run.diagnose()}\n"
         f"  Each line is `<TABLE>  <finding>  cobol=... python=...`; rows are "
         f"aligned by primary-key VALUE and the comparison is exact, so `1` "
         f"against `\"1\"` is a difference. The report is also at "
@@ -1235,8 +1235,8 @@ def test_empty_batch_state_parity(
         f"banner - so that an operator can test for emptiness rather than parse a "
         f"message."
     )
-    assert diff_states.render(run.tree) == "", (
-        f"the report renders as {diff_states.render(run.tree)!r} on an empty "
+    assert run.diagnose() == "", (
+        f"the report renders as {run.diagnose()!r} on an empty "
         f"comparison. Agent Action Plan section 0.8.5 makes the empty string the "
         f"rendering of two identical trees."
     )
@@ -1760,7 +1760,8 @@ def test_diff_exit_contract_is_honoured(
 @pytest.mark.database
 @pytest.mark.oracle
 def test_dump_is_wellformed_on_both_sides(
-    empty_batch_parity: object, harness: object, frozen_schema: object
+    empty_batch_parity: object, harness: object, frozen_schema: object,
+    withheld: object,
 ) -> None:
     """THE DEFENCE AGAINST "NEVER DUMPED" MASQUERADING AS "CORRECTLY EMPTY".
 
@@ -1912,7 +1913,7 @@ def test_dump_is_wellformed_on_both_sides(
                         value, bool
                     ), (
                         f"{where}: {column} serialised as "
-                        f"{type(value).__name__} ({value!r}). A dumped value is "
+                        f"{type(value).__name__} ({withheld(value)}). A dumped value is "
                         f"a JSON string or a JSON integer and NEVER a real "
                         f"number: no accounting value in this migration passes "
                         f"through binary floating point (R-2)."
@@ -1930,7 +1931,7 @@ def test_dump_is_wellformed_on_both_sides(
                         if declared.scale:
                             fraction = value.partition(".")[2]
                             assert len(fraction) == declared.scale, (
-                                f"{where}: {column} rendered {value!r}, which "
+                                f"{where}: {column} rendered {withheld(value)}, which "
                                 f"carries {len(fraction)} decimal place(s) "
                                 f"against the {declared.scale} declared by "
                                 f"{declared.sql_type!r} at "

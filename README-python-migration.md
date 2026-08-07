@@ -554,34 +554,49 @@ unchanged.
 The three dependency sets are pairwise disjoint and exact. Every direct
 dependency, with its pin:
 
-| Set | Package | Pin | Why it is here |
-| --- | --- | --- | --- |
-| runtime | `mysql-connector-python` | `26.7.0` | **The only third-party module `acas_posting` imports, and the only runtime dependency.** Materialises `DECIMAL` as `Decimal` and integer columns as `int`, never as a float (R-2) |
-| harness | `PyYAML` | `6.0.3` | Parses the nine scenario definitions under `harness/scenarios/` |
-| dev | `pytest` | `9.1.1` | The test runner |
-| dev | `pytest-cov` | `7.1.0` | Coverage as traceability evidence (R-5), **not** a quality gate |
+| Set | Package | Pin | Why it is here | Imported? |
+| --- | --- | --- | --- | --- |
+| runtime | `mysql-connector-python` | `26.7.0` | The database driver. Materialises `DECIMAL` as `Decimal` and integer columns as `int`, never as a float (R-2) | **Yes** — in `dal/connection.py`, and it is the only third-party module `acas_posting` imports |
+| runtime | `SQLAlchemy` | `2.0.51` | Declared because AAP §0.5.1 fixes the runtime closure at this name and this version | **No** — see the note below |
+| runtime | `greenlet` | `3.5.4` | `SQLAlchemy`'s own requirement, named as such by AAP §0.5.1 | **No** |
+| runtime | `typing_extensions` | `4.16.0` | `SQLAlchemy`'s own requirement | **No** |
+| harness | `PyYAML` | `6.0.3` | Parses the nine scenario definitions under `harness/scenarios/` | Yes, by the harness only |
+| dev | `pytest` | `9.1.1` | The test runner | Yes, by the tests only |
+| dev | `pytest-cov` | `7.1.0` | Coverage as traceability evidence (R-5), **not** a quality gate | Yes, by the tests only |
 
 `coverage`, `pluggy`, `iniconfig`, `packaging`, `Pygments` and the `setuptools`
 build backend are pinned alongside them in `requirements.txt`'s section 3.
 
-⚠️ **`SQLAlchemy` is absent from that table, and earlier revisions of this
-document said it was active.** It was pinned as a runtime dependency and
-described here, in `pyproject.toml` and in `requirements.txt` as *"Core level
-only — `text()` statements on an explicit `Connection`"*, together with
-`greenlet` and `typing_extensions` as its transitive requirements. **No module
-under `acas_posting/` ever imported it.** An AST census over the package yields
-exactly one third-party top-level module, `mysql` — a fact `pyproject.toml`
-already stated in the same file that listed all three as dependencies. Three
-artifacts advertised an execution path the code did not take, which is finding
-MJ-20, and the divergence is recorded here rather than quietly corrected.
+⚠️ **`SQLAlchemy` is declared and is not imported, and both halves are
+deliberate.** This is the one place in the dependency set where what is
+*declared* is wider than what is *executed*, so it is stated outright rather than
+left to be inferred from either artifact alone.
 
-**The requirement permits either option, and the plan names which is primary.**
-AAP §0.8.2 preserves the user requirement verbatim and it is an either/or —
-*"MySQL access via `mysql-connector-python` or SQLAlchemy Core with no ORM entity
-layer"* — while §0.5.1 calls `mysql-connector-python` *"the primary database
-path"* and §0.1.2's diagram labels the edge *"SQLAlchemy Core / connector"*, an
-alternative rather than a stack. Shipping the connector alone satisfies the
-requirement and takes the path the plan itself calls primary.
+**Declared, because the plan fixes the closure and the plan is frozen.** AAP
+§0.5.1 states the runtime inventory as four names at exact versions —
+`mysql-connector-python` 26.7.0, `SQLAlchemy` 2.0.51 and, in its own words,
+*"Pulls `greenlet` 3.5.4 as a transitive dependency"*, with `typing_extensions`
+travelling with it. A manifest may not narrow that closure on implementation
+grounds, however sound those grounds are: aligning code to the plan is the
+standing rule, and the plan is not editable by the implementation. All four are
+therefore declared in `pyproject.toml`, pinned to the plan's versions, and
+hash-verified in `requirements.txt` section 1.
+
+**Not imported, because the code takes the other of two permitted paths.** An AST
+census over `acas_posting/` yields exactly one third-party top-level module,
+`mysql`. AAP §0.8.2 preserves the user requirement verbatim and it is an
+either/or — *"MySQL access via `mysql-connector-python` or SQLAlchemy Core with no
+ORM entity layer"* — while §0.5.1 calls `mysql-connector-python` *"Oracle's
+official MySQL driver and the primary database path"* and §0.1.2's diagram labels
+the edge *"SQLAlchemy Core / connector"*, an alternative rather than a stack. The
+connector is the path taken, which is the one the plan itself calls primary.
+
+**An earlier revision resolved the same tension the other way**, by deleting the
+three pins from both manifests so that declared and imported coincided (finding
+MJ-20). That removed a real defect — three artifacts had been describing the Core
+boundary as *active* — but it also left the manifests narrower than the frozen
+plan, which is finding DEP-01. The pins are restored; the false activity claims
+are not. What replaced them is the sentence you are reading.
 
 **What decided it was the frozen behaviour, not the tidier diagram.**
 `acas_posting/dal/connection.py` does not merely open connections; it reproduces
@@ -600,18 +615,35 @@ R-2 loses nothing by the choice: the exact-decimal guarantee is enforced by
 `AcasConverter` and a live per-connection probe, which are driver-level and are
 what a Core boundary would have had to pass through `connect_args` in any case.
 
-`tests/arithmetic/test_deployment_contract_boundaries.py` now holds the declared
-runtime dependency set and the AST import census in agreement **in both
-directions**, so a package can neither be declared without being imported nor
-imported without being declared. That, rather than either package name, is what
-MJ-20 was really about.
+**R-3 still holds by construction rather than by trust.** What R-3 forbids is an
+ORM entity layer, declarative metadata that could emit DDL against the frozen
+schema, and async, thread or pool libraries — not the presence of a distribution
+on disk. No file in this repository imports `sqlalchemy` or `greenlet`, and none
+constructs an `Engine`, a `MetaData`, a `Table`, a mapped class, a `Session` or an
+async engine, so no schema can be generated and no coroutine scheduled even by
+accident. Two independent checks assert that rather than assuming it:
+
+- `tests/arithmetic/test_deployment_contract_boundaries.py` censuses every import
+  under `acas_posting/` and requires the imported third-party set to be exactly
+  `{mysql}`; requires `pyproject.toml`'s declared runtime set to be exactly the
+  plan's closure, no wider and no narrower; requires `requirements.txt` to pin
+  precisely that closure; and requires no artifact to describe the Core boundary
+  as *active*. The declared-but-not-imported set is pinned to exactly the three
+  names the plan declares, so a fourth could not join them unnoticed.
+- `harness/Dockerfile.gnucobol` asserts inside the built image that all four
+  declared names are importable at these versions and that importing `SQLAlchemy`
+  leaves `sqlalchemy.orm` unloaded. It also records a measured fact rather than an
+  assumed one: `import sqlalchemy` *does* load `greenlet`, because SQLAlchemy 2.0
+  imports its concurrency shim eagerly — which is why `greenlet` is in the closure
+  at all, and which schedules nothing on its own because no file here imports
+  either module or calls `create_async_engine`.
 
 Two contracts worth stating because breaking either is a defect rather than a
 preference:
 
-- **Pin parity.** `pyproject.toml` and the three `requirements*.txt` files
-  carry identical exact versions. A version that differs between them is a
-  defect, not a variation.
+- **Pin parity.** `pyproject.toml` and `requirements.txt` carry identical exact
+  versions for every name, and neither carries a name the plan does not declare. A
+  version that differs between them is a defect, not a variation.
 - **Do not upgrade.** A driver or runtime change can move a stored penny, and
   the only acceptable proof of equivalence is an empty scenario diff against the
   compiled oracle. "Checking for newer" is not an improvement here.
@@ -623,6 +655,94 @@ third-party date library — the date semantics being reproduced belong to a
 specific COBOL program with a non-standard epoch, and a general-purpose library
 would be *more correct than the specification*, which is the one outcome to
 avoid.
+
+### 7.1 Advisory review of every pinned component
+
+"Do not upgrade" above is a real constraint, and it obliges this project to say
+what it is carrying rather than to leave advisory status unexamined. Every
+pinned component was reviewed at **its exact pinned version**, and the result is
+recorded here — including the parts that are not clean.
+
+**Reviewed 2026-08-07.** Method, so a reader can re-run it rather than trust it:
+
+- **The PyPI closure** was queried against [OSV.dev](https://osv.dev)
+  (`POST /v1/querybatch`, ecosystem `PyPI`, exact `version`). OSV answers *"is
+  this version affected"*, so a clean answer is evidence about the pin, not
+  about the project's history.
+- **The toolchain** was queried against the NVD CVE API 2.0 — by
+  `virtualMatchString` CPE where a CPE exists, so that NVD performs the
+  version-range match itself, and by keyword otherwise. Keyword hits were then
+  read out of each advisory's `configurations` block, because keyword search
+  matches any advisory *mentioning* a product and most such hits name a
+  different version line entirely.
+
+**Part A — the PyPI closure: clean at every pin.** All fourteen
+distributions — the thirteen in `requirements.txt` plus `pip` 26.2.1, which
+performs the hash-verified install — returned **zero** applicable advisories at
+their pinned versions: `mysql-connector-python` 26.7.0, `SQLAlchemy` 2.0.51,
+`greenlet` 3.5.4, `typing_extensions` 4.16.0, `PyYAML` 6.0.3, `pytest` 9.1.1,
+`pytest-cov` 7.1.0, `coverage` 7.15.2, `pluggy` 1.6.0, `iniconfig` 2.3.0,
+`packaging` 26.2, `Pygments` 2.20.0, `setuptools` 83.0.0, `pip` 26.2.1.
+
+**Part B — the toolchain: three clean, two carrying applicable advisories.**
+
+| Component | Pinned | Recorded | Applicable to the pin | Basis |
+|---|---|---|---|---|
+| MariaDB Connector/C | 3.3.4 | 2 | **0** | CVE-2020-13249 is bounded `<3.1.8`; CVE-2015-3152 names MySQL Connector/C `<=6.1.2` and MariaDB server 5.5/10.0 — neither range contains 3.3.4 |
+| MySQL Connector/C | 6.1.11 | 5 | **0** | CVE-2017-3635 is bounded `<=6.1.10`; CVE-2015-3152 `<=6.1.2`; CVE-2020-13249 is a different product; CVE-2026-60179/-60180 are Connector/**C++** 9.7.x. Independently: the harness builds **only** MariaDB Connector/C and presents it under the `libmysqlclient` name the frozen compile lines expect, so 6.1.11 is vendored in the checkout but never built or linked |
+| GnuCOBOL | 3.2 | 6 | **0** | All six are CPE-pinned to exactly `gnucobol 2.2` with no upper bound extending to 3.x. All six also require *compiling crafted COBOL source*, and the only source this harness compiles is the frozen in-repository checkout |
+| JC preSQL | 1.14f / presql2 2.22 | 0 | **0** | No advisory is recorded. That is the absence of a published advisory for a niche tool, **not** a statement that no defect exists |
+| **CPython** | **3.12.13** | 12 | **10** | Two of the twelve carry `vulnerable=False` for the Python CPE — Python is named as a *platform*, and the flaws are Odoo (CVE-2020-29396) and Django (CVE-2021-32052). The other ten apply |
+| **MariaDB server** | **10.11.7** | 9 | **6** | Every range contains 10.11.7 (`>=10.11.1 <10.11.17`, `<10.11.18`, `<=10.11.15`). Three are excluded on a measured precondition, below |
+
+**Why the two are not remediated by upgrading, and where that reasoning stops.**
+For MariaDB and GnuCOBOL the version *is* the specification, not a
+configuration choice: R-6 makes compiled behaviour the arbiter, and §0.5.2 of
+the plan derives both versions from repository evidence — the schema header
+records the producing server, and the maintainer's own compile script names the
+compiler. Changing either changes the oracle, which would invalidate the
+evidence the whole migration rests on rather than improve it. `Dockerfile.gnucobol`
+refuses a `--build-arg` override of the compiler version for exactly this reason.
+
+That argument does **not** extend to CPython, and it should not be stretched to.
+`requires-python = "==3.12.*"` pins the *series*, not the patch level, so moving
+to the newest 3.12.x is permitted without touching the plan and is the
+recommended action for any real deployment. Two honest caveats: NVD models these
+advisories with a single bound against the 3.13/3.14 lines (`<3.13.10`,
+`<3.13.13`, `<3.13.14`, `<=3.14.4`), which formally marks *every* 3.12.x
+affected and does not model 3.12's security-only branch, so a later 3.12.x may
+well carry the backport even though the recorded range still covers it; and any
+interpreter change is a runtime change, so it is subject to the same empty-diff
+proof as a driver change.
+
+**What actually reduces the exposure here, measured rather than assumed.**
+
+- **None of the ten CPython advisories is reachable.** They name `plistlib`,
+  `xml.dom.minidom`, `xml.parsers.expat`/`ElementTree`, `base64`, `tarfile`,
+  `http.cookies`, `html.parser`, `webbrowser` and `shutil.unpack_archive`. An
+  AST import census across `acas_posting/`, `harness/` and `tests/` finds **zero
+  imports of any of them and no call to `shutil.unpack_archive`** — consistent
+  with §0.5.1 of the plan, which names the load-bearing standard-library
+  modules as `decimal`, `datetime`, `dataclasses`, `argparse`, `pathlib`, `csv`
+  and `json`. A test keeps that census honest, so a future import of one of
+  these modules is a visible change rather than a silent one.
+- **Three of the nine MariaDB advisories have an absent precondition.**
+  CVE-2026-3494 requires the server audit plugin with `server_audit_events`
+  configured, and CVE-2026-35549 requires the `caching_sha2_password` plugin —
+  neither plugin is installed. CVE-2026-49261 requires Galera, and the server
+  reports `wsrep_on = OFF` with `wsrep_provider = none`.
+- **The remaining six MariaDB advisories are authenticated server-side flaws,
+  and are residual.** They are contained rather than eliminated: the stack's
+  network is `internal: true` with **no published port**, so the server is
+  unreachable from the host; the only clients are the harness's own scripts; and
+  the application account holds `SELECT, INSERT, UPDATE, DELETE` on `ACASDB`
+  alone, with no global privilege beyond `USAGE`.
+
+**What would change this verdict.** A new advisory against any pinned
+distribution; a pin moving; the harness gaining a network path from outside the
+project; or `acas_posting`, `harness` or `tests` importing one of the modules
+named above. This register is a point-in-time record, and re-running the two
+queries above is the way to refresh it — not editing the table by hand.
 
 ---
 
@@ -704,10 +824,11 @@ C="docker compose -f harness/docker-compose.yml run --rm -T \
 piped stage would appear to hang. Redirect stdin from `/dev/null` as well when a
 command is backgrounded.
 
-⚠️ **`ACAS_SEED_AUTOCOMMIT=on` is REQUIRED, not a convenience.** Without it every
-seeding stage — `harness/seed.sh`, `harness/reset_db.sh` and therefore stages 1
-and 5 of the driver — exits **76**, "the seed reported success and left no rows".
-That is not a harness bug: it is the reproduced legacy defect. The frozen loaders
+⚠️ **`ACAS_SEED_AUTOCOMMIT=on` is REQUIRED to obtain a fixture, and it is a
+declared deviation from the AAP.** The default is the AAP-mandated `off` (§9.4), and
+without this flag every seeding stage — `harness/seed.sh`, `harness/reset_db.sh` and
+therefore stages 1 and 5 of the driver — exits **76**, "the seed reported success
+and left no rows". That is not a harness bug: it is the reproduced legacy defect. The frozen loaders
 reach **no** `COMMIT` and **no** `ROLLBACK` — across all 28 `common/*LD.cbl`
 every `perform aa020-Rollback` is commented out, 78 sites and none live, and
 `perform aa030-Commit` occurs exactly once anywhere, at
@@ -869,22 +990,70 @@ fails closed.
 
 These are frozen files. They are **worked around, never fixed** (R-4).
 
-### 8.7 WARNING: one copybook is missing from the frozen archive
+### 8.7 STOP: the frozen oracle cannot be built from this checkout
 
-`copybooks/ACAS-SQLstate-error-list.cob` is **absent from the checkout** while
-being `COPY`'d by dozens of frozen files, most of them `*MT` bridges. Left
-alone, the majority of bridges fail to compile and the oracle cannot be built.
+**This is the single most important section in this document.** A build of the
+frozen sources, exactly as committed and with nothing altered, **fails**. That is
+measured, not predicted, and it is the default behaviour of
+`harness/build_oracle.sh`:
 
-It is **not fabricated into the frozen tree**, because inventing a frozen source
-file would breach R-3 and R-4. Instead `harness/build_oracle.sh` materialises an
-idempotent, comments-only compatibility include under the writable build copy's
-`copybooks/` directory — `harness/copybook-shims/ACAS-SQLstate-error-list.cob`.
-Every frozen `COPY` site expands it inside the Identification Division's
-Remarks paragraph, before any Data Division begins, so the include changes no
-COBOL behaviour; the executable SQLSTATE handling lives elsewhere and is
-untouched. The checkout's own `copybooks/` directory is never written.
-`docs/migration/ambiguity-resolutions.md` §10.1 records this as a build blocker
-resolved without touching the freeze.
+```
+$ docker compose -f harness/docker-compose.yml run --rm -T gnucobol \
+      /repo/harness/build_oracle.sh
+...
+frozen oracle: no source transformation applied; the build copy is byte-for-byte the checkout
+verified by MEASUREMENT: zero source transformations; the build copy is byte-for-byte the frozen checkout
+...
+    glpostingMT.cbl:160: error: ACAS-SQLstate-error-list.cob: No such file or directory
+    glbatchMT.cbl:160:   error: ACAS-SQLstate-error-list.cob: No such file or directory
+    nominalMT.cbl:175:   error: ACAS-SQLstate-error-list.cob: No such file or directory
+    ... 22 bridges in total ...
+FATAL: comp-common.sh produced 22 fatal diagnostic line(s).
+harness/build_oracle.sh FAILED with exit code 74.
+```
+
+`copybooks/ACAS-SQLstate-error-list.cob` is **absent from the checkout and from
+`presql2-latest.zip`**, while being `COPY`'d by 22 of the 28 generated
+`common/*MT.cbl` bridges and by the same 22 `*MT.scb` sources — 44 frozen files.
+Those bridges cannot compile, and the handlers that `CALL` them cannot reach a
+table. (`dummy-rdbmsMT.cbl` has no `*MT.scb` and does not reference it, so it is
+unaffected.)
+
+**Consequence, stated plainly: on this checkout there is no frozen oracle, so no
+parity evidence can be produced.** No attestation is written, and
+`harness/run_parity.sh` reports exit **77 — EVIDENCE UNAVAILABLE**, a status
+deliberately distinct from "the two states differ". Nothing was compared.
+
+**The member is not fabricated.** It carries the SQLSTATE list the bridges
+document, and inventing a frozen source file would breach both R-3 (no new
+validations) and R-4 (reproduce, never fix). It must be supplied by the maintainer.
+
+#### 8.7.1 What the shim is, and what it is measured to do
+
+An explicitly requested `--transformed-oracle` build materialises an idempotent,
+comments-only include under the **writable build copy** —
+`harness/copybook-shims/ACAS-SQLstate-error-list.cob`, 8 lines, not one of them a
+statement. The checkout's own `copybooks/` is never written.
+
+Its content provably does not matter. Translating `glpostingMT.cbl` to C with
+`cobc -C` under three variants — the comment-only shim, a zero-byte member, and
+arbitrary different comment text — yields a **byte-identical** translation every
+time. Only the `COPY` resolving matters.
+
+That is what the file's position predicts. The `COPY` sits at
+`common/glpostingMT.cbl:160`, between `identification division.` (L9) and
+`environment division.` (L201) — a region where only comments are legal — so the
+absent member cannot have carried data or procedure code, and the executable
+SQLSTATE handling is already present in the frozen `PROCEDURE DIVISION` (`move
+WS-MYSQL-SqlState to SQL-State`, 8 sites in this bridge alone).
+
+**So this transform is behaviour-neutral, and it is not why a transformed oracle
+cannot be evidence.** The other **40** transformed paths are: they alter
+executable logic in the handlers, loaders and menus. See §8.10.
+
+`docs/migration/ambiguity-resolutions.md` §10.1 records the missing member as a
+build blocker, and `docs/migration/scenario-diff-evidence.md` records the
+resulting evidence position.
 
 ### 8.8 Build the scenario fixtures
 
@@ -922,7 +1091,7 @@ TAB-separated `key<TAB>value` lines needing no parser:
 | `cobc-version`, `cobc-path`, `cobc-sha256`, `cc-version`, `cc-path`, `cc-sha256` | A version string is what a compiler says about itself; the digest is what it is. |
 | `module-count`, `module-set-sha256` | Every `*.so` under the six compile directories, sorted by path, each hashed, the listing hashed again. This is what binds the attestation to the artifacts. |
 | `overrides-used` | Whether either IDENTITY substitution was used — a replacement preSQL archive, or a redirected `cobmysqlapi.o`. `no` means neither was. It says **nothing** about the source transformations below, and reading it as "this is the unmodified oracle" is the mistake the next three rows exist to prevent. |
-| `oracle-source-is-frozen` | **The plain answer to "was this compiled from the frozen checkout?"** `no` whenever any build-copy source differs from the checkout, which today is always — see §8.10. |
+| `oracle-source-is-frozen` | **The plain answer to "was this compiled from the frozen checkout?"** `yes` only when the build copy is byte-for-byte the checkout, derived from the register of transformations actually APPLIED rather than from the catalogue of ones available. A frozen build is now the default — and on this checkout it fails before any attestation is written (§8.7), so in practice an attestation exists only for an explicitly requested `--transformed-oracle` build, where this reads `no`. See §8.10. |
 | `source-transforms`, `source-transform-set-sha256` | How many build-copy sources differ from the frozen checkout, and one digest over the whole disclosure so a consumer can compare two builds with a single value. |
 | `source-transform` × N | One record per transformed path: `source-transform<TAB>path<TAB>frozen-sha256<TAB>build-sha256<TAB>reason`. Both digests are published so a reader can recompute either side and diff the two trees. |
 
@@ -933,9 +1102,17 @@ recorded archive digest equals the recorded pin, requires
 the module-set digest from the modules **on disk** so that replacing a single
 `.so` after the build is caught, and requires `oracle-source-is-frozen` to be
 stated at all — an attestation silent on that question cannot support a claim
-about the frozen specification. It does **not** refuse a transformed oracle; it
-refuses to be quiet about one, printing the count and the set digest before stage 1
-and again beside the verdict in the closing summary.
+about the frozen specification.
+
+**It refuses a transformed oracle.** `oracle-source-is-frozen=no` ends the run with
+exit **77 — EVIDENCE UNAVAILABLE**, naming the transform count and the set digest
+and saying in terms that nothing was compared. An absent attestation ends it the
+same way, because the commonest reason for one on this checkout is that the default
+frozen build failed (§8.7). Passing `--accept-transformed-oracle` proceeds anyway
+for diagnosis, and then **every** verdict the run prints is marked
+`identical-against-diagnostic-oracle` / **NO PARITY CLAIM**, however the comparison
+turns out — an empty diff against a repaired specification says the migrated cycle
+matches a patched system, which is not the question this protocol exists to answer.
 
 Two consequences to plan around:
 
@@ -962,9 +1139,11 @@ because `cobc` embeds build-varying material in the C it generates. The value
 proves only that the modules on disk now are the ones the attestation describes —
 which is precisely what the consumer needs, since it is about to execute them.
 
-### 8.10 The oracle is compiled from transformed sources, and that is disclosed
+### 8.10 A transformed oracle is opt-in, disclosed, and refused as evidence
 
-**Read this before quoting any empty diff.** `harness/build_oracle.sh` edits the
+**Read this before quoting any empty diff.** The default build applies **no**
+transformation at all (§8.7). When `--transformed-oracle` is requested explicitly —
+or `ACAS_ORACLE_ALLOW_TRANSFORMS=1` is set — `harness/build_oracle.sh` edits the
 **build copy** of a declared set of frozen sources. The frozen checkout is never
 written — every `.cbl`, `.cob`, `.cpy` and `.scb` under `common/`, `copybooks/`,
 `general/`, `sales/`, `purchase/`, `irs/` and `stock/` is byte-for-byte as
@@ -975,24 +1154,38 @@ digest, its build digest and its reason. They fall into four groups:
 
 | Group | Files | What is changed |
 |---|---|---|
-| Missing archive member | `copybooks/ACAS-SQLstate-error-list.cob` | **Created.** The 22 frozen `*MT` bridges `COPY` it from their Remarks paragraphs and the checkout does not contain it. The shim is comment-only, and the build refuses it if it ever acquires executable text. |
+| Missing archive member (**1** file, behaviour-neutral) | `copybooks/ACAS-SQLstate-error-list.cob` | **Created.** The 22 frozen `*MT` bridges `COPY` it from their Remarks paragraphs and the checkout does not contain it. The shim is comment-only, and the build refuses it if it ever acquires executable text. Measured content-independent: the generated C is byte-identical with the shim, with a zero-byte member and with different comment text (§8.7.1). |
 | `IF` scope | 6 loaders — `glbatchLD`, `glpostingLD`, `irsnominalLD`, `irspostingLD`, `nominalLD`, `otm5LD` | A period on the first `MOVE` of each flat-file open-error branch ends the `IF` sentence, so the diagnostic, `CLOSE` and `GOBACK` that follow run even after a **successful** open. The period is removed so the branch has the scope the surrounding source states. |
 | Connection propagation and ownership | 25 handlers (`acas000`…`acas032`, `acasirsub1`…`acasirsub5`), 3 secondary loaders (`dfltLD`, `finalLD`, `sys4LD`), both `mysql-procedures` copybooks, `irs030`, and the three menus | The credential fields are copied into `File-Access` for a second caller, the reply pair is reset before each dispatch, the process connection survives one handler's close, the declared RDB mode survives the menu's flat-file mirror, and the IRS end-of-job keeps its connection until the transfer cleanup. |
 
-**Why they are not optional.** Without them the compiled cycle does not reach
-MySQL: a loader returns zero having loaded nothing, a second handler connects to a
-local socket with blank credentials, or the menu's exit path silently reverts the
-run to indexed files. There would be no oracle, and therefore no evidence of any
-kind.
+**Why they exist.** Without them the compiled cycle does not reach MySQL: a loader
+returns zero having loaded nothing, a second handler connects to a local socket
+with blank credentials, or the menu's exit path silently reverts the run to indexed
+files. They are what makes a **runnable diagnostic** oracle possible.
+
+**Why that does not make them acceptable in evidence.** Under R-6 the compiled
+program *is* the specification and under R-4 its defects are the thing being
+reproduced. Forty of these transforms repair executable logic — `IF` scope,
+connection lifetime, credential propagation, stale reply pairs — so a build
+carrying them has repaired the specification. Comparing the migrated cycle against
+a repaired specification cannot establish that the migration reproduces the frozen
+one, which is why `harness/run_parity.sh` refuses such a build with exit 77 unless
+`--accept-transformed-oracle` is given, and marks every verdict from it **NO PARITY
+CLAIM** when it is.
 
 **What they do not touch.** No arithmetic statement, no `ROUNDED` site, no sort
 key, no control-total comparison, no rejection path and no posted value. Each one
 is a connectivity or `IF`-scope repair, stated per file in the attestation.
 
-**What that means for a verdict.** An empty diff from this harness is parity
-between the migrated cycle and a **disclosed-transformed** compiled oracle. It is
-not, and must not be described as, parity with the untouched checkout. Every
-`harness/run_parity.sh` summary prints that distinction beside its verdict.
+**What that means for a verdict.** An empty diff obtained under
+`--accept-transformed-oracle` is agreement between the migrated cycle and a
+**disclosed-transformed, partly repaired** compiled oracle. It is not, and must not
+be described as, parity with the untouched checkout. Every
+`harness/run_parity.sh` summary prints that distinction beside its verdict, and the
+claim it records is `identical-against-diagnostic-oracle` rather than `identical`.
+**No result in this repository currently establishes parity against the frozen
+specification**, because the frozen specification does not presently compile (§8.7).
+`docs/migration/scenario-diff-evidence.md` states that position per scenario.
 
 **The register cannot go stale.** On any build that refreshes the tree, the sources
 are digested immediately before the shim block and immediately after it, and the
@@ -1029,11 +1222,12 @@ itself takes no default, because it can be driven against an ambient data
 directory with no scenario at all.
 
 The **seeding window's autocommit mode** is likewise defaulted rather than
-demanded: unset means the mode measured to be the only one in which the frozen
-loaders leave a durable row. `ACAS_SEED_AUTOCOMMIT=off` selects the literal
-reading of Agent Action Plan §0.5.2 and reproduces the frozen no-COMMIT defect,
-under which seven loaders report success, the tables read empty and the
-durability gate exits **76**. Both modes were measured; the arbitration is `Q-10`
+demanded: unset means the mode Agent Action Plan §0.5.2 mandates, which is **off**.
+It reproduces the frozen no-COMMIT defect, under which seven loaders report
+success, the tables read empty and the durability gate exits **76**.
+`ACAS_SEED_AUTOCOMMIT=on` requests the only mode measured to leave a durable row,
+as an explicitly declared deviation that yields a working fixture rather than
+AAP-conformant evidence. Both modes were measured; the arbitration is `Q-10`
 in [`docs/migration/ambiguity-resolutions.md`](docs/migration/ambiguity-resolutions.md).
 
 ### 9.1 Why `common/masterLD.sh` is reproduced rather than invoked
@@ -1131,10 +1325,10 @@ capture reach a comparison whose pass condition is an empty diff.
 
 ### 9.4 Two operational constraints
 
-- **The seeding window runs with autocommit ON, and that needs no flag.** This is
-  the one place the harness knowingly departs from the letter of the Agent Action
-  Plan, so it is stated plainly. The AAP requires autocommit **off** during
-  seeding (§0.2.1.1, §0.5.2, §0.4.1.7) on the strength of
+- **The seeding window defaults to autocommit OFF, which is what the Agent Action
+  Plan mandates — and in that mode this repository cannot produce a seeded state.**
+  Both halves of that sentence matter, so both are stated plainly. The AAP requires
+  autocommit **off** during seeding (§0.2.1.1, §0.5.2, §0.4.1.7) on the strength of
   `[common/glbatchLD.cbl:L9-L13]` — but that citation is a four-line **operator
   banner, not code**, and no COBOL program in the checkout can change the setting:
   the vendored `cobmysqlapi38.c` exposes `MySQL_commit` and `MySQL_rollback` and
@@ -1147,15 +1341,27 @@ capture reach a comparison whose pass condition is an empty diff.
 
   So under autocommit off the loaders persist **nothing**, and a seed that cannot
   persist makes the AAP's own pass condition (§0.8.5, an empty diff over a real
-  comparison) unreachable. Rule R-6 makes compiled behaviour the arbiter, so
-  **`ACAS_SEED_AUTOCOMMIT` defaults to `on`** and `harness/docker-compose.yml`
-  declares it explicitly. The divergence is written up in full at
-  `docs/migration/ambiguity-resolutions.md`.
+  comparison) unreachable.
 
-  `ACAS_SEED_AUTOCOMMIT=off` still selects the **AAP-literal** window, because a
-  reader must be able to run exactly what the plan describes. It will seed nothing
-  and `harness/seed.sh` will exit **76** saying so — measured, not predicted.
-  Nothing in the harness issues the `COMMIT` the frozen loaders omit (R-4).
+  **That does not license changing the default.** The AAP is the frozen, agreed
+  specification for this migration; a harness that quietly seeded in the other mode
+  would leave a reader of a parity result unable to tell that the configuration had
+  been changed underneath them. So **`ACAS_SEED_AUTOCOMMIT` defaults to `off`**,
+  nothing in the harness pins it, and a default seed exits **76** — measured, not
+  predicted: seven loaders run, all return success, all seven seeded tables read
+  zero rows. Nothing in the harness issues the `COMMIT` the frozen loaders omit
+  (R-4), because a defect fixed is a failure.
+
+  **`ACAS_SEED_AUTOCOMMIT=on` requests the deviation explicitly**, per invocation,
+  so it appears in the command that ran — which is why the runner shorthand in §8.1
+  carries it. It is the only mode measured to leave a durable row (8 rows across 7
+  tables for `clean_batch_gl`), and the loader return codes are identical under both
+  modes, so the mode is invisible to the frozen code. That is why the deviation is
+  available at all; it is not why it could be silent. A fixture seeded this way is
+  usable for development and diagnosis and is **not** AAP-conformant evidence, and
+  `harness/run_parity.sh` warns to that effect rather than describing it as though
+  it were. The measurements are written up in full at
+  `docs/migration/ambiguity-resolutions.md`.
 
   Either way the mode is a **window**: `harness/seed.sh` sets it, runs the
   loaders, then restores whatever the server had, however the run ends. Runtime
@@ -1624,6 +1830,7 @@ each failure is refused up front rather than discovered mid-protocol:
 | The server-side disposability sentinel is present | Absent — `harness/reset_db.sh` proves disposability against the server, not merely against the host name |
 | **None** of `ACAS_DB_ALLOWED_SCHEMAS`, `ACAS_DB_DISPOSABLE_HOSTS`, `ACAS_RESET_ACKNOWLEDGE_DESTRUCTIVE`, `ACAS_RESET_ACKNOWLEDGE` is set | Any of them set, *even to a harmless value* |
 | A full-build provenance attestation exists and is untainted (§8.9) | Absent, unreadable, override-tainted, or describing modules other than those on disk — checked only when stage 2 is in range |
+| **The attestation says the oracle was compiled from the FROZEN checkout** — `oracle-source-is-frozen=yes` (§8.9) | `no`, with exit **77 — EVIDENCE UNAVAILABLE**, distinct from the statuses that mean the two states differ. `--accept-transformed-oracle` proceeds for diagnosis and marks every verdict **NO PARITY CLAIM**. On this checkout the default frozen build fails, so this is the ordinary outcome (§8.7) |
 
 The last bypass row is the sharpest of them, and the reason it is refused rather
 than merely warned about: `ACAS_RESET_ACKNOWLEDGE_DESTRUCTIVE` suppresses **both**
@@ -1662,6 +1869,67 @@ and it cites these artifacts by digest.
 **`verdict.json` is written on a difference too, not only on a pass.** That is
 deliberate: an outcome that only records success cannot be used to demonstrate
 that a difference was found and acted on.
+
+### 11.1c How long a run is RETAINED, what protects it, and how it is DISPOSED of
+
+§11.1b says what a run publishes. This section says what happens to it afterwards,
+because an evidence directory that accumulates indefinitely with nothing said about
+its lifetime is a defect in its own right — and the contents are not neutral.
+
+**What is actually in there, measured rather than assumed.** On this clone the
+evidence volume holds **1410 files, 11.5 MB**, across nine scenario trees. Each
+tree carries `cobol/`, `cobol.normalized/`, `python/`, `python.normalized/`,
+`diff.txt`, `parity-result` and `verdict.json`. The dumps are `SELECT *` over the
+in-scope tables, so they contain **monetary amounts** and **the primary keys that
+identify the accounts, customers and suppliers they belong to** — a `GLLEDGER-REC`
+row, for instance, leads with its nominal account number. This is accounting data
+extracted from the database, not a log of what the harness did.
+
+**Protection while retained.** Four properties, each already enforced rather than
+merely intended:
+
+| Protection | How it is enforced |
+| --- | --- |
+| Every artifact is mode `600` | Written that way, atomically, by the producing script (§11.1b) |
+| The volume is not reachable from the host filesystem | It is a Docker named volume, not a bind mount of a repository path, so nothing in the checkout can be made to contain it and no `git add` can capture it |
+| It cannot be shared with, or destroyed by, a sibling clone | The name is `acas-harness-${CLONE_INDEX}-out`, and `CLONE_INDEX` is a **required** variable — Compose refuses to start without it rather than defaulting to a name another run owns |
+| Nothing rotates, prunes or expires it | Deliberate. A verdict cannot be re-derived by re-reading the tree; it can only be re-produced by re-running the protocol against the same seed and the same oracle. Automatic deletion would therefore destroy evidence, not tidy it |
+
+**Retention period.** Keep a scenario's tree **for as long as any document cites
+it**. In this repository the citing document is
+[`docs/migration/scenario-diff-evidence.md`](docs/migration/scenario-diff-evidence.md),
+which references artifacts **by digest** — so a tree whose digests appear there is
+load-bearing and must not be removed, and a tree superseded by a later run of the
+same scenario, with the register updated to the new digests, no longer is. That
+rule is deliberately tied to a citation rather than to a number of days: the
+evidence exists to support specific published claims, and it stops being needed
+exactly when no claim depends on it.
+
+**Disposal is explicit and target-scoped.** Sibling clones each own their own
+`out` volume, and this workspace root is shared, so a broad command destroys
+another run's evidence:
+
+```bash
+# Release the volume first: a volume in use by a container cannot be removed.
+docker compose -f harness/docker-compose.yml down
+
+# Dispose of THIS clone's evidence, named exactly. CLONE_INDEX is required, so the
+# name cannot silently widen to a sibling's.
+docker volume rm "acas-harness-${CLONE_INDEX}-out"
+
+# Verify: the target is gone and every sibling is untouched.
+docker volume ls --format '{{.Name}}' | grep -- '-out$'
+```
+
+⚠️ **Never `docker volume prune`, never `docker volume rm $(docker volume ls -q)`,
+and never `rm -rf` a host path under the shared workspace root.** All three reach
+volumes and working trees this clone does not own. The clone-namespaced name is the
+guard, and it only works if it is the thing you type.
+
+To discard evidence but keep the built oracle and the fixtures, remove **only** the
+`-out` volume as above; `-build` and `-data` are separate volumes and rebuilding
+them is expensive. To reset a scenario's evidence without touching the others,
+delete just that scenario's subtree inside the volume rather than the volume itself.
 
 ### 11.2 Why the dump is trivially deterministic
 
