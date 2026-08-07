@@ -519,6 +519,7 @@ readonly EX_DATABASE=72       # unreachable server, or the schema is not there
 readonly EX_SCENARIO=75       # the scenario file is missing or incomplete
 readonly EX_ASSERT=77         # a post-run assertion or the capture failed
 readonly EX_TIMEOUT=78        # a bounded command overran its deadline
+readonly EX_TARGET=90         # the target is not a proven harness-owned disposable database
 
 # =============================================================================
 # DEADLINES.  Every external command runs under one, because a hang is worse
@@ -558,6 +559,31 @@ readonly -a ACAS_PY_REQUIRED_ENV_DECLARED=(
 # definitions, no database creation and no schema switch, so there is exactly
 # one database this cycle can legitimately be driven against.
 readonly ACAS_PY_REQUIRED_SCHEMA='ACASDB'
+# ---------------------------------------------------------------------------
+#  ⭐ MJ-18: WHAT PROVES THIS TARGET IS THROWAWAY.
+#
+#  This side POSTS TOO. The migrated cycle reproduces the frozen writes exactly --
+#  that is the whole point (R-4) -- so it rewrites nominal balances, stamps batches
+#  cleared and, for a scenario answering the IRS end-of-job question `Y', performs
+#  the bounded clear of PSIRSPOST-REC. Until now the only guard was the schema NAME
+#  being `ACASDB', and the frozen dump gives every ACAS installation in existence
+#  that same name [mysql/ACASDB.sql], so a name is not a distinction.
+#
+#  The proof, the variable and the marker text are IDENTICAL to
+#  [harness/reset_db.sh] and [harness/run_cobol_scenario.sh]. One fact, read the same
+#  way by all three, so the two parity legs cannot disagree about whether a target is
+#  disposable -- a disagreement there would mean one leg posted and the other
+#  refused, and the resulting diff would be evidence of nothing (R-6).
+#
+#  Read with THE DRIVER rather than a client binary, matching this script's stated
+#  design and keeping the gate available on a host that has an interpreter and
+#  nothing else -- which is what R-1 is ultimately about.
+# ---------------------------------------------------------------------------
+readonly ACAS_PY_DISPOSABLE_MARKER='ACAS-harness-disposable-oracle'
+readonly ACAS_PY_DISPOSABLE_VARIABLE='report_host'
+# EXPORTED because the probe heredoc is a child process and the heredoc is
+# quoted, so this is the only way the one declaration reaches the one reader.
+export ACAS_PY_DISPOSABLE_VARIABLE
 readonly ACAS_PY_REQUIRED_TABLES=33
 
 # The interpreter series the project pins. A different series would compile the
@@ -580,6 +606,41 @@ readonly -a ACAS_PY_OPERATIONS=(
 )
 
 readonly -a ACAS_PY_SUBSYSTEMS=(general sales purchase irs)
+
+# ⭐ THE CLOSED SET OF SEMANTIC STATUSES, PER OPERATION (finding MJ-01)
+#
+# A status this script records as BEHAVIOURAL becomes evidence: the wrapper exits
+# EX_BEHAVIOUR=69, harness/run_parity.sh lets the protocol CONTINUE past stage 6 so
+# the capture can corroborate it, and tests/conftest.py classifies it as
+# `behavioural-difference' rather than as a broken rig. That is the right treatment
+# for a term code and the wrong treatment for everything else, and this table is what
+# separates the two.
+#
+# BEFORE THIS TABLE the rule was "anything but 2", so an uncaught exception (1), a
+# missing interpreter (127), a SIGKILL from the kernel's OOM killer (137), a
+# segmentation fault (139) or any arbitrary tool exit was recorded as a measured
+# semantic difference and attested as one. None of those is a disposition the frozen
+# program can be in; each is a fault in the rig, and a fault attested as behaviour is
+# the most misleading record this harness can produce.
+#
+# THE ADMITTED VALUES ARE 0 AND THE OPERATION'S OWN FROZEN TERM CODES, and there are
+# exactly three term codes in the whole in-scope cycle: `move 5 to ws-term-code'
+# [general/gl070.cbl:L289] reaches the General menu's gate, and `move 8 to
+# ws-term-code' [sales/sl055.cbl:L344] and [purchase/pl055.cbl:L286] reach the Sales
+# and Purchase ones. The four remaining operations set none at all, so for them ONLY
+# zero is semantic. The same mapping is declared for the consuming side in
+# tests/conftest.py's `TERM_CODES', and the two must agree.
+#
+# operation | space-separated term codes, empty when the operation sets none
+readonly -a ACAS_PY_TERM_CODE_MAP=(
+  'gl_post_cycle|5'
+  'gl_end_of_cycle|'
+  'sl_invoice_post|8'
+  'sl_cash_post|'
+  'pl_order_post|8'
+  'pl_payment_post|'
+  'irs_post|'
+)
 
 # operation | subsystem | module | menu paragraph | locator
 #
@@ -1251,11 +1312,27 @@ acas_py_derive_run_id() {
 }
 
 acas_py_assert_run_id() {
-  [[ "$$ACAS_PY_RUN_ID" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || acas_py_die "$EX_USAGE" \
+  #  ⭐ THE VARIABLE, NOT THE PROCESS ID (finding MJ-02 / S-1). This read
+  #  `$$ACAS_PY_RUN_ID`, which bash expands as `$$` -- this shell's PID -- followed by
+  #  the LITERAL text `ACAS_PY_RUN_ID`, so the regex was matched against something like
+  #  `4127ACAS_PY_RUN_ID`. That is always inside the closed alphabet, so the check
+  #  ALWAYS PASSED and the supplied run id was never validated. The id becomes part of
+  #  a file name and is published in every evidence record (CWE-20, CWE-22, CWE-73,
+  #  CWE-117).
+  [[ "${ACAS_PY_RUN_ID-}" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || acas_py_die "$EX_USAGE" \
     "the run id must be 1 to 64 characters of letters, digits, dot, underscore or hyphen." \
     "  got: $(acas_py_sanitise_field "$ACAS_PY_RUN_ID")" \
     'It becomes part of a file name and is published in every evidence record, so it' \
     'has to be a plain identifier.'
+
+  #  AND IT MUST NAME SOMETHING -- see the same refusal in harness/run_cobol_scenario.sh.
+  case "$ACAS_PY_RUN_ID" in
+    .|..)
+      acas_py_die "$EX_USAGE" \
+        "the run id must be an identifier, not a directory reference: '$ACAS_PY_RUN_ID'." \
+        'It is published in every evidence record and must identify one attempt.'
+      ;;
+  esac
 }
 
 # ⭐ EVERY EVIDENCE LEAF IS PUBLISHED BY RENAME, NEVER BY REDIRECTION (finding F-26)
@@ -1674,12 +1751,17 @@ SCENARIO KEYS THIS STAGE READS
                            [irs/irs030.cbl:L1723], so an irs_post scenario must
                            also list PSIRSPOST-REC in affected_tables.
     gl080_proceed          "Y" proceeds, "A" aborts before any write of any kind
-                           [general/gl080.cbl:L295-L302]. Default "Y", which is
-                           the frozen program's own default.
+                           [general/gl080.cbl:L295-L302]. REQUIRED for
+                           gl_end_of_cycle and deliberately NOT defaulted: this
+                           runner passes it as --run-confirmed, and the entry
+                           point's require_stated gate reads an option present on
+                           argv as consent explicitly given, so a default here
+                           would arrive as a decision nobody made (MJ-16).
     disk_change_option     "0" proceeds, "9" aborts the archiving walk and the
                            whole of end-of-period processing
-                           [general/gl080.cbl:L545]. Default "0". No other value
-                           can leave the frozen program's input loop.
+                           [general/gl080.cbl:L545]. REQUIRED for
+                           gl_end_of_cycle, not defaulted, for the same reason.
+                           No other value can leave the frozen input loop.
     archive_path_override  Optional override of the archive path
                            [general/gl080.cbl:L530-L537]. Omit it for the frozen
                            default, which is no override.
@@ -1710,8 +1792,11 @@ ENVIRONMENT
     ACAS_DB_PORT          The port; 3306 inside the harness network.
     ACAS_DB_NAME          MUST be exactly ACASDB. This stage drives a
                           DESTRUCTIVE posting cycle against whatever schema it
-                          is pointed at, and the schema name is the only thing
-                          distinguishing the harness database from a real one.
+                          is pointed at. The NAME alone proves nothing -- the
+                          frozen mysql/ACASDB.sql gives every ACAS installation
+                          that same name -- so the target must additionally
+                          declare itself disposable through @@report_host, or be
+                          acknowledged by exact name (MJ-18).
     ACAS_DB_USER          The credential. Both are width-limited to twelve
     ACAS_DB_PASSWORD      characters, because the frozen host-variable group is
                           `DB-UName pic x(12)' and `DB-UPass pic x(12)'
@@ -2513,6 +2598,37 @@ acas_py_operation_field() {
     "operation '$(acas_py_sanitise_field "$operation")' has no entry in the operation map."
 }
 
+# acas_py_term_codes <operation>  The operation's frozen term codes, space separated.
+#
+# Empty output means the operation sets no term code, so zero is its only semantic
+# status. The lookup is total: an operation absent from the table is a programming
+# error here rather than a condition to degrade through, because the alternative is
+# an empty answer that silently narrows the admitted set to {0}.
+acas_py_term_codes() {
+  local operation="$1" entry
+  for entry in "${ACAS_PY_TERM_CODE_MAP[@]}"; do
+    if [[ "${entry%%|*}" == "$operation" ]]; then
+      printf '%s' "${entry#*|}"
+      return 0
+    fi
+  done
+  acas_py_die "$EX_USAGE" \
+    "operation '$(acas_py_sanitise_field "$operation")' has no entry in the term-code map." \
+    'Every operation must declare which non-zero statuses are frozen term codes, even' \
+    'when the answer is none, so that no status can be admitted as behaviour by' \
+    'default.'
+}
+
+# acas_py_status_is_semantic <operation> <status>  0 when the status is a disposition.
+acas_py_status_is_semantic() {
+  local operation="$1" status="$2" code
+  (( status == 0 )) && return 0
+  for code in $(acas_py_term_codes "$operation"); do
+    (( status == 10#$code )) && return 0
+  done
+  return 1
+}
+
 # =============================================================================
 # THE RUN LOG, THE WORKING DIRECTORY AND THE RUN LOCK
 #
@@ -2583,6 +2699,21 @@ acas_py_open_log() {
   # if this run dies before it can publish, `absent' is the honest answer and a
   # previous run's transcript must not be sitting there answering in its place.
   ACAS_PY_LOG_STAGING="${ACAS_PY_LOG}.${ACAS_PY_RUN_ID}.part"
+
+  #  ⭐ AND THE COMPOSED PATH IS CHECKED, not merely its ingredients (finding MJ-02).
+  #  The run id is validated against a closed alphabet that admits no `/', so it
+  #  cannot traverse -- but that argument is about the INPUT, and what is about to be
+  #  created is this PATH. Asserting the staging file's directory is the same
+  #  directory as the canonical transcript makes the containment a property of the
+  #  thing itself, so a future edit to how the name is composed cannot quietly move it
+  #  somewhere else.
+  if [[ "$(dirname -- "$ACAS_PY_LOG_STAGING")" != "$(dirname -- "$ACAS_PY_LOG")" ]]; then
+    acas_py_die "$EX_PRECONDITION" \
+      'the transcript staging path is not in the transcript directory.' \
+      "  staging   $(acas_py_sanitise_field "$ACAS_PY_LOG_STAGING")" \
+      "  canonical $(acas_py_sanitise_field "$ACAS_PY_LOG")" \
+      'Publication is a rename WITHIN one directory, so the two must share it.'
+  fi
 
   if [[ -e "$ACAS_PY_LOG" || -L "$ACAS_PY_LOG" ]]; then
     rm -f -- "$ACAS_PY_LOG" 2>/dev/null || acas_py_die "$EX_PRECONDITION" \
@@ -2969,10 +3100,52 @@ acas_py_resolve_gating_answers() {
     esac
   fi
 
-  # THE END-OF-CYCLE ANSWERS. These three DO have frozen defaults, so they are
-  # defaulted to those and never to something convenient.
+  # ---------------------------------------------------------------------------
+  #  ⭐ MJ-16 / S-2: THE END-OF-CYCLE ANSWERS ARE REQUIRED, NOT DEFAULTED.
+  #
+  #  These two answers are DESTRUCTIVE, and they used to be defaulted here to the
+  #  frozen values ('Y' and '0') when a scenario omitted them. That reasoning was
+  #  sound in isolation -- defaulting to the frozen answer rather than to something
+  #  convenient is the right instinct -- and it produced a security defect anyway,
+  #  because of what happens NEXT.
+  #
+  #  acas_posting/cli/args.py carries an explicit-intent gate: `require_stated'
+  #  refuses to run until the operator has actually STATED each destructive answer,
+  #  and `stated_explicitly' answers that question by asking whether the option was
+  #  PRESENT ON THE COMMAND LINE. This runner then composed `--run-confirmed' and
+  #  `--disk-change-option <v>' onto argv UNCONDITIONALLY. So an answer the scenario
+  #  never gave arrived at the entry point indistinguishable from one an operator had
+  #  typed deliberately: the gate was satisfied by this script's own default, and the
+  #  one component whose entire job is to refuse un-stated consent was told consent
+  #  had been given. A silent omission became an affirmative authorisation.
+  #
+  #  The gate is not the thing to weaken -- it is correct, and the frozen defaults
+  #  are still what the parser and `--help' carry, so no COBOL default has changed.
+  #  What changes is that THIS script no longer speaks on the scenario's behalf. If a
+  #  scenario selects the end-of-cycle operation it must say what the answers are,
+  #  and if it does not, the run is refused before anything connects.
+  #
+  #  MEASURED: `end_of_cycle_gl.yaml' is the ONLY scenario that selects this
+  #  operation and it already declares both keys, so requiring them refuses no
+  #  scenario that exists. (`period_end_totals.yaml' names the operation only in a
+  #  comment explaining why it is deliberately not appended.)
+  #
+  #  Rule R-3 is not engaged: this adds no validation of the ANSWER. Both answers
+  #  remain equally acceptable and neither is rejected. What is refused is SILENCE.
+  # ---------------------------------------------------------------------------
   if (( needs_gl080 )); then
-    ACAS_PY_GL080_PROCEED="$(acas_py_scenario_default gl080_proceed 'Y')"
+    ACAS_PY_GL080_PROCEED="$(acas_py_scenario_scalar gl080_proceed)"
+    [[ -n "$ACAS_PY_GL080_PROCEED" ]] || acas_py_die "$EX_SCENARIO" \
+      'the scenario selects the end-of-cycle operation but does not declare gl080_proceed.' \
+      'That answer is the pre-run backup gate [general/gl080.cbl:L295-L302]. "A"' \
+      'returns before any write of any kind; anything else PROCEEDS, and the run' \
+      'then stamps batches, deletes postings, rolls the ledger quarters and' \
+      'increments the cycle. It is not defaulted here on purpose: this runner passes' \
+      'the answer as --run-confirmed / --no-run-confirmed, and acas_posting/cli/args' \
+      'require_stated treats an option PRESENT ON ARGV as consent explicitly given.' \
+      'A default supplied here would therefore reach the entry point as an operator' \
+      'decision that nobody made.' \
+      'Add to the scenario:  gl080_proceed: "Y"   (or "A" to abort before any write)'
     case "$ACAS_PY_GL080_PROCEED" in
       Y|A) ;;
       *)
@@ -2983,9 +3156,46 @@ acas_py_resolve_gating_answers() {
           'So Y is the frozen default and is what this key defaults to.'
         ;;
     esac
-    ACAS_PY_DISK_CHANGE="$(acas_py_scenario_default disk_change_option '0')"
+    ACAS_PY_DISK_CHANGE="$(acas_py_scenario_scalar disk_change_option)"
+    [[ -n "$ACAS_PY_DISK_CHANGE" ]] || acas_py_die "$EX_SCENARIO" \
+      'the scenario selects the end-of-cycle operation but does not declare disk_change_option.' \
+      'That answer is the disk-change option [general/gl080.cbl:L545]. "9" leaves the' \
+      'section immediately and so suppresses the archiving walk, every batch stamp,' \
+      'every posting delete, the ledger-quarter rollover and the cycle increment' \
+      '[general/gl080.cbl:L324-L326], [general/gl080.cbl:L408-L409]. "0" proceeds.' \
+      'Not defaulted here for the same reason as gl080_proceed: it is passed as' \
+      '--disk-change-option, and an option on argv reads as consent explicitly' \
+      'given.' \
+      'Add to the scenario:  disk_change_option: "0"   (or "9" to suppress the walk)'
     case "$ACAS_PY_DISK_CHANGE" in
-      0|9) ;;
+      0) ;;
+      9)
+        # ⭐ MJ-10: REFUSED HERE TOO, so that the two legs agree on what is
+        # drivable. This side implements 9 perfectly well -- the entry point
+        # publishes --disk-change-option and the program module honours it. What it
+        # cannot do is produce COMPARABLE evidence, because
+        # [harness/run_cobol_scenario.sh] refuses 9: `a` is `pic 99`
+        # [general/gl080.cbl:L183] so a single keystroke's landing position is
+        # unmeasured, and on 9 the section exits [general/gl080.cbl:L547] before the
+        # accept that would consume the Return.
+        #
+        # A capture with no possible counterpart is not evidence, and this runner
+        # exists to produce evidence. Refused rather than warned, so a scenario
+        # cannot be written that only one leg can run. No scenario declares 9.
+        acas_py_die "$EX_SCENARIO" \
+          'disk_change_option: "9" has no oracle counterpart, so it is refused rather than run.' \
+          'This side implements 9. The compiled leg cannot be driven to it provably' \
+          '-- `a` is `pic 99` [general/gl080.cbl:L183], so whether one keystroke' \
+          'lands as 09 or 90 is unmeasured, and on 9 the section exits at' \
+          '[general/gl080.cbl:L547] before the accept that would consume the' \
+          'Return -- and the prompt is unreachable in every fixture because it' \
+          'needs SYSTEM-REC.Arch = "Y" [general/gl080.cbl:L315], so it cannot be' \
+          'measured now either.' \
+          'A capture this protocol can never compare is not evidence, so the run is' \
+          'refused here as well and the two legs agree on what is drivable.' \
+          'Use disk_change_option: "0". Recorded as Q-GL084-ACCEPT-SEMANTICS in' \
+          'docs/migration/ambiguity-resolutions.md.'
+        ;;
       *)
         acas_py_die "$EX_SCENARIO" \
           "disk_change_option must be 0 (proceed) or 9 (abort); got '$(acas_py_sanitise_field "$ACAS_PY_DISK_CHANGE")'." \
@@ -2999,6 +3209,24 @@ acas_py_resolve_gating_answers() {
     # Absent means "no override", which is the frozen default: the accept is an
     # update field already holding the computed path [general/gl080.cbl:L555].
     ACAS_PY_ARCHIVE_PATH="$(acas_py_scenario_scalar archive_path_override)"
+    # ⭐ MJ-10: and PRESENT is refused, symmetrically with the compiled leg. That
+    # accept is an UPDATE field pre-loaded with the path built at
+    # [general/gl080.cbl:L530-L537]; whether typed text replaces or inserts into
+    # that content is unmeasured, and unmeasurable while the prompt is unreachable.
+    # This side would take the override as a plain string, so an insert rather than a
+    # replace on the other side would give the two legs different paths -- and a diff
+    # between them would measure the accept's edit semantics, not the accounting.
+    [[ -z "$ACAS_PY_ARCHIVE_PATH" ]] || acas_py_die "$EX_SCENARIO" \
+      'archive_path_override has no oracle counterpart, so it is refused rather than run.' \
+      'The compiled prompt is `accept file-2 ... with update`' \
+      '[general/gl080.cbl:L555], an update field already holding the path built at' \
+      '[general/gl080.cbl:L530-L537]. Whether typed text replaces or inserts into' \
+      'it is unmeasured, and the prompt is unreachable in every fixture (it needs' \
+      'SYSTEM-REC.Arch = "Y" [general/gl080.cbl:L315]) so it cannot be measured' \
+      'now. This side would pass the override as a plain string, so the two legs' \
+      'could receive different paths.' \
+      'Remove the key to take the frozen default, which is no override. Recorded as' \
+      'Q-GL084-ACCEPT-SEMANTICS in docs/migration/ambiguity-resolutions.md.'
   fi
 
   # An optional override of the calling identity. Omitted, each route takes its
@@ -3465,6 +3693,16 @@ AFFIRMATIVE = frozenset({"1", "true", "yes", "on"})
 NEGATIVE = frozenset({"", "0", "false", "no", "off"})
 LOOPBACK = frozenset({"", "localhost", "localhost.localdomain", "127.0.0.1", "::1"})
 IDENTIFIER = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# MJ-18: named ONCE in the shell (ACAS_PY_DISPOSABLE_VARIABLE) and read here, so the
+# two cannot drift. Restricted to a bare identifier before it is composed into SQL
+# text -- refused rather than escaped.
+DISPOSABLE_VARIABLE = (os.environ.get("ACAS_PY_DISPOSABLE_VARIABLE") or "").strip()
+if MODE == "probe" and not IDENTIFIER.match(DISPOSABLE_VARIABLE):
+    sys.stderr.write(
+        "ACAS_PY_DISPOSABLE_VARIABLE must be a bare identifier; it is composed "
+        "into a SELECT and is therefore refused rather than escaped.\n"
+    )
+    raise SystemExit(2)
 
 
 def whole_seconds(name, default):
@@ -3576,6 +3814,19 @@ try:
             cursor.execute("SELECT @@autocommit")
             row = cursor.fetchone()
             sys.stdout.write("autocommit\t%s\n" % ("" if row is None else row[0]))
+            # MJ-18: the server-side disposability declaration. A server variable
+            # written by harness/Dockerfile.mariadb, so a client cannot fake it and a
+            # session cannot set it. Read on the SAME connection the capture uses, so
+            # it describes the server this run will actually post into. A read that
+            # fails is reported as an EMPTY marker and the shell refuses on that --
+            # the gate must not open because a query declined to answer.
+            try:
+                cursor.execute("SELECT @@%s" % DISPOSABLE_VARIABLE)
+                row = cursor.fetchone()
+                marker = "" if row is None or row[0] is None else str(row[0])
+            except Exception:
+                marker = ""
+            sys.stdout.write("disposable\t%s\n" % marker.replace("\t", " "))
         elif MODE == "system":
             # The two observables the controlled clock pins, read back so that a
             # date the frozen module rejected is VISIBLE. It leaves its output
@@ -3646,6 +3897,78 @@ raise SystemExit(status)
 PY
 }
 
+# MJ-18: THE DESTRUCTIVE-TARGET GATE. See the DISPOSABLE vocabulary near the top for
+# why the schema name alone proved nothing, and why this is the same fact
+# [harness/reset_db.sh] and [harness/run_cobol_scenario.sh] read.
+acas_py_target_label() {
+  printf '%s@%s:%s/%s' \
+    "${ACAS_DB_USER:-<unset>}" \
+    "${ACAS_DB_HOST:-<unset>}" \
+    "${ACAS_DB_PORT:-<unset>}" \
+    "${ACAS_DB_NAME:-<unset>}"
+}
+
+acas_py_target_acknowledged() {
+  local supplied="${ACAS_PY_ACKNOWLEDGE_DESTRUCTIVE-}"
+  [[ -n "$supplied" ]] || return 1
+  [[ "$supplied" == "$(acas_py_target_label)" ]]
+}
+
+acas_py_assert_disposable_target() {
+  local marker="$1" acknowledged=0
+  if acas_py_target_acknowledged; then
+    acknowledged=1
+  fi
+
+  # An acknowledgement that is SET but names a different target is refused outright
+  # rather than treated as absent: it means the operator believes they authorised
+  # this run, and letting the marker decide instead would answer a question they did
+  # not ask.
+  if (( ! acknowledged )) && [[ -n "${ACAS_PY_ACKNOWLEDGE_DESTRUCTIVE-}" ]]; then
+    acas_py_die "$EX_TARGET" \
+      'ACAS_PY_ACKNOWLEDGE_DESTRUCTIVE names a different target than this run.' \
+      "  this run: $(acas_py_target_label)" \
+      'The acknowledgement is matched against the exact target so that one left in' \
+      'an environment cannot later authorise a different database. Correct it or' \
+      'unset it.'
+  fi
+
+  if [[ "$marker" != "$ACAS_PY_DISPOSABLE_MARKER"* ]]; then
+    if (( ! acknowledged )); then
+      acas_py_die "$EX_TARGET" \
+        'this server does not declare itself a harness-owned disposable target.' \
+        "  variable: @@${ACAS_PY_DISPOSABLE_VARIABLE}" \
+        "  expected: ${ACAS_PY_DISPOSABLE_MARKER}..." \
+        "  found:    $(acas_py_sanitise_field "${marker:-<not reported>}")" \
+        '' \
+        'This stage DRIVES THE MIGRATED POSTING CYCLE, which reproduces the frozen' \
+        'writes exactly (R-4): nominal balances rewritten, batches stamped cleared,' \
+        'and for a scenario answering the IRS end-of-job question Y, PSIRSPOST-REC' \
+        'cleared. The schema name proves nothing -- the frozen mysql/ACASDB.sql' \
+        'gives every ACAS installation that same name.' \
+        '' \
+        'That declaration is written into the server configuration by' \
+        'harness/Dockerfile.mariadb, so its ABSENCE means this is not the' \
+        "harness's throwaway server. Start the harness service instead:" \
+        '    docker compose -f harness/docker-compose.yml up -d mariadb' \
+        'If this IS a disposable target that predates the marker, rebuild the' \
+        'image rather than acknowledging past the gate:' \
+        '    docker compose -f harness/docker-compose.yml build mariadb' \
+        '' \
+        'If the target really is disposable, say so explicitly and name it exactly:' \
+        "    ACAS_PY_ACKNOWLEDGE_DESTRUCTIVE='$(acas_py_target_label)'" \
+        'harness/run_parity.sh refuses that variable: evidence production may not' \
+        'be aimed by hand.'
+    fi
+    acas_py_warn 'acknowledged: this server does not declare itself a harness-owned disposable target.'
+    acas_py_log 'disposability = acknowledged, NOT PROVEN'
+    acas_py_summary_row 'disposability' 'acknowledged, not proven'
+  else
+    acas_py_log "disposability declared by the server: @@${ACAS_PY_DISPOSABLE_VARIABLE} = ${ACAS_PY_DISPOSABLE_MARKER}"
+    acas_py_summary_row 'disposability' 'declared by the server'
+  fi
+}
+
 acas_py_assert_database() {
   ACAS_PY_CURRENT_STAGE='asserting the database'
   acas_py_stage 'Check 5/8: database, schema and session'
@@ -3666,13 +3989,18 @@ acas_py_assert_database() {
       'harness database service, or apply the frozen schema to it, before this stage.'
   fi
 
-  local key value table_count='' autocommit=''
+  local key value table_count='' autocommit='' disposable=''
   while IFS=$'\t' read -r key value; do
     case "$key" in
       tables)     table_count="$value" ;;
       autocommit) autocommit="$value" ;;
+      disposable) disposable="$value" ;;
     esac
   done <<< "$out"
+
+  # MJ-18: BEFORE the table count, the silent-pass traps and every drive stage, so
+  # nothing has posted by the time this either passes or refuses.
+  acas_py_assert_disposable_target "$disposable"
 
   [[ "$table_count" =~ ^[0-9]+$ ]] || acas_py_die "$EX_DATABASE" \
     "the schema table count could not be read; got '$(acas_py_sanitise_field "$table_count")'."
@@ -4449,6 +4777,34 @@ acas_py_run_operations() {
         'checked against that module own help text before it was used, so a refusal' \
         'here means the option exists but its VALUE was refused. The reason is in the' \
         'run log.'
+    fi
+
+    # ⭐ ONLY A DISPOSITION MAY BECOME EVIDENCE (finding MJ-01)
+    #
+    # Checked BEFORE the declared status is consulted, because the question "is this
+    # status a disposition at all" is prior to "is it the disposition the scenario
+    # expected". A status outside the operation's closed set is a HARNESS FAULT: the
+    # capture that follows would describe a process that fell over rather than a
+    # cycle that ran, and admitting it as a behavioural difference would let it
+    # continue past stage 6 into a dump, a normalisation and a diff, and be attested
+    # as a measured semantic difference. Exit EX_ASSERT rather than EX_BEHAVIOUR so
+    # harness/run_parity.sh STOPS the protocol -- 69 is the one status it continues
+    # through -- and so tests/conftest.py bands it as `harness-fault'.
+    if ! acas_py_status_is_semantic "$operation" "$rc"; then
+      local admitted
+      admitted="$(acas_py_term_codes "$operation")"
+      acas_py_die "$EX_ASSERT" \
+        "the $operation module exited $rc, which is not a status the frozen cycle can produce." \
+        "  admitted for this operation: 0${admitted:+ and $admitted}" \
+        'The frozen programs set exactly three term codes in the whole in-scope cycle --' \
+        '5 [general/gl070.cbl:L289], 8 [sales/sl055.cbl:L344] and 8' \
+        '[purchase/pl055.cbl:L286] -- and the four other operations set none, so any' \
+        'other status is a fault in this rig: an uncaught exception, an import failure,' \
+        'a signal, or a tool exiting on its own account.' \
+        'THE CAPTURE IS REFUSED DELIBERATELY. A dump taken after a process fell over' \
+        'describes the fall, not the cycle, and an empty diff drawn from it would be' \
+        'attested as parity. Read the operation output in the run log, fix the fault,' \
+        'and re-run the protocol from stage 1.'
     fi
 
     if [[ -z "$declared" ]]; then

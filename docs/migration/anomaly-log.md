@@ -388,16 +388,34 @@ conditional is written as a **nested** conditional and is deliberately **not** n
 its three siblings.
 
 **Test-locked.** Yes. **Primary lock:**
-`tests/scenarios/test_clean_batch_post_sl.py::test_a1_missing_period_gl_posting_close_not_executed`,
-which is the assertion that owns this defect — it drives the Sales route in pure-GL mode, the one
-configuration in which A-1 is observable at all, and demands that `GLPOSTING-REC` show the
-unclosed-file state on both sides. **Paired control:**
-`tests/scenarios/test_clean_batch_post_pl.py::test_a1_control_pl060_terminating_period_is_present`,
-which asserts the *correct* sibling behaviour; the two together are what prove A-1 is an accident
-rather than an idiom. **Contextual coverage only:**
+`tests/arithmetic/test_shipped_close_and_rejection_paths.py::test_a1_the_posting_close_follows_the_nested_predicate`,
+which drives the SHIPPED `ca000-BL-Close` with a recording stand-in in the module's `facade` slot and
+asserts the whole two-field truth table of `IRS-Instead` × `Level-1`. Its companion
+`test_a1_the_nested_and_sibling_readings_differ_on_exactly_one_row` establishes that the table
+discriminates: the nested reading and the sibling reading disagree on **pure-GL mode alone**, so a
+test exercising only the IRS states would pass against both and prove nothing. Verified by
+construction — adding the missing period was tried, and the truth table failed on exactly that one
+row.
+
+⚠️ **The lock moved here, and the reason is worth stating (finding MJ-07).** An earlier revision named
+`tests/scenarios/test_clean_batch_post_sl.py::test_a1_missing_period_gl_posting_close_not_executed` as
+the primary lock, on the ground that it "demands that `GLPOSTING-REC` show the unclosed-file state on
+both sides". **There is no such state.** `GL-Posting-Close` is a pure lifecycle call: it writes
+nothing, mutates no record area, and closing a file leaves no row behind. Adding the missing period
+therefore produces an identical dump and that test passes either way — measured, not reasoned. A
+state comparison could never have owned this defect.
+
+**State witnesses.** `tests/scenarios/test_clean_batch_post_sl.py::test_a1_missing_period_gl_posting_close_not_executed`
+and its **paired control**
+`tests/scenarios/test_clean_batch_post_pl.py::test_a1_control_pl060_terminating_period_is_present`
+remain valuable and remain in the register — just as witnesses rather than locks. What they establish
+is that two independent implementations agree on `GLPOSTING-REC` on the one route where A-1 is
+reachable, and on the sibling route where the period is present; that is real parity evidence about
+the surrounding posting path, and it is what makes the three-to-one split reviewable against compiled
+behaviour rather than against an argument. **Contextual coverage only:**
 `tests/arithmetic/test_irs_vat_from_net.py` and
-`tests/scenarios/test_clean_batch_post_pl.py`'s header prose mention `A-1` without asserting it, and
-neither is a lock. The distinction is kept because a reader who follows a mention to an arithmetic
+`tests/scenarios/test_clean_batch_post_pl.py`'s header prose mention `A-1` without asserting it. The
+distinction between lock, witness and mention is kept because a reader who follows a mention to a
 test and finds no assertion has been misdirected.
 
 **Status.** REPRODUCED. Determined entirely by the frozen source; no measurement is required to know
@@ -1262,8 +1280,13 @@ posting amount is unchanged, and `tests/arithmetic/test_irs_vat_from_gross.py` f
 subtract at L1564.
 
 **Status.** REPRODUCED. The exact intermediate precision of the compound from-gross expression under
-the compiler's default arithmetic is an unmeasured question carried in
-[`ambiguity-resolutions.md`](ambiguity-resolutions.md), alongside `Q-ROUNDED-OVERFLOW-ORDER`.
+the compiler's default arithmetic was carried as a question in
+[`ambiguity-resolutions.md`](ambiguity-resolutions.md), alongside `Q-ROUNDED-OVERFLOW-ORDER`, and
+**both have since been measured**: `Q-2` is **`RESOLVED BY ORACLE`** (2026-08-07) — extended precision
+throughout, quantized once at the store — and `Q-ROUNDED-OVERFLOW-ORDER` is **`RESOLVED BY ORACLE`**
+on the same date. Measuring the precision did not change this anomaly's standing: it is REPRODUCED
+either way, because knowing what the compiler does is not the same as the behaviour being correct
+(R-4).
 
 ### A-20 — two spare fields carrying the Sales prefix inside the Purchase group
 
@@ -1359,11 +1382,12 @@ it distinguishes four relationships that an earlier revision of this table blurr
 
 This is the ownership map. The "primary lock" column is the test that owns the assertion; the "also
 cites" column was recovered by reading every test file in this checkout, so that a reader chasing an
-identifier finds every file that mentions it rather than only the owner. All NINETEEN files under
+identifier finds every file that mentions it rather than only the owner. All TWENTY files under
 `tests/arithmetic/` are present in the repository and pass on a bare host, with no Docker, no MariaDB
 and no GnuCOBOL: the fourteen AAP §0.4.1.7 names, plus the shared-storage and dispatch-boundary file,
-the deployment-contract file, and the three that drive the shipped modules directly — the gl080
-end-of-cycle file, the gl072 silent-skip file and the CLI-seam file. (Fifteen is the number of
+the deployment-contract file, and the four that drive the shipped modules directly — the gl080
+end-of-cycle file, the gl072 silent-skip file, the CLI-seam file and the shipped-close/rejection file
+that holds A-1's and the IR032 path's call sequences. (Fifteen is the number of
 ANOMALIES carrying a behaviour lock, not the number of files: several files lock more than one, and
 several of the nineteen lock none because they are structural rather than arithmetic.)
 
@@ -1371,9 +1395,11 @@ several of the nineteen lock none because they are structural rather than arithm
 sixteen and then eighteen as the directory grew.** `test_shared_storage_and_dispatch_boundaries.py`
 was named in the prose below the table, as **A-6**'s lock, but had no row of its own — so a reader
 scanning the table for the file would not have found it, and the stated count of files agreed with
-the number of rows rather than with the tree. Every file now has a row, and the count is **nineteen**
-because the directory holds nineteen; `test_documented_inventory_counts_match_the_tree` reads the
-tree so that this cannot drift again.
+the number of rows rather than with the tree. Every file now has a row in the second table of this
+section, and the count is **twenty** because the directory holds twenty — nineteen until
+`test_shipped_close_and_rejection_paths.py` was added for findings MJ-07 and MJ-11.
+`test_documented_inventory_counts_match_the_tree` reads the tree, and it is what caught this revision
+rather than a reader noticing.
 
 - **PRIMARY LOCK** — the test that owns the assertion of *this defect*. Break the defect and this test
   goes red. There is exactly one per entry, except where an entry has two independent dispositions, in
@@ -1387,9 +1413,12 @@ tree so that this cannot drift again.
   a lock at all**, and previously the most misleading kind of entry in this table: a reader who followed
   a mention to an arithmetic test and found no assertion had been sent to the wrong file.
 
-**The arithmetic tier — fifteen files**, all present, all passing on a bare host with no Docker, no
-MariaDB and no GnuCOBOL. (Fifteen, not fourteen: `test_shared_storage_and_dispatch_boundaries.py` was
-added during QA remediation.)
+**The arithmetic tier — twenty files**, all present, all passing on a bare host with no Docker, no
+MariaDB and no GnuCOBOL. The table immediately below carries a row for the fifteen that own an anomaly
+relationship; the second table in this section carries a row for **every** file, which is the one to
+read for completeness. (Twenty, not the fourteen AAP §0.4.1.7 names: the shared-storage,
+deployment-contract, two shipped-module, CLI-seam and shipped-close/rejection files were added during
+QA remediation.)
 
 | Test file | Primary lock | Supporting lock | Contextual citation |
 | --- | --- | --- | --- |
@@ -1433,6 +1462,8 @@ observable is end state, and A-6 has its state-level lock here for the same reas
 | `tests/arithmetic/test_gl080_shipped_end_of_cycle.py` | **A-2, A-3** in the SHIPPED module rather than a transcription | A-11 |
 | `tests/arithmetic/test_gl072_shipped_silent_skips.py` | **A-13** reachability: both silent skips driven, each with a positive witness | A-14 |
 | `tests/arithmetic/test_cli_seams_and_failure_paths.py` | the entry-point seams the scenario tier cannot reach without the stack | — |
+| `tests/arithmetic/test_shipped_close_and_rejection_paths.py` | **A-1** — the nested posting close, over the full `IRS-Instead` × `Level-1` truth table in the SHIPPED paragraph — and the **IR032 clean rejection**, the sibling path of A-4 | A-4 |
+| `tests/arithmetic/test_deployment_contract_boundaries.py` | the deployment, manifest and register-consistency contracts; no anomaly of its own | — |
 
 Three entries in the dagger set are locked outside the arithmetic tier as well, because their
 observable is end state rather than a computed value:
@@ -1440,8 +1471,13 @@ observable is end state rather than a computed value:
 - **A-5** is locked by the IRS scenario test named in AAP §0.4.1.7, whose empty-diff assertion is the
   only observable that can see a lost update. A lost update is an ordering fault across a loop
   boundary, not an arithmetic one, so no arithmetic-tier assertion can distinguish it.
-- **A-1** and **A-4** are additionally exercised end-to-end by the scenario tier named in the same
-  section, since a file left unclosed and a half-posted double entry both show up as table state.
+- **A-4** is additionally exercised end-to-end by the scenario tier named in the same section, because
+  a half-posted double entry shows up as table state: the debit is written and nothing balances it.
+- **A-1** is **not**, and the distinction matters (finding MJ-07). A file left unclosed shows up in **no**
+  table — `GL-Posting-Close` writes nothing — so the scenario tier is A-1's **state witness** and its
+  **primary lock** is `tests/arithmetic/test_shipped_close_and_rejection_paths.py`, which drives the
+  shipped paragraph and asserts the verb sequence. An earlier revision of this bullet paired A-1 with
+  A-4 as though both were observable in state; they are not, and A-1's own entry records the correction.
 - **A-6**'s state half lives in the IRS scenario file, which compares the transfer table's pre-run
   digest against its post-run digest per side. The mechanism half is in the arithmetic tier above,
   where the handler can be called directly; neither half claims the other's ground.
@@ -1691,9 +1727,15 @@ There are **three** distinct declared-length findings in the frozen copybooks �
 overstate the open questions or understate them, and **overclaiming uncertainty is as damaging as
 fabricating certainty**.
 
-**A-15 proper — genuinely open.** `[copybooks/wsbatch.cob:L7-L9]`: two lengths, one contradiction,
-and two of the maintainer's own question marks. Nothing in the file explains the delta. Carried as
-`Q-4` in [`ambiguity-resolutions.md`](ambiguity-resolutions.md).
+**A-15 proper — unexplained in the source, and MEASURED against the compiler.**
+`[copybooks/wsbatch.cob:L7-L9]`: two lengths, one contradiction, and two of the maintainer's own
+question marks. Nothing in the file explains the delta, which is why it was carried as `Q-4` in
+[`ambiguity-resolutions.md`](ambiguity-resolutions.md) rather than argued out on the page. `Q-4` is
+now **`RESOLVED BY ORACLE`** (2026-08-07) and the answer is **neither** reading taken as a contest:
+both record copies measure **96**, `FUNCTION LENGTH` agrees with the field sum, and the 98 in the
+maintainer's note is **false** under GnuCOBOL 3.2.0 — which is why this register carries A-15 as
+`REPRODUCED — VALUE MEASURED`. Measuring it did not repair it and must not: the contradictory
+comments stay in the frozen copybook (R-4).
 
 **Sibling 1 — explained, but not resolved.** `[copybooks/wspost.cob:L6-L7]` records *"98 bytes
 26/03/09"* and then *"96 bytes 20/12/11 (leading sign removed)"*. Unlike A-15's pair, this one
@@ -2227,7 +2269,7 @@ frozen file at that line in this checkout. Every census figure — the five `ROU
 sources, the numeric and character column censuses, the 24 malformed loader lines, the nine
 `cobmysqlapi.o` link sites, the 44 `COPY` references to the missing copybook — was produced by
 enumeration over the frozen files, not recalled. The `bash -n` failure on `common/masterLD.sh` was
-observed. All nineteen `tests/arithmetic/` files were read to build §11's map, including the
+observed. All twenty `tests/arithmetic/` files were read to build §11's map, including the
 shared-storage, dispatch-boundary and cross-file-reference coverage added during QA remediation. The infrastructure-free
 tier was run independently of the Compose stack. The per-field `anomaly_refs` and
 `ambiguity_refs` counts quoted for A-7, A-11, A-12, A-14, A-15 and A-20 were read out of the committed

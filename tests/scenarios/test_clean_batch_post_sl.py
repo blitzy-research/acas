@@ -1,4 +1,14 @@
-"""THE SALES CLEAN-BATCH STATE-PARITY TEST, AND THE FILE THAT LOCKS ANOMALY A-1.
+"""THE SALES CLEAN-BATCH STATE-PARITY TEST, AND ANOMALY A-1'S STATE WITNESS.
+
+⚠️ THIS FILE IS A-1's WITNESS, NOT ITS LOCK, and the header below says so wherever it
+matters (finding MJ-07). `GL-Posting-Close` writes nothing, so adding the missing period
+at [sales/sl060.cbl:L1176] leaves an IDENTICAL `GLPOSTING-REC` and every assertion here
+still passes. The LOCK is
+`tests/arithmetic/test_shipped_close_and_rejection_paths.py`, which drives the shipped
+`ca000-BL-Close` over the whole `IRS-Instead` × `Level-1` truth table with a recording
+facade stand-in and fails on exactly the row the two readings disagree about. What THIS
+file establishes is different and still worth having: that two independent
+implementations agree on `GLPOSTING-REC` on the one route where A-1 is reachable at all.
 
 Scenario `clean_batch_sl`, subsystem `sales`, operation `sl_invoice_post` - the two
 in-scope programs `sl055` then `sl060`. It drives the ten-stage parity protocol and
@@ -668,9 +678,10 @@ FILE_SYSTEM_USED_MYSQL: Final[int] = 1
 # the four Sales and Purchase posting programs, on this route at
 # [sales/sl060.cbl:L1039], [sales/sl060.cbl:L1126] and [sales/sl060.cbl:L1175]. Agent
 # Action Plan section 0.6.4: "leaving it at a default would make the affected-table list
-# ambiguous", so every scenario pins it explicitly. A space or empty value maps to the
-# command-line token "N" while the column still stores a space, and normalisation job 1
-# trims that identically on BOTH sides.
+# ambiguous", so every scenario pins it explicitly. A space or empty value reaches the
+# command line as the LITERAL SPACE `--irs-instead ' '`; the option takes one character
+# and publishes no `N`, so the space is what is passed and what the column stores, and
+# normalisation job 1 trims that identically on BOTH sides.
 #
 # IF THIS EVER DRIFTS TO "Y" OR "B", IF#2 AT [sales/sl060.cbl:L1175] BECOMES TRUE, A-1
 # VVANISHES FROM THE DIFF AND THIS FILE SILENTLY STOPS LOCKING ANYTHING. That is the
@@ -2170,11 +2181,17 @@ def test_a1_missing_period_gl_posting_close_not_executed(
     permits:
     "A defect reproduced is correct; a defect fixed is a failure."
 
-    SO DO NOT ADD THE MISSING PERIOD. This test exists so that a well-meaning correction
-    to [sales/sl060.cbl:L1176] - or, far more likely, a Python translation of
-    `ca000-BL-Close` that "obviously" closes the posting file - turns this suite RED
-    instead of passing unnoticed. Recorded as A-1 in `docs/migration/anomaly-log.md`,
-    where its status is REPRODUCED and its dagger marks it test-locked.
+    SO DO NOT ADD THE MISSING PERIOD - and note WHICH test catches you if you do
+    (finding MJ-07). NOT THIS ONE. A well-meaning correction to
+    [sales/sl060.cbl:L1176], or a translation of `ca000-BL-Close` that "obviously"
+    closes the posting file, changes which VERBS are performed and changes NO ROW,
+    because a close writes nothing. This test would stay green. The lock is
+    `tests/arithmetic/test_shipped_close_and_rejection_paths.py::test_a1_the_posting_close_follows_the_nested_predicate`,
+    which drives the shipped paragraph and asserts the verb sequence over the full
+    two-field truth table; it was verified to fail on exactly the pure-GL row when the
+    period was added. Recorded as A-1 in `docs/migration/anomaly-log.md`, where its
+    status is REPRODUCED, its dagger marks it test-locked, and this assertion is listed
+    as a state WITNESS rather than the lock.
 
     THE COMPARISON IS MADE TWICE, deliberately. The `TableDiff` LOCALISES a difference
     to a primary key and a column, which is what makes a failure actionable; the direct

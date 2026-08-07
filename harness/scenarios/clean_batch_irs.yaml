@@ -11,10 +11,38 @@
 # key and in the same order, because two runners read these files with two
 # different strategies and only the shared shape satisfies both.
 #
-# TWO THINGS MAKE THIS SCENARIO DIFFERENT FROM ITS SEVEN SIBLINGS.
-#   1. Its run EMPTIES A TABLE. The pinned end-of-job answer below performs an
-#      open-output on the IRS transfer file, which that handler turns into a
-#      mass delete of every row of PSIRSPOST-REC.
+# TWO THINGS MAKE THIS SCENARIO DIFFERENT FROM ITS EIGHT SIBLINGS. (The
+# enumeration above is the EIGHT the Agent Action Plan mandates; the directory
+# holds NINE, because end_of_cycle_gl was added beyond the mandated set. This
+# sentence previously said "SEVEN SIBLINGS", counting the directory as it stood
+# before that file existed.)
+#   1. Its run EMPTIES A TABLE ON THIS SEED -- and the distinction matters,
+#      because the clear is BOUNDED, not unconditional. The pinned end-of-job
+#      answer below performs an open-output on the IRS transfer file, which the
+#      handler coerces to DELETE-ALL [common/acas008.cbl:L569-L574]. What the
+#      bridge then issues is NOT a mass delete of every row. It moves 99999 into
+#      BOTH halves of the posting key [common/slpostingMT.cbl:L850-L851], builds
+#      a STRICT less-than clause from it [common/slpostingMT.cbl:L860-L868] and
+#      deletes only below that sentinel [common/slpostingMT.cbl:L885-L891]:
+#
+#          DELETE FROM `PSIRSPOST-REC` WHERE `IRS-POST-KEY` < "9999999999"
+#
+#      The frozen code says so itself in its own log text, "Deleting back from"
+#      [common/slpostingMT.cbl:L870-L871]. Because the comparison is strict, a
+#      row AT the sentinel would survive the very bound built from it, and any
+#      row above it would survive too.
+#        WHAT THIS SEED MEASURES, AND WHAT IT DOES NOT. The six PSIRSPOST-REC
+#      rows seeded below carry batch 1 with post numbers 1000 through 6000, so
+#      their keys run 0000101000 to 0000106000 -- ALL below the sentinel.
+#      MEASURED: six deleted, ZERO retained, so the table does end empty here
+#      and the diff is a faithful comparison. But the emptiness is a property of
+#      THIS SEED, not a guarantee of the handler, and no scenario in this
+#      directory seeds a row at or above the sentinel, so the surviving-row
+#      branch is reproduced in code and NOT witnessed in any table state.
+#      The Python leg parameterises the identical threshold, at
+#      [acas_posting/dal/acas008_spl_posting.py ba085_process_delete_all], where
+#      the caller-record mutation the move performs is recorded as
+#      N-DELALLMUTATES.
 #   2. It is the ONLY route on which the three-state IRS fan-out switch cannot
 #      be delivered as a command-line input. On this route it reaches the
 #      program solely through the seeded system record, so the value declared
@@ -614,6 +642,19 @@ description: |
                          control accounts, for A-5. Each row carries its own
                          debit and credit accumulators and the four quarterly
                          pairs, [copybooks/irswsnl.cob:L17-L20].
+                         WHAT THIS SEED DELIBERATELY DOES *NOT* COVER, and where
+                         it is covered instead (finding MJ-11): the withheld
+                         account is the CREDIT one, so rejection class 1 -- a
+                         missing DEBIT account, message IR032 at
+                         [irs/irs030.cbl:L1630-L1634] -- is never taken on this
+                         route. Seeding it here would not help much either: that
+                         path writes NOTHING, so an implementation that aborted
+                         the run instead of looping leaves the same rows and no
+                         diff distinguishes them. Class 1 is locked by call
+                         sequence in
+                         tests/arithmetic/test_shipped_close_and_rejection_paths.py
+                         section 2, which serves a rejected record followed by a
+                         sound one and requires the sound one to post in full.
     irsdflt.dat       -- [common/masterLD.sh:L100], loaded into IRSDFLT-REC as
                          one row per group position, keyed by position. Its
                          thirty-first and thirty-second account fields are the

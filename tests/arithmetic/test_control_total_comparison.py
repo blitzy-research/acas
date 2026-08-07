@@ -120,30 +120,40 @@ practice and invents nothing.
   R-6 Compiled behaviour is the tie-breaker. Nothing here is expected because
       reading the COBOL suggests it; every figure is either transcribed from a
       frozen line or read out of the migrated semantics layer. Where that layer's
-      own answer rests on an open question the question is named, and this file
-      claims no measurement of its own.
+      own answer rests on a compiled arbitration the question is named, and this
+      file claims no measurement of its own.
 
-THE OPEN QUESTIONS THAT BEAR ON THESE FIELDS. The generated dictionary attaches
-`Q-4` to all four `Amounts` members and to `Batch-Status`: that is the batch
-record's declared-length contradiction, anomaly `A-15`
+THE COMPILED ARBITRATIONS THAT BEAR ON THESE FIELDS. The generated dictionary
+attaches `Q-4` to all four `Amounts` members and to `Batch-Status`: that is the
+batch record's declared-length contradiction, anomaly `A-15`
 [copybooks/wsbatch.cob:L7-L9], which this file RECORDS and does not settle - its
-primary lock lives in `test_pic_field_descriptors.py`. Two further questions bear
-on the figures below, and NEITHER is claimed as measured - what makes them
-assertable is that the SHIPPED LAYER'S OWN ANSWER is what this file imports and
-therefore what it may assert:
+primary lock lives in `test_pic_field_descriptors.py`. It IS settled in the
+register: `Q-4` is `RESOLVED BY ORACLE` (2026-08-07) and the answer is NEITHER of
+the two readings taken as a contest - both record copies measure 96 and `FUNCTION
+LENGTH` agrees with the field sum - so the cross-reference these fields carry now
+leads to a measurement rather than to a pending experiment. Two further questions
+bear on the figures below, and this file claims NO measurement of either - what
+makes them assertable is that the SHIPPED LAYER'S OWN ANSWER is what this file
+imports and therefore what it may assert:
 
   * the value a signed figure takes in an unsigned WORKING-STORAGE receiver. The
     shipped layer keeps the magnitude and discards the sign - not a two's-complement
     reinterpretation - and `acas_posting/dal/acas029_otm5.py` carries the same
     treatment at the bridge. Whether the compiled bridge agrees is `Q-3`, anomaly
-    `A-11`, and it is PENDING: `test_comp_binary.py` carries that question as a
-    strict expected failure, and nothing here contradicts it, because the store
-    asserted below is into working storage rather than through the bridge.
+    `A-11`, and it too has been measured: `Q-3` is `RESOLVED BY ORACLE`
+    (2026-08-07, finding F-19) - the magnitude is kept and the sign discarded, then
+    bounded by the receiving digit count, which is what the shipped layer does.
+    `test_comp_binary.py` asserts that measurement and carries NO strict expected
+    failure for it, because a strict `xfail` against a resolved question would
+    XPASS. Nothing here contradicts any of it, because the store asserted below is
+    into working storage rather than through the bridge.
   * the direction of an un-`ROUNDED` store, settled BY THE LANGUAGE - truncation
-    toward zero - and the precision of the intermediate it truncates from, which is
-    question `Q-2`'s open half and is unmeasured. Both are carried by
-    `acas_posting/cobol/arithmetic.py`; no figure below can reach the open half,
-    because every operand and every receiver here is a two-place decimal.
+    toward zero - and the precision of the intermediate it truncates from, which was
+    question `Q-2` and is now `RESOLVED BY ORACLE` (2026-08-07): extended precision
+    throughout, quantized ONCE at the store. Both are carried by
+    `acas_posting/cobol/arithmetic.py`; no figure below could reach the
+    intermediate-precision half in any case, because every operand and every
+    receiver here is a two-place decimal.
 
 Because the shipped behaviour of both is settled, neither may be written as a
 strict expected failure: a strict `xfail` whose assertion passes is itself a
@@ -484,11 +494,14 @@ def test_the_batch_record_length_contradiction_is_recorded_and_left_open() -> No
           8: *> 98 bytes 20/12/11 (no, dont understand as I count 96)
           9: *>   but function length (Batch-record) says 98?
 
-    The generated dictionary attaches anomaly `A-15` and open question `Q-4` to
-    every field of the record, and the primary lock on the anomaly lives in
-    `test_pic_field_descriptors.py`. This test only shows that the record-length
-    question reaches the gate's own fields and that nothing here answers it: the
-    descriptor vocabulary has no member in which an answer could be written.
+    The generated dictionary attaches anomaly `A-15` and the ambiguity
+    cross-reference `Q-4` to every field of the record, and the primary lock on the
+    anomaly lives in `test_pic_field_descriptors.py`. This test only shows that the
+    record-length question reaches the gate's own fields and that nothing HERE
+    answers it: the descriptor vocabulary has no member in which an answer could be
+    written. The answer lives where it belongs - `Q-4` is `RESOLVED BY ORACLE`
+    (2026-08-07), NEITHER declared length wins and both copies measure 96 - and the
+    reference is retained as the route from a field to that record.
     """
     for member in (*AMOUNTS, BATCH_STATUS):
         assert "A-15" in member.anomaly_refs()
@@ -1081,8 +1094,10 @@ def test_a_negative_post_amount_loses_its_sign_in_the_unsigned_receiver() -> Non
     no `S` and so has no room for a sign. THE SIGN IS DISCARDED AND THE MAGNITUDE
     SURVIVES - the shipped store path's own behaviour, and the same treatment
     `acas_posting/dal/acas029_otm5.py` applies at the bridge. Whether the COMPILED
-    bridge agrees is anomaly A-11's question Q-3, which is pending; the store
-    asserted here is into working storage, so it does not turn on that answer.
+    bridge agrees was anomaly A-11's question Q-3, and it agrees: Q-3 is `RESOLVED
+    BY ORACLE` (2026-08-07, finding F-19) - the bridge stores the absolute value,
+    bounded by the receiving digit count. The store asserted here is into working
+    storage either way, so it does not turn on that answer.
 
     Rule R-3 forbids turning this into a validation and rule R-4 forbids repairing
     it: nothing is raised, nothing is clamped and nothing is warned about. A batch

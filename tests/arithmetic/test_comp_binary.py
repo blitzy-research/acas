@@ -1960,9 +1960,10 @@ def test_overflow_into_a_signed_field_keeps_the_original_sign() -> None:
     `usage._reduce_units` discards high-order DIGITS for a declared-digit class
     and then re-applies the incoming sign, so -12345.67 stored into a five-digit
     two-place item is -345.67. This is the documented behaviour of the store
-    rather than an open question, so it is asserted plainly - the sign question
-    that IS open concerns an UNSIGNED receiving field, which the next test holds
-    against Q-3.
+    rather than an open question, so it is asserted plainly - and the companion
+    sign question, which concerns an UNSIGNED receiving field, is no longer open
+    either: the next test holds it against Q-3, which is `RESOLVED BY ORACLE`
+    (2026-08-07, finding F-19) with the magnitude kept and the sign discarded.
     """
     assert (
         cobol_usage.coerce(

@@ -196,9 +196,14 @@ posted, or does it rewrite nothing meaningful, or rewrite a zero-key record? THA
 QUESTION IS NOT ANSWERED HERE. No test below hard-codes an expectation for
 `CLEARED-STATUS` or `POSTED`; each asserts only that THE TWO SIDES AGREE. The
 question is carried as ambiguity `Q-EMPTY-BATCH-AT-END` in
-docs/migration/ambiguity-resolutions.md, section 13 - the identifier was coined
+docs/migration/ambiguity-resolutions.md, section 13, where it is now `RESOLVED BY
+ORACLE` (2026-08-07): NEITHER at-end paragraph leaves any observable effect, which
+is the FIRST of the three readings below. That answer is a reason to expect these
+assertions to hold and deliberately not a value any of them hard-codes - each still
+asserts only that the two sides agree, because a parity test that encoded the
+measured value would stop being a parity test. The identifier was coined
 here, in the descriptive form that document already uses for `Q-SORT-TIE-ORDER`
-and `Q-A17-POSTINGS-EFFECT`, and the register now carries the entry it names:
+and `Q-A17-POSTINGS-EFFECT`, and the register carries the entry it names:
 three readings of what the two at-end rewrites do to a zero key, the observable
 that separates them, and the note that this scenario's declared
 `expected_table_effect: unchanged` is the FIRST reading stated as an expectation
@@ -233,8 +238,12 @@ shifts and the very fields this scenario depends on - `Batch-Status`,
 `Cleared-Status`, `Bcycle` - could be read from the wrong offsets. Which reading
 governs is the R-6 arbitration filed as `Q-4` in
 docs/migration/ambiguity-resolutions.md, settled by execution and not by counting
-bytes on paper. docs/migration/anomaly-log.md records A-15's status as PENDING
-against exactly that identifier.
+bytes on paper -- and it HAS been settled: `RESOLVED BY ORACLE` (2026-08-07), the
+answer being NEITHER, because both record copies measure 96 and the 98 in the
+maintainer's note is false under GnuCOBOL 3.2.0. The trailing-field alignment this
+scenario depends on therefore does not shift. docs/migration/anomaly-log.md carries
+A-15 as `REPRODUCED -- VALUE MEASURED` against that identifier, not as pending; the
+contradictory note itself is untouched (R-4).
 
 -------------------------------------------------------------------------------
 THE TRAP THAT MAKES THIS THE MOST DANGEROUS SCENARIO IN THE SET
@@ -433,7 +442,7 @@ expects to move cannot reveal a difference in anything it did not. There is no
 ignore-list, no tolerance-list and no "known difference" allowance anywhere in
 the diff path, and none is added here.
 
-The three DECLARED tables, alphabetically, in the order the seed fingerprint is
+The five DECLARED tables, alphabetically, in the order the seed fingerprint is
 written in:
 
     GLBATCH-REC     carries the ANSWER to the central open question above
@@ -441,10 +450,13 @@ written in:
                     `end-account`'s `GL-Nominal-Rewrite` [general/gl072.cbl:L382]
                     actually did
     GLPOSTING-REC   the UNCHANGED WITNESS, additionally empty in the seed
+    SYSDEFLT-REC    written by the menu exit path under key 2, and empty in this seed
+    SYSTEM-REC      written by the menu exit path under key 1, on both sides
 
-Why the system tables are absent from the DECLARED EFFECT list - they are still
-inside the 22-table comparison. The menu shell's exit path persists three of them
-on the way out [general/general.cbl:L656-L672]:
+Why the last two are on the DECLARED EFFECT list at all - they are written by the
+menu shell's exit path rather than by any of the twelve in-scope programs, and a
+table a run writes belongs in its declared effect whichever layer writes it
+[general/general.cbl:L656-L672]:
 
     656  overrewrite.
     657       if       File-System-Used NOT = zero
@@ -1244,7 +1256,10 @@ def test_empty_batch_state_parity(
 @pytest.mark.database
 @pytest.mark.oracle
 def test_affected_tables_are_byte_identical_to_the_seed(
-    empty_batch_parity: object, harness: object, protocol: object
+    empty_batch_parity: object,
+    harness: object,
+    protocol: object,
+    scenario_loader: object,
 ) -> None:
     """BYTE-IDENTICAL TO THE SEED - compared against the seed, not against the other run.
 
@@ -1275,6 +1290,14 @@ def test_affected_tables_are_byte_identical_to_the_seed(
     measurement and reproduce it, never to weaken this back to a side-to-side comparison.
     Nothing here predicts `CLEARED-STATUS` or `POSTED`.
 
+    THE SEED COMPARISON IS BOUNDED BY THE DECLARED EFFECT and the side-to-side
+    comparison by all 22 in-scope tables, and the difference is not an oversight. Both
+    runners fingerprint the scenario's own `affected_tables` plus the menu-persisted
+    parameter row; those are the tables about which a pre/post record exists, so they
+    are the tables about which "unchanged by THIS run" can be asserted at all. The
+    22-table bound is what the diff below uses, because a bound drawn from what a
+    scenario expects to move cannot reveal a difference in anything it did not.
+
     THE SIDE-TO-SIDE STRUCTURAL CLAIMS FOLLOW, per table: no spurious row, no dropped
     row, matching row counts and column lists, no differing value. And the corroboration
     that the verdict is not vacuous - the tables the seed filled came back WITH ROWS,
@@ -1286,6 +1309,8 @@ def test_affected_tables_are_byte_identical_to_the_seed(
         harness: The three harness modules (R-1).
         protocol: The protocol bundle, for the per-side seed comparison. It is the ONE
             implementation of that comparison; nothing here reads a digest file itself.
+        scenario_loader: tests/conftest.py's `scenario_definition`, read for the
+            declared `affected_tables` - the set the runners fingerprint.
     """
     run = empty_batch_parity
 
@@ -1293,7 +1318,15 @@ def test_affected_tables_are_byte_identical_to_the_seed(
     # Every bounded table, on each side, must carry the same row count and the same
     # digest after the run as before it. This is the seed comparison; everything below
     # it is the side-to-side structural detail.
-    protocol.assert_tables_unchanged_by_run(run, unchanged=tuple(run.tables))
+    #  THE SEED COMPARISON IS OVER THE DECLARED EFFECT, WHICH IS WHAT THE RECORD
+    #  COVERS. Both runners fingerprint the scenario's own `affected_tables' plus the
+    #  menu-persisted parameter row, and nothing else, so this is exactly the set on
+    #  which "unchanged by the run" can be established. It is deliberately NOT
+    #  `run.tables': that is the 22-table COMPARISON bound, asserted side-to-side
+    #  below, and asking the pre/post record about a table it never fingerprinted
+    #  reports a missing record rather than an unchanged table.
+    declared = tuple(scenario_loader(SCENARIO)["affected_tables"])
+    protocol.assert_tables_unchanged_by_run(run, unchanged=declared)
 
     by_table = {entry.table: entry for entry in run.tree.tables}
 
@@ -1510,12 +1543,28 @@ def test_no_empty_batch_special_case_was_added(
 
     THIS IS A BEHAVIOURAL ASSERTION, NOT A SOURCE SCAN, and it deliberately does
     NOT assert that any diagnostic exists: asserting a message the COBOL does not
-    emit would itself be an added behaviour, and therefore a defect. A guard on
-    the Python side is observable precisely because it would SKIP the at-end work
-    the oracle performed, so it shows up as a `GLBATCH-REC` or `GLLEDGER-REC`
-    difference; a counter or summary row would show up as an extra row or a
-    changed column. Both are checked here, per table, with the guard hypothesis
-    named in the message.
+    emit would itself be an added behaviour, and therefore a defect.
+
+    ⚠️ WHAT THIS TEST CAN AND CANNOT SEE, corrected (finding MJ-14). An earlier
+    revision claimed a guard on the Python side "is observable precisely because it
+    would SKIP the at-end work, so it shows up as a `GLBATCH-REC` or `GLLEDGER-REC`
+    difference". THAT IS FALSE, and `Q-EMPTY-BATCH-AT-END` says why: it is
+    `RESOLVED BY ORACLE` (2026-08-07) with the answer that NEITHER at-end paragraph
+    leaves any observable effect. `end-account` and `end-batch` rewrite the BLANK
+    records the program is holding, so both statements are an `UPDATE` on key zero,
+    no row carries key zero, and the two rewrites match nothing. A guard that
+    skipped them therefore produces the IDENTICAL empty diff and passes this test.
+    Measured, not reasoned: adding `if save-batch not = zero` to the at-end clause
+    was tried, and this file stayed green while the call-sequence lock failed.
+
+    SO THIS TEST IS A WITNESS, and the LOCK lives in
+    `tests/arithmetic/test_gl072_shipped_silent_skips.py` §4, which drives the
+    shipped `gl072` over an empty work file with a recording facade double and
+    asserts that `end-account` then `end-batch` both run, on zero keys, in that
+    order. What THIS test contributes is different and still worth having: that the
+    two independent implementations agree across all bounded tables on a run that
+    posts nothing. A counter or summary row WOULD show up here, as an extra row or a
+    changed column, because those add state rather than skip a no-op.
 
     [general/gl072.cbl:L443] `call "SYSTEM" using Print-Report.` is the one thing
     the cycle does that must NOT appear in a dump: it is a spool-out with no
@@ -1532,14 +1581,20 @@ def test_no_empty_batch_special_case_was_added(
             f"{entry.table}: {entry.total_differences} finding(s) on a run that "
             f"posts nothing.\n"
             f"{harness.diff_states.render_table(entry)}\n"
-            f"  THE FIRST HYPOTHESIS TO TEST IS AN ADDED EMPTY-CASE GUARD. A "
-            f"short circuit, an early return over the empty work file or a "
-            f"skipped phase on the Python side would omit exactly the at-end "
-            f"work [general/gl072.cbl:L287-L288] that the oracle performed, and "
-            f"would show up here. R-3 forbids adding one even if it produced the "
-            f"same table state today, because it would produce a DIFFERENT state "
-            f"the moment the Q-EMPTY-BATCH-AT-END arbitration comes back as 'the "
-            f"batch is stamped'."
+            f"  AN ADDED EMPTY-CASE GUARD IS *NOT* THE HYPOTHESIS THIS "
+            f"DIFFERENCE SUPPORTS, and saying otherwise would send a reader the "
+            f"wrong way (MJ-14). A short circuit over the empty work file omits "
+            f"the at-end work [general/gl072.cbl:L287-L288], and that work is a "
+            f"rewrite on key ZERO which matches no row - so a guard shows up "
+            f"NOWHERE in this comparison. Q-EMPTY-BATCH-AT-END is `RESOLVED BY "
+            f"ORACLE` (2026-08-07) with exactly that answer, and the guard is "
+            f"caught instead by "
+            f"tests/arithmetic/test_gl072_shipped_silent_skips.py section 4. R-3 "
+            f"forbids adding one regardless of table state, because a guard that "
+            f"agrees with a measured no-op is still added behaviour and would "
+            f"diverge the moment the frozen path changed. A difference HERE is "
+            f"something else: added state - an extra row, a counter, a summary - "
+            f"or a genuine divergence in the phases that do write."
         )
         assert entry.rows_compared, (
             f"{entry.table}: the rows were not compared at all, so the absence "

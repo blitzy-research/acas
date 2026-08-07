@@ -181,10 +181,14 @@ sort-code, sort-date, sort-ac, sort-pc, sort-amount, sort-legend` -- NOT the key
 and confusing the two would reorder the stream. There is NO `with duplicates in order`
 phrase, so the compiled tie order for two records carrying an identical `(sort-batch,
 sort-ac, sort-pc, sort-post)` is whatever GnuCOBOL 3.2 chooses; the Python sort is
-stable unconditionally, which may or may not agree. Under R-6 that is a question for the
-oracle and it is carried as `Q-SORT-TIE-ORDER` in
-`docs/migration/ambiguity-resolutions.md`. gl071 is a PURE SORT: zero facade verbs, zero
-arithmetic statements.
+stable unconditionally. Under R-6 that was a question for the oracle, and the oracle
+has ANSWERED it: `Q-SORT-TIE-ORDER` in `docs/migration/ambiguity-resolutions.md` is
+`RESOLVED BY ORACLE` (2026-08-07) -- the compiled sort PRESERVES INPUT ORDER for equal
+keys, which is exactly what an unconditionally stable sort produces, so no tie-driven
+divergence is expected. The assertions below are unchanged and still assert only that
+the two sides AGREE: a measured answer is a reason to expect agreement, never a
+substitute for observing it. gl071 is a PURE SORT: zero facade verbs, zero arithmetic
+statements.
 
 THE ACCEPTED POSTINGS' ONLY MUTATIONS
 The balance moves at [general/gl072.cbl:L331] `add post-amount to ledger-balance.`, is
@@ -295,10 +299,13 @@ A-15 -- THE BATCH RECORD'S DECLARED LENGTH CONTRADICTION
     L9  *>   but function length (Batch-record) says 98?
 
 Whether the declared length or the field sum governs the record actually read affects
-field alignment for the trailing fields, and only execution shows which. It is carried
-as `Q-4` in `docs/migration/ambiguity-resolutions.md` and its anomaly-log status is
-PENDING -- AWAITING ORACLE EXECUTION. It is recorded, not resolved, and certainly not
-fixed.
+field alignment for the trailing fields, and only execution showed which. Execution has
+now happened: `Q-4` in `docs/migration/ambiguity-resolutions.md` is `RESOLVED BY ORACLE`
+(2026-08-07) and the answer is NEITHER -- both record copies measure 96, `FUNCTION
+LENGTH` agrees with the field sum, and the 98 in the maintainer's note is false under
+GnuCOBOL 3.2.0. `docs/migration/anomaly-log.md` correspondingly carries A-15 as
+`REPRODUCED -- VALUE MEASURED`, not as pending. Measured is not fixed: the contradictory
+note is still in the frozen copybook and nothing repairs it (R-4).
 
 THE SEED USES A CLOSED BATCH -- NOT AN OPEN ONE. THE SINGLE EASIEST WAY TO GET THIS
 SCENARIO WRONG.
@@ -875,9 +882,10 @@ def test_scenario_definition_preconditions(
     predicates are simply false, which is General Ledger only. Agent Action Plan section
     0.6.4:
     "leaving it at a default would make the affected-table list ambiguous", so it is
-    declared rather than defaulted. A YAML space maps to the CLI token `N` while the
-    column still stores a space, and normalisation job 1 trims that to the empty string
-    on BOTH sides - correct, because it is applied identically.
+    declared rather than defaulted. A YAML space or empty value reaches the CLI as the
+    LITERAL SPACE `--irs-instead ' '` - there is no `N` token and the option's own
+    help says so - so the column stores a space, and normalisation job 1 trims that
+    to the empty string on BOTH sides - correct, because it is applied identically.
 
     THE PINNED CLOCK MATTERS CONCRETELY HERE. The binary observable is `05 Run-Date
     binary-long.` [copybooks/wssystem.cob:L67], and [general/gl072.cbl:L376] `move
@@ -1717,8 +1725,16 @@ def test_the_run_reproduced_the_measured_no_op_rather_than_posting(
     """
     sides = tuple(harness.dump_tables.SIDES)
 
-    # ---- ONE: neither cycle changed any bounded table ---------------------------
-    protocol.assert_tables_unchanged_by_run(parity, unchanged=tuple(parity.tables))
+    # ---- ONE: neither cycle changed any DECLARED table --------------------------
+    #  The pre/post record covers the scenario's own `affected_tables' plus the
+    #  menu-persisted parameter row, and nothing else, so that is the set on which
+    #  "unchanged by THIS run" can be established. `parity.tables' is the wider
+    #  22-table COMPARISON bound, asserted side-to-side elsewhere in this file; asking
+    #  the pre/post record about a table it never fingerprinted reports an absent
+    #  record rather than an unchanged table.
+    protocol.assert_tables_unchanged_by_run(
+        parity, unchanged=tuple(scenario_loader(SCENARIO)["affected_tables"])
+    )
 
     # ---- TWO: both batch rows still carry their seeded values --------------------
     records = scenario_loader(SCENARIO)["seed_records"]
@@ -1858,14 +1874,18 @@ def test_skipped_postings_do_not_perturb_sequential_nominal_cursor(
     consequence; the Agent Action Plan's L410-L412 citation points at that post-read
     block rather than at the read itself.
 
-    WHAT IS NOT SETTLED BY READING. [general/gl071.cbl:L172-L178] declares no `with
-    duplicates in order` phrase, so the compiled tie order for two records carrying an
-    identical `(sort-batch, sort-ac, sort-pc, sort-post)` is whatever GnuCOBOL 3.2
-    chooses, while the Python sort is stable unconditionally. Under R-6 that is a
-    question for the oracle and it is carried as `Q-SORT-TIE-ORDER` in
-    `docs/migration/ambiguity-resolutions.md`. This test does not pre-judge it: it
-    asserts that the two sides AGREE, which is the observable that would catch a
-    disagreement about ties as readily as one about skips.
+    WHAT READING DOES NOT SETTLE, AND WHAT THE ORACLE DID.
+    [general/gl071.cbl:L172-L178] declares no `with duplicates in order` phrase, so the
+    compiled tie order for two records carrying an identical `(sort-batch, sort-ac,
+    sort-pc, sort-post)` is whatever GnuCOBOL 3.2 chooses, while the Python sort is
+    stable unconditionally. Under R-6 that was a question for the oracle, and the
+    oracle has ANSWERED it: `Q-SORT-TIE-ORDER` in
+    `docs/migration/ambiguity-resolutions.md` is `RESOLVED BY ORACLE` (2026-08-07) - the
+    compiled sort PRESERVES INPUT ORDER for equal keys, which is exactly what an
+    unconditionally stable sort produces. This test still does not pre-judge the
+    outcome: it asserts that the two sides AGREE, which is the observable that would
+    catch a disagreement about ties as readily as one about skips. A measured answer is
+    a reason to expect agreement, never a substitute for observing it.
 
     NOTHING IS RECOMPUTED HERE. No balance is recalculated in Python, no debit total is
     compared against a credit total, and no arithmetic is performed at all - that is
@@ -1939,8 +1959,10 @@ def test_skipped_postings_do_not_perturb_sequential_nominal_cursor(
         f"NEVER be replaced by an indexed one to make this pass. If the disagreement "
         f"is "
         f"about a SORT TIE rather than a skip, that is `Q-SORT-TIE-ORDER` in "
-        f"docs/migration/ambiguity-resolutions.md and is settled by the oracle, not "
-        f"here.\n{harness.diff_states.render(parity.tree)}"
+        f"docs/migration/ambiguity-resolutions.md, which the oracle ANSWERED: the "
+        f"compiled sort preserves input order for equal keys, so a tie should NOT "
+        f"produce a difference here and one that appears is a real divergence rather "
+        f"than the open question it used to be.\n{harness.diff_states.render(parity.tree)}"
     )
 
 
@@ -1999,11 +2021,14 @@ def test_batch_stamp_columns_agree_on_both_sides(
     A-15 is in the background of every `GLBATCH-REC` assertion:
     [copybooks/wsbatch.cob:L7-L9] records the maintainer's own 96-versus-98
     contradiction, and whether the declared length or the field sum governs the record
-    actually read affects the alignment of the trailing fields. It is carried as `Q-4`
-    in `docs/migration/ambiguity-resolutions.md`, its anomaly-log status is PENDING -
-    AWAITING
-    ORACLE EXECUTION, and it is recorded rather than resolved. If it bites, it bites the
-    column values, and this comparison is where it would surface.
+    actually read affects the alignment of the trailing fields. `Q-4` in
+    `docs/migration/ambiguity-resolutions.md` is `RESOLVED BY ORACLE` (2026-08-07) and
+    the answer is NEITHER: both copies measure 96 and the 98 in the note is false under
+    GnuCOBOL 3.2.0, so A-15 carries `REPRODUCED -- VALUE MEASURED` in
+    `docs/migration/anomaly-log.md`. The measurement says the alignment does not shift;
+    it does not repair the contradictory note, which stays as written (R-4). If it ever
+    did bite it would bite the column values, and this comparison is where it would
+    surface -- which is why the comparison is kept rather than dropped as settled.
 
     Args:
         parity: The completed run.

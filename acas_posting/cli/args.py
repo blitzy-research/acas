@@ -407,14 +407,21 @@ __all__: Final[tuple[str, ...]] = (
     "RdbmsParamError",
     "report_configuration_failure",
     # ---- the menus' database-affecting record paragraphs ------------------
+    #  ⭐ MN-08: ONE NAME, ONE ENTRY. This group used to re-list seven names that
+    #  the two groups above already publish -- the four `acas000` key numbers and
+    #  the store selector digit, and `aa010_get_system_recs`, `overrewrite` and
+    #  `zz095_restore_irs_system_data` -- because the same paragraph belongs to
+    #  more than one of the themes these comments organise the list by. A tuple is
+    #  not a set, so those were seven genuine duplicates in the module's public
+    #  contract: `len(__all__)` read 72 against 65 distinct names, `from ... import
+    #  *` bound each twice, and any tool counting the public surface over-counted
+    #  it. The grouping comments are worth keeping and a repeated entry is not, so
+    #  a name is published once, at the first group it belongs to, and a group that
+    #  would otherwise repeat one says so instead. The assertion below the tuple
+    #  makes that structural rather than a convention.
+    #
+    #  Published here and nowhere above: the store selector's companion flag.
     "FS_MYSQL_USED",
-    "RDBMS_STORE_SELECTOR_DIGIT",
-    "SYSTEM_FILE_KEY_DEFAULTS",
-    "SYSTEM_FILE_KEY_PARAMS",
-    "SYSTEM_FILE_KEY_TOTALS",
-    "aa010_get_system_recs",
-    "overrewrite",
-    "zz095_restore_irs_system_data",
     # ---- the credential question, re-exported -----------------------------
     #  A RE-EXPORT, not a second implementation:
     #  `records/system_record.py` owns the four placeholder items and the
@@ -448,6 +455,18 @@ __all__: Final[tuple[str, ...]] = (
     "redact_boundary_error",
     "require_stated",
     "stated_explicitly",
+)
+
+#  ⭐ MN-08: the public contract holds each name exactly once, checked here rather
+#  than trusted. `__all__` is grouped by theme for a reader, and several paragraphs
+#  belong to more than one theme, so a duplicate is the natural mistake to make while
+#  editing it -- and it is invisible, because a duplicate in `__all__` raises nothing
+#  and simply binds a name twice under `import *`. Checked at import so the mistake is
+#  reported where it was made; `tests/arithmetic/test_cli_seams_and_failure_paths.py`
+#  asserts the same property so it also holds under `python -O`, which strips asserts.
+assert len(set(__all__)) == len(__all__), (
+    "acas_posting.cli.args.__all__ holds a repeated name: "
+    + ", ".join(sorted({name for name in __all__ if __all__.count(name) > 1}))
 )
 
 

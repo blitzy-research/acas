@@ -579,6 +579,51 @@ TABLE_OF_KEYNAMES: Final[Mapping[str, tuple[KeyOfReference, ...]]] = (
                     source_locator="[common/nominalMT.scb:L245-L247]",
                 ),
             ),
+            # -----------------------------------------------------------------
+            #  ⭐ THE ONE KEY OF REFERENCE THAT RESTS ON AN OPEN QUESTION (MJ-09).
+            #
+            #  `POST-KEY` is transcribed here because that is what the frozen bridge
+            #  DECLARES as its key of reference [common/glpostingMT.scb:L232-L234] --
+            #  name, the offset/length pair "00010010", and the type "STR". This entry
+            #  is a transcription, not an adjudication.
+            #
+            #  But three lines above that declaration the same file carries the
+            #  maintainer's own warning, at [common/glpostingMT.scb:L229] and verbatim
+            #  in the generated program at [common/glpostingMT.cbl:L229]:
+            #
+            #      *>  WARNING POST-KEY MAY WELL NEED CHANGING TO POST-RRN & RDB made
+            #          to index fld.
+            #
+            #  And the schema agrees with the warning rather than the declaration:
+            #  `POST-RRN` is GLPOSTING-REC's PRIMARY KEY [mysql/ACASDB.sql:L155, :L169],
+            #  which is why `TABLE_PRIMARY_KEYS` below records `POST-RRN` for this same
+            #  table. THIS MODULE THEREFORE CARRIES BOTH FACTS, in two tables, for one
+            #  table -- and that is not an inconsistency to tidy away, it is exactly the
+            #  state the frozen source is in.
+            #
+            #  `Q-9` in docs/migration/ambiguity-resolutions.md owns the question. Its
+            #  status is PARTIAL and the OPEN half is precisely this one: the resolution
+            #  settled the non-fetch WRITE path -- `initialize TD-GLPOSTING-REC` leaves
+            #  `HV-POST-RRN` at zero and `bb000-HV-Load` never sets it
+            #  [common/glpostingMT.cbl:L1053-L1066] -- and it explicitly does NOT claim
+            #  that START/READ NEXT follows `POST-RRN`, nor erase the warning.
+            #
+            #  ⚠️ WHY IT IS STILL OPEN, WHICH IS NOT FOR WANT OF TRYING. Deciding it
+            #  needs a walk over rows whose `POST-KEY` and `POST-RRN` orderings DIFFER.
+            #  That seed is unreachable through the frozen loaders: because
+            #  `HV-POST-RRN` is never loaded while `POST-RRN` is the primary key, every
+            #  loader write targets the same key, so a scenario seed persists AT MOST
+            #  ONE GLPOSTING-REC row. One row cannot distinguish two orderings. The
+            #  register records the deliberately non-degenerate experiment; running it
+            #  needs a seed route the frozen loaders do not provide, and inventing one
+            #  would be this migration manufacturing state (R-3).
+            #
+            #  So the declared metadata is carried as declared (R-4: reproduce, do not
+            #  adjudicate), the open half is named here rather than left for a reader to
+            #  discover, and no test claims parity ON THIS POINT --
+            #  tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py asserts
+            #  only that what is carried MATCHES the frozen declaration.
+            # -----------------------------------------------------------------
             "GLPOSTING-REC": (
                 KeyOfReference.from_offset_length_string(
                     key_name="POST-KEY",
@@ -762,6 +807,10 @@ TABLE_OF_KEYNAMES: Final[Mapping[str, tuple[KeyOfReference, ...]]] = (
 
 # Read from the frozen `mysql/ACASDB.sql`, whose twenty-two in-scope tables each declare
 # a SINGLE-COLUMN primary key and ZERO secondary indexes.
+#
+# ⭐ `GLPOSTING-REC` is the one table whose primary key here (`POST-RRN`) is NOT the key
+# of reference declared above (`POST-KEY`). That divergence is the frozen source's, not
+# this module's, and it is the open half of `Q-9` -- see the annotated entry above.
 TABLE_PRIMARY_KEYS: Final[Mapping[str, str]] = MappingProxyType(
     {
         "SYSTEM-REC": "SYSTEM-REC-KEY",

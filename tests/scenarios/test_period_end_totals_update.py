@@ -5,8 +5,12 @@ THE ONE SENTENCE THIS FILE EXISTS TO ASSERT, from Agent Action Plan section 0.8.
 dump the affected tables ordering-normalised, reset, run the Python cycle, dump
 again - and the diff MUST BE EMPTY."
 
-This is the ONLY scenario that drives FOUR operations in sequence, and
-the ONLY one for which `SYSTOT-REC` is genuinely in scope. Agent Action Plan section
+This is the ONLY scenario that drives FOUR operations in sequence, and therefore the
+only one whose dump carries the CUMULATIVE effect of the period-total writes across
+both ledgers. ⚠️ NARROWED: this previously also called it "the ONLY one for which
+`SYSTOT-REC` is genuinely in scope", which is FALSE - measured over the nine scenario
+files, three declare that table: `clean_batch_sl`, `clean_batch_pl` and this one. What
+is unique here is REACH, not the table. Agent Action Plan section
 0.6.4 is what makes it verifiable at all: the nine period-total write sites are "all
 inside the Sales and Purchase programs, and all in scope ... the sole writers of the
 totals record, which makes the period-end-totals scenario verifiable by inspecting
@@ -90,8 +94,14 @@ read back by a LATER operation [purchase/pl100.cbl:L564]. All four run inside a
 SINGLE stage 2 and a single stage 6, one at a time (R-3), with NO dump between them,
 so the diff proves the CUMULATIVE effect of the sequence.
 
-`gl_end_of_cycle` (gl080) IS DELIBERATELY NOT DRIVEN, here or in any other scenario
-file. gl080 is Phase 3 (Transaction Deletion) plus Phase 5 (End of Period
+`gl_end_of_cycle` (gl080) IS DELIBERATELY NOT DRIVEN BY THIS SCENARIO. ⚠️ NARROWED:
+this previously read "here or in any other scenario file", which is FALSE -
+`harness/scenarios/end_of_cycle_gl.yaml` drives it, with its own affected-table list
+and its own suite in `tests/scenarios/test_end_of_cycle_gl.py`. The scenario file this
+paragraph cites had already been corrected to say so
+[harness/scenarios/period_end_totals.yaml "It is not absent from the directory"]; this
+restatement was the stale copy left behind. gl080 is Phase 3 (Transaction Deletion)
+plus Phase 5 (End of Period
 Processing), it promotes THREE interactive answers, and driving it would make the
 totals attribution ambiguous - whereas section 0.6.4's nine write sites make the
 totals attributable to one table without it. The decision is recorded at length in
@@ -418,9 +428,14 @@ declared order and a disagreement is a harness fault:
     SAINV-LINES-REC    SAINVOICE-REC      SAITM3-REC         SALEDGER-REC
     SYSTOT-REC         VALUEANAL-REC
 
-`SYSTOT-REC` IS GENUINELY IN SCOPE HERE AND ON NO OTHER SCENARIO'S LIST, and it is
-never blanket-excluded. Its inclusion is what makes the nine write sites verifiable
-"by inspecting one table". Why each of the other thirteen is present:
+`SYSTOT-REC` IS GENUINELY IN SCOPE HERE, and it is never blanket-excluded. Its
+inclusion is what makes the nine write sites verifiable "by inspecting one table".
+⚠️ NARROWED: this previously read "AND ON NO OTHER SCENARIO'S LIST", which is false -
+`clean_batch_sl` and `clean_batch_pl` declare it too. What is unique to this scenario
+is REACH rather than the table: driving all four posting operations is what lets ONE
+dump carry all nine write sites, where `clean_batch_sl` (sl055 then sl060) reaches four
+of them and `clean_batch_pl` (pl055 then pl060) three.
+Why each of the other thirteen is present:
 
   SAINVOICE-REC, SAINV-LINES-REC, PUINVOICE-REC, PUINV-LINES-REC - sl055 and pl055
     stamp the header status bytes [sales/sl055.cbl:L679-L681],
@@ -908,9 +923,9 @@ FILE_SYSTEM_USED_MYSQL: Final[int] = 1
 # `PSIRSPOST-REC` is only opened and closed, whereas under "Y" or "B" the fan-out
 # would change which tables move. It is tested at three sites in each of the four
 # Sales and Purchase posting programs - for example [sales/sl060.cbl:L1039],
-# [sales/sl060.cbl:L1126] and [sales/sl060.cbl:L1175]. A YAML space maps to the CLI
-# token `N` while the column still stores a space, and normalisation's first job trims
-# it identically on both sides.
+# [sales/sl060.cbl:L1126] and [sales/sl060.cbl:L1175]. A YAML space reaches the CLI
+# as the LITERAL SPACE `--irs-instead ' '` - no `N` token exists - so the column
+# stores a space, and normalisation's first job trims it identically on both sides.
 IRS_INSTEAD_GL_ONLY: Final[str] = " "
 
 # The two one-shot posting latches, `S-Flag-P` [copybooks/wssystem.cob:L226] and
@@ -1813,9 +1828,13 @@ def test_scenario_definition_preconditions(
         ALL - both `IRS-Used` and `IRS-Both-Used` are simply False.
       `cyclea != 0`  a zero accounting cycle diverts the menu to system setup
         [general/general.cbl:L462-L463], which on a headless runner is a hang.
-      `period == 1`  INERT, and asserted only so that its inertness is recorded rather
-        than assumed: the sole in-scope divide by it is [general/gl080.cbl:L328] and
-        `gl_end_of_cycle` is driven by no scenario at all.
+      `period == 1`  INERT ON THIS SCENARIO, and asserted only so that its inertness
+        is recorded rather than assumed: the sole in-scope divide by it is
+        [general/gl080.cbl:L328], which belongs to `gl_end_of_cycle` - an operation
+        none of THIS file's four routes dispatches. ⚠️ NARROWED: this previously said
+        `gl_end_of_cycle` "is driven by no scenario at all", which is false.
+        `end_of_cycle_gl` drives it, and the divide is emphatically NOT inert there -
+        it is what selects the quarter.
       `date_form == 1`  UK dd/mm/yyyy, matching the pinned text, whose digits are never
         reordered to match the form.
       THE CLOCK  both observables, against the `pinned_clock` fixture and against this
@@ -2262,8 +2281,9 @@ def test_ok_to_post_answers_are_pinned(
         assert key not in definition, (
             f"{SCENARIO}: `{key}:` is declared and must not be. None of its routes is "
             f"on this path - the transfer-file clear belongs to the IRS route and the "
-            f"three end-of-cycle answers to `gl_end_of_cycle`, which no scenario file "
-            f"drives. Leaving it unstated is what keeps this scenario's inputs exactly "
+            f"three end-of-cycle answers to `gl_end_of_cycle`, which THIS scenario does "
+            f"not drive (`end_of_cycle_gl` does). Leaving it unstated is what keeps "
+            f"this scenario's inputs exactly "
             f"the inputs the frozen cycle takes (R-3)."
         )
 
@@ -2279,8 +2299,12 @@ def test_affected_tables_are_in_scope_and_alphabetical(
     allowance anywhere in the diff path, so what is on the list is compared exactly and
     what is off it is not compared at all - BOUNDING, NEVER IGNORING.
 
-    `SYSTOT-REC` IS DELIBERATELY INCLUDED HERE AND ON NO OTHER SCENARIO'S LIST, and it
-    is never blanket-excluded. Agent Action Plan section 0.6.4 names the nine
+    `SYSTOT-REC` IS DELIBERATELY INCLUDED HERE, and it is never blanket-excluded.
+    ⚠️ NARROWED: this previously added "AND ON NO OTHER SCENARIO'S LIST", which is
+    false - `clean_batch_sl` and `clean_batch_pl` declare it too, reaching four and
+    three of the nine write sites respectively. This scenario's claim rests on REACH,
+    not exclusivity: all four operations, so all nine sites, in one dump.
+    Agent Action Plan section 0.6.4 names the nine
     period-total write sites as "the sole writers of the totals record, which makes the
     period-end-totals scenario verifiable by inspecting one table", and that is exactly
     the claim this list makes possible.
@@ -3364,10 +3388,21 @@ def test_a2_a3_quarter_handling_is_not_reconciled_here(
 ) -> None:
     """A-2 and A-3 are NOT exercised by this scenario, and that is recorded not implied.
 
-    DOCUMENTATION ONLY, AND IT NEEDS NO STACK. Both anomalies live in gl080, and
-    `gl_end_of_cycle` is driven by NO scenario file at all, so neither can be observed
-    here. They are locked arithmetically in
-    `tests/arithmetic/test_gl080_cycle_divide_rounded.py`, which owns them.
+    DOCUMENTATION ONLY, AND IT NEEDS NO STACK. Both anomalies live in gl080, which
+    THIS scenario does not drive, so neither can be observed HERE. ⚠️ NARROWED: this
+    previously said `gl_end_of_cycle` "is driven by NO scenario file at all", which is
+    false, and the correction changes where each anomaly is locked:
+      A-2, the unbounded quarter subscript, IS owned by
+        `tests/arithmetic/test_gl080_cycle_divide_rounded.py` and is deliberately never
+        driven through the compiled oracle, because an out-of-range subscript is a write
+        into adjacent storage whose effect is undefined.
+      A-3, the second rotating quarter counter, is ALSO witnessed in TABLE STATE by
+        `end_of_cycle_gl`, whose suite asserts it as a positive fact
+        [tests/scenarios/test_end_of_cycle_gl.py "ANOMALY A-3, asserted as a positive
+        fact about the state"] - seeding the counter and the subscript to disagree and
+        observing that the subscript writes Q1 while the counter writes Ledger-Last.
+    Both remain locked arithmetically in
+    `tests/arithmetic/test_gl080_cycle_divide_rounded.py`.
 
         L328      divide   scycle by period giving a rounded.     <- A-2, the ROUNDED
                                                                     divide

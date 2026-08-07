@@ -39,6 +39,7 @@ readonly EX_DRIVE=76       # the pty driver timed out, spun, or hit a refusal
 readonly EX_ASSERT=77      # a post-run assertion failed
 readonly EX_TIMEOUT=78     # an external command exceeded its finite deadline
 readonly EX_CAPACITY=79    # the fh-logger budget cannot be met -> refuse to run
+readonly EX_TARGET=90      # the target is not a proven harness-owned disposable database
 
 
 # No external command may run without an upper bound. The pty driver already
@@ -71,6 +72,40 @@ readonly -a ACAS_RUN_REQUIRED_ENV_DECLARED=(
 
 readonly ACAS_RUN_REQUIRED_SCHEMA='ACASDB'
 
+# ---------------------------------------------------------------------------
+#  ⭐ MJ-18: WHAT PROVES THIS TARGET IS THROWAWAY.
+#
+#  Driving the compiled posting cycle POSTS. It rewrites nominal balances, stamps
+#  batches cleared, writes posting rows and -- when a scenario answers the IRS
+#  end-of-job question with `Y' -- performs acas008-Open-Output, which DELETES EVERY
+#  ROW of PSIRSPOST-REC [common/acas008.cbl:L313-L319]. Until now the only thing
+#  standing between that and somebody's real ledger was the schema NAME being
+#  `ACASDB', and the frozen dump gives every ACAS installation in existence exactly
+#  that name [mysql/ACASDB.sql]. A name shared with every real installation is not a
+#  distinction, so this script could be pointed at a production ACAS database and
+#  would post into it without a word.
+#
+#  The proof is the one harness/reset_db.sh already relies on and is deliberately
+#  IDENTICAL to it, down to the variable and the marker text: a SERVER SETTING that
+#  harness/Dockerfile.mariadb writes into the server's own configuration. A stock
+#  MariaDB leaves `report_host' empty and this server is nobody's replica, so the
+#  setting has no other effect and can be read back with one query. It cannot be
+#  faked by a client, cannot be set per session, and is absent from every server the
+#  harness did not build.
+#
+#  NOT a table and NOT a schema object: rule R-3 admits no added DDL, so a gate that
+#  needed one would make the violation load-bearing.
+#
+#  The escape hatch is deliberately target-SCOPED. An acknowledgement names the exact
+#  `user@host:port/schema' it authorises, so one left in an environment cannot later
+#  authorise a different database -- the failure mode a bare
+#  ACAS_..._ACKNOWLEDGE=1 would have. harness/run_parity.sh refuses the
+#  acknowledgement outright, because evidence production may not be aimed by hand.
+# ---------------------------------------------------------------------------
+readonly ACAS_RUN_DISPOSABLE_MARKER='ACAS-harness-disposable-oracle'
+readonly ACAS_RUN_DISPOSABLE_VARIABLE='report_host'
+
+
 readonly ACAS_RUN_ROWS=24
 readonly ACAS_RUN_COLS=80
 
@@ -99,7 +134,7 @@ readonly -a ACAS_RUN_OPERATION_MAP=(
   'sl_cash_post:sales:K:load11:sales/sales.cbl:L792-L796'
   'pl_order_post:purchase:H:load08:purchase/purchase.cbl:L752-L762'
   'pl_payment_post:purchase:L:load12:purchase/purchase.cbl:L786-L790'
-  'irs_post:irs:4:irs030-dispatch:irs/irs030.cbl:L666-L672'
+  'irs_post:irs:4:irs030-dispatch:irs/irs.cbl:L666-L672'
 )
 
 # The in-scope `-m' modules each subsystem's menu must be able to load, taken
@@ -262,6 +297,8 @@ ACAS_RUN_OBSERVED_STATUS=0       # term code observed from the driven menu path
 ACAS_RUN_IRS_CLEAR=''           # G-1: irs030's clear-transfer-file answer
 ACAS_RUN_GL080_PROCEED=''       # G-2: gl080's pre-run gate answer
 ACAS_RUN_PAYMENT_CONFIRM=''     # G-3: sl100 / pl100 YES/NO
+ACAS_RUN_DISK_CHANGE=''         # MJ-10: gl080 disk-change option, 0 or 9
+ACAS_RUN_ARCHIVE_PATH=''        # MJ-10: gl080 archive path override, or empty
 ACAS_SQL_OUT=''                 # last successful scalar query result
 ACAS_SQL_DIAG=''                # last client diagnostic, for error messages
 declare -a ACAS_RUN_TABLES=()          # the scenario's affected-table list
@@ -770,11 +807,31 @@ acas_derive_run_id() {
 }
 
 acas_assert_run_id() {
-  [[ "$$ACAS_RUN_RUN_ID" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || acas_die "$EX_USAGE" \
+  #  ⭐ THE VARIABLE, NOT THE PROCESS ID (finding MJ-02 / S-1). This read `$$ACAS_RUN_RUN_ID`,
+  #  which bash expands as `$$` -- this shell's PID -- followed by the LITERAL text
+  #  `ACAS_RUN_RUN_ID`. The regex was therefore matched against something like
+  #  `4127ACAS_RUN_RUN_ID`, which is always inside the closed alphabet, so the check
+  #  ALWAYS PASSED and the supplied run id was never validated at all. The id becomes
+  #  part of a file name and is published in every evidence record, so CR, LF, tab or
+  #  path content in it could forge an evidence line or steer a staging path
+  #  (CWE-20, CWE-22, CWE-73, CWE-117).
+  [[ "${ACAS_RUN_RUN_ID-}" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || acas_die "$EX_USAGE" \
     "the run id must be 1 to 64 characters of letters, digits, dot, underscore or hyphen." \
     "  got: $(acas_sanitise_field "$ACAS_RUN_RUN_ID")" \
     'It becomes part of a file name and is published in every evidence record, so it' \
     'has to be a plain identifier.'
+
+  #  AND IT MUST NAME SOMETHING. `.` and `..` are inside the alphabet above and are
+  #  directory references rather than identifiers; neither can traverse -- the closed
+  #  set admits no `/` -- but neither is a name an evidence record can be attributed
+  #  to, and `..` as a file-name component reads as a mistake wherever it appears.
+  case "$ACAS_RUN_RUN_ID" in
+    .|..)
+      acas_die "$EX_USAGE" \
+        "the run id must be an identifier, not a directory reference: '$ACAS_RUN_RUN_ID'." \
+        'It is published in every evidence record and must identify one attempt.'
+      ;;
+  esac
 }
 
 # ⭐ EVERY EVIDENCE LEAF IS PUBLISHED BY RENAME, NEVER BY REDIRECTION (finding F-26)
@@ -1474,6 +1531,17 @@ SCENARIO KEYS THIS STAGE READS
                           and the same key harness/dump_tables.py reads.
     irs_clear_postings     G-1. "Y" or "N". Required for irs_post.
     gl080_proceed          G-2. "Y" proceeds, "A" aborts. Default "Y".
+    disk_change_option     REQUIRED for gl_end_of_cycle. The GL084 answer
+                           [general/gl080.cbl:L545-L549]. Only "0" is accepted:
+                           this leg cannot drive "9" provably, because `a' is
+                           `pic 99' [general/gl080.cbl:L183] and because 9 exits
+                           the section before the accept that would consume the
+                           Return. Refused rather than guessed at (MJ-10).
+    archive_path_override  REFUSED by this leg. The frozen prompt is an UPDATE
+                           accept [general/gl080.cbl:L555] whose replace-versus-
+                           insert behaviour is unmeasured and, while the prompt
+                           is unreachable in every fixture, unmeasurable. Omit
+                           the key to take the frozen default of no override.
     payment_post_confirm   G-3. "YES" or "NO". Required for sl_cash_post and
                           pl_payment_post: neither program's prompt has a default
                           (both blank the reply field and re-ask on a blank), so
@@ -1567,6 +1635,13 @@ EXIT CODES
         cycle had reached is still readable afterwards.
     79  insufficient free space for the frozen fh-logger. Nothing was run and
         the database was not contacted.
+    90  the target is not a proven harness-owned disposable database. Driving
+        this cycle POSTS, and the schema NAME proves nothing -- the frozen
+        mysql/ACASDB.sql gives every ACAS installation the name ACASDB -- so the
+        server must declare itself disposable through @@report_host, or the exact
+        target must be named in ACAS_RUN_ACKNOWLEDGE_DESTRUCTIVE. Same number and
+        same meaning in [harness/reset_db.sh] and
+        [harness/run_python_scenario.sh].
 
 ARTIFACTS, all under $ACAS_OUT/run-logs/<scenario>/ and all mode 0600, none of
 them inside any tree the diff stage compares:
@@ -2305,7 +2380,25 @@ acas_resolve_pinned_values() {
   fi
 
   if acas_ops_include 'gl_end_of_cycle'; then
-    ACAS_RUN_GL080_PROCEED="$(acas_scenario_default gl080_proceed 'Y')"
+    # ⭐ MJ-16: REQUIRED, not defaulted -- symmetrically with the migrated leg.
+    #
+    # This leg types a keystroke rather than passing an option, so it cannot launder
+    # an omission into "consent explicitly stated" the way the migrated leg could.
+    # The reason it must still require the key is the OTHER half of the same rule: the
+    # scenario is the single statement of what both legs were driven with. If one leg
+    # accepted silence and supplied 'Y' while the other refused it, the scenario would
+    # no longer say what the run did -- and the answer decides whether gl080 writes
+    # anything at all [general/gl080.cbl:L295-L302]. Costs nothing: the only scenario
+    # selecting this operation declares it.
+    ACAS_RUN_GL080_PROCEED="$(acas_scenario_scalar gl080_proceed)"
+    [[ -n "$ACAS_RUN_GL080_PROCEED" ]] || acas_die "$EX_SCENARIO" \
+      'the scenario selects gl_end_of_cycle but does not declare gl080_proceed.' \
+      'It is the pre-run backup gate [general/gl080.cbl:L295-L302]: "A" or Escape' \
+      'means goback and gl080 writes nothing; anything else proceeds. Not defaulted' \
+      'here because the migrated leg does not default it either -- the scenario is' \
+      'the single statement of what BOTH legs were driven with, and a value this' \
+      'harness invented would make that statement untrue.' \
+      'Add to the scenario:  gl080_proceed: "Y"   (or "A" to abort before any write)'
     ACAS_RUN_GL080_PROCEED="${ACAS_RUN_GL080_PROCEED^^}"
     case "$ACAS_RUN_GL080_PROCEED" in
       Y|A) : ;;
@@ -2320,6 +2413,109 @@ acas_resolve_pinned_values() {
           'default exactly rather than to type a letter the program never tests.'
         ;;
     esac
+
+    # -------------------------------------------------------------------------
+    #  ⭐ MJ-10: THIS LEG NOW READS THE DISK-CHANGE ANSWER INSTEAD OF ASSUMING IT.
+    #
+    #  `disk_change_option' and `archive_path_override' were both on this script's
+    #  KNOWN-KEY list and neither was ever READ. The GL084 plan step hard-coded `0'.
+    #  So a scenario declaring 9 was accepted here, honoured by the migrated leg as
+    #  --disk-change-option 9, and contradicted by this leg typing 0 -- two legs
+    #  driven with different logical inputs, and a diff between them measuring the
+    #  disagreement rather than the accounting (R-6).
+    #
+    #  REQUIRED rather than defaulted, matching the migrated leg (MJ-16): the answer
+    #  decides whether the archiving walk, every batch stamp, every posting delete,
+    #  the ledger-quarter rollover and the cycle increment happen at all
+    #  [general/gl080.cbl:L406-L409], [general/gl080.cbl:L324-L326].
+    # -------------------------------------------------------------------------
+    ACAS_RUN_DISK_CHANGE="$(acas_scenario_scalar disk_change_option)"
+    [[ -n "$ACAS_RUN_DISK_CHANGE" ]] || acas_die "$EX_SCENARIO" \
+      'the scenario selects gl_end_of_cycle but does not declare disk_change_option.' \
+      'It is the GL084 answer [general/gl080.cbl:L545-L549]. Not defaulted here,' \
+      'because the migrated leg does not default it either: a value this harness' \
+      'invented would be driven into one leg as a decision nobody made, and the' \
+      'two legs must be given the SAME logical inputs or the diff means nothing.' \
+      'Add to the scenario:  disk_change_option: "0"'
+    case "$ACAS_RUN_DISK_CHANGE" in
+      0) : ;;
+      9)
+        # ---------------------------------------------------------------------
+        #  REFUSED, NOT SILENTLY DOWNGRADED -- and this is MJ-10's second branch
+        #  ("reject unsupported keys and keep the ambiguity open") applied
+        #  deliberately rather than as a shortcut.
+        #
+        #  Two things about the 9 journey are UNMEASURED, and R-6 does not let a
+        #  guess stand in for a measurement:
+        #
+        #  1. `77 a pic 99 value zero' [general/gl080.cbl:L183] is a TWO-DIGIT
+        #     numeric field. Whether the single keystroke 9 lands as 09 (so that
+        #     `if a = 9' [general/gl080.cbl:L546] fires) or as 90 (so that it does
+        #     not) depends on how the screen accept justifies a numeric field.
+        #  2. `if a = 9 go to main-exit' [general/gl080.cbl:L547] leaves the
+        #     section IMMEDIATELY, before the path accept at
+        #     [general/gl080.cbl:L555] that otherwise consumes the plan's Return.
+        #     That Return would stay buffered and be taken by whichever accept came
+        #     next -- answering a later prompt with a keystroke meant for this one.
+        #
+        #  Neither can be settled from the source, and neither can be measured
+        #  today: `disk-change' is reached only from `gl080b', which runs only when
+        #  SYSTEM-REC.Arch = "Y" [general/gl080.cbl:L315],
+        #  [copybooks/wssystem.cob:L164-L165], and no fixture seeds that. Reaching
+        #  it would mean this harness inventing seed state (R-3).
+        #
+        #  So it is refused HERE, where the divergence would be introduced, rather
+        #  than driven on a guess. Refusing costs nothing real: no scenario declares
+        #  9, and the parity driver stops at this stage rather than producing a
+        #  verdict from two differently-driven runs. Recorded as an OPEN question in
+        #  docs/migration/ambiguity-resolutions.md.
+        # ---------------------------------------------------------------------
+        acas_die "$EX_SCENARIO" \
+          'disk_change_option: "9" cannot be driven through this leg provably, so it is refused.' \
+          'The migrated leg implements 9 and this one would have to type it at' \
+          '[general/gl080.cbl:L545]. Two things about that are UNMEASURED:' \
+          '  1. `a` is `pic 99` [general/gl080.cbl:L183], so whether one keystroke' \
+          '     lands as 09 or 90 -- and therefore whether `if a = 9` fires at' \
+          '     [general/gl080.cbl:L546] -- depends on numeric-accept justification.' \
+          '  2. On 9 the section exits at [general/gl080.cbl:L547] BEFORE the path' \
+          '     accept at [general/gl080.cbl:L555] that would consume the Return,' \
+          '     leaving it buffered to answer some later prompt by accident.' \
+          'Neither is measurable today: the prompt is reached only when' \
+          'SYSTEM-REC.Arch = "Y" [general/gl080.cbl:L315] and no fixture seeds that,' \
+          'and seeding one would be this harness inventing state (R-3).' \
+          'Driving it on an assumption would give the two legs different inputs and' \
+          'a diff that measures the assumption (R-6), so it is refused instead.' \
+          'Use disk_change_option: "0". The open question is Q-GL084-ACCEPT-SEMANTICS' \
+          'in docs/migration/ambiguity-resolutions.md.'
+        ;;
+      *)
+        acas_die "$EX_SCENARIO" \
+          "disk_change_option must be 0 or 9; got '$ACAS_RUN_DISK_CHANGE'." \
+          'Anything that is neither is sent straight back to the prompt by' \
+          '[general/gl080.cbl:L548-L549], so no other value can leave the loop.'
+        ;;
+    esac
+
+    #  The archive path override, refused for the same reason and on the same terms.
+    #  [general/gl080.cbl:L555] is `accept file-2 ... with update' -- an UPDATE field
+    #  pre-loaded with the path the program just built at
+    #  [general/gl080.cbl:L530-L537]. Whether typed text REPLACES that content or is
+    #  INSERTED into it, and where the cursor starts, is terminal- and
+    #  runtime-dependent and is not measurable while the prompt is unreachable. The
+    #  migrated leg takes the override as a plain string, so an insert rather than a
+    #  replace here would hand the two legs different paths.
+    ACAS_RUN_ARCHIVE_PATH="$(acas_scenario_scalar archive_path_override)"
+    [[ -z "$ACAS_RUN_ARCHIVE_PATH" ]] || acas_die "$EX_SCENARIO" \
+      'archive_path_override cannot be driven through this leg provably, so it is refused.' \
+      'The frozen prompt is `accept file-2 ... with update` at' \
+      '[general/gl080.cbl:L555]: an UPDATE field already holding the path built at' \
+      '[general/gl080.cbl:L530-L537]. Whether typed text replaces or inserts into' \
+      'that content is unmeasured, and the prompt is unreachable in every fixture' \
+      '(it needs SYSTEM-REC.Arch = "Y" [general/gl080.cbl:L315]), so it cannot be' \
+      'measured now. The migrated leg would take the override as a plain string, so' \
+      'an insert rather than a replace would give the two legs different paths.' \
+      'Remove the key to take the frozen default, which is no override. The open' \
+      'question is Q-GL084-ACCEPT-SEMANTICS in docs/migration/ambiguity-resolutions.md.'
   fi
 
   # G-3 -- sl100 / pl100 YES/NO before posting. REQUIRED, exactly as G-1 is, and
@@ -3347,6 +3543,85 @@ acas_system_column() {
   printf '%s' "$ACAS_SQL_OUT"
 }
 
+# ⭐ MJ-18: THE DESTRUCTIVE-TARGET GATE. See the DISPOSABLE vocabulary above for
+# why the schema name alone proved nothing.
+#
+# Called from acas_assert_database AFTER connectivity, because the proof is a query.
+# It runs BEFORE the autocommit check, the silent-pass traps and every drive stage,
+# so nothing has posted by the time this either passes or refuses.
+acas_run_target_label() {
+  printf '%s@%s:%s/%s' \
+    "${ACAS_DB_USER:-<unset>}" \
+    "${ACAS_DB_HOST:-<unset>}" \
+    "${ACAS_DB_PORT:-<unset>}" \
+    "${ACAS_DB_NAME:-<unset>}"
+}
+
+acas_run_target_acknowledged() {
+  local supplied="${ACAS_RUN_ACKNOWLEDGE_DESTRUCTIVE-}"
+  [[ -n "$supplied" ]] || return 1
+  [[ "$supplied" == "$(acas_run_target_label)" ]]
+}
+
+acas_assert_disposable_target() {
+  local acknowledged=0
+  if acas_run_target_acknowledged; then
+    acknowledged=1
+  fi
+
+  # An acknowledgement that is SET but names a different target is refused outright
+  # rather than treated as absent: it means the operator believes they authorised
+  # this run, and letting the marker decide instead would be answering a question
+  # they did not ask.
+  if (( ! acknowledged )) && [[ -n "${ACAS_RUN_ACKNOWLEDGE_DESTRUCTIVE-}" ]]; then
+    acas_die "$EX_TARGET" \
+      'ACAS_RUN_ACKNOWLEDGE_DESTRUCTIVE names a different target than this run.' \
+      "  this run: $(acas_run_target_label)" \
+      'The acknowledgement is matched against the exact target so that one left in' \
+      'an environment cannot later authorise a different database. Correct it or' \
+      'unset it.'
+  fi
+
+  local marker='' rc=0
+  acas_sql_scalar "select @@${ACAS_RUN_DISPOSABLE_VARIABLE};" || rc=$?
+  if (( rc == 0 )); then
+    marker="$ACAS_SQL_OUT"
+  fi
+
+  if (( rc != 0 )) || [[ "$marker" != "$ACAS_RUN_DISPOSABLE_MARKER"* ]]; then
+    if (( ! acknowledged )); then
+      acas_die "$EX_TARGET" \
+        'this server does not declare itself a harness-owned disposable target.' \
+        "  variable: @@${ACAS_RUN_DISPOSABLE_VARIABLE}" \
+        "  expected: ${ACAS_RUN_DISPOSABLE_MARKER}..." \
+        "  found:    ${marker:-<query failed>}" \
+        '' \
+        'This script DRIVES THE COMPILED POSTING CYCLE. It rewrites nominal' \
+        'balances, stamps batches cleared and, for a scenario that answers the IRS' \
+        'end-of-job question with Y, DELETES EVERY ROW of PSIRSPOST-REC' \
+        '[common/acas008.cbl:L313-L319]. The schema name proves nothing: the frozen' \
+        'mysql/ACASDB.sql gives every ACAS installation that same name.' \
+        '' \
+        'That declaration is written into the server configuration by' \
+        'harness/Dockerfile.mariadb, so its ABSENCE means this is not the' \
+        "harness's throwaway server. Start the harness service instead:" \
+        '    docker compose -f harness/docker-compose.yml up -d mariadb' \
+        'If this IS a disposable target that predates the marker, rebuild the' \
+        'image rather than acknowledging past the gate:' \
+        '    docker compose -f harness/docker-compose.yml build mariadb' \
+        '' \
+        'If the target really is disposable, say so explicitly and name it exactly:' \
+        "    ACAS_RUN_ACKNOWLEDGE_DESTRUCTIVE='$(acas_run_target_label)'" \
+        'harness/run_parity.sh refuses that variable: evidence production may not' \
+        'be aimed by hand.'
+    fi
+    acas_warn 'acknowledged: this server does not declare itself a harness-owned disposable target.'
+    acas_log 'disposability = acknowledged, NOT PROVEN'
+  else
+    acas_log "disposability declared by the server: @@${ACAS_RUN_DISPOSABLE_VARIABLE} = ${ACAS_RUN_DISPOSABLE_MARKER}"
+  fi
+}
+
 # STAGE 6 -- the database.
 acas_assert_database() {
   ACAS_RUN_CURRENT_STAGE='asserting the database'
@@ -3372,6 +3647,10 @@ acas_assert_database() {
          "the database rejected a trivial query on $ACAS_DB_NAME." \
          "$(acas_diag_summary "$ACAS_SQL_DIAG")" ;;
   esac
+
+  # ⭐ MJ-18: BEFORE anything else this stage learns about the target, and long
+  # before any drive stage posts into it.
+  acas_assert_disposable_target
 
   # The frozen schema must be present. 33 CREATE TABLE statements, no ALTER and
   # no CREATE INDEX [mysql/ACASDB.sql]. Nothing here alters it (R-3).
@@ -3845,6 +4124,46 @@ acas_plan_add() {
     >>"$ACAS_RUN_PLAN_FILE"
 }
 
+# ---------------------------------------------------------------------------
+#  ⭐ MJ-19: TRUSTED PLAN CONTROLS AND UNTRUSTED SCENARIO DATA ARE NOT THE SAME
+#  THING, AND THEY SHARED ONE ESCAPE NAMESPACE.
+#
+#  A plan row's `send' field is TRUSTED PLAN TEXT. The pty driver's `decode_send'
+#  expands `\r', `\n', `\e', `\t' and `\\' ANYWHERE in it, which is exactly right for
+#  the terminator this script appends to a keystroke -- and exactly wrong for the
+#  scenario-supplied value the terminator is appended TO. Both arrived in the same
+#  string, so a backslash in a scenario value was read as the start of a control
+#  sequence rather than as a backslash: `run_date_text: 01\r02\r2025' would have been
+#  typed at the compiled program as three separate ENTER-terminated fields.
+#
+#  THE PARITY CONSEQUENCE IS THE POINT, not the injection. The migrated leg receives
+#  scenario values as ARGV -- no escape layer, no expansion, the bytes as written. So
+#  a value the oracle leg re-interpreted and the migrated leg took literally makes
+#  the two legs receive DIFFERENT LOGICAL INPUTS, and a diff drawn across that pair
+#  measures the escape layer rather than the accounting (R-6).
+#
+#  This function is the boundary. Every backslash in untrusted text is doubled, so
+#  `decode_send' emits precisely one literal backslash for it and the data reaches
+#  the program BYTE FOR BYTE as the scenario wrote it -- while the `\r' this script
+#  appends outside the call still means ENTER.
+#
+#  Ordering is not incidental: the backslash must be doubled FIRST or a doubling pass
+#  would re-escape its own output. `${var//\\/\\\\}' is a single simultaneous
+#  substitution, so it cannot.
+#
+#  Currently every value reaching a send field is also pattern-validated to a closed
+#  set that contains no backslash, so this is not a live injection today. It is
+#  applied anyway, at the boundary, because the validation and the send site are
+#  hundreds of lines apart: the next scenario key routed into a keystroke, or one
+#  relaxation of one pattern, would otherwise reintroduce the divergence silently.
+#  A test asserts that no send field interpolates a variable without coming through
+#  here.
+# ---------------------------------------------------------------------------
+acas_plan_escape_data() {
+  local raw="$1"
+  printf '%s' "${raw//\\/\\\\}"
+}
+
 acas_plan_forbidden() {
   local entry code reason locator
   for entry in "${ACAS_RUN_FORBIDDEN[@]}"; do
@@ -3873,7 +4192,7 @@ acas_plan_date_entry() {
     purchase) locator='purchase/pl000.cbl:L236-L245' ;;  # prompts L236/239/242, accept L245
     irs)      locator='irs/irs000.cbl:L222-L231'     ;;  # accept L231, at column 0848
   esac
-  acas_plan_add 1 'date-entry' expect "date as $order" "${ACAS_RUN_DATE_TEXT}\\r" 1 \
+  acas_plan_add 1 'date-entry' expect "date as $order" "$(acas_plan_escape_data "$ACAS_RUN_DATE_TEXT")\\r" 1 \
     "pinned run date, typed in the order DATE-FORM $ACAS_RUN_DATE_FORM selects [$locator]"
 }
 
@@ -3966,10 +4285,47 @@ acas_plan_gl_end_of_cycle() {
   acas_plan_ack 'gl080-note' 'GL012' 3 \
     'gl080 note-and-return acknowledgement [general/gl080.cbl:L310]'
 
-  # GL084 sits deeper in the archive path and is a genuine choice: "<0> to
-  # signify change made or <9> to abort this run".
-  acas_plan_add 2 'gl080-archive' react 'GL084' '0\r' 3 \
-    'gl080 archive-path question; 0 = change made, continue [general/gl080.cbl:L539-L545]'
+  # ---------------------------------------------------------------------------
+  #  ⭐ MJ-10: THE DECLARED ANSWER, NOT A HARD-CODED ONE.
+  #
+  #  GL084 is a genuine choice -- "<0> to signify change made or <9> to abort this
+  #  run" -- and this step used to type `0' whatever the scenario said. The value is
+  #  now the scenario's, and the binding gate above has already refused every value
+  #  this leg cannot drive provably, so by the time we get here it is `0'.
+  #
+  #  Escaped at the boundary (MJ-19) even though the gate has narrowed it to a single
+  #  digit: the escaping belongs to the send site, not to whatever validation happens
+  #  to precede it today.
+  #
+  #  REACHABILITY, STATED PLAINLY: `disk-change' runs only from `gl080b', which runs
+  #  only when SYSTEM-REC.Arch = "Y" [general/gl080.cbl:L315],
+  #  [copybooks/wssystem.cob:L164-L165]. No fixture seeds that, so this rule and the
+  #  path rule below have never fired in any run. They are `react' rules, which fire
+  #  only if the screen appears, so an unreachable prompt costs nothing -- but the
+  #  step is written correctly rather than left as a hard-coded placeholder, and its
+  #  untested status is recorded in docs/migration/ambiguity-resolutions.md.
+  # ---------------------------------------------------------------------------
+  acas_plan_add 2 'gl080-archive' react 'GL084' \
+    "$(acas_plan_escape_data "$ACAS_RUN_DISK_CHANGE")\\r" 3 \
+    "gl080 disk-change option; scenario declares $ACAS_RUN_DISK_CHANGE [general/gl080.cbl:L539-L549]"
+
+  #  ⭐ MJ-10: THE PROMPT THIS PLAN HAD NO STEP FOR AT ALL.
+  #
+  #  Answering GL084 with 0 falls through to a SECOND prompt the plan never
+  #  mentioned: `accept file-2 ... with update' [general/gl080.cbl:L555], an update
+  #  field pre-loaded with the archive path built at
+  #  [general/gl080.cbl:L530-L537]. A bare Return accepts that built path unchanged,
+  #  which is the frozen default and the only behaviour this leg supports -- the
+  #  binding gate refuses archive_path_override precisely because overriding an
+  #  update field cannot be driven provably.
+  #
+  #  Without this step the run would answer GL084 and then sit at an unanswered
+  #  accept until the phase deadline, reported as a pty timeout rather than as the
+  #  missing plan step it actually was. A leading space would send the program back
+  #  to the option prompt [general/gl080.cbl:L556-L557], so a bare Return is also
+  #  the only answer that makes progress.
+  acas_plan_add 2 'gl080-archive-path' react 'Current path/name is' '\r' 3 \
+    'gl080 archive-path update accept; bare Return keeps the built path, which is the frozen default [general/gl080.cbl:L553-L557]'
 
   acas_plan_add 2 'gl080-phase1' react 'Phase - 1. Batch Check' '' 3 \
     'gl080 Phase 1 banner [general/gl080.cbl:L306]'
@@ -4035,7 +4391,7 @@ acas_plan_sl_cash_post() {
   acas_plan_menu_select
 
   acas_plan_add 2 'sl100-confirm' react 'OK to Post Payment Transactions' \
-    "${ACAS_RUN_PAYMENT_CONFIRM}\\r" 3 \
+    "$(acas_plan_escape_data "$ACAS_RUN_PAYMENT_CONFIRM")\\r" 3 \
     "G-3: sl100 posting confirmation = $ACAS_RUN_PAYMENT_CONFIRM [sales/sl100.cbl:L310-L318]"
   acas_plan_ack 'sl100-not-proofed' 'SL137' 2 \
     'sl100 payments-not-proofed; Stage 6 asserts S-FLAG-P = 2 so this should not fire [sales/sl100.cbl:L296-L301]'
@@ -4085,7 +4441,7 @@ acas_plan_pl_payment_post() {
   acas_plan_menu_select
 
   acas_plan_add 2 'pl100-confirm' react 'OK to post payment transactions' \
-    "${ACAS_RUN_PAYMENT_CONFIRM}\\r" 3 \
+    "$(acas_plan_escape_data "$ACAS_RUN_PAYMENT_CONFIRM")\\r" 3 \
     "G-3: pl100 posting confirmation = $ACAS_RUN_PAYMENT_CONFIRM; note the wording differs from sl100 [purchase/pl100.cbl:L302-L311]"
   acas_plan_ack 'pl100-not-proofed' 'PL137' 2 \
     'pl100 payments-not-proofed; Stage 6 asserts P-FLAG-P = 2 so this should not fire [purchase/pl100.cbl:L288-L293]'
@@ -4117,7 +4473,7 @@ acas_plan_irs_post() {
   # G-1. LIMIT 2 rather than 1: one legitimate appearance, and one more to
   # catch a rejected answer as a failure rather than as a hang.
   acas_plan_add 2 'irs030-clear' react 'Can I clear the Ledgers Posting' \
-    "${ACAS_RUN_IRS_CLEAR}\\r" 2 \
+    "$(acas_plan_escape_data "$ACAS_RUN_IRS_CLEAR")\\r" 2 \
     "G-1: clear the transfer file = $ACAS_RUN_IRS_CLEAR; \"Y\" deletes every row of PSIRSPOST-REC [irs/irs030.cbl:L1715-L1724]"
   acas_plan_ack 'irs030-note-counts' 'Note counts and any messages' 2 \
     'pure acknowledgement, no database effect [irs/irs030.cbl:L1725-L1726]'
@@ -4382,7 +4738,19 @@ def clean(raw):
 def decode_send(spec):
     r"""Expand the plan's \r and \e escapes. Deliberately NOT a general
     unicode_escape decode, which would also transform sequences that are meant
-    to reach the program literally."""
+    to reach the program literally.
+
+    MJ-19 -- THE INPUT CONTRACT. This expands escapes ANYWHERE in `spec', which is
+    correct only because a plan `send' field is TRUSTED PLAN TEXT. Untrusted
+    scenario-supplied text must reach a send field through
+    `acas_plan_escape_data', which doubles every backslash so that exactly one
+    literal backslash is emitted here. That keeps the bytes typed at the compiled
+    program identical to the bytes the migrated leg receives as argv, where there
+    is no escape layer at all -- and a diff between two legs that were given
+    different logical inputs would measure this function rather than the
+    accounting (R-6). Do not add an escape to this table without checking every
+    send site: a new one silently changes the meaning of data already flowing
+    through."""
     out = []
     i = 0
     while i < len(spec):

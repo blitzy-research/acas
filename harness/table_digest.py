@@ -181,8 +181,13 @@ def _resolve_tables(
         raise SystemExit(
             _fail(
                 "give either a table list or --scenario-file, and exactly one of "
-                "them. They are alternative ways of choosing the same list, and "
-                "harness/dump_tables.py refuses the combination for the same reason.",
+                "them. They are alternative ways of choosing the same list HERE, "
+                "because this tool has no provenance field to put a scenario file "
+                "in. Note that harness/dump_tables.py is DIFFERENT: it accepts "
+                "--scenario-file alongside a selector and records it as provenance "
+                "(scenario_file_sha256), refusing only --tables with "
+                "--all-in-scope. This message previously claimed dump_tables "
+                "refused the same combination, which is no longer true.",
                 EX_USAGE,
             )
         )

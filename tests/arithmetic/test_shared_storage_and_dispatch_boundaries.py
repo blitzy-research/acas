@@ -2342,6 +2342,17 @@ _MAY_DEFER_IMPORT_PROGRAM_OR_DAL: Final[Mapping[str, str]] = MappingProxyType(
         "test_pic_field_descriptors.py": (
             "reads shipped descriptors for the drift census across the three layers"
         ),
+        "test_shipped_close_and_rejection_paths.py": (
+            "drives the shipped sl060 close paragraph and irs030 input loop with a "
+            "recording facade stand-in, because A-1's nested posting close and the "
+            "IR032 clean rejection are call sequences no table dump can observe "
+            "(findings MJ-07 and MJ-11)"
+        ),
+        "test_cli_seams_and_failure_paths.py": (
+            "inspects irs030_posting.run's own signature to prove the transfer-file "
+            "clear answer has no default (MN-05); a transcription of the signature "
+            "could not catch the shipped default the finding was about"
+        ),
     }
 )
 

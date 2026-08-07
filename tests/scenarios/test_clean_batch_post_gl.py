@@ -27,8 +27,12 @@ status equals one, or that a total is arithmetically right. Every assertion asks
 whether the migrated cycle produced what the compiled COBOL produced. Agent Action
 Plan section 0.3.2 reinforces it: expected values come "from the compiled oracle, never
 from reading the COBOL and reasoning about what it should produce" - which is also why
-`test_batch_is_stamped_cleared_and_posted` is framed as "both sides agree" and never as
-"the value is 1".
+`test_the_stamped_batch_columns_agree_on_both_sides` is framed as "both sides agree" and
+never as "the value is 1". ⚠️ IT WAS ONCE NAMED
+`test_batch_is_stamped_cleared_and_posted`, which asserted an OUTCOME the oracle
+refutes on this route: the batch is NOT stamped here, because A-NEW-18 starves the
+posting walk. A test name is read far more often than a test body, so a name that
+states a false outcome is a false claim however careful the body is (finding MJ-08).
 
 THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports that none was
 provided, so there is no on-disk rules file and no reader should look for one. The six
@@ -191,9 +195,14 @@ verbatim:
     9|  *>   but function length (Batch-record) says 98?
 
 Whether the declared length or the sum of the fields governs the record actually read
-affects the alignment of the trailing fields, and only execution shows which. It is
-carried as ambiguity `Q-4` and arbitrated against the compiled oracle, never resolved
-by reasoning.
+affects the alignment of the trailing fields, and only execution showed which - never
+reasoning. Execution has now happened: `Q-4` in
+`docs/migration/ambiguity-resolutions.md` is `RESOLVED BY ORACLE` (2026-08-07) and the
+answer is NEITHER - both record copies measure 96, `FUNCTION LENGTH` agrees with the
+field sum, and the 98 in the maintainer's note is false under GnuCOBOL 3.2.0.
+`docs/migration/anomaly-log.md` correspondingly carries A-15 as `REPRODUCED - VALUE
+MEASURED`. Measured is not fixed: the contradictory note stays in the frozen copybook
+and nothing repairs it (R-4).
 
 A-12 - CHARACTER-WIDTH DRIFT, the reason normalisation job 1 exists at all:
 `Ledger-Name pic x(24)` at `[copybooks/wsledger.cob:L27]` becomes
@@ -216,10 +225,14 @@ THE gl071 SORT CONTRACT - A LOAD-BEARING ORDERING, NOT A DETAIL
 WARNING - THE SD DECLARATION ORDER IS NOT THE KEY ORDER. The record is declared
 `sort-batch, sort-post, sort-code, sort-date, sort-ac, sort-pc, sort-amount,
 sort-legend` at `[general/gl071.cbl:L137-L144]`, while the keys are batch, AC, PC,
-POST. There is NO `DUPLICATES IN ORDER` phrase, so a tie on all four keys has
-unspecified relative order - carried as ambiguity `Q-SORT-TIE-ORDER`, and provably
-harmless here because gl072's only state mutation for a posting is the COMMUTATIVE add
-at `[general/gl072.cbl:L331]`. gl071 is a PURE SORT: measured over the whole file, zero
+POST. There is NO `DUPLICATES IN ORDER` phrase, so the relative order of a tie on all
+four keys is whatever GnuCOBOL 3.2 chooses. Under R-6 that was a question for the
+oracle, and the oracle has ANSWERED it: `Q-SORT-TIE-ORDER` in
+`docs/migration/ambiguity-resolutions.md` is `RESOLVED BY ORACLE` (2026-08-07) - the
+compiled sort PRESERVES INPUT ORDER for equal keys, which is exactly what the Python
+side's unconditionally stable sort produces. It is independently harmless here, because
+gl072's only state mutation for a posting is the COMMUTATIVE add at
+`[general/gl072.cbl:L331]`. gl071 is a PURE SORT: measured over the whole file, zero
 facade verbs and zero arithmetic statements.
 
 -------------------------------------------------------------------------------
@@ -643,9 +656,10 @@ def test_scenario_definition_preconditions(pinned_clock, vocabulary) -> None:
     # THREE states, and the third - a space, General Ledger only - HAS NO CONDITION
     # NAME AT ALL: both predicates are simply False. Agent Action Plan section 0.6.4:
     # "leaving it at a default would make the affected-table list ambiguous", so it
-    # is pinned rather than defaulted. A YAML space maps to the CLI token "N" while
-    # the column still stores a space, and normalisation job 1 trims that to the
-    # empty string on BOTH sides - correct, because it is applied identically.
+    # is pinned rather than defaulted. A YAML space reaches the CLI as the LITERAL
+    # SPACE `--irs-instead ' '`; there is no `N` token, as that option's own help
+    # states. The column therefore stores a space, and normalisation job 1 trims that
+    # to the empty string on BOTH sides - correct, because it is applied identically.
     irs_instead_key = vocabulary.scenario_keys["irs_instead"]
     assert system[irs_instead_key] in vocabulary.irs_instead_states
     assert system[irs_instead_key] == vocabulary.irs_instead_states[0]
@@ -983,10 +997,15 @@ def test_clean_batch_post_gl_state_parity(parity, harness) -> None:
     WHERE THE VERDICT IS RECORDED (R-6). This run's outcome belongs in
     docs/migration/scenario-diff-evidence.md, and any semantic question it raises in
     docs/migration/ambiguity-resolutions.md - never settled silently in the code. Two
-    such questions already touch this scenario: `Q-4`, the batch-record length
-    contradiction at [copybooks/wsbatch.cob:L7-L9], and `Q-SORT-TIE-ORDER`, the
-    unspecified relative order of records tying on all four of gl071's keys
-    [general/gl071.cbl:L172-L178]. The General Ledger caveat makes this
+    such questions touch this scenario, and BOTH have been measured rather than left
+    open: `Q-4`, the batch-record length contradiction at
+    [copybooks/wsbatch.cob:L7-L9], is `RESOLVED BY ORACLE` (2026-08-07) with the answer
+    NEITHER - both copies measure 96 - and `Q-SORT-TIE-ORDER`, the relative order of
+    records tying on all four of gl071's keys [general/gl071.cbl:L172-L178], is
+    `RESOLVED BY ORACLE` (2026-08-07) with the compiled sort PRESERVING INPUT ORDER.
+    Neither answer is hard-coded into an assertion below: a measured answer is a reason
+    to expect agreement, never a substitute for observing it. The General Ledger caveat
+    makes this
     non-negotiable: the maintainer records at [README.TXT:L50-L53] that testing is
     complete for IRS, Stock and Sales but that he has "not had any time to work with
     General at all since it was migrated over to using the GnuCobol compiler (3.2
@@ -1407,8 +1426,18 @@ def test_glposting_rec_is_an_unchanged_witness(
 
 @pytest.mark.database
 @pytest.mark.oracle
-def test_batch_is_stamped_cleared_and_posted(parity, protocol, frozen_schema) -> None:
+def test_the_stamped_batch_columns_agree_on_both_sides(
+    parity, protocol, frozen_schema
+) -> None:
     """The two columns `end-batch` stamps must AGREE BETWEEN THE TWO SIDES.
+
+    ⚠️ RENAMED FROM `test_batch_is_stamped_cleared_and_posted` (finding MJ-08). On this
+    route the batch is NOT stamped: A-NEW-18 starves `gl070` so no work record is
+    written, `gl072` takes at end on its first read, and the rewrite it performs
+    addresses key zero. Measured after a real ten-stage run: `CLEARED-STATUS` 0 and
+    `POSTED` 0 on the one seeded row. The old name asserted the opposite outcome, and
+    `test_the_gl_route_leaves_the_measured_no_op_on_both_sides` below now pins what
+    actually happens.
 
     `[general/gl072.cbl:L372-L377]` verbatim:
 
@@ -1579,3 +1608,145 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
         f"so without this check the parity claim above could pass on a database that "
         f"was never seeded."
     )
+
+
+# ---------------------------------------------------------------------------
+#  THE ACCEPTANCE CRITERION THIS ROUTE CANNOT MEET, PINNED RATHER THAN NARRATED
+#  (finding MJ-08)
+#
+#  Agent Action Plan section 0.8.5 lists "clean batch post per ledger" among the
+#  acceptance criteria, and for the General Ledger the natural reading of "post" is a
+#  nominal-ledger balance moving. THIS ROUTE CANNOT DEMONSTRATE THAT, and the reason is
+#  a frozen defect rather than a gap in the fixture: anomaly A-NEW-18 (working alias
+#  `N-KEY`). `move WS-Post-Key to HV-POST-KEY` [common/glpostingMT.cbl:L1054] moves a
+#  ten-byte GROUP into `PIC 9(18) COMP` [common/glpostingMT.cbl:L283], which is a byte
+#  move rather than a numeric conversion, so the key does not survive the round trip in
+#  a form `gl070` will accept and its guard `if batch not = WS-Batch-Nos`
+#  [general/gl070.cbl:L492-L493] discards the row. Independently, the bridge never loads
+#  `HV-POST-RRN` [common/glpostingMT.cbl:L1053-L1066] while `POST-RRN` is the primary
+#  key [mysql/ACASDB.sql:L155,:L169], so a seed persists AT MOST ONE posting row.
+#
+#  WHY AN EMPTY DIFF IS NOT ENOUGH ON ITS OWN. The state-parity test above is symmetric:
+#  it passes if the two sides agree, whether they agree on a no-op or on a balance
+#  movement. So it cannot be cited as evidence for EITHER. This section makes the
+#  measured outcome an ASSERTION, in absolute terms and on both sides, so that the
+#  criterion's unavailability is a locked fact rather than a paragraph of prose - and so
+#  that the day the frozen path changes, or a fixture starts reaching the posting walk,
+#  this test fails and the shortfall is re-examined instead of being quietly inherited.
+#
+#  THIS IS NOT A CORRECTNESS CLAIM AND MUST NOT BE READ AS ONE. Nothing here says the
+#  no-op is right. It says the compiled oracle produced it (measured, and recorded in
+#  A-NEW-18's own step 5), so R-4 requires the migrated cycle to produce it too. The GL
+#  arithmetic that this route therefore does NOT exercise is held by the arithmetic tier:
+#  `tests/arithmetic/test_double_entry_explosion.py` for gl070's three-leg explosion and
+#  `tests/arithmetic/test_ledger_balance_accumulation.py` for gl072's accumulation.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.database
+@pytest.mark.oracle
+def test_the_gl_route_leaves_the_measured_no_op_on_both_sides(
+    parity, protocol, frozen_schema
+) -> None:
+    """A-NEW-18's consequence, asserted ABSOLUTELY rather than by agreement (MJ-08).
+
+    Three measured facts, each required on BOTH sides independently:
+
+      * every `GLLEDGER-REC` balance is zero - no account moved;
+      * the seeded `GLBATCH-REC` row is unstamped - `CLEARED-STATUS` and `POSTED` both
+        zero, because `end-batch`'s rewrite addressed key zero;
+      * at most one `GLPOSTING-REC` row exists - the never-loaded `HV-POST-RRN`.
+
+    Each side is checked on its own, not against the other, which is exactly what the
+    symmetric diff cannot do.
+
+    Args:
+        parity: The completed, guarded `ParityRun`.
+        protocol: The protocol bundle, for the dump reader and the side labels.
+        frozen_schema: The parsed `mysql/ACASDB.sql`, to locate columns by name.
+
+    Raises:
+        Skipped: The harness Compose stack is not usable.
+        AssertionError: A side departed from the measured no-op - which means either
+            the frozen path changed or the criterion has become reachable. Both are
+            findings, not failures to paper over.
+    """
+    from decimal import Decimal  # noqa: PLC0415 - see the module docstring on R-2
+
+    def column_values(tree, table: str, column: str) -> list[object]:
+        """Every row's value for one column, in dump order.
+
+        Args:
+            tree: A normalised dump tree.
+            table: The table name.
+            column: The column name.
+
+        Returns:
+            The values.
+        """
+        dump = protocol.read_dump(tree / f"{table}.json")
+        protocol.assert_dump_wellformed(dump, where=str(tree), schema=frozen_schema)
+        index = list(dump["columns"]).index(column)
+        return [row[index] for row in dump["rows"]]
+
+    for side, tree in (
+        #  Side labels from the protocol's own vocabulary, as every sibling test in
+        #  this file does, so one place names them.
+        (protocol.vocabulary.sides[0], parity.paths.cobol_normalized),
+        (protocol.vocabulary.sides[1], parity.paths.python_normalized),
+    ):
+        #  1. NO BALANCE MOVED. Compared as `Decimal` against `Decimal`, because the
+        #  column is `decimal(10,2)` and a string comparison would pass on "0" and fail
+        #  on "0.00" for reasons that have nothing to do with the accounting.
+        balances = column_values(tree, LEDGER_TABLE, "LEDGER-BALANCE")
+        assert balances, (
+            f"{side}: `{LEDGER_TABLE}` came back with no rows, so this assertion "
+            f"proved nothing. The fixture must seed the nominal accounts the batch "
+            f"references."
+        )
+        nonzero = [value for value in balances if Decimal(str(value)) != Decimal("0")]
+        assert not nonzero, (
+            f"{side}: `{LEDGER_TABLE}.LEDGER-BALANCE` is non-zero on {len(nonzero)} "
+            f"row(s): {nonzero!r}.\n"
+            f"  A BALANCE MOVED, AND ON THIS ROUTE ONE CANNOT. Anomaly A-NEW-18 "
+            f"starves `gl070`: the corrupted `POST-KEY` fails the guard at "
+            f"[general/gl070.cbl:L492-L493], no work record is written, and `gl072` "
+            f"takes at end on its first read. If this now fails, DO NOT relax it - "
+            f"either the frozen bridge changed, or the fixture has begun reaching the "
+            f"posting walk, and in either case Agent Action Plan section 0.8.5's GL "
+            f"acceptance criterion has become reachable and must be re-stated in "
+            f"docs/migration/scenario-diff-evidence.md, harness/scenarios/clean_batch_gl.yaml "
+            f"and A-NEW-18 together."
+        )
+
+        #  2. THE BATCH IS UNSTAMPED. `end-batch` ran - that is locked by
+        #  tests/arithmetic/test_gl072_shipped_silent_skips.py section 4 - and its
+        #  rewrite addressed key zero, so the seeded row is untouched.
+        cleared = column_values(tree, BATCH_TABLE, "CLEARED-STATUS")
+        posted = column_values(tree, BATCH_TABLE, "POSTED")
+        assert cleared and posted
+        assert all(int(value) == 0 for value in cleared), (
+            f"{side}: `{BATCH_TABLE}.CLEARED-STATUS` is {cleared!r}. `88 Waiting` is "
+            f"value 0 [copybooks/wsbatch.cob:L29-L31], and a stamped batch would mean "
+            f"`end-batch`'s rewrite [general/gl072.cbl:L375-L377] reached a real row - "
+            f"which A-NEW-18 step 5 measured that it does not."
+        )
+        assert all(int(value) == 0 for value in posted), (
+            f"{side}: `{BATCH_TABLE}.POSTED` is {posted!r} rather than the seeded zero."
+        )
+
+        #  3. AT MOST ONE POSTING ROW SURVIVED THE SEED. The never-loaded
+        #  `HV-POST-RRN` is a different link of A-NEW-18 from the corrupted key, and
+        #  it is asserted separately so a reader can tell which one moved.
+        posting_keys = column_values(tree, POSTING_TABLE, "POST-RRN")
+        assert len(posting_keys) <= 1, (
+            f"{side}: `{POSTING_TABLE}` holds {len(posting_keys)} rows. The bridge "
+            f"never loads `HV-POST-RRN` [common/glpostingMT.cbl:L1053-L1066] while "
+            f"`POST-RRN` is the primary key [mysql/ACASDB.sql:L155,:L169], so every "
+            f"loader write targets the same key and a second row is a duplicate. More "
+            f"than one row means the loader path changed."
+        )
+        assert all(int(value) == 0 for value in posting_keys), (
+            f"{side}: `{POSTING_TABLE}.POST-RRN` is {posting_keys!r}; the "
+            f"never-loaded host variable leaves it at its `initialize` value."
+        )

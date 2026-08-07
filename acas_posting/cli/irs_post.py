@@ -15,10 +15,16 @@ rather than filled in.
 `--clear-posting-file` carries the end-of-job question
 [irs/irs030.cbl:L1715-L1724], and its answer TRUNCATES A TABLE: answering yes
 performs an open-output on the transfer file, which the handler implements as
-deleting every row [common/acas008.cbl:L313-L319]. The frozen default is [Y]
-[irs/irs030.cbl:L1716], so the flag is destructive AND on by default; it is
-preserved that way and published in both spellings so a caller can refuse it
-explicitly.
+deleting every row [common/acas008.cbl:L313-L319]. **The frozen prompt has no
+default, so neither does this flag: the answer is REQUIRED in one spelling or the
+other.** The `[Y]` at [irs/irs030.cbl:L1716] is prompt text and nothing more --
+the accept on the next line carries no `WITH UPDATE`, `WS-Reply` is never set to
+"Y" anywhere in the program, and L1718-L1719 send anything that is neither `Y`
+nor `N` straight back to the prompt, so a bare Enter RE-PROMPTS rather than
+clearing. Both spellings are published so that the answer, either answer, is
+always something the caller said. Reading that `[Y]` as a pre-filled default was
+finding CLI-05: it invented a default the program has not got, and the one it
+invented was the destructive answer.
 
     L552  procedure division using IRS-System-Params
     L553                           WS-System-Record
@@ -884,11 +890,14 @@ if __name__ == "__main__":
 #   6. `acas_posting.programs.irs030_posting.run` takes TWO keyword-only
 #      parameters beyond the three positional ones and `clear_posting_file`:
 #      `file_access` and `dal_common`, both defaulting to `None`. The file brief
-#      quotes the signature without them. The MODULE is followed, not the brief;
-#      `clear_posting_file` does default to `True` there, as the brief says, and
-#      this module passes it explicitly anyway - which is why the program's own
-#      default is never consulted and why REQUIRING the switch at this boundary
-#      (finding CLI-05) changes nothing about the program module. See OMISSIONS.
+#      quotes the signature without them. The MODULE is followed, not the brief.
+#      ⭐ The brief also gives `clear_posting_file` a `True` default and the module
+#      does NOT: it is keyword-only with no default, so the program module cannot
+#      be called without an answer either. That is the correct shape for the reason
+#      finding CLI-05 gives -- the frozen prompt has no default to reproduce -- and
+#      it means neither layer can supply the destructive answer on a caller's
+#      behalf. This module requires the switch, so it always has an answer to pass.
+#      See OMISSIONS.
 #
 # OMISSIONS  -  recorded as omissions so that a reader comparing the two trees
 # does not conclude something was lost (Agent Action Plan section 0.4.3).

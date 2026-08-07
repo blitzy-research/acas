@@ -80,6 +80,7 @@ import importlib
 import sys
 import types
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, Final
 
 import pytest
@@ -1294,3 +1295,151 @@ def test_the_end_of_cycle_refusal_names_what_each_answer_decides(
         for table in ("GLPOSTING-REC", "GLBATCH-REC", "GLLEDGER-REC"):
             assert table in message
         assert dispatched == []
+
+
+# ---------------------------------------------------------------------------
+#  MN-08 - THE PUBLIC CONTRACT HOLDS EACH NAME EXACTLY ONCE
+#
+#  `acas_posting.cli.args.__all__` is grouped by theme with explanatory comments, and
+#  several of the menu paragraphs it publishes belong to more than one theme. A tuple is
+#  not a set, so re-listing one under a second heading is a genuine duplicate in the
+#  module's public contract - and an invisible one, because a duplicate in `__all__`
+#  raises nothing, simply binding the name twice under `import *`. Seven names were
+#  duplicated: `len(__all__)` read 72 against 65 distinct.
+#
+#  The module asserts this at import too. This test exists because that assert is
+#  stripped under `python -O`, and because a test states the property where a reviewer
+#  looks for properties.
+def test_cli_args_publishes_each_public_name_once() -> None:
+    """`args.__all__` holds no repeated entry, and exports nothing it lacks."""
+    from acas_posting.cli import args
+
+    names = list(args.__all__)
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    assert not repeated, (
+        f"acas_posting.cli.args.__all__ lists {len(names)} entries with only "
+        f"{len(set(names))} distinct names. Repeated: {', '.join(repeated)}. "
+        "A duplicate binds the name twice under `import *` and makes any count of the "
+        "public surface wrong (MN-08)."
+    )
+
+    # A deduplication that dropped a name would be a silent narrowing of the public
+    # surface, so every listed name must still resolve on the module.
+    absent = sorted(name for name in names if not hasattr(args, name))
+    assert not absent, (
+        "acas_posting.cli.args.__all__ names attributes the module does not define, so "
+        f"`from acas_posting.cli.args import *` would fail: {', '.join(absent)}"
+    )
+
+    # The seven names the duplication involved must still be exported - removing one
+    # rather than deduplicating it would also make the count agree.
+    formerly_duplicated = (
+        "RDBMS_STORE_SELECTOR_DIGIT",
+        "SYSTEM_FILE_KEY_DEFAULTS",
+        "SYSTEM_FILE_KEY_PARAMS",
+        "SYSTEM_FILE_KEY_TOTALS",
+        "aa010_get_system_recs",
+        "overrewrite",
+        "zz095_restore_irs_system_data",
+    )
+    lost = sorted(name for name in formerly_duplicated if name not in names)
+    assert not lost, (
+        "these names were published twice and are now published zero times, which "
+        f"narrows the public surface rather than tidying it: {', '.join(lost)}"
+    )
+
+
+def test_cli_args_import_star_binds_every_published_name() -> None:
+    """`import *` succeeds and binds exactly the published set (MN-08).
+
+    Exercises the contract the way a consumer would, so a `__all__` entry that names
+    something unimportable is caught as the ImportError it would really be.
+    """
+    namespace: dict[str, Any] = {}
+    exec("from acas_posting.cli.args import *", namespace)  # noqa: S102
+
+    from acas_posting.cli import args
+
+    bound = {name for name in namespace if not name.startswith("__")}
+    assert bound == set(args.__all__), (
+        "the names `import *` bound differ from `__all__`:\n"
+        f"  only bound    : {sorted(bound - set(args.__all__))}\n"
+        f"  only in __all__: {sorted(set(args.__all__) - bound)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+#  MN-05 - THE CLEAR ANSWER HAS NO DEFAULT, AND NOTHING SAYS IT DOES
+#
+#  `EOJ-q1` displays "Can I clear the Ledgers Posting file? [Y]"
+#  [irs/irs030.cbl:L1716] and that `[Y]` looks like a default. It is not one: the accept
+#  on the next line carries no `WITH UPDATE`, so the literal never reaches the field;
+#  `WS-Reply pic x` is never set to "Y" anywhere in the program; and L1718-L1719 send
+#  anything that is neither `Y` nor `N` back to the prompt, so a bare Enter RE-PROMPTS.
+#
+#  Answering `Y` reaches `acas008-Open-Output`, which for that handler DELETES EVERY ROW
+#  of `PSIRSPOST-REC` [common/acas008.cbl:L313-L319]. So a default would not merely be
+#  wrong, it would be the destructive answer applied to an operator who said nothing -
+#  which is why the seam requires the answer, and why prose claiming otherwise is worth
+#  a test rather than a correction alone. Three comment sites still claimed a `True`
+#  default after the seam had stopped having one.
+def test_the_clear_answer_is_required_at_both_layers() -> None:
+    """Neither the program module nor the CLI can be driven without the answer."""
+    import inspect
+
+    from acas_posting.programs.irs030_posting import run
+
+    parameter = inspect.signature(run).parameters["clear_posting_file"]
+    assert parameter.default is inspect.Parameter.empty, (
+        "irs030_posting.run gives clear_posting_file the default "
+        f"{parameter.default!r}. The frozen prompt has no default -- the [Y] at "
+        "[irs/irs030.cbl:L1716] is prompt text, the accept carries no WITH UPDATE, and "
+        "L1718-L1719 re-prompt on anything but Y or N -- so a default here invents one, "
+        "and answering Y deletes every row of PSIRSPOST-REC (MN-05, finding CLI-05)."
+    )
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, (
+        "clear_posting_file must stay keyword-only so a caller cannot supply the "
+        "destructive answer positionally by accident."
+    )
+
+
+def test_no_module_claims_the_clear_answer_defaults_on() -> None:
+    """No comment or docstring says clearing is on by default (MN-05).
+
+    Read as text on purpose: the defect was prose disagreeing with the code, so the
+    code assertion above cannot catch it and did not.
+    """
+    root = Path(__file__).resolve().parents[2]
+    # Phrases that assert a live default. A sentence EXPLAINING that an earlier draft
+    # had one, or that the file brief specifies one the module declines, is the
+    # historical record and is not a claim about the seam - so those are exempted by
+    # requiring the phrase to appear without a disclaiming neighbour on the same line.
+    claims = (
+        "on by default",
+        "does default to `True`",
+        "default is [Y]",
+        "frozen default is [Y]",
+        "defaults to clearing",
+    )
+    exempt = ("previous default", "was wrong", "invented", "brief gives", "brief also gives")
+
+    offenders: list[str] = []
+    for relative in (
+        "acas_posting/cli/irs_post.py",
+        "acas_posting/cli/args.py",
+        "acas_posting/programs/irs030_posting.py",
+    ):
+        path = root / relative
+        assert path.is_file(), f"a declared consumer is absent: {path}"
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            lowered = line.lower()
+            if any(word in lowered for word in exempt):
+                continue
+            for claim in claims:
+                if claim.lower() in lowered:
+                    offenders.append(f"{relative}:{number}: {line.strip()[:92]}")
+    assert not offenders, (
+        "these lines claim the transfer-file clear defaults on, while the seam requires "
+        "an explicit Y or N and the frozen prompt has no default at all (MN-05):\n  "
+        + "\n  ".join(offenders)
+    )

@@ -175,12 +175,13 @@ that honours it:
 
          Everything else this file asserts is settled: the block itself was read
          out of the frozen checkout, and the storage shapes come from the generated
-         data dictionary. The two questions those shapes rest on are NOT claimed as
+         data dictionary. The two questions those shapes rest on HAVE since been
          measured - `acas_posting.cobol.arithmetic`'s question Q-2 and
-         `acas_posting.cobol.usage`'s Q-5.1 to Q-5.3 are pending, and their
-         provisional values are the documented defaults rather than observations.
-         No figure in this file reaches either open half: every operand is a
-         two-place decimal or an integer.
+         `acas_posting.cobol.usage`'s Q-5.1 to Q-5.3 are all `RESOLVED BY ORACLE`
+         (2026-08-07), so the values those modules carry are confirmed readings
+         rather than documented defaults. No figure in this file reaches either
+         question in any case: every operand is a two-place decimal or an integer,
+         and this file still asserts no measurement of its own.
 
     Also binding - Agent Action Plan section 0.8.4: no timing assertion and no
     performance measurement appears anywhere in this file.

@@ -343,7 +343,40 @@ class SystemDataBlock:
 
     phone_no: str = " " * 12
 
-    filler_81: str = " " * 20
+    # ⭐ MJ-06: THE ONE ATTRIBUTE IN THE PACKAGE THAT HAD NO ROUTE TO ITS ENTRY.
+    #
+    # Rule R-5 requires that every record field be traceable to a data-dictionary
+    # entry, and `acas_posting/dictionary/loader.py` normally finds one without help
+    # by trying, in order: field metadata, a class constant, the class's and module's
+    # named descriptor maps, then POSITION within `FIELDS`. Of 976 dataclass
+    # attributes across the 27 record modules this was the only one that reached the
+    # end of that list, and it did so because two ordinary facts about THIS record
+    # combine badly:
+    #
+    #  1. The POSITIONAL route is unavailable here. It requires `FIELDS` and the
+    #     dataclass fields to be the same length, and they are not: `FIELDS` carries
+    #     46 descriptors against 45 fields, because `Scycle REDEFINES Cyclea`
+    #     [copybooks/wssystem.cob:L62-L63] is one storage location with two COBOL
+    #     names, correctly modelled as one field plus the `scycle` property above.
+    #     The record is right and the count mismatch is a consequence of it.
+    #  2. The NAME route cannot match either. The descriptor's COBOL name is the bare
+    #     `FILLER` [copybooks/wssystem.cob:L81], and `FILLER` is not unique in this
+    #     copybook, so the attribute has to carry the line number to be a distinct
+    #     Python name -- and `filler_81` then equals no form of `FILLER`.
+    #
+    # So the field states its key outright, which is the loader's FIRST route. The key
+    # is taken from `_KEY_INDEX` rather than written as a literal, deliberately: that
+    # lookup is total, so a wrong name or line fails at IMPORT with a `KeyError`
+    # naming the pair, exactly as `_descriptor` does. A literal string would have been
+    # a second place for the key to drift out of agreement with the artifact.
+    #
+    # `tests/arithmetic/test_pic_field_descriptors.py` asserts that ZERO record
+    # attributes are unrouted, so a future field that lands in this same gap fails a
+    # test rather than quietly losing its traceability.
+    filler_81: str = field(
+        default=" " * 20,
+        metadata={"dictionary_key": _KEY_INDEX[("FILLER", 81)]},
+    )
 
     pass_value: int = 0
 

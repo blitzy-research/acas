@@ -56,6 +56,12 @@ description: |
   It does not demonstrate a ledger balance moving. The measured relational
   effect is an UNCHANGED no-op, which is why `expected_table_effect' below is
   `unchanged' and why GLLEDGER-REC comes back all zero on BOTH sides.
+  THE CAUSE HAS A NAME: anomaly A-NEW-18, working alias N-KEY, in
+  docs/migration/anomaly-log.md, where the whole chain is recorded link by
+  link with each link measured on GnuCOBOL 3.2 against MariaDB 10.11.7. It is
+  cited by identifier here rather than only derived, because a defect that is
+  merely derived in passing is a defect nobody can cite (finding MJ-08); the
+  derivation is kept below because a reader of this scenario needs it to hand.
   The cause is frozen and is not this harness's to fix: the compiled bridge
   loads thirteen host variables but never loads HV-POST-RRN
   [common/glpostingMT.cbl:L1053-L1066], and POST-RRN is the table primary key

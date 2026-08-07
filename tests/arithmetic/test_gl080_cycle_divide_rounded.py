@@ -129,13 +129,16 @@ THE AMBIGUITY REGISTER IDS CITED HERE, none of them invented by this file:
 
   Q-2   the intermediate precision of a multi-term expression, and the direction
         of a `ROUNDED` store, both carried by `acas_posting/cobol/arithmetic.py`.
-        THE TWO HALVES HAVE DIFFERENT STANDING and this file does not conflate
-        them. The DIRECTION is settled by the language: COBOL `ROUNDED` rounds half
-        away from zero, and the shipped layer does. The NUMBER OF INTERMEDIATE
-        DIGITS is a property of the compiler build, is UNMEASURED, and the register
-        keeps Q-2 pending on it. No figure in this file depends on the open half:
-        every quotient here lands in a two-digit receiver, so sixty working digits
-        and any plausible compiler default agree.
+        THE TWO HALVES REACHED THEIR STATUS DIFFERENTLY and this file does not
+        conflate them. The DIRECTION is settled by the language: COBOL `ROUNDED`
+        rounds half away from zero, and the shipped layer does. The NUMBER OF
+        INTERMEDIATE DIGITS is a property of the compiler build and was settled by
+        a focused probe, so `Q-2` is `RESOLVED BY ORACLE` (2026-08-07) - extended
+        precision throughout, quantized ONCE at the store. The register records
+        that this entry was previously wrong in BOTH directions and keeps the
+        rejected readings as evidence. No figure in this file turns on the digit
+        count regardless: every quotient here lands in a two-digit receiver, so
+        sixty working digits and the measured default agree.
   Q-3   a signed copybook item narrowed to an unsigned host variable and an
         unsigned column, so the sign is lost AT THE BRIDGE. Carried by
         `SYSTEM-REC.CYCLEA` and `SYSTEM-REC.PERIOD` together with anomaly A-11.
@@ -951,7 +954,7 @@ def test_the_binary_char_declaration_governs_and_nothing_is_adjudicated() -> Non
     0..99 and that band would have been unreachable.
 
     The bridge disagrees in the same direction, and THAT disagreement is a
-    numbered open question rather than a matter of opinion: the copybook says
+    numbered register question rather than a matter of opinion: the copybook says
     signed, the host variable `HV-CYCLEA PIC 9(03) COMP` says unsigned, and the
     column `tinyint(2) unsigned` agrees with the host variable, so a negative
     value loses its sign AT THE BRIDGE, before any SQL runs. That is anomaly A-11
@@ -2239,10 +2242,13 @@ def test_the_signed_quotient_drops_its_sign_on_store_into_a() -> None:
     SIGN-DROPPED value - 3 * -2 = -6 - and loses its own sign in turn, arriving as
     6, so the gate compares 5 against 6 and turns the phase back.
 
-    Provenance: the zoned store policy, question Q-5.1, whose provisional values
-    are transcribed from the documented GnuCOBOL default into
-    `acas_posting/cobol/usage.py` and are pending measurement. Note this is the
-    store into
+    Provenance: the zoned store policy, question Q-5.1, whose values were
+    transcribed from the documented GnuCOBOL default into
+    `acas_posting/cobol/usage.py` and have since been MEASURED: `Q-5.1` is
+    `RESOLVED BY ORACLE` (2026-08-07) and the provisional constants turned out to be
+    right, with a `COMP` item carrying a PICTURE reducing on its declared digit count
+    while a `BINARY-*` item declared by USAGE ALONE wraps at its signed byte
+    capacity. Note this is the store into
     WORKING STORAGE and is a separate matter from the sign lost at the bridge on
     the way to an unsigned column, which is anomaly A-11 and question Q-3. Q-3 has
     since been MEASURED - the unsigned column keeps the ABSOLUTE VALUE, magnitude
@@ -2377,11 +2383,12 @@ def test_the_ambient_decimal_context_cannot_change_the_result() -> None:
     `INTERMEDIATE_CONTEXT` - sixty significant digits, and the direction of a store
     fixed by the descriptor rather than by the context. Both are the shipped
     layer's own, and what this test establishes is that neither moves when the
-    ambient context does. The sixty digits are a WORKING ASSUMPTION documented at
+    ambient context does. The sixty digits are documented at
     `acas_posting/cobol/arithmetic.py`'s `INTERMEDIATE_PRECISION`, chosen to exceed
-    every in-scope receiver; the compiler's own default is question Q-2 and is
-    still pending, and it cannot reach these two figures, which need eight digits
-    between them.
+    every in-scope receiver; the compiler's own default was question Q-2 and is now
+    `RESOLVED BY ORACLE` (2026-08-07), which is what promotes that constant from a
+    working assumption to a confirmed reading. It cannot reach these two figures in
+    any case, which need eight digits between them.
 
     THE AMBIENT CONTEXT IS THE ONLY GLOBAL THIS FILE TOUCHES, it is touched only
     here, and it is put back in a `finally` so that a failure inside the block

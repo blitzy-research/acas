@@ -469,11 +469,18 @@ def assert_exact_numeric(value: object, *, where: str) -> None:
 #  resolve and no risk of shadowing a stdlib name.
 # ---------------------------------------------------------------------------
 
-# The three harness Python modules, by file name without the extension.
-HARNESS_MODULE_NAMES: Final[tuple[str, str, str]] = (
+# The harness Python modules this suite loads, by file name without the extension.
+# The first three are the tools a test drives; the fourth is the shared
+# scenario parser every consumer reads a definition through.
+HARNESS_MODULE_NAMES: Final[tuple[str, ...]] = (
     "dump_tables",
     "normalize",
     "diff_states",
+    #  The one duplicate-rejecting scenario parser (finding MJ-17). Loaded the same
+    #  way and for the same reason as the three above, and deliberately NOT exposed
+    #  through the `harness` fixture: it is infrastructure every consumer uses, not a
+    #  tool a test drives.
+    "scenario_yaml",
 )
 
 # Loaded modules, memoised so repeated fixture use does not re-execute a
@@ -499,7 +506,7 @@ def _load_harness_module(name: str) -> ModuleType:
         The executed module, memoised for the life of the session.
 
     Raises:
-        ValueError: `name` is not one of the three harness modules.
+        ValueError: `name` is not one of the loadable harness modules.
         FileNotFoundError: The file is absent. The message carries the full
             expected path and says plainly that the harness tree has not been
             created, because that is the whole diagnosis.
@@ -507,7 +514,7 @@ def _load_harness_module(name: str) -> ModuleType:
     """
     if name not in HARNESS_MODULE_NAMES:
         raise ValueError(
-            f"{name!r} is not a harness Python module. The three are "
+            f"{name!r} is not a harness Python module. The loadable ones are "
             f"{', '.join(HARNESS_MODULE_NAMES)}, at harness/<name>.py."
         )
 
@@ -1678,7 +1685,7 @@ OPERATIONS: Final[Mapping[str, tuple[str, str, str, str]]] = {
         "load12",
         "purchase/purchase.cbl:L786-L790",
     ),
-    "irs_post": ("irs", "4", "irs030-dispatch", "irs/irs030.cbl:L666-L672"),
+    "irs_post": ("irs", "4", "irs030-dispatch", "irs/irs.cbl:L666-L672"),
 }
 
 # The Python module each operation dispatches, for a test that wants to assert the
@@ -1765,6 +1772,17 @@ RUN_COBOL_FAULT_CODES: Final[frozenset[int]] = frozenset(
 # migration defect was therefore indistinguishable from a missing environment
 # variable. 69 now classifies as `DISPOSITION_BEHAVIOURAL` and reaches the test body,
 # where it FAILS.
+#
+# ⭐ AND 69 MEANS A TERM CODE, BECAUSE THE PRODUCER SAYS SO (finding MJ-01). Admitting
+# 69 as data is only sound while the runner cannot mint it from a fault. It could:
+# every child status other than 2 became 69, so an uncaught exception, an import
+# failure, a signal or an arbitrary tool exit was attested as a completed semantic
+# difference. harness/run_python_scenario.sh now admits only 0 and the operation's own
+# frozen term codes -- `ACAS_PY_TERM_CODE_MAP', whose contents are the same mapping
+# `TERM_CODES` below declares for this side -- and exits EX_ASSERT=77 otherwise, which
+# is in the set below and therefore lands as a harness fault. The two layers agree by
+# construction rather than by coincidence, and a drift between the two tables is
+# caught by `test_term_codes_match_the_runner_table`.
 RUN_PYTHON_FAULT_CODES: Final[frozenset[int]] = frozenset(
     {70, 71, 72, 73, 74, 75, 76, 77, 78}
 )
@@ -1845,9 +1863,10 @@ SCENARIO_KEY_AFFECTED_TABLES: Final[tuple[str, str]] = (
 # ALL - both predicates are simply False for a space, which is General Ledger only.
 # Agent Action Plan section 0.6.4: "leaving it at a default would make the
 # affected-table list ambiguous", so every scenario pins it explicitly. A YAML space
-# or empty value maps to the CLI token "N" while the column still stores a space,
-# and normalize.py's job 1 trims that to the empty string on BOTH sides - correct,
-# because it is applied identically.
+# or empty value reaches the CLI as the LITERAL SPACE `--irs-instead ' '`: the option
+# takes ONE character and publishes no `N`, so the space is what is passed and what
+# the column stores, and normalize.py's job 1 trims that to the empty string on BOTH
+# sides - correct, because it is applied identically.
 IRS_INSTEAD_GL_ONLY: Final[str] = " "
 IRS_INSTEAD_IRS_USED: Final[str] = "Y"
 IRS_INSTEAD_BOTH_USED: Final[str] = "B"
@@ -2071,8 +2090,12 @@ def bound_run_id(run_id: str | None = None) -> Iterator[str]:
 def scenario_definition(scenario: str) -> Mapping[str, Any]:
     """Load one scenario definition (Agent Action Plan section 0.4.1.7).
 
-    Read with `yaml.safe_load`, NEVER `yaml.load`: the loader must not be able to
-    construct arbitrary Python objects from a data file.
+    Read through `harness/scenario_yaml.py`'s duplicate-rejecting loader, which is a
+    `yaml.SafeLoader` subclass - so the loader still cannot construct arbitrary Python
+    objects from a data file, AND a repeated mapping key is a hard parse failure rather
+    than PyYAML's silent last-one-wins (finding MJ-17). Every consumer of a scenario
+    definition in this project uses that one loader, and none of them falls back to
+    PyYAML's own safe loader entry point.
 
     ONLY THE KEYS THE HELPERS CONSUME ARE CHECKED FOR PRESENCE, and NOTHING IS
     INTERPRETED. No semantic validation is added on top of the harness's own,
@@ -2090,7 +2113,13 @@ def scenario_definition(scenario: str) -> Mapping[str, Any]:
         ValueError: The file is not a YAML mapping, or carries neither spelling of
             the affected-table key or both.
     """
-    import yaml  # noqa: PLC0415 - lazy, so the arithmetic tier imports without it
+    #  Both lazy, so the arithmetic tier imports this module without PyYAML present.
+    #  `scenario_yaml` is loaded by explicit file path for the same reason the three
+    #  larger harness modules are: harness/ is deliberately not a Python package
+    #  (rule R-1), and adding an __init__.py is not the fix.
+    import yaml  # noqa: PLC0415, F401 - re-exported exception type
+
+    scenario_yaml = _load_harness_module("scenario_yaml")
 
     path = scenario_file(scenario)
     if not path.is_file():
@@ -2103,7 +2132,7 @@ def scenario_definition(scenario: str) -> Mapping[str, Any]:
             f"defaulted."
         )
 
-    parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
+    parsed = scenario_yaml.load_scenario_yaml(path.read_text(encoding="utf-8"))
     if not isinstance(parsed, Mapping):
         raise ValueError(
             f"{path}: a scenario definition must be a YAML mapping; parsed as "
@@ -2572,9 +2601,16 @@ def _requested_operations(
 ) -> tuple[str, ...]:
     """Resolve the operations one run-stage invocation drives.
 
-    The oracle runner drives one menu operation per invocation, using the scalar
-    `operation` key. The Python runner can drive the ordered `operations` list used by
-    `period_end_totals`. An explicit override always narrows either side to one.
+    BOTH runners drive the whole ordered `operations` list in ONE invocation, and both
+    take a REPEATABLE `--operation` (finding MJ-04). `harness/run_parity.sh` builds each
+    run stage as a single argv carrying one `--operation` per declared operation, in the
+    declared order, and each runner publishes one disposition record per operation. An
+    earlier revision of this docstring said the oracle runner drove "one menu operation
+    per invocation, using the scalar `operation` key", which described the runner before
+    it learned the list; `harness/run_cobol_scenario.sh --help` states the current
+    contract as "REPEATABLE, and driven in the order given".
+
+    An explicit override still narrows either side to exactly one operation.
     """
     if override is not None:
         return (override,)
@@ -2597,6 +2633,12 @@ def _requested_operations(
 #: mode 0600 and carries the run id, so it can be attributed to an attempt.
 OPERATION_STATUS_SUFFIX: Final[str] = ".operation-status"
 
+#: The status field's sentinel for an operation that was declared and never driven.
+#: `ACAS_PY_OP_NOT_RUN` in harness/run_python_scenario.sh and `ACAS_RUN_OP_NOT_RUN` in
+#: harness/run_cobol_scenario.sh, and deliberately not zero: zero is a real term code,
+#: so a slot defaulting to it would attest a clean disposition for work never done.
+OPERATION_STATUS_NOT_RUN: Final[str] = "not-run"
+
 
 def read_operation_status_artifact(
     scenario: str,
@@ -2614,15 +2656,27 @@ def read_operation_status_artifact(
         operations<TAB><count>
         operation<TAB><index><TAB><name><TAB><status>     x count
 
+    ⭐ THE STATUS FIELD IS A NUMBER *OR* THE SENTINEL `not-run`. Both runners declare
+    `not-run` for an operation they never reached - `ACAS_PY_OP_NOT_RUN` and
+    `ACAS_RUN_OP_NOT_RUN` - deliberately, because zero is a real term code and a slot
+    defaulting to zero would attest a clean disposition for work that never happened.
+    This reader used to `int()` the field unconditionally and raise a harness fault on
+    the sentinel, so an artifact the runner wrote CORRECTLY was rejected as malformed
+    and the diagnosis a partial run had published was replaced by a parse error. A
+    `not-run` row is now read, kept out of the returned dispositions - it has none -
+    and counted for the completeness check, which is about the record being whole
+    rather than about the work being done.
+
     Args:
         scenario: The scenario name.
         side: `cobol` or `python`.
         out_dir: The output root; `$ACAS_OUT` when omitted.
 
     Returns:
-        The ordered `(operation, status)` pairs, or None when the file is absent -
-        which is not by itself a fault, because a hand-driven run legitimately has
-        none and the caller decides whether it needed one.
+        The ordered `(operation, status)` pairs for the operations that RAN, or None
+        when the file is absent - which is not by itself a fault, because a
+        hand-driven run legitimately has none and the caller decides whether it
+        needed one.
 
     Raises:
         HarnessFaultError: The file exists but is malformed, or its rows are not a
@@ -2646,7 +2700,7 @@ def read_operation_status_artifact(
         ) from exc
 
     declared: int | None = None
-    rows: list[tuple[int, str, int]] = []
+    rows: list[tuple[int, str, int | None]] = []
     for number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
@@ -2667,10 +2721,20 @@ def read_operation_status_artifact(
                     f"and status; got {line!r}."
                 )
             try:
-                rows.append((int(fields[1], 10), fields[2], int(fields[3], 10)))
+                index = int(fields[1], 10)
             except ValueError as exc:
                 raise HarnessFaultError(
-                    f"{path}:{number}: a non-integer index or status in {line!r}."
+                    f"{path}:{number}: a non-integer operation index in {line!r}."
+                ) from exc
+            if fields[3] == OPERATION_STATUS_NOT_RUN:
+                rows.append((index, fields[2], None))
+                continue
+            try:
+                rows.append((index, fields[2], int(fields[3], 10)))
+            except ValueError as exc:
+                raise HarnessFaultError(
+                    f"{path}:{number}: the status field is neither an integer nor "
+                    f"the sentinel {OPERATION_STATUS_NOT_RUN!r} in {line!r}."
                 ) from exc
 
     if declared is None:
@@ -2690,7 +2754,13 @@ def read_operation_status_artifact(
             f"{[index for index, _, _ in rows]!r}; expected 1..{declared} in order. "
             f"The order is the order they were driven in, and it matters."
         )
-    return tuple((name, status) for _, name, status in rows)
+    #  ONLY THE OPERATIONS THAT RAN CARRY A DISPOSITION. A `not-run` row is
+    #  information - it says the record is complete and that this slot was never
+    #  driven - and it is deliberately not turned into a status, because there is no
+    #  number that means "did not happen".
+    return tuple(
+        (name, status) for _, name, status in rows if status is not None
+    )
 
 
 def _attach_operation_statuses(
@@ -3380,6 +3450,10 @@ def dump(
     0.8.5), so its scope has to be everything the cycle can persist. Pass `tables` only
     to narrow one table by hand while debugging.
 
+    THE SCENARIO DEFINITION IS NAMED ON EVERY CAPTURE, as provenance and not as a
+    selector, because `scenario_file_sha256` is one of the three provenance fields
+    stage 9 requires to be present and equal on both sides.
+
     Args:
         scenario: The scenario name, which also composes the output path.
         side: `cobol` or `python`. Recorded in the PATH, never in a file.
@@ -3404,6 +3478,15 @@ def dump(
         argv.append("--all-in-scope")
     else:
         argv += ["--tables", ",".join(tables)]
+    #  AND THE DEFINITION IS NAMED WHATEVER THE BOUND IS. `--scenario-file` is
+    #  provenance here rather than a selector: its digest becomes
+    #  `scenario_file_sha256`, one of the three fields `harness/diff_states.py`
+    #  requires to be present and EQUAL on both sides before it compares a row.
+    #  Omitting it left the field empty on both sides, and stage 9 refused the pair -
+    #  which is exactly right, since the definition carries the fan-out switch that
+    #  decides which tables the run touches. The driver passes it at the same three
+    #  stages for the same reason.
+    argv += ["--scenario-file", str(scenario_file(scenario))]
 
     stage = STAGE_DUMP_COBOL if side == SIDE_COBOL else STAGE_DUMP_PYTHON
     return _drive_harness_main(harness_dump_tables(), argv, stage=stage)
@@ -4529,6 +4612,15 @@ def run_scenario_parity(
     if operation is not None:
         assert_operation(operation)
 
+    #  THE ORDERED OPERATION LIST THIS REQUEST STANDS FOR, resolved HERE so that the
+    #  stage helper can name it in a diagnostic without re-deriving it. `operation is
+    #  None` means "every operation the scenario declares, in its declared order",
+    #  which is the same rule both runners apply, so the tuple below is what stage 2
+    #  and stage 6 are each expected to report having driven.
+    requested_operations = _requested_operations(
+        scenario, operation, all_declared=operation is None
+    )
+
     # ⭐ ONE RUN PER DISTINCT REQUEST, FOR THE WHOLE SESSION. Keyed on every argument
     # that changes what the protocol does, so two callers asking different questions
     # still get their own runs and two callers asking the SAME question get the SAME
@@ -4597,6 +4689,8 @@ def run_scenario_parity(
             paths=paths,
             stages=stages,
             run_id=run_id,
+            cache_key=cache_key,
+            requested_operations=requested_operations,
         )
 
 
@@ -4610,6 +4704,8 @@ def _run_scenario_parity_stages(
     paths: ScenarioPaths,
     stages: list[StageResult],
     run_id: str,
+    cache_key: tuple[object, ...],
+    requested_operations: tuple[str, ...],
 ) -> ParityRun:
     """Drive the ten stages with one run id already bound.
 
@@ -4626,6 +4722,16 @@ def _run_scenario_parity_stages(
         paths: The resolved artifact paths.
         stages: The list to append each stage result to.
         run_id: The bound run id, recorded on the returned run.
+        cache_key: The caller's memo key for this request. Passed in rather than
+            recomputed so that the entry this function writes and the entry the
+            caller looked up cannot be two different keys - the whole value of the
+            memo is that a second caller asking the same question gets the same
+            `ParityRun`, and a key derived twice from two scopes is exactly how that
+            guarantee is lost.
+        requested_operations: The ordered operations this request stands for, already
+            resolved by the caller. Used only in the operation-mismatch diagnostic,
+            where it is the third term a reader needs: what was asked for, beside
+            what each side reported driving.
 
     Returns:
         The complete run.
@@ -6419,12 +6525,13 @@ def vocabulary() -> Vocabulary:
 
 @pytest.fixture(scope="session")
 def scenario_loader() -> Callable[[str], Mapping[str, Any]]:
-    """A loader for one scenario definition, parsed with `yaml.safe_load`.
+    """A loader for one scenario definition, duplicate-rejecting (finding MJ-17).
 
-    Needs no stack: a scenario definition is a file on disk. ONLY THE KEYS THE
-    HELPERS CONSUME ARE CHECKED FOR PRESENCE and nothing is interpreted, because
-    judging a scenario's declared contents would be the added validation rule R-3
-    forbids.
+    Needs no stack: a scenario definition is a file on disk. Parsing goes through
+    `harness/scenario_yaml.py`, so a repeated mapping key is a hard parse failure
+    rather than a silent last-one-wins. ONLY THE KEYS THE HELPERS CONSUME ARE
+    CHECKED FOR PRESENCE and nothing is interpreted, because judging a scenario's
+    declared contents would be the added validation rule R-3 forbids.
 
     Returns:
         `scenario_definition`.

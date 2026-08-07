@@ -457,7 +457,7 @@ Two disciplines apply to a register that will be read by agents who cannot see t
 **Repository paths are cited only when they exist.** Verified present at the time of writing: the
 thirteen modules under `acas_posting/programs/`, the twenty-two under `acas_posting/dal/`, the seven under
 `acas_posting/cobol/`, `acas_posting/clock.py`, `acas_posting/dates.py`, `acas_posting/workfiles.py`, the
-`acas_posting/cli/` and `acas_posting/records/` and `acas_posting/dictionary/` packages; the nineteen test
+`acas_posting/cli/` and `acas_posting/records/` and `acas_posting/dictionary/` packages; the twenty test
 files under `tests/arithmetic/`, the nine under `tests/scenarios/`, plus `tests/conftest.py` and
 `tests/determinism/test_two_runs_byte_identical.py`; the committed scripts and two Dockerfiles under
 `harness/` with its nine scenario definitions under `harness/scenarios/`; both files under
@@ -661,7 +661,7 @@ Three per-question levers appear repeatedly below and are described once:
 | Lever | How it is set | Why an entry needs it |
 | --- | --- | --- |
 | The seed | the scenario's own `seed_files`, staged by `harness/seed.sh` from the frozen `common/*LD.cbl` loaders | the only way to place a chosen value in front of the compiled program without touching frozen code |
-| The affected-table list | `--scenario-file` for the scenario's own `affected_tables`, or `--tables` for an explicit list — **never both**, since `harness/dump_tables.py` rejects the combination as *"alternative ways of choosing the same list, so use exactly one"* | bounds the observation to the tables the scenario is about; see `Q-7` |
+| The affected-table list | `--all-in-scope` for the full 22-table comparison bound (what the authoritative driver uses), `--tables` for an explicit list, or `--scenario-file` alone for the scenario's own `affected_tables`. `--tables` and `--all-in-scope` are the mutually exclusive pair — `harness/dump_tables.py` refuses them together as *"alternative ways of choosing the same list, so use exactly one"*. `--scenario-file` is **not** in that pair: it selects only when it is the sole selector, and otherwise rides along as **provenance**, supplying the `scenario_file_sha256` that stage 10 requires present and equal on both sides. ⚠️ This row previously read "`--scenario-file` … or `--tables` … **never both**", attributing the refusal to the wrong pair. Measured: `--scenario-file` with `--tables` is **accepted** (1 table, scenario file as provenance), `--scenario-file` with `--all-in-scope` is **accepted** (22 tables), and only `--tables` with `--all-in-scope` is refused. The old reading was not merely imprecise — treating the two as exclusive is the defect that emptied `scenario_file_sha256` and left the authoritative driver unable to complete a single scenario | bounds the observation to the tables the scenario is about; see `Q-7` |
 | The IRS fan-out state | `IRS-Instead` in the seeded system row — `[copybooks/wssystem.cob:L179-L181]`, with `88 IRS-Used value "Y"` and `88 IRS-Both-Used value "B"` | three states, and the state decides which tables a run touches at all |
 
 Where an entry needs a value at a boundary the nine committed scenarios do not already seed, it says so
@@ -772,16 +772,17 @@ did not reach the boundary the question is about. A question answered by reading
 the weaker `RESOLVED BY CONSTRUCTION` instead — `Q-8` is the one entry that does, and it says why in its own
 text.
 
-**§13** carries the deferrals handed up from the tiers that could not answer them: **seven** entries of its
-own, mostly under mnemonic identifiers — six from the arithmetic tier and one from the scenario tier — plus a
+**§13** carries the deferrals handed up from the tiers that could not answer them: **eight** entries of its
+own, mostly under mnemonic identifiers — six from the arithmetic tier, one from the scenario tier and one from
+the two parity runners — plus a
 companion answer key that a run supplies, plus **three** questions cited by scope because the semantics layer
 already owns them. The seventh is [`Q-EMPTY-BATCH-AT-END`](#q-empty-batch-at-end), which
 `tests/scenarios/test_empty_batch.py` coined and cited before this file carried it; §13's warning records that
 gap rather than closing it silently. **§14** catalogues every remaining `Q-` identifier the repository cites —
-**84** distinct identifiers are cited outside this file across the migration trees, and **every one of them
+**85** distinct identifiers are cited outside this file across the migration trees, and **every one of them
 resolves to an entry or a catalogue row in this file**, so no citation anywhere dangles (§17 states that as a
 counted property, with the counting algorithm given so every figure is reproducible; the register's own total
-is **113**, the difference being the 3 identifiers documented as unassigned and the 26 canonical names §15.1
+is **114**, the difference being the 3 identifiers documented as unassigned and the 26 canonical names §15.1
 mints). **§15** does two things: **§15.1** assigns a globally unique canonical identifier to every reading that
 previously had only a colliding bare number, and **§15.2** tabulates the collisions between the three
 coexisting registers.
@@ -1070,9 +1071,13 @@ measurement is what promotes that constant from a working assumption to a confir
 applied.** One revision claimed both halves had been *"measured against GnuCOBOL 3.2.0"* before any probe had
 run; a later one withdrew the claim from this register, from that module's comment and from two test headers,
 on the ground that neither half was measured. Neither statement is the truth: the shape is settled by the
-language and the digits are settled by the probe below. The module comment, the two test headers and this
-register now state that one status, and the register keeps the rejected readings as evidence so a reader can
-check the discrimination instead of taking it on authority.
+language and the digits are settled by the probe below. The module comment, this register and **every test
+header that describes this question** now state that one status — enumerated as "two test headers" in an
+earlier revision, which under-counted them and was itself a symptom of finding MJ-13, so the agreement is now
+held by `tests/arithmetic/test_deployment_contract_boundaries.py`'s
+`test_no_consumer_describes_a_resolved_question_as_open` rather than by a list that has to be maintained. This
+register keeps the rejected readings as evidence so a reader can check the discrimination instead of taking it
+on authority.
 
 **The captured observables.** The discriminating case is the compound gross form of
 `[irs/irs030.cbl:L1562-L1564]` and [`general/gl051.cbl:L796`],
@@ -2810,7 +2815,8 @@ The parity tiers reached a class of question they cannot answer and would not be
 compiled program produces where the language leaves the result undefined, or where the only observable is
 one the migration does not have.** Each one is recorded here with the same five parts, in a more compact
 form because the experiments share a shape. Six came up from the arithmetic tier; the seventh,
-`Q-EMPTY-BATCH-AT-END`, came up from the scenario tier and is marked as such at its entry.
+`Q-EMPTY-BATCH-AT-END`, came up from the scenario tier, and the eighth,
+`Q-GL084-ACCEPT-SEMANTICS`, came up from the two parity runners — each is marked as such at its entry.
 
 Most carry a **mnemonic** identifier rather than a number. That is deliberate and not a lapse in the
 numbering: they were opened by the modules and tests that hit them, an id that names the question survives
@@ -3635,6 +3641,70 @@ itself is additionally exercised without a database by
 whatever batch record the program is holding — a measurement that bears on this question's second reading and
 does **not** resolve it, because that probe drove the shipped module rather than the compiled one.
 
+<a id="q-gl084-accept-semantics"></a>
+
+### `Q-GL084-ACCEPT-SEMANTICS` — what the two `disk-change` prompts do with a keystroke
+
+**Status: `PENDING — AWAITING ORACLE EXECUTION`** — and, unusually for this register, **pending for a
+structural reason rather than for want of effort**: the prompts cannot be reached by any fixture that exists,
+and reaching them would mean the harness inventing seed state. Opened by the two parity runners (MJ-10), which
+is why it sits in this section rather than §12.
+
+**(a) The question, in two halves.** `disk-change` `[general/gl080.cbl:L519-L558]` puts two prompts on the
+screen, and each carries an unmeasured input semantic:
+
+1. **`accept a at 1369`** `[general/gl080.cbl:L545]`, where `a` is `77 a pic 99 value zero`
+   `[general/gl080.cbl:L183]` — a **two-digit** numeric field offered a **single** keystroke. Does `9` land as
+   `09`, so that `if a = 9 go to main-exit` `[general/gl080.cbl:L546-L547]` fires; or as `90`, so that it does
+   not and `if a not = zero go to accept-option` `[general/gl080.cbl:L548-L549]` re-prompts instead? The
+   answer decides whether `9` aborts anything at all.
+2. **`accept file-2 at 1501 with update`** `[general/gl080.cbl:L555]` — an **update** field pre-loaded with
+   the path the section has just built `[general/gl080.cbl:L530-L537]`. Does typed text **replace** that
+   content or is it **inserted** into it, and where does the cursor start? The answer decides what path an
+   override actually produces.
+
+There is a third, smaller half that follows from (1): on `9` the section exits **before** the accept in (2),
+so a Return sent with the `9` would remain buffered and be taken by whichever accept came next — answering a
+later prompt with a keystroke meant for this one.
+
+**(b) Why it cannot be measured today.** `disk-change` is performed only from `gl080b`
+`[general/gl080.cbl:L406]`, and `gl080b` runs only when `archiving` is true — `if archiving perform gl080b
+else perform gl080c` `[general/gl080.cbl:L315-L320]` — where `Archiving` is the condition name on
+`05 Arch pic x` with `value "Y"` `[copybooks/wssystem.cob:L164-L165]`. **No fixture seeds `Arch = "Y"`.**
+Seeding one to reach the prompt would be this harness manufacturing a system-parameter row rather than
+reproducing one, which rule R-3 forbids. So the prompts are unreachable, and an unreachable prompt cannot be
+watched.
+
+**(c) What was done instead of guessing.** Both runners now **refuse** the inputs whose behaviour depends on
+the answer, rather than driving them on an assumption:
+
+| Declared input | Compiled leg | Migrated leg |
+| --- | --- | --- |
+| `disk_change_option: "0"` | driven — the value is read from the scenario and typed | driven as `--disk-change-option 0` |
+| `disk_change_option: "9"` | **refused** — half (1) and the buffered Return are unmeasured | **refused** — it is implemented here, but a capture the oracle cannot match is not evidence |
+| `archive_path_override` | **refused** — half (2) is unmeasured | **refused**, for the same reason |
+
+⚠️ **This is the register's rule applied to a case where guessing would have been easy and invisible.** The
+compiled leg previously **hard-coded** `0` at the first prompt and had **no step at all** for the second,
+while the migrated leg honoured both declared inputs — so a scenario declaring `9` would have been accepted,
+driven as `9` on one side and `0` on the other, and the resulting diff would have measured the disagreement
+rather than the accounting (R-6). The refusals remove that possibility entirely: either both legs receive
+`0` and no override, or the run stops before either posts. Refusing costs nothing real — **no scenario
+declares either input**, and the plan steps are `react` rules, which fire only if the screen appears.
+
+**(d) The experiment, specified for whoever can run it.** Seed a fixture whose `SYSTEM-REC.Arch` is `"Y"` —
+which is a deliberate act, recorded, not a quiet fixture edit — drive `gl_end_of_cycle`, and capture: the
+value `a` holds after a single `9` keystroke; whether `GL084` re-displays; the exact bytes `file-2` holds
+after a bare Return and after typed text; and where a following Return is consumed. Until that is done this
+entry states the question and the plan and nothing more, which is what `PENDING` means here.
+
+**(e) Consuming modules.** `harness/run_cobol_scenario.sh` (the binding gate and the two `react` plan steps),
+`harness/run_python_scenario.sh` (the symmetric refusals), `acas_posting/programs/gl080_end_of_cycle.py` and
+`acas_posting/cli/gl_end_of_cycle.py` (which implement both answers and are unaffected by the harness
+refusing to drive one of them). **Adjacent but distinct:** `Q-22` (§14) owns *what path the `STRING` builds*
+and is measured; `A-NEW-9` records the maintainer's own `*> this lot looks wrong !!!!!` on that construction.
+This entry owns only what the two **accepts** do with a keystroke, which neither of those touches.
+
 <a id="q-string-pointer-and-refmod"></a>
 
 ### The three that are handed **down**, not up — questions the semantics layer already owns
@@ -4132,9 +4202,13 @@ consequence in one sentence, quoted verbatim:
 That is the whole reason a register of ambiguities exists for this migration rather than a list of decisions.
 Where the General Ledger does something inexplicable, the correct response is to reproduce it and record the
 question — which is what every entry in §12 and §13 did while it was open, and what the `MEASURED` verdicts
-they now carry were reached by. ⚠️ Those entries no longer carry `PENDING — AWAITING ORACLE EXECUTION`; §17's
-status rows count **0** of them. The discipline is unchanged — a question is recorded before it is answered,
-and the answer replaces the status rather than the question.
+they now carry were reached by. ⚠️ **No §12 entry carries `PENDING — AWAITING ORACLE EXECUTION`, and exactly
+one §13 entry does**: `Q-GL084-ACCEPT-SEMANTICS`, which §17's status rows count. It is pending for a
+structural reason rather than for want of effort — the two prompts it asks about are unreachable in every
+fixture, and reaching them would mean seeding a system-parameter row this harness has no business inventing
+(R-3) — and while it is open **both parity legs refuse the inputs whose behaviour depends on the answer**,
+so no run can be driven on a guess. The discipline is unchanged — a question is recorded before it is
+answered, and the answer replaces the status rather than the question.
 
 ---
 
@@ -4162,16 +4236,16 @@ Q-nn` at the site that raises it"* — and **seven Payroll data-item names**.
 | Property | Value |
 | --- | --- |
 | Primary entries in §12 | **14** — `Q-1` … `Q-5`, `Q-5.1` … `Q-5.3`, `Q-6` … `Q-10`, and `Q-SYS4-SPARE-SENTINEL` |
-| Entries in §13 | **7** of its own — six handed up from the arithmetic tier and `Q-EMPTY-BATCH-AT-END` from the scenario tier — plus one companion answer key, plus **3** cited by scope |
+| Entries in §13 | **8** of its own — six handed up from the arithmetic tier, `Q-EMPTY-BATCH-AT-END` from the scenario tier and `Q-GL084-ACCEPT-SEMANTICS` from the two parity runners — plus one companion answer key, plus **3** cited by scope |
 | Statuses in §12 | **0** × `PENDING — AWAITING ORACLE EXECUTION`; **12** × `RESOLVED BY ORACLE` (`Q-1`, `Q-4`, `Q-5`, `Q-5.1`, `Q-2`, `Q-3`, `Q-5.2`, `Q-5.3` and `Q-SYS4-SPARE-SENTINEL` dated 2026-08-07; `Q-6`, `Q-7`, `Q-10` dated 2026-08-04); **1** × `RESOLVED BY CONSTRUCTION` (`Q-8`); **1** partial (`Q-9`). Sums to the 14 entries |
-| Statuses in §13 | **0** × `PENDING — AWAITING ORACLE EXECUTION`; **6** × `RESOLVED BY ORACLE`, all 2026-08-07 (`Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-70f`, `Q-EMPTY-BATCH-AT-END`); **1** two-part status (`Q-EDITED-BLANK-WHEN-ZERO`, `RESOLVED BY ORACLE` for the case that reaches a column and `MEASURED — DECLINED ON SCOPE` for the print-only pictures). Sums to the 7 entries |
+| Statuses in §13 | **1** × `PENDING — AWAITING ORACLE EXECUTION` (`Q-GL084-ACCEPT-SEMANTICS`, opened by the parity runners and pending because the prompts it asks about are unreachable in every fixture); **6** × `RESOLVED BY ORACLE`, all 2026-08-07 (`Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-70f`, `Q-EMPTY-BATCH-AT-END`); **1** two-part status (`Q-EDITED-BLANK-WHEN-ZERO`, `RESOLVED BY ORACLE` for the case that reaches a column and `MEASURED — DECLINED ON SCOPE` for the print-only pictures). Sums to the 8 entries |
 | `RESOLVED BY ORACLE` used as a status | **19 entries** — 12 in §12, 6 in §13 and the column-reaching half of §13's two-part entry — and only where a compiled run or a focused compiled probe directly answered the stated question, with the captured observable written into the entry. §4 states the rule; this row is the only tally of it |
 | `RESOLVED BY CONSTRUCTION` used as a whole-entry status | **1** — `Q-8`, whose open half was *which statements exist*, answered by a census of the frozen `MOVE` sites shown in full in the entry. It claims the weaker of the two resolved statuses deliberately: no compiled run was needed, so none is claimed. `Q-9` remains partial and carries its settled half inside the entry |
 | Entries carrying all five template parts | **all of them.** Every §12 and §13 entry has (a) question, (b) evidence, (c) oracle experiment, (d) resolution-or-status and (e) consuming module(s) |
-| Explicit anchors | **22** — one for each of the **21** anchored entries (`q-1` … `q-9`, `q-5-1` … `q-5-3`, `q-sys4-spare-sentinel`, and one per §13 entry), plus `q-string-pointer-and-refmod` on §13's closing handed-down table, so a bare `#q-n` citation resolves. Every internal fragment reference in this file — **20** of them, to **15** distinct anchors — resolves; **0** dangle. Each id appears exactly ONCE: a duplicate anchor is as bad as a missing one, because a reader cannot tell which of the two a link reached — and a duplicate `q-empty-batch-at-end` has arisen **twice**, each time while two independently drafted versions of that entry coexisted, which is why this row is now checked by matching the anchor tags mechanically rather than by reading |
-| `Q-` identifiers cited by the project | **84** cited somewhere OTHER than this file, and **every one of them appears in this file** — §12, §13, §14 or §15, so **0 dangle**. Census scope, stated so the figure is reproducible: the git-tracked text files of `acas_posting/`, `tests/`, `harness/`, `docs/`, `data_dictionary/` and the two manifests, under the algorithm stated above this table. ⚠️ This row has read **82**, then **81**, then **85**; it is re-derived mechanically under that algorithm on every revision and now comes out at **84**, and the earlier figures are corrected rather than defended, since a row whose whole purpose is to be reproducible has to match what reproducing it yields |
-| Identifiers this file uses **as register identifiers** | **113**, and every one of them is entered, catalogued or declared here |
-| … of which cited **outside** this register | **84** — the row above. Each resolves to a §12 or §13 entry or to a §14/§15 catalogue row, so **no citation anywhere in the project dangles** |
+| Explicit anchors | **23** — one for each of the **22** anchored entries (`q-1` … `q-9`, `q-5-1` … `q-5-3`, `q-sys4-spare-sentinel`, and one per §13 entry), plus `q-string-pointer-and-refmod` on §13's closing handed-down table, so a bare `#q-n` citation resolves. Every internal fragment reference in this file — **20** of them, to **15** distinct anchors — resolves; **0** dangle. Each id appears exactly ONCE: a duplicate anchor is as bad as a missing one, because a reader cannot tell which of the two a link reached — and a duplicate `q-empty-batch-at-end` has arisen **twice**, each time while two independently drafted versions of that entry coexisted, which is why this row is now checked by matching the anchor tags mechanically rather than by reading |
+| `Q-` identifiers cited by the project | **85** cited somewhere OTHER than this file, and **every one of them appears in this file** — §12, §13, §14 or §15, so **0 dangle**. Census scope, stated so the figure is reproducible: the git-tracked text files of `acas_posting/`, `tests/`, `harness/`, `docs/`, `data_dictionary/` and the two manifests, under the algorithm stated above this table. ⚠️ This row has read **82**, then **81**, then **85**; it is re-derived mechanically under that algorithm on every revision and now comes out at **85** — the newest being `Q-GL084-ACCEPT-SEMANTICS`, which both parity runners name in the diagnostic that refuses the input it governs — and the earlier figures are corrected rather than defended, since a row whose whole purpose is to be reproducible has to match what reproducing it yields |
+| Identifiers this file uses **as register identifiers** | **114**, and every one of them is entered, catalogued or declared here |
+| … of which cited **outside** this register | **85** — the row above. Each resolves to a §12 or §13 entry or to a §14/§15 catalogue row, so **no citation anywhere in the project dangles** |
 | … of which **register-only** | **29**, each declared as such rather than left to look like an omission: **3** documented as **unassigned** — `Q-12`, `Q-13`, `Q-70c` — and **26** newly minted in §15.1 as the canonical names for readings that previously had only a colliding bare number: seven in the GL051 series, nine in SL060, five in PL100, four in MOVE, and the single `Q-VATNET-1` (the series are named without their `Q-` prefix here on purpose: a self-audit row that spells a family stem mints a token its own census then has to exclude). ⚠️ Earlier revisions of this row read **86** and then **88** and counted `Q-GL080-DIVIDE-BY-ZERO` and then `Q-SYS4-SPARE-SENTINEL` among the register-only identifiers. Neither is one: [`scenario-diff-evidence.md`](scenario-diff-evidence.md) cites the first and the six corrected fixtures cite the second, so both fall inside the 84. `Q-GL080-DIVIDE-BY-ZERO` remains the one **coined name** for an existing question (§13, §15) — coined and cited being different properties that the old row conflated |
 | Tokens outside the census, and why | Two closed sets, both named in full so the exclusion is checkable rather than asserted. **Payroll data-item names — `Q-TAX`, `Q-TAXES`, `Q-FICA-TAX`, `Q-CO-FUTA-LIAB`, `Q-ENDED`, `Q-Year`, `Q-mmdd`** — are COBOL fields in a sub system AAP §0.2.2 excludes in its entirety; they are not register identifiers and are deliberately not catalogued. **Family labels and placeholders — `Q-5.x`, `Q-70`, `Q-CLI`, `Q-PL055-n`, `Q-n`, `Q-nn`** — name groups and metasyntactic slots rather than questions; the last is what `acas_posting/programs/gl080_end_of_cycle.py` writes in *"`AMBIGUITY Q-nn` at the site that raises it"*. A naive `Q-` pattern over this file therefore returns more tokens than the rows above count, by these two sets plus case and trailing-punctuation variants of them. ⚠️ This row used to assert a specific naive-token total. That number decayed on every edit to the file and is replaced by the rule, for the same reason §4's status tallies were moved into this section: a count written where nothing recomputes it is a claim with a shelf life |
 | Experiments described as having been run | The strict build, all nine parity journeys, both scenario orders, the two-run determinism tier, the focused boundary probes cited by `Q-7`, `Q-9` and `Q-10`, and the 2026-08-07 focused probes cited by `Q-1`, `Q-2`, `Q-3`, `Q-4`, `Q-5`, `Q-5.1`, `Q-5.2`, `Q-5.3`, `Q-SYS4-SPARE-SENTINEL`, `Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-EDITED-BLANK-WHEN-ZERO`, `Q-70f` and `Q-EMPTY-BATCH-AT-END`. Every one of the latter reports its captured observable in its own entry. Two of them called a COMPILED MODULE rather than only compiling a probe — `Q-1` invoked `maps04.so` and `Q-3` went through the compiled handler, bridge and `cobmysqlapi` to real SQL |

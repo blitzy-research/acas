@@ -338,15 +338,15 @@ Two tiers, and the distinction is load-bearing because only one of them runs eve
 | `gl051_batch_control_check.py` | `tests/arithmetic/test_control_total_comparison.py` — drives `_end_batch` | **no scenario at all** | in-process only |
 | `gl070_transaction_pre_process.py` | — | `clean_batch_gl`, `mixed_accepted_rejected` | scenario only |
 | `gl071_batch_sort.py` | — | `clean_batch_gl`, `mixed_accepted_rejected` | scenario only |
-| `gl072_transaction_update.py` | `tests/arithmetic/test_gl072_shipped_silent_skips.py` — drives both silent-skip branches | `clean_batch_gl`, `mixed_accepted_rejected` | **both** |
+| `gl072_transaction_update.py` | `tests/arithmetic/test_gl072_shipped_silent_skips.py` — drives both silent-skip branches and, at §4, the EMPTY work file's at-end path, where `end-account` and `end-batch` run unconditionally on zero keys (finding MJ-14) | `clean_batch_gl`, `mixed_accepted_rejected` | **both** |
 | `gl080_end_of_cycle.py` | `tests/arithmetic/test_gl080_shipped_end_of_cycle.py` — drives the `ROUNDED` divide, the unbounded subscript, the rotating counter, and the archive and deletion phases | **no scenario at all** | in-process only |
 | `sl055_invoice_extract_analysis.py` | — | `clean_batch_sl`, `period_end_totals` | scenario only |
-| `sl060_invoice_posting.py` | `tests/arithmetic/test_compute_truncate_unrounded.py` — drives `_ba000_sales_comp` and `_ba000_credit_comp` | `clean_batch_sl`, `period_end_totals` | **both** |
+| `sl060_invoice_posting.py` | `tests/arithmetic/test_compute_truncate_unrounded.py` — drives `_ba000_sales_comp` and `_ba000_credit_comp`; `tests/arithmetic/test_shipped_close_and_rejection_paths.py` — drives `_ca000_bl_close` over the full `IRS-Instead` × `Level-1` truth table, which is A-1's primary lock (finding MJ-07) | `clean_batch_sl`, `period_end_totals` | **both** |
 | `sl100_cash_posting.py` | `tests/arithmetic/test_compute_truncate_unrounded.py` — drives `_compute_sales_pay` | `period_end_totals` | **both** |
 | `pl055_order_proof_extract.py` | — | `clean_batch_pl`, `period_end_totals` | scenario only |
 | `pl060_order_posting.py` | `tests/arithmetic/test_compute_truncate_unrounded.py` — drives `_purch_comp` and `_credit_comp` | `clean_batch_pl`, `period_end_totals` | **both** |
 | `pl100_payment_posting.py` | `tests/arithmetic/test_compute_truncate_unrounded.py` — drives `_init01__compute_purch_pay` | `period_end_totals` | **both** |
-| `irs030_posting.py` | `tests/arithmetic/test_irs_vat_from_net.py`, `tests/arithmetic/test_irs_vat_from_gross.py` — drive `Net` and `Gross` | `clean_batch_irs` | **both** |
+| `irs030_posting.py` | `tests/arithmetic/test_irs_vat_from_net.py`, `tests/arithmetic/test_irs_vat_from_gross.py` — drive `Net` and `Gross`; `tests/arithmetic/test_shipped_close_and_rejection_paths.py` — drives `_input_loop` for the IR032 clean rejection and its A-4 counterpart (finding MJ-11) | `clean_batch_irs` | **both** |
 
 ⭐ **Two modules are driven by no scenario, and the reason differs in each case.**
 
@@ -593,9 +593,13 @@ the `GeneralLedgerWorkFiles` pair that stand in for `pretrans.tmp`
 ⚠️ One property of that `SORT` is **not** settled by reading it: `[general/gl071.cbl:L172-L178]`
 declares no `with duplicates in order` phrase, so the compiled tie order for two records carrying an
 identical `(sort-batch, sort-ac, sort-pc, sort-post)` is whatever GnuCOBOL 3.2 chooses. The Python
-sort is stable unconditionally, which may or may not agree. Under R-6 that is a question for the
-oracle, and it is carried as **`Q-SORT-TIE-ORDER`** in `ambiguity-resolutions.md` rather than settled
-here.
+sort is stable unconditionally, which may or may not agree. Under R-6 that was a question for the
+oracle rather than something to settle here, and the oracle has **answered** it:
+**`Q-SORT-TIE-ORDER`** in `ambiguity-resolutions.md` is **`RESOLVED BY ORACLE`** (2026-08-07) — the
+compiled sort **preserves input order** for equal keys, which is exactly what an unconditionally
+stable sort produces, so the two implementations agree. The measured ordering is asserted as a fact
+under the companion key **`Q-SORT-TIE-ORDER-ANSWER`**; it is recorded here rather than settled here,
+because the register remains the single place a resolution is declared.
 
 #### `general/gl072.cbl` → `gl072_transaction_update.py`
 
@@ -1124,6 +1128,34 @@ for example, imports `FieldDescriptor` from `acas_posting.cobol.field` and `load
 `pyproject.toml` therefore ships the dictionary as package data, because a wheel without it cannot
 import `acas_posting.records` at all.
 
+⚠️ **The run-time half of that claim is now a measured count rather than a description, and it was
+one attribute short when it was only a description.** `loader.trace_record` resolves an attribute to
+its entry by trying a fixed sequence of routes — field metadata, a class constant, the class's and
+then the module's named descriptor maps, position within `FIELDS`, and group membership — so "every
+record field cites its entry at run time" holds exactly as far as that sequence reaches. Run across
+every record dataclass the package defines, it reaches **976 of 976 attributes**. It previously
+reached 975: `SystemDataBlock.filler_81` fell off the end of the sequence, because two ordinary facts
+about that record combine badly.
+
+- **The positional route was unavailable.** It requires `FIELDS` and the dataclass fields to be the
+  same length, and `SYSTEM-REC` has **46** descriptors against **45** fields — because
+  `Scycle REDEFINES Cyclea` `[copybooks/wssystem.cob:L62-L63]` is one storage location with two COBOL
+  names, correctly modelled as one field plus a `scycle` property. The record is right; the count
+  mismatch is a consequence of it being right.
+- **No name route could match.** The descriptor's COBOL name is the bare `FILLER`
+  `[copybooks/wssystem.cob:L81]`, and `FILLER` is not unique in that copybook, so the Python
+  attribute has to carry the line number to be a distinct name — after which `filler_81` equals no
+  form of `FILLER`.
+
+The field now states its key outright, which is the loader's **first** route, and takes it from the
+module's own key index rather than as a literal so that a wrong name or line fails at import with a
+`KeyError` naming the pair. The entry it reaches is `System-Record.FILLER#81`, row 300 of Appendix A.
+`tests/arithmetic/test_pic_field_descriptors.py` holds both halves: that **zero** attributes are
+unrouted, and that this particular one routes by stated key to that particular entry — the second
+assertion being there because the count alone would go green again if the attribute were deleted
+rather than routed, and deleting a `FILLER` the frozen record declares would be a change to the
+layout rather than a fix.
+
 ### 10.2 What one entry contains — the authoritative triple, plus what the triple implies
 
 Every entry is keyed `TABLE-NAME.COLUMN-NAME` and carries four views of one field, so that a reader
@@ -1485,11 +1517,15 @@ signed fields of the internal IRS posting record as unsigned. `acas_posting/cobo
 both, and `acas_posting/cobol/picture.py` parses the clause into the `SignPosition` the dictionary
 records.
 
-⚠️ The **width in bytes** of a leading-sign `DISPLAY` item is a second open question, carried as
-**`Q-5.2`**. Two readings exist: the maintainer's own byte accounting at
+⚠️ The **width in bytes** of a leading-sign `DISPLAY` item was a second question, carried as
+**`Q-5.2`**. Two readings existed: the maintainer's own byte accounting at
 `[copybooks/wspost.cob:L6-L7]` — 98 bytes, then 96 "(leading sign removed)" across two fields, so one
 byte each — implies digits + 1; the ISO overpunch reading implies digits. Under R-6 the compiled
-program decides, so the descriptor records which reading is in force and the question stays open.
+program decided, and it has: **`Q-5.2`** is **`RESOLVED BY ORACLE`** (2026-08-07) on **Reading B —
+the width is `digits`**, an included leading sign spending no byte, which is what
+`[acas_posting/cobol/usage.py byte_length]` implements. Reading A, `digits + 1`, is measured **false**.
+The descriptor continues to record which reading is in force, now as a confirmed reading rather than a
+provisional one.
 
 ### 10.7 What is deliberately **not** a column-anchored entry
 
@@ -2260,7 +2296,7 @@ was taken from the tree rather than carried forward:
 
 | Item | Status in this checkout |
 | --- | --- |
-| `tests/arithmetic/` | **present — nineteen test files**, including the shared-storage, dispatch-boundary, tier-import, deployment-contract and cross-file-reference coverage added during QA remediation, and the three that drive shipped program and CLI modules in-process: `test_gl080_shipped_end_of_cycle.py`, `test_gl072_shipped_silent_skips.py` and `test_cli_seams_and_failure_paths.py`. §7.2 records which module each one drives |
+| `tests/arithmetic/` | **present — twenty test files**, including the shared-storage, dispatch-boundary, tier-import, deployment-contract and cross-file-reference coverage added during QA remediation, and the four that drive shipped program and CLI modules in-process: `test_gl080_shipped_end_of_cycle.py`, `test_gl072_shipped_silent_skips.py`, `test_cli_seams_and_failure_paths.py` and `test_shipped_close_and_rejection_paths.py` — the last holding A-1's nested posting close and the IR032 clean rejection, both of which are call sequences no table dump can observe (finding MJ-07, MJ-11). §7.2 records which module each one drives |
 | `tests/scenarios/` | **present — nine scenario tests**, the eight that discharge AAP §0.8.5's mandate plus `test_end_of_cycle_gl.py` |
 | `tests/determinism/test_two_runs_byte_identical.py` | **present** |
 | `harness/scenarios/` | **present — 9 YAML definitions**, including `period_end_totals.yaml` and `end_of_cycle_gl.yaml` |

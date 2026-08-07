@@ -3237,6 +3237,18 @@ def read_run_attestation(
         # equivalent: 69 is not in its band at all. `behavioural`, published as its
         # own count beside the status, is what lets a reader tell this from a
         # wrapper fault without knowing the runner's exit-code bands.
+        #
+        # ⭐ WHAT MAKES THIS SAFE IS UPSTREAM, NOT HERE (finding MJ-01). This branch
+        # attests a capture as comparable on the strength of one number, so it is
+        # only as sound as the rule that produced the number. That rule used to be
+        # "any child status but 2 is a disposition", under which an uncaught
+        # exception, a missing interpreter, a signal or any arbitrary tool exit
+        # arrived here as 69 and was attested as a measured semantic difference.
+        # harness/run_python_scenario.sh now admits ONLY zero and the operation's own
+        # frozen term codes -- see its `ACAS_PY_TERM_CODE_MAP' and
+        # `acas_py_status_is_semantic' -- and exits EX_ASSERT for everything else, so
+        # a 69 reaching this branch can only mean a term code that contradicted the
+        # scenario. The fault statuses fall through to the refusal below.
         return {
             "attested": True,
             "disposition": DISPOSITION_BEHAVIOURAL,
@@ -3798,6 +3810,55 @@ def _publish_staged(
 # SYSTOT-REC are comparable on both sides rather than a source of false failure.
 
 
+# ---------------------------------------------------------------------------
+#  ⭐ THE SHARED SCENARIO PARSER IS RESOLVED BY PATH, NOT BY NAME (finding MJ-17).
+#
+#  `harness/scenario_yaml.py` is a SIBLING FILE, not an installed package, so a bare
+#  `import scenario_yaml` resolves only when this directory already sits on `sys.path`.
+#  That holds when this module is run as a script from `harness/` and does NOT hold
+#  when a test loads it by path, which made the import ORDER-DEPENDENT: it resolved if
+#  some other harness module had inserted the directory first and failed otherwise.
+#  The failure was then reported as "PyYAML is not importable" - a different fault with
+#  a different remedy - so the refusal that should have followed was never produced.
+#  Measured symptom: `tests/scenarios/` run on its own failed twelve tests while the
+#  full suite passed, because in the full suite an earlier module did the insert.
+#
+#  Resolved from this module's OWN location, so it behaves identically however the
+#  module was loaded and depends on nothing else having run first. `sys.path` is
+#  deliberately left alone: making one import succeed by mutating the interpreter's
+#  global search path is what allowed the order dependency to hide, and this module is
+#  imported into test processes where a shadowing entry would be a real hazard.
+# ---------------------------------------------------------------------------
+def _load_scenario_yaml_module() -> Any:
+    """Load the sibling `scenario_yaml` module from this file's own directory.
+
+    Returns:
+        The executed `scenario_yaml` module, whose `load_scenario_yaml` rejects a
+            duplicate key instead of applying last-one-wins.
+
+    Raises:
+        ImportError: The sibling file is absent or cannot be executed - which includes
+            PyYAML being unavailable, since `scenario_yaml` imports it at module
+            scope. The message names which of the two it was, so the caller's refusal
+            can say what is actually missing.
+    """
+    import importlib.util  # noqa: PLC0415 - lazy, alongside the import it performs
+
+    sibling = Path(__file__).resolve().parent / "scenario_yaml.py"
+    if not sibling.is_file():
+        raise ImportError(
+            f"the shared duplicate-rejecting scenario parser is absent: {sibling}"
+        )
+    spec = importlib.util.spec_from_file_location(
+        "acas_harness_scenario_yaml", sibling
+    )
+    if spec is None or spec.loader is None:  # pragma: no cover - defensive
+        raise ImportError(f"the shared scenario parser is not loadable: {sibling}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def scenario_tables(path: Path | str) -> tuple[str, ...]:
     """Read a scenario's affected-table list.
 
@@ -3816,11 +3877,23 @@ def scenario_tables(path: Path | str) -> tuple[str, ...]:
     """
     try:
         import yaml  # noqa: PLC0415 - lazy, so the module imports without it
+
+        #  ⭐ THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17).
+        #  `yaml.safe_load` applies last-one-wins to a repeated key, silently. A
+        #  scenario definition carries the destructive answers, the fan-out switch
+        #  that decides which tables a run touches and the comparison bound, so a
+        #  shadowed key means two consumers read two different files. Imported
+        #  lazily, and by sibling name, so this module still imports on a host
+        #  without PyYAML.
+        scenario_yaml = _load_scenario_yaml_module()
     except ImportError as exc:
         raise ScenarioFileError(
-            "PyYAML is not importable, so a scenario definition cannot be "
-            "read. requirements.txt pins PyYAML==6.0.3. Pass --tables "
-            "instead to name the tables directly."
+            f"the shared scenario parser could not be loaded, so a scenario "
+            f"definition cannot be read: {exc}. The two possible causes have "
+            f"different remedies, which is why this message names the one that "
+            f"applied: harness/scenario_yaml.py is the shared "
+            f"duplicate-rejecting loader, and requirements.txt pins "
+            f"PyYAML==6.0.3. Pass --tables instead to name the tables directly."
         ) from exc
 
     source = Path(path)
@@ -3834,7 +3907,7 @@ def scenario_tables(path: Path | str) -> tuple[str, ...]:
         ) from exc
 
     try:
-        document = yaml.safe_load(text)
+        document = scenario_yaml.load_scenario_yaml(text)
     except yaml.YAMLError as exc:
         raise ScenarioFileError(
             f"the scenario definition {source} is not valid YAML: {exc}"
@@ -3901,18 +3974,33 @@ def resolve_tables(
 ) -> tuple[str, ...]:
     """Resolve the command line's table selectors into a table list.
 
-    Exactly one selector may be given.
+    ⭐ SELECTION AND PROVENANCE ARE TWO DIFFERENT USES OF `--scenario-file`, and
+    conflating them broke the protocol outright. `--scenario-file` originally had one
+    job: read the declared `affected_tables` and dump those. When the comparison bound
+    became all 22 in-scope tables, stages 3 and 7 switched to `--all-in-scope` - and
+    because the two options were refused together as "alternative ways of choosing the
+    same list", the dumps stopped naming the scenario definition at all. That emptied
+    `scenario_file_sha256`, which `harness/diff_states.py`'s `PROVENANCE_MUST_MATCH`
+    requires to be present and equal on both sides, so stage 10 refused every run with
+    "the provenance field 'scenario_file_sha256' is empty on both sides". The
+    authoritative driver could not complete a single scenario.
+
+    So `--scenario-file` now SELECTS only when no other selector is given, and is
+    otherwise recorded as provenance beside the capture. `--all-in-scope` and
+    `--tables` remain mutually exclusive, because those two really are alternative
+    ways of choosing one list.
 
     Args:
         tables: A comma-separated list of table names.
-        scenario_file: A scenario definition to read the list from.
+        scenario_file: A scenario definition. Selects its declared `affected_tables`
+            when it is the only selector; otherwise provenance only.
         all_in_scope: Dump all 22 explicitly.
 
     Returns:
         The table names, in the order to dump them.
 
     Raises:
-        ValueError: More than one selector was given, or `tables` is empty or names a
+        ValueError: Both real selectors were given, or `tables` is empty or names a
             table twice.
         ScenarioFileError: The scenario definition is unusable.
         TableNotInScopeError: A named table is out of scope.
@@ -3922,18 +4010,17 @@ def resolve_tables(
         name
         for name, given in (
             ("--tables", tables is not None),
-            ("--scenario-file", scenario_file is not None),
             ("--all-in-scope", bool(all_in_scope)),
         )
         if given
     ]
     if len(chosen) > 1:
         raise ValueError(
-            f"{' and '.join(chosen)} were all given; they are alternative "
+            f"{' and '.join(chosen)} were both given; they are alternative "
             f"ways of choosing the same list, so use exactly one."
         )
 
-    if scenario_file is not None:
+    if scenario_file is not None and not chosen:
         return scenario_tables(scenario_file)
 
     if tables is not None:
@@ -4071,6 +4158,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    #  THE MUTUALLY EXCLUSIVE GROUP HOLDS THE TWO REAL SELECTORS ONLY.
+    #  `--scenario-file` used to sit here too, which made it impossible to name the
+    #  scenario definition alongside the protocol's own `--all-in-scope` bound - and
+    #  the definition's digest is a provenance field harness/diff_states.py REQUIRES
+    #  on both sides. See `resolve_tables` for the whole of that story.
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument(
         "--tables",
@@ -4080,17 +4172,22 @@ def build_parser() -> argparse.ArgumentParser:
             "mysql/ACASDB.sql spells it, hyphens included."
         ),
     )
-    selection.add_argument(
+    parser.add_argument(
         "--scenario-file",
         metavar="PATH",
         help=(
-            "read the affected-table list from a scenario definition file, "
-            "under the key affected_tables (or affected-tables). NARROWS the "
-            "capture to the tables the scenario declares it affects, which is "
-            "useful while debugging one of them. It is NOT the protocol: a "
+            "the scenario definition this capture belongs to. ALWAYS recorded "
+            "as provenance -- its sha256 becomes scenario_file_sha256, which "
+            "harness/diff_states.py requires to be present and equal on both "
+            "sides before it compares a single row, because the definition "
+            "carries the fan-out switch that decides which tables a run "
+            "touches. It additionally SELECTS the declared affected_tables "
+            "when no other selector is given, which NARROWS the capture and is "
+            "useful while debugging one table but is NOT the protocol: a "
             "capture bounded by the declared effect cannot show a difference "
-            "in a table the scenario did not expect to move. Use "
-            "--all-in-scope for evidence."
+            "in a table the scenario did not expect to move. Pass it together "
+            "with --all-in-scope for evidence -- the bound is then all 22 and "
+            "the definition is still named."
         ),
     )
     selection.add_argument(
@@ -4438,13 +4535,18 @@ def _selector_name(arguments: argparse.Namespace) -> str | None:
     Returns:
         The selector's manifest vocabulary word, or None when no selector was given at
             all - which `main` refuses.
+
+    The order matches `resolve_tables`: a real selector wins, and `--scenario-file`
+    names the selector only when it was the one that chose the list. Recording
+    `scenario-file` for a capture actually bounded by all 22 tables would misdescribe
+    the capture's scope, which is the one thing the manifest exists to state.
     """
-    if arguments.scenario_file is not None:
-        return SELECTOR_SCENARIO_FILE
     if arguments.tables is not None:
         return SELECTOR_TABLES
     if arguments.all_in_scope:
         return SELECTOR_ALL_IN_SCOPE
+    if arguments.scenario_file is not None:
+        return SELECTOR_SCENARIO_FILE
     return None
 
 

@@ -58,6 +58,17 @@ ACAS_TIMEOUT_CLIENT="${ACAS_TIMEOUT_CLIENT-}"        # one MariaDB client invoca
 ACAS_TIMEOUT_RESOLVED=''      # out-parameter of acas_timeout_seconds
 declare -a ACAS_DEADLINE_ARGV=()   # populated by acas_deadline_prefix
 
+# THIS SCRIPT'S OWN DIRECTORY, so its sibling harness/scenario_yaml.py -- the one
+# duplicate-rejecting scenario parser (finding MJ-17) -- can be imported by the
+# embedded Python that reads the definition. Resolved the same way
+# harness/run_parity.sh resolves its own, and never from $PATH.
+case "${BASH_SOURCE[0]}" in
+  */*) ACAS_SEED_HARNESS_DIR="${BASH_SOURCE[0]%/*}" ;;
+  *)   ACAS_SEED_HARNESS_DIR='.' ;;
+esac
+ACAS_SEED_HARNESS_DIR="$(cd -- "$ACAS_SEED_HARNESS_DIR" && pwd -P)"
+readonly ACAS_SEED_HARNESS_DIR
+
 # THE SYSTEM-FILE BLOCK -- [common/masterLD.sh:L50-L88] Frozen order, and the
 # reason for it, [common/masterLD.sh:L47-L48] verbatim.
 readonly -a ACAS_SEED_SYSTEM_BLOCK=(
@@ -2016,12 +2027,11 @@ acas_assert_seed_durability() {
     'their return codes are identical either way, so the mode is invisible to' \
     'the frozen code. Unset the variable, or set it to on, to seed.' \
     'Selecting off is a legitimate thing to do -- it reproduces the frozen defect' \
-    'end to end, which is exactly what this exit code reports -- and the R-6' \
-    'arbitration behind the default is in docs/migration/ambiguity-resolutions.md.'
-    'To seed under the mode the compiled loaders actually require, simply UNSET' \
-    'ACAS_SEED_AUTOCOMMIT, or set it to on. That is the CANONICAL mode and needs' \
-    'no flag; it diverges from the AAP-mandated seeding mode deliberately and is' \
-    'written up as an R-6 arbitration in docs/migration/ambiguity-resolutions.md.'
+    'end to end, which is exactly what this exit code reports.' \
+    'TO SEED, simply UNSET ACAS_SEED_AUTOCOMMIT, or set it to on. That is the' \
+    'CANONICAL mode and needs no flag; it diverges from the AAP-mandated seeding' \
+    'mode deliberately, and the R-6 arbitration behind that choice is written up' \
+    'in docs/migration/ambiguity-resolutions.md.'
 }
 
 
@@ -2628,7 +2638,7 @@ acas_stage_scenario_seed() {
   # interpolated into the program text. Exit codes are the program's own.
   local parsed rc=0
   acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
-  parsed="$("${ACAS_DEADLINE_ARGV[@]}" python3 - "$scenario_real" 2>&1 <<'PY'
+  parsed="$("${ACAS_DEADLINE_ARGV[@]}" python3 - "$scenario_real" "$ACAS_SEED_HARNESS_DIR" 2>&1 <<'PY'
 """Emit the scenario's declared seed directory and seed file names.
 
 THE TRANSPORT IS CONTROL-FREE AND SELF-CHECKING, and it is that way because the
@@ -2689,8 +2699,16 @@ def emit(key, value):
     """Write one length-prefixed record."""
     sys.stdout.write('%s\t%d\t%s\n' % (key, len(value), value))
 
+#  THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17). `yaml.safe_load` applies
+#  last-one-wins to a repeated key, silently, and this program reads `seed_dir` and
+#  `seed_files` -- the paths the seeding stage then loads. A shadowed `seed_dir` seeds
+#  from a directory the definition does not appear to name. argv[2] is this harness
+#  directory, passed in rather than derived, because a heredoc has no __file__.
+sys.path.insert(0, sys.argv[2])
+
 try:
     import yaml
+    import scenario_yaml
 except ImportError:
     sys.stderr.write('PyYAML is not installed; it is required to bind a '
                      'scenario to its seed files\n')
@@ -2699,7 +2717,7 @@ except ImportError:
 path = sys.argv[1]
 try:
     with open(path, 'r', encoding='utf-8') as handle:
-        document = yaml.safe_load(handle)
+        document = scenario_yaml.load_scenario_yaml(handle.read())
 except (OSError, yaml.YAMLError) as error:
     sys.stderr.write('cannot parse %s: %s\n' % (path, error))
     raise SystemExit(3)

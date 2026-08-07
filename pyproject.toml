@@ -72,16 +72,57 @@ dependencies = [
     # The ONLY third-party module acas_posting imports. Ships a compiled C
     # extension for CPython 3.12 and materialises DECIMAL as decimal.Decimal.
     "mysql-connector-python==26.7.0",
-    # CORE LEVEL ONLY: text() statements on an explicit Connection. An ORM entity
-    # layer is forbidden (R-3) -- it would want to own schema definition, and its
-    # identity-map and flush ordering would obscure the exact statement order the
-    # state diff is sensitive to.
-    "SQLAlchemy==2.0.51",
-    # SQLAlchemy's own requirements, pinned so an install is reproducible. Nothing
-    # here imports greenlet and nothing calls create_async_engine.
-    "greenlet==3.5.4",
-    "typing_extensions==4.16.0",
 ]
+
+# =============================================================================
+#  WHY SQLAlchemy IS NOT IN THAT LIST  (finding MJ-20)
+#
+#  It used to be, described as "CORE LEVEL ONLY: text() statements on an explicit
+#  Connection", together with `greenlet` and `typing_extensions` as its transitive
+#  requirements. No module under acas_posting/ ever imported it. The AST import
+#  census quoted a dozen lines above -- "acas_posting/ imports exactly one
+#  third-party top-level module, `mysql`" -- was therefore TRUE while this very list
+#  contradicted it, and re-running that census today still yields exactly `mysql`.
+#  A manifest advertising an execution path the code does not take is a defect in
+#  its own right: it makes the shipped architecture unauditable from the artifact.
+#
+#  THE REQUIREMENT PERMITS EITHER, AND THE PLAN NAMES WHICH IS PRIMARY.
+#  AAP section 0.8.2 preserves the user requirement verbatim, and it is an
+#  either/or: "MySQL access via `mysql-connector-python` OR SQLAlchemy Core with no
+#  ORM entity layer". AAP section 0.5.1 then calls mysql-connector-python
+#  "Oracle's official MySQL driver and THE PRIMARY DATABASE PATH", and section
+#  0.1.2's own diagram labels the edge "SQLAlchemy Core / connector" -- an
+#  alternative, not a stack. Shipping the connector alone satisfies the requirement
+#  and matches the path the plan calls primary.
+#
+#  AND THE FROZEN SEMANTICS DECIDE IT. `dal/connection.py` does not merely open a
+#  connection; it reproduces the frozen bridges' CONNECTION OWNERSHIP. It re-opens
+#  one specific connection object in place (`established.connect(...)`), keeps a
+#  single process handle that handlers deliberately share, and lets a handler opt
+#  OUT of sharing when the bridge it mirrors keeps its own SQL state across CALLs --
+#  `dal/acas016_invoice.py` says so at its own call site: "slinvoiceMT keeps its own
+#  SQL state across CALLs. A live handle owned by another bridge is not that state
+#  and must not be reused." An Engine owns connection lifecycle by design and has no
+#  supported way to re-connect a given connection in place, so routing this through
+#  one would mean reimplementing that ownership model on top of an abstraction built
+#  to own it, and changing WHICH PHYSICAL SESSION a statement runs on. Under rules
+#  R-4 and R-6 that is not a refactor, it is a behavioural risk taken for a claim.
+#
+#  R-2 loses nothing either: the exact-decimal guarantee is enforced by
+#  `AcasConverter` plus a live per-connection probe in `dal/connection.py`, which
+#  is driver-level and is what a Core boundary would have had to pass through
+#  `connect_args` anyway.
+#
+#  `greenlet` and `typing_extensions` go with it: `pip show` records them as
+#  SQLAlchemy's requirements and nothing else's, mysql-connector-python requires
+#  nothing at all, and no file in acas_posting/, tests/ or harness/ imports either.
+#  This manifest already admitted the first half of that -- "Nothing here imports
+#  greenlet".
+#
+#  `tests/arithmetic/test_deployment_contract_boundaries.py` now asserts that this
+#  list and the AST census agree, in both directions, so the two cannot drift apart
+#  again -- which is the root cause of MJ-20 rather than either name in isolation.
+# =============================================================================
 
 [project.optional-dependencies]
 # The oracle harness reads scenario definitions with PyYAML. Kept out of the

@@ -88,9 +88,13 @@ ACAS_PARITY_OP_ARG=''
 ACAS_PARITY_BEHAVIOURAL=0
 
 # THE CAPTURE AND THE COMPARISON ARE BOUNDED BY ALL 22 IN-SCOPE TABLES, not by the
-# scenario's declared affected_tables. Stages 3 and 7 pass --all-in-scope and stage 10
-# passes it too, keeping --scenario-file only for the declared-effect gate that refuses
-# an all-empty comparison. Both cycles perform the menu's own `overrewrite.'
+# scenario's declared affected_tables. Stages 3, 7 and 10 all pass --all-in-scope, and
+# all three ALSO pass --scenario-file: on those three stages it names the definition
+# rather than choosing the list. That is not decoration. `scenario_file_sha256` is one
+# of the three provenance fields harness/diff_states.py requires to be present and
+# EQUAL on both sides before it compares a row, because the definition carries the
+# fan-out switch that decides which tables a run touches; while the two dumps omitted
+# it the field was empty on both sides and stage 10 refused every scenario outright. Both cycles perform the menu's own `overrewrite.'
 # [general/general.cbl:L656-L672] - SYSTEM-REC key 1, SYSDEFLT-REC key 2, SYSTOT-REC
 # key 4, reproduced by acas_posting/cli/args.py::overrewrite - so a capture bounded by
 # what a scenario EXPECTS to move could have reported an EMPTY DIFF while the run date,
@@ -409,6 +413,13 @@ acas_parity_assert_environment() {
     ACAS_DB_DISPOSABLE_HOSTS
     ACAS_RESET_ACKNOWLEDGE_DESTRUCTIVE
     ACAS_RESET_ACKNOWLEDGE
+    # ⭐ MJ-18: the two DRIVE-side acknowledgements, refused here for the same
+    # reason as the reset-side pair. Each lets its runner post into a server that
+    # carries no disposability declaration, so honouring one on the evidence path
+    # would mean a verdict drawn from a database nobody proved was throwaway.
+    # Both runners direct an operator who needs one to invoke the runner itself.
+    ACAS_RUN_ACKNOWLEDGE_DESTRUCTIVE
+    ACAS_PY_ACKNOWLEDGE_DESTRUCTIVE
   )
   local present=''
   for name in "${bypasses[@]}"; do
@@ -424,6 +435,9 @@ acas_parity_assert_environment() {
     'ACAS_RESET_ACKNOWLEDGE bypass the static disposability check AND the' \
     'server-side sentinel proof, so with one set the reset would drop a database' \
     'that cannot prove it is disposable.' \
+    'ACAS_RUN_ACKNOWLEDGE_DESTRUCTIVE and ACAS_PY_ACKNOWLEDGE_DESTRUCTIVE do the' \
+    'same for the two DRIVE stages, which post rather than drop but are equally' \
+    'destructive of the state a verdict is drawn from.' \
     'Unset it and re-run. If you genuinely need to reset a different target, use' \
     'harness/reset_db.sh directly -- it is the general administrative tool and it' \
     'keeps those options deliberately. Evidence production does not.'
@@ -548,14 +562,20 @@ acas_parity_assert_environment() {
 
   local operation_lines
   operation_lines="$(
-    "$ACAS_PARITY_PYTHON" - "$ACAS_PARITY_SCENARIO_FILE" <<'PY'
+    "$ACAS_PARITY_PYTHON" - "$ACAS_PARITY_SCENARIO_FILE" "$ACAS_PARITY_HARNESS" <<'PY'
 import sys
 from pathlib import Path
 
-import yaml
+#  THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17): a shadowed `operations`
+#  key would let this driver drive one ordered list while a runner drove another.
+#  argv[2] is the harness directory, passed in because a heredoc has no __file__.
+sys.path.insert(0, sys.argv[2])
+
+import scenario_yaml
+import yaml  # noqa: F401 - the exception type the caller reports
 
 path = Path(sys.argv[1])
-definition = yaml.safe_load(path.read_text(encoding="utf-8"))
+definition = scenario_yaml.load_scenario_yaml(path.read_text(encoding="utf-8"))
 if not isinstance(definition, dict):
     raise SystemExit(f"{path}: scenario definition is not a YAML mapping")
 
@@ -732,7 +752,7 @@ acas_parity_resolve_fixture_root() {
 # =============================================================================
 acas_parity_assert_seed_files() {
   local parsed rc=0
-  parsed="$("$ACAS_PARITY_PYTHON" - "$ACAS_PARITY_SCENARIO_FILE" <<'SEEDLIST'
+  parsed="$("$ACAS_PARITY_PYTHON" - "$ACAS_PARITY_SCENARIO_FILE" "$ACAS_PARITY_HARNESS" <<'SEEDLIST'
 """Emit the scenario's declared seed file names, control-free and length-prefixed.
 
 The grammar is harness/seed.sh's, minus the SEED_DIR record this caller does not
@@ -750,6 +770,12 @@ seed file name.
 import re
 import sys
 
+#  THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17): a shadowed `seed_files`
+#  key would stage a fixture the definition does not appear to declare. argv[2] is
+#  the harness directory, passed in because a heredoc has no __file__.
+sys.path.insert(0, sys.argv[2])
+
+import scenario_yaml
 import yaml
 
 BARE_NAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
@@ -757,7 +783,7 @@ BARE_NAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
 path = sys.argv[1]
 try:
     with open(path, 'r', encoding='utf-8') as handle:
-        document = yaml.safe_load(handle)
+        document = scenario_yaml.load_scenario_yaml(handle.read())
 except (OSError, yaml.YAMLError) as error:
     sys.stderr.write('cannot parse %s: %s\n' % (path, error))
     raise SystemExit(3)
@@ -872,17 +898,40 @@ declare -a ACAS_PARITY_ARGV=()
 # records that as a fact; refusing it is this gate's job, which keeps the build
 # script debuggable and the evidence path strict.
 #
-# FOUR THINGS ARE CHECKED, and the fourth is the one that makes the other three
+# FIVE THINGS ARE CHECKED, and the fourth is the one that makes the first three
 # worth having:
 #   1. the attestation EXISTS -- a partial or --only build leaves none;
 #   2. it is the version this driver understands;
 #   3. `overrides-used' is `no';
 #   4. the module-set digest still matches the modules ON DISK, recomputed here the
 #      same way the build computed it. Without this an attestation would only
-#      describe some build, not the artifacts stage 2 is about to execute.
+#      describe some build, not the artifacts stage 2 is about to execute;
+#   5. the SOURCE-TRANSFORMATION DISCLOSURE is present and is REPORTED with the run.
+#
+# ⭐ ON THE FIFTH (finding CR-01). harness/build_oracle.sh edits the BUILD COPY of
+# frozen sources in a declared set of places -- connectivity and IF-scope repairs
+# without which the compiled cycle cannot reach MySQL at all. A version 1 attestation
+# said nothing about them, so `overrides-used no' read as "this is the unmodified
+# oracle" for a build that was not, and an empty diff drawn against it was presented as
+# parity with the frozen behavioural specification. Version 2 publishes
+# `oracle-source-is-frozen', a transform count, a set digest and one record per
+# transformed path with its frozen and build digests.
+#
+# THIS DRIVER DOES NOT REFUSE A TRANSFORMED ORACLE, and that is a deliberate choice
+# rather than an omission: refusing would leave the project with NO oracle and
+# therefore no evidence of any kind, since the transformations are what make the
+# compiled cycle reach the database. What it does instead is refuse to be QUIET about
+# it -- the count and the set digest are logged before stage 1 and again in the closing
+# summary, so every verdict this driver produces carries the disclosure beside it and
+# no reader can mistake it for a verdict against the untouched checkout.
 # =============================================================================
 readonly ACAS_PARITY_ATTESTATION_BASENAME='oracle-attestation.txt'
-readonly ACAS_PARITY_ATTESTATION_VERSION='1'
+readonly ACAS_PARITY_ATTESTATION_VERSION='2'
+
+# Populated by acas_parity_assert_oracle_attestation and reported in the summary.
+ACAS_PARITY_SOURCE_IS_FROZEN=''
+ACAS_PARITY_SOURCE_TRANSFORMS=''
+ACAS_PARITY_TRANSFORM_DIGEST=''
 readonly -a ACAS_PARITY_ORACLE_DIRS=(common general irs purchase sales stock)
 
 #  IDENTICAL to acas_module_set_digest in harness/build_oracle.sh, deliberately:
@@ -932,6 +981,9 @@ acas_parity_assert_oracle_attestation() {
       cobmysqlapi-redirected)  redirected="$value" ;;
       cobmysqlapi-provenance)  provenance="$value" ;;
       cobc-version)            cobc_version="$value" ;;
+      oracle-source-is-frozen) ACAS_PARITY_SOURCE_IS_FROZEN="$value" ;;
+      source-transforms)       ACAS_PARITY_SOURCE_TRANSFORMS="$value" ;;
+      source-transform-set-sha256) ACAS_PARITY_TRANSFORM_DIGEST="$value" ;;
     esac
   done < "$attestation"
 
@@ -1016,8 +1068,29 @@ acas_parity_assert_oracle_attestation() {
     'listing hashed again, so a single replaced, added or removed module changes' \
     'this value. Rebuild the oracle: harness/build_oracle.sh'
 
+  #  THE DISCLOSURE MUST BE PRESENT. An attestation of the right version that omits it
+  #  is a producer that did not look, and silence about whether the sources were
+  #  transformed is exactly the condition finding CR-01 names.
+  case "$ACAS_PARITY_SOURCE_IS_FROZEN" in
+    yes|no) : ;;
+    *)
+      acas_parity_die "$EX_PRECONDITION" \
+        'THE ATTESTATION DOES NOT STATE WHETHER THE ORACLE WAS COMPILED FROM THE FROZEN' \
+        'SOURCES, so it cannot support a claim about the frozen behavioural specification.' \
+        "  attestation              $attestation" \
+        "  oracle-source-is-frozen  ${ACAS_PARITY_SOURCE_IS_FROZEN:-<unrecorded>}" \
+        'Rebuild the oracle: harness/build_oracle.sh'
+      ;;
+  esac
+
   acas_parity_log "oracle provenance verified: $attestation"
   acas_parity_note "no identity override; cobmysqlapi.o ${provenance}; preSQL archive matches its pin; ${recorded_count:-?} module(s), set digest $measured; toolchain ${cobc_version:-unknown}"
+
+  if [[ "$ACAS_PARITY_SOURCE_IS_FROZEN" == 'yes' ]]; then
+    acas_parity_log 'oracle sources: the frozen checkout, with no build-copy transformation'
+  else
+    acas_parity_warn "ORACLE SOURCES ARE TRANSFORMED, DISCLOSED: ${ACAS_PARITY_SOURCE_TRANSFORMS:-?} build-copy file(s) differ from the frozen checkout (transform-set digest ${ACAS_PARITY_TRANSFORM_DIGEST:-<unrecorded>}). Every one is listed in $attestation with its frozen and build digests and the reason for it, and the frozen checkout itself is untouched. They are connectivity and IF-scope repairs without which the compiled cycle cannot reach MySQL; none alters an accounting computation, a posting order, a control total or a rejection path. A verdict from this run is a verdict against a DISCLOSED-TRANSFORMED oracle and must not be reported as one against the unmodified frozen specification."
+  fi
 }
 
 acas_parity_argv() {
@@ -1062,6 +1135,7 @@ acas_parity_argv() {
     3) ACAS_PARITY_ARGV=(
          "$ACAS_PARITY_PYTHON" "$H/dump_tables.py"
          '--scenario' "$N" '--side' 'cobol' '--all-in-scope'
+         '--scenario-file' "$S"
        ) ;;
     4) ACAS_PARITY_ARGV=(
          "$ACAS_PARITY_PYTHON" "$H/normalize.py"
@@ -1075,6 +1149,7 @@ acas_parity_argv() {
     7) ACAS_PARITY_ARGV=(
          "$ACAS_PARITY_PYTHON" "$H/dump_tables.py"
          '--scenario' "$N" '--side' 'python' '--all-in-scope'
+         '--scenario-file' "$S"
        ) ;;
     8) ACAS_PARITY_ARGV=(
          "$ACAS_PARITY_PYTHON" "$H/normalize.py"
@@ -1466,6 +1541,27 @@ acas_parity_report() {
   # result artifact below say the same thing.
   acas_parity_read_verdict
   acas_parity_log "verdict state = $ACAS_PARITY_VERDICT_STATE ($ACAS_PARITY_VERDICT_DETAIL)"
+
+  #  ⭐ THE ORACLE'S SOURCE PROVENANCE TRAVELS WITH EVERY VERDICT (finding CR-01).
+  #  Printed here, in the block a reader quotes, rather than only in the preflight log
+  #  a reader scrolls past: a verdict of `identical' against a transformed oracle is a
+  #  different claim from one against the untouched checkout, and the difference has to
+  #  be visible at the point the claim is made.
+  case "$ACAS_PARITY_SOURCE_IS_FROZEN" in
+    yes)
+      acas_parity_log 'oracle sources = the frozen checkout, no build-copy transformation'
+      ;;
+    no)
+      acas_parity_log "oracle sources = TRANSFORMED (disclosed): ${ACAS_PARITY_SOURCE_TRANSFORMS:-?} build-copy file(s) differ from the frozen checkout, transform-set digest ${ACAS_PARITY_TRANSFORM_DIGEST:-<unrecorded>}"
+      acas_parity_log '                 listed per file with frozen and build digests in $ACAS_BUILD/oracle-attestation.txt'
+      acas_parity_log '                 so any claim below is against a DISCLOSED-TRANSFORMED oracle, not the unmodified specification'
+      ;;
+    *)
+      # Reachable only when the attestation gate was skipped -- --only or --from
+      # without stage 2 -- so the field was never read.
+      acas_parity_log 'oracle sources = not read (the attestation gate did not run for this invocation)'
+      ;;
+  esac
 
   local claim='no-claim'
   if (( first_failure == 0 && ACAS_PARITY_BEHAVIOURAL != 0 )); then

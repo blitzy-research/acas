@@ -2291,6 +2291,169 @@ acas_wait_for_database() {
 
 # The WHOLE checkout is copied, and that is the safe choice.
 
+# =============================================================================
+# ⭐ THE SOURCE-TRANSFORMATION REGISTER (finding CR-01)
+#
+# NINE SHIMS BELOW EDIT THE BUILD COPY OF FROZEN SOURCES, and this register is what
+# makes that a DISCLOSED fact rather than a hidden one. The attestation used to
+# describe only the two identity substitutions -- a replacement preSQL archive and a
+# redirected cobmysqlapi.o -- and published `overrides-used no' for a build whose
+# compiled COBOL differed from the checkout in nine places. An empty diff drawn
+# against such a build compares Python to a PATCHED oracle, and calling that "the
+# frozen behavioural specification" is the one claim this project must never make.
+#
+# WHY THE SHIMS EXIST AT ALL, stated once so the disclosure is readable rather than
+# alarming. Every one of them is a CONNECTIVITY or SCOPE repair without which the
+# compiled cycle cannot reach MySQL, and none of them alters an accounting
+# computation, a posting order, a control total or a rejection path. Six restore the
+# IF scope that a stray period closed early; three propagate or retain a database
+# connection the frozen code drops; one supplies an archive member the frozen bridges
+# COPY and the checkout does not contain. Each one's reason is recorded beside its
+# path below, and the frozen checkout itself is never written.
+#
+# WHAT IS PUBLISHED. For every registered path the attestation carries the FROZEN
+# checkout digest and the BUILD COPY digest, so a reader can verify the difference
+# independently and diff the two trees themselves. `oracle-source-is-frozen' states
+# the conclusion in one word.
+#
+# WHY A DECLARED LIST *AND* A MEASURED CHECK. The list is what the attestation
+# publishes; the measurement is what stops the list going stale. On any build that
+# refreshes the tree, the sources are digested immediately before the shim block and
+# immediately after it, and the set of paths that changed must EQUAL this register. A
+# tenth shim added without a register entry therefore fails the build instead of
+# compiling silently into the oracle.
+#
+# Format: <repo-relative path>|<reason>
+readonly -a ACAS_SOURCE_TRANSFORMS=(
+  'copybooks/ACAS-SQLstate-error-list.cob|supplies the comment-only archive member the 22 frozen *MT bridges COPY from their Remarks paragraphs and the checkout does not contain'
+  'common/glbatchLD.cbl|restores the IF scope of both flat-file open-error branches, which a period on the first MOVE closed early'
+  'common/glpostingLD.cbl|restores the IF scope of both flat-file open-error branches'
+  'common/irsnominalLD.cbl|restores the IF scope of both flat-file open-error branches'
+  'common/irspostingLD.cbl|restores the IF scope of both flat-file open-error branches'
+  'common/nominalLD.cbl|restores the IF scope of both flat-file open-error branches'
+  'common/otm5LD.cbl|restores the IF scope of both flat-file open-error branches'
+  'common/dfltLD.cbl|propagates the six RDBMS credential fields of SYSTEM-REC into File-Access before the bridge call, which this loader reads and never copies'
+  'common/finalLD.cbl|propagates the six RDBMS credential fields of SYSTEM-REC into File-Access before the bridge call'
+  'common/sys4LD.cbl|propagates the six RDBMS credential fields of SYSTEM-REC into File-Access before the bridge call'
+  'copybooks/mysql-procedures.cpy|retains the process connection across Mysql-1980-Close so one handler closing does not invalidate another handler still-open bridge state'
+  'copybooks/mysql-procedures-2.cpy|retains the process connection across Mysql-1980-Close'
+  'general/general.cbl|retains the declared RDB mode in the system record the menu rewrites on exit, so a run cannot silently fall back to indexed files'
+  'sales/sales.cbl|retains the declared RDB mode in the system record the menu rewrites on exit'
+  'purchase/purchase.cbl|retains the declared RDB mode in the system record the menu rewrites on exit'
+  'irs/irs030.cbl|retains the shared connection until the end-of-job transfer cleanup, which the frozen EOJ closes first'
+  # The 25 numbered file handlers, each carrying BOTH handler shims: the connection
+  # refresh and the reply-pair reset. `acas000.cbl` takes only the second, because it
+  # is the four-way dispatcher and copies no credentials of its own.
+  'common/acas000.cbl|resets the FS-Reply/We-Error pair before each dispatch, so a caller cannot read the previous call reply'
+  'common/acas004.cbl|refreshes the six DB-Data fields from the current caller on every RDBMS dispatch, which the frozen one-time guard leaves blank for a second caller, and resets the reply pair before each dispatch'
+  'common/acas005.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas006.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas007.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas008.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas010.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas011.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas012.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas013.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas014.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas015.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas016.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas017.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas019.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas022.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas023.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas026.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas029.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas030.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acas032.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acasirsub1.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acasirsub3.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acasirsub4.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+  'common/acasirsub5.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
+)
+
+#: The source extensions the frozen build consumes, and therefore the ones the
+#: completeness measurement covers.
+readonly -a ACAS_SOURCE_TRANSFORM_EXTENSIONS=('*.cbl' '*.cob' '*.cpy' '*.scb')
+
+#: The directories those sources live in. `copybooks` first because the shim that
+#: CREATES a file writes there.
+readonly -a ACAS_SOURCE_TRANSFORM_DIRS=(copybooks common general sales purchase irs stock)
+
+# acas_in_list <needle> <haystack>...  0 when the first argument equals a later one.
+acas_in_list() {
+  local needle="$1"
+  shift
+  local candidate
+  for candidate in "$@"; do
+    [[ "$candidate" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+# acas_source_digest_listing  A sorted `<digest>  <relpath>` listing of every build-tree
+# source. Written to stdout; an unreadable file is listed as UNREADABLE so it cannot
+# vanish from the comparison.
+acas_source_digest_listing() {
+  local dir pattern
+  {
+    for dir in "${ACAS_SOURCE_TRANSFORM_DIRS[@]}"; do
+      for pattern in "${ACAS_SOURCE_TRANSFORM_EXTENSIONS[@]}"; do
+        find "$ACAS_BUILD/$dir" -maxdepth 1 -type f -name "$pattern" -print 2>/dev/null
+      done
+    done
+  } | LC_ALL=C sort | while IFS= read -r path; do
+    if [[ -r "$path" ]]; then
+      printf '%s  %s\n' "$(sha256sum "$path" | cut -d' ' -f1)" "${path#"$ACAS_BUILD/"}"
+    else
+      printf 'UNREADABLE  %s\n' "${path#"$ACAS_BUILD/"}"
+    fi
+  done
+}
+
+# acas_assert_transform_register_complete <before-listing> <after-listing>
+#
+# The measurement that keeps ACAS_SOURCE_TRANSFORMS honest. Only meaningful on a
+# refreshed tree: the shims are idempotent, so on a --no-refresh build over an already
+# prepared tree nothing changes and there is nothing to compare.
+acas_assert_transform_register_complete() {
+  local before="$1" after="$2"
+  local -a measured=() registered=() unregistered=() unmeasured=()
+  local entry path
+
+  mapfile -t measured < <(
+    LC_ALL=C comm -3 <(LC_ALL=C sort "$before") <(LC_ALL=C sort "$after") \
+      | awk '{ print $NF }' | LC_ALL=C sort -u
+  )
+  for entry in "${ACAS_SOURCE_TRANSFORMS[@]}"; do
+    registered+=("${entry%%|*}")
+  done
+
+  for path in "${measured[@]}"; do
+    [[ -n "$path" ]] || continue
+    acas_in_list "$path" "${registered[@]}" || unregistered+=("$path")
+  done
+  for path in "${registered[@]}"; do
+    acas_in_list "$path" "${measured[@]}" || unmeasured+=("$path")
+  done
+
+  if (( ${#unregistered[@]} )); then
+    acas_die "$EX_BUILDTREE" \
+      "the shim block changed build-copy sources that ACAS_SOURCE_TRANSFORMS does not declare:" \
+      "  $(printf '%s ' "${unregistered[@]}")" \
+      'Every source transformation must be REGISTERED, because the attestation' \
+      'publishes the register and a transformation missing from it is an undisclosed' \
+      'behavioural patch in the oracle (finding CR-01). Add the path and its reason.'
+  fi
+  if (( ${#unmeasured[@]} )); then
+    acas_die "$EX_BUILDTREE" \
+      "ACAS_SOURCE_TRANSFORMS declares paths the shim block did not change:" \
+      "  $(printf '%s ' "${unmeasured[@]}")" \
+      'A register entry with no transformation behind it overstates what was patched,' \
+      'which is as misleading as omitting one. Remove the stale entry, or fix the shim.'
+  fi
+  acas_log "verified: ${#registered[@]} declared source transformation(s), and no others were made"
+}
+
 acas_install_sqlstate_comment_shim() {
   local source="$ACAS_REPO/harness/copybook-shims/ACAS-SQLstate-error-list.cob"
   local target="$ACAS_BUILD/copybooks/ACAS-SQLstate-error-list.cob"
@@ -2982,6 +3145,18 @@ acas_prepare_build_tree() {
   # environment include path cannot reach this missing archive member. Install
   # the comment-only shim into the BUILD COPY instead. This runs for refresh and
   # --no-refresh alike and never writes under $ACAS_REPO/copybooks.
+  #  DIGEST THE SOURCES ON EITHER SIDE OF THE SHIM BLOCK, so the register above is
+  #  MEASURED rather than trusted. Only on a refreshed tree: the shims are idempotent
+  #  and a --no-refresh build over an already prepared tree changes nothing, so there
+  #  would be nothing to compare and the check would pass vacuously.
+  local before_listing='' after_listing=''
+  if (( ACAS_REFRESH_TREE )); then
+    before_listing="$ACAS_BUILD/.acas-sources-before-shims"
+    after_listing="$ACAS_BUILD/.acas-sources-after-shims"
+    acas_source_digest_listing > "$before_listing" || acas_die "$EX_BUILDTREE" \
+      "could not digest the build-tree sources into $before_listing."
+  fi
+
   acas_install_sqlstate_comment_shim
   acas_install_loader_open_scope_shims
   acas_install_system_secondary_loader_credential_shims
@@ -2991,6 +3166,13 @@ acas_prepare_build_tree() {
   acas_install_menu_rdb_mode_restore_shims
   acas_install_irs_default_connection_ownership_shim
   acas_install_irs_eoj_connection_ownership_shim
+
+  if (( ACAS_REFRESH_TREE )); then
+    acas_source_digest_listing > "$after_listing" || acas_die "$EX_BUILDTREE" \
+      "could not digest the build-tree sources into $after_listing."
+    acas_assert_transform_register_complete "$before_listing" "$after_listing"
+  fi
+
   acas_check_copybook_closure
 }
 
@@ -3941,7 +4123,16 @@ acas_finalise() {
 # by a shell script with `while IFS=', so it needs no parser and cannot fail on a
 # quoting subtlety at the exact moment it is meant to be establishing trust.
 # =============================================================================
-readonly ACAS_ATTESTATION_VERSION='1'
+# VERSION 2 ADDS THE SOURCE-TRANSFORMATION DISCLOSURE (finding CR-01). A version 1
+# attestation described only the two IDENTITY substitutions and said nothing about the
+# nine shims that edit the build copy of frozen sources, so `overrides-used no' read as
+# "this is the unmodified oracle" for a build that was not. Version 2 publishes the
+# register: a count, a set digest, one record per transformed path carrying its FROZEN
+# and BUILD digests, and `oracle-source-is-frozen' stating the conclusion outright.
+# harness/run_parity.sh understands version 2 and refuses version 1, deliberately: an
+# attestation that cannot state whether the sources were transformed is not evidence
+# about the frozen specification.
+readonly ACAS_ATTESTATION_VERSION='2'
 readonly ACAS_ATTESTATION_BASENAME='oracle-attestation.txt'
 
 #  THE CANONICAL cobmysqlapi.o PATH, and why merely being SET is not an override.
@@ -4001,6 +4192,34 @@ acas_file_digest() {
   else
     printf 'ABSENT'
   fi
+}
+
+# acas_source_transform_records  One TAB-separated record per registered transformation.
+#
+#   source-transform<TAB><relpath><TAB><frozen digest><TAB><build digest><TAB><reason>
+#
+# The FROZEN digest is taken from $ACAS_REPO, which this script never writes, so a
+# reader can recompute both sides independently and diff the two files. `ABSENT` on the
+# frozen side is the correct and expected value for the one shim that CREATES a file
+# the checkout does not contain.
+acas_source_transform_records() {
+  local entry path reason
+  for entry in "${ACAS_SOURCE_TRANSFORMS[@]}"; do
+    path="${entry%%|*}"
+    reason="${entry#*|}"
+    printf 'source-transform\t%s\t%s\t%s\t%s\n' \
+      "$path" \
+      "$(acas_file_digest "$ACAS_REPO/$path")" \
+      "$(acas_file_digest "$ACAS_BUILD/$path")" \
+      "$reason"
+  done
+}
+
+# The digest OVER the transformation records, so one changed shim changes one value a
+# consumer can compare. Computed from the records themselves rather than from the
+# register text, so editing a reason without changing a source is visible too.
+acas_source_transform_set_digest() {
+  acas_source_transform_records | sha256sum | cut -d' ' -f1
 }
 
 acas_publish_attestation() {
@@ -4069,6 +4288,15 @@ acas_publish_attestation() {
   module_digest="$(acas_module_set_digest)"
   module_count="$(acas_module_set_count)"
 
+  #  WHETHER THE COMPILED ORACLE IS THE FROZEN SOURCE, answered from the register
+  #  rather than asserted. `no' whenever any transformation is declared, which today
+  #  is always -- the nine shims are what let the compiled cycle reach MySQL at all.
+  #  The value exists so that a tree in which they became unnecessary would say `yes'
+  #  and be believed, and so that no consumer has to infer the answer from a count.
+  local source_is_frozen='yes' transform_digest
+  (( ${#ACAS_SOURCE_TRANSFORMS[@]} == 0 )) || source_is_frozen='no'
+  transform_digest="$(acas_source_transform_set_digest)"
+
   {
     printf 'attestation-version	%s
 ' "$ACAS_ATTESTATION_VERSION"
@@ -4110,6 +4338,17 @@ acas_publish_attestation() {
 ' "$module_digest"
     printf 'overrides-used	%s
 ' "$overrides"
+    #  ⭐ THE SOURCE-TRANSFORMATION DISCLOSURE (finding CR-01). Published
+    #  UNCONDITIONALLY, so an attestation can never be silent about it: a reader who
+    #  finds no `source-transform' record knows there were none, rather than not
+    #  knowing whether the producer looked.
+    printf 'oracle-source-is-frozen	%s
+' "$source_is_frozen"
+    printf 'source-transforms	%s
+' "${#ACAS_SOURCE_TRANSFORMS[@]}"
+    printf 'source-transform-set-sha256	%s
+' "$transform_digest"
+    acas_source_transform_records
   } > "$target" || acas_die "$EX_FINALISE" \
     "the provenance attestation could not be written to $target." \
     'Without it harness/run_parity.sh will refuse to run the compiled cycle,' \
@@ -4123,6 +4362,11 @@ acas_publish_attestation() {
   acas_log "  cobmysqlapi.o       $(acas_file_digest "${ACAS_COBMYSQLAPI_SRC-}")"
   acas_log "  toolchain           $cobc_version / $cc_version"
   acas_log "  modules             $module_count (*.so), set digest $module_digest"
+  acas_log "  frozen sources      $source_is_frozen"
+  acas_log "  source transforms   ${#ACAS_SOURCE_TRANSFORMS[@]}, set digest $transform_digest"
+  if [[ "$source_is_frozen" != 'yes' ]]; then
+    acas_warn "THIS ORACLE WAS COMPILED FROM TRANSFORMED SOURCES, and the attestation now says so. ${#ACAS_SOURCE_TRANSFORMS[@]} build-copy file(s) differ from the frozen checkout; every one is listed in $target as a source-transform record carrying its frozen and build digests and the reason for it. They are connectivity and IF-scope repairs without which the compiled cycle cannot reach MySQL, and none alters an accounting computation, a posting order, a control total or a rejection path -- but a parity verdict produced against this build is a verdict against a DISCLOSED-TRANSFORMED oracle and must never be described as one against the unmodified frozen specification. The frozen checkout itself is untouched: diff $ACAS_REPO against $ACAS_BUILD to see every difference."
+  fi
   if [[ "$overrides" == 'yes' ]]; then
     acas_warn "THIS ORACLE CANNOT PRODUCE EVIDENCE: its identity was not established from the reviewed sources alone (presql2-digest-override=$digest_override, presql2-matches-pin=$archive_matches_pin, cobmysqlapi-redirected=$object_redirected, cobmysqlapi-provenance=$object_provenance). The attestation records that and harness/run_parity.sh will refuse to run the compiled cycle against this build. Rebuild without ACAS_PRESQL2_SHA256, and without pointing ACAS_COBMYSQLAPI_OBJ anywhere other than $ACAS_CANONICAL_COBMYSQLAPI_OBJ. To replace either legitimately, make it a REVIEWED SOURCE CHANGE -- update the vendored archive and ACAS_PRESQL2_SHA256_EXPECTED together in the same commit."
   else

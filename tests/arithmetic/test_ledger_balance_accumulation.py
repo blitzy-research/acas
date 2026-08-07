@@ -118,8 +118,10 @@ R-5  Full traceability. Every descriptor arrives by its dictionary key or by a
      Coverage is evidence, never a gate.
 R-6  Compiled behavior is the tie-breaker. THIS FILE OWNS THE SORT TIE-ORDER
      QUESTION, and it is now ANSWERED: the compiled sort was measured to be STABLE,
-     so there is no `xfail` in this file and `OPEN_QUESTIONS` below records each
-     question with the measurement that closed it. Where a measurement refuted a
+     so there is no `xfail` in this file and `ARBITRATED_QUESTIONS` below records
+     each question with the measurement that closed it. That structure was called
+     `OPEN_QUESTIONS` while holding only settled entries, which described a
+     resolution backlog this file does not have (finding MJ-13). Where a measurement refuted a
      reading, the refutation is asserted, so a change back in that direction fails
      by name rather than passing unnoticed.
 
@@ -178,9 +180,23 @@ pytestmark = pytest.mark.arithmetic
 #      already settled there, so the value is asserted plainly below.
 #    * the high-order digit discard of an un-ROUNDED store - same module, same
 #      settled rule: nothing is raised and nothing is clamped.
-OPEN_QUESTIONS: Final[dict[str, str]] = {
+#  ⭐ RENAMED FROM `OPEN_QUESTIONS` (finding MJ-13). Not one of the three entries
+#  below is open: `Q-SORT-TIE-ORDER` was measured to preserve input order,
+#  `Q-SORT-TIE-ORDER-ANSWER` records that measurement, and
+#  `Q-EDITED-BLANK-WHEN-ZERO` was measured and deliberately not implemented. The name
+#  said otherwise, and a name is what a reader believes: with it, this file described
+#  three settled questions as an open arbitration backlog while
+#  docs/migration/ambiguity-resolutions.md recorded all three as answered. R-6 needs
+#  ONE resolution state across the project, and two structures cannot disagree about
+#  it if only one of them claims to hold open questions.
+#
+#  What this dict actually holds is each question this file owns TOGETHER WITH ITS
+#  CURRENT STATE, which is what the register holds too, so the two now read alike.
+#  Every value below states its state in its own first words.
+ARBITRATED_QUESTIONS: Final[dict[str, str]] = {
     "Q-SORT-TIE-ORDER": (
-        "Where the compiled SORT places two records carrying an IDENTICAL "
+        "RESOLVED BY ORACLE (2026-08-07), input order preserved. The question: "
+        "where the compiled SORT places two records carrying an IDENTICAL "
         "(sort-batch, sort-ac, sort-pc, sort-post). The tie is reachable: the "
         "CR leg and the VAT leg of the gl070 double-entry explosion coincide "
         "when the VAT account equals the CR account, and "
@@ -1771,8 +1787,8 @@ def test_gl071_sort_declares_no_duplicates_phrase() -> None:
     the COMPILED sort does with a tie is question `Q-SORT-TIE-ORDER`, asserted
     separately below and never mixed into the stability assertion.
     """
-    assert "Q-SORT-TIE-ORDER" in OPEN_QUESTIONS
-    assert "with duplicates in order" in OPEN_QUESTIONS["Q-SORT-TIE-ORDER"]
+    assert "Q-SORT-TIE-ORDER" in ARBITRATED_QUESTIONS
+    assert "with duplicates in order" in ARBITRATED_QUESTIONS["Q-SORT-TIE-ORDER"]
     # Stability is not an option the caller chooses, which is what makes it a
     # contract rather than a default.
     tied = [
@@ -1858,7 +1874,7 @@ def test_q_sort_tie_order_compiled_tie_order_is_input_order() -> None:
     #  what `docs/migration/ambiguity-resolutions.md` cites, so a measurement that
     #  drifted from the recorded answer - or a recorded answer edited without
     #  re-measuring - fails here rather than leaving the two to disagree quietly.
-    compiled_tie_order = OPEN_QUESTIONS.get("Q-SORT-TIE-ORDER-ANSWER")
+    compiled_tie_order = ARBITRATED_QUESTIONS.get("Q-SORT-TIE-ORDER-ANSWER")
     assert compiled_tie_order is not None, (
         "the measured answer to Q-SORT-TIE-ORDER must stay recorded under "
         "`Q-SORT-TIE-ORDER-ANSWER`: it is the key the ambiguity register cites."
@@ -2559,7 +2575,7 @@ def test_q_edited_blank_when_zero_is_measured_and_deliberately_not_implemented(
     have to re-derive it. That is the distinction rule R-6 asks to be kept visible.
     """
     # The question is settled, so the layer's refusal is a SCOPE decision.
-    assert "Q-EDITED-BLANK-WHEN-ZERO" in OPEN_QUESTIONS
+    assert "Q-EDITED-BLANK-WHEN-ZERO" in ARBITRATED_QUESTIONS
 
     # THE REFUSAL, which is the shipped behaviour and stays so.
     for receiver in (L6_ACCOUNT, L6_DEBIT, L6_CREDIT):

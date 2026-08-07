@@ -1684,13 +1684,17 @@ def run(
 #        presentation; the transfer is behaviour.
 #   O-5  `accept WS-Reply` AT L1717 IS NOT DROPPED.  It gates a database write -
 #        the transfer-table truncation - so it becomes the explicit
-#        `clear_posting_file` parameter of `run`.  ITS `True` DEFAULT IS A
-#        SIGNATURE CONTRACT from this module's file brief and NOT a COBOL default:
-#        the frozen prompt has none, because the `[Y]` at L1716 is prompt text, the
-#        accept at L1717 carries no `WITH UPDATE`, `WS-Reply` is never set to `"Y"`
-#        anywhere in the program, and L1718-L1719 re-prompt on anything else.  Every
-#        caller passes the value explicitly, so the default is never consulted;
-#        acas_posting/cli/irs_post.py requires the answer (finding CLI-05).
+#        `clear_posting_file` parameter of `run`.  ⭐ IT HAS NO DEFAULT, AND THAT IS
+#        DELIBERATE: it is keyword-only and required, so this module cannot be
+#        called without an answer.  The file brief gives it a `True` default and the
+#        module does not follow the brief here, because there is no COBOL default to
+#        reproduce -- the `[Y]` at L1716 is prompt text, the accept at L1717 carries
+#        no `WITH UPDATE`, `WS-Reply` is never set to `"Y"` anywhere in the program,
+#        and L1718-L1719 re-prompt on anything else, so a bare Enter re-prompts
+#        rather than clearing.  A `True` default would have been this migration
+#        inventing the DESTRUCTIVE answer (finding CLI-05), which rule R-3 forbids
+#        as much as rule R-4 forbids dropping a real one.
+#        acas_posting/cli/irs_post.py likewise requires the answer at its boundary.
 #   O-6  `copy "screenio.cpy"` (L344) and `copy "envdiv.cob"` (L197) map to
 #        nothing.  Both are representation only: a screen-section vocabulary and
 #        an environment division fragment, neither of which has a Python

@@ -97,12 +97,21 @@ HOW THE SIX RULES BIND HERE
                   `ambiguity_refs()`, while anomaly `A-11` stays on every one - and
                   this file asserts exactly that state.
              Q-4  which of the batch record's two declared lengths governs the record
-                  that is actually read. STILL OPEN, and asserted through
-                  `ambiguity_refs()` alone.
+                  that is actually read. MEASURED on GnuCOBOL 3.2.0: `Q-4` is
+                  `RESOLVED BY ORACLE` (2026-08-07) and the answer is NEITHER of the
+                  maintainer's two readings taken as a contest - both record copies
+                  measure 96, `FUNCTION LENGTH` agrees with the field sum, and the 98
+                  is false. That answer changes NOTHING here, because the field sum is
+                  already what these descriptors encode, so `Q-4` remains published in
+                  `ambiguity_refs()` on all 28 affected entries as a CROSS-REFERENCE to
+                  the register - the same way `A-15` stays on them. Contrast `Q-3`,
+                  whose measurement changed what a STORED VALUE becomes and therefore
+                  moved into the entries' notes and out of `ambiguity_refs()`.
 
-         Consequently this file carries NO expected-failure marker: for `Q-4` one would
-         have to stand in for a value nobody has measured, and no such value is asserted
-         here; for `Q-3` the measurement is on record and is asserted plainly. Section
+         Consequently this file carries NO expected-failure marker: neither question
+         needs one, because this file asserts no value of its own for either - for `Q-4`
+         it asserts only the two DECLARED lengths and the published cross-references,
+         and for `Q-3` the measurement is on record and is asserted plainly. Section
          0.8.4 also applies - there is no timing assertion and no performance
          measurement anywhere.
 
@@ -1074,8 +1083,8 @@ def test_a11_signed_binary_long_narrowed_to_unsigned_at_the_bridge() -> None:
     # carried, not by rewriting either side.
     assert descriptor.signed is True
     assert "A-11" in descriptor.anomaly_refs()
-    # R-6: the stored value of a negative is NOT asserted - only that the question is on
-    # the register.
+    # R-6: no stored value is INVENTED here. What is asserted is the MEASUREMENT the
+    # register recorded, read out of the entry's own notes rather than restated.
     # Q-3 IS RESOLVED (finding F-19): GnuCOBOL 3.2.0 stores the ABSOLUTE VALUE,
     # bounded by the receiving digit count. So the entry no longer publishes it as
     # an OPEN question - it publishes the measurement - while anomaly A-11, the
@@ -1280,10 +1289,14 @@ def test_a15_both_of_the_batch_record_s_declared_lengths_are_recorded() -> None:
         *>   but function length (Batch-record) says 98?
 
     The maintainer records two lengths and disputes his own second one. THIS TEST DOES
-    NOT ASSERT WHICH IS RIGHT, and could not: the declared lengths live in an ARRAY
-    precisely so a contradiction can be carried instead of adjudicated, and which length
-    governs the record actually read is the open question Q-4. Only running the compiled
-    program can settle it.
+    NOT ASSERT WHICH IS RIGHT, and must not: the declared lengths live in an ARRAY
+    precisely so the contradiction is CARRIED rather than adjudicated here. Only running
+    the compiled program could settle which length governs the record actually read, and
+    it has: `Q-4` in `docs/migration/ambiguity-resolutions.md` is `RESOLVED BY ORACLE`
+    (2026-08-07), the answer is NEITHER - both copies measure 96 and `FUNCTION LENGTH`
+    agrees with the field sum - and `docs/migration/anomaly-log.md` carries A-15 as
+    `REPRODUCED - VALUE MEASURED`. The array below still holds BOTH lengths, because
+    measuring the contradiction did not repair the copybook and nothing may (R-4).
     """
     batch_sources = tuple(
         copybook
@@ -1311,8 +1324,10 @@ def test_a15_both_of_the_batch_record_s_declared_lengths_are_recorded() -> None:
     assert len(totals_sources) == 1
     assert totals_sources[0].declared_lengths == ("1024",)
 
-    # Every field of the record carries the anomaly and the open question, so a reader
-    # arriving at any one of them is led to the contradiction.
+    # Every field of the record carries the anomaly and the ambiguity cross-reference,
+    # so a reader arriving at any one of them is led to the contradiction and to the
+    # measured answer recorded against it. `Q-4` is RESOLVED, and the reference is kept
+    # for exactly that reason: it is the route from a field to the measurement.
     # spec: [copybooks/wsbatch.cob:L41]  05  Input-Gross     pic 9(9)v99.
     gross = _descriptor_for("GLBATCH-REC", "Input-Gross")
     assert "A-15" in gross.anomaly_refs()
@@ -2832,3 +2847,132 @@ def test_every_ref_node_carries_only_annotations_beside_it() -> None:
     visit(schema, "")
 
     assert offenders == [], offenders
+
+
+# ---------------------------------------------------------------------------
+#  MJ-06 - EVERY RECORD ATTRIBUTE REACHES A DICTIONARY ENTRY
+#
+#  Rule R-5 requires field-level traceability: every record field maps to a
+#  data-dictionary entry. `acas_posting/dictionary/loader.py` makes that mechanical by
+#  trying a fixed sequence of routes - field metadata, a class constant, the class's
+#  and module's named descriptor maps, then position within `FIELDS`, then group
+#  membership. The claim "every field is traceable" is therefore only as good as that
+#  sequence covering every field, and nothing was checking that it did.
+#
+#  Exactly one attribute of 976 did not route: `SystemDataBlock.filler_81`, where two
+#  ordinary facts combined badly. The positional route needs `FIELDS` and the dataclass
+#  fields to be the same length, and `SYSTEM-REC` has 46 descriptors against 45 fields
+#  because `Scycle REDEFINES Cyclea` [copybooks/wssystem.cob:L62-L63] is one storage
+#  location modelled as one field plus a property. And the name route cannot help,
+#  because the descriptor's COBOL name is the bare `FILLER` [copybooks/wssystem.cob:L81]
+#  while the attribute must carry its line number to be a distinct Python name.
+#
+#  This asserts the property as a COUNT over the whole package, so a future field that
+#  lands in the same gap fails here instead of silently losing its traceability. It is
+#  the census the finding was raised from, kept.
+def _record_dataclasses() -> list[type]:
+    """Every record dataclass the package defines, discovered rather than listed.
+
+    Discovery matters: a hand-written list would not cover a record module added
+    later, which is exactly the case this census exists to catch.
+
+    Returns:
+        The dataclasses, each defined by the module it is found in.
+    """
+    import dataclasses as _dc
+    import importlib
+    import pkgutil
+
+    import acas_posting.records as records_package
+
+    found: list[type] = []
+    for module_info in pkgutil.iter_modules(records_package.__path__):
+        module = importlib.import_module(f"acas_posting.records.{module_info.name}")
+        for value in vars(module).values():
+            if (
+                isinstance(value, type)
+                and _dc.is_dataclass(value)
+                and value.__module__ == module.__name__
+            ):
+                found.append(value)
+    return found
+
+
+def test_every_record_attribute_routes_to_a_dictionary_entry() -> None:
+    """No record attribute is left without a dictionary key or a group type.
+
+    A `FieldTrace` carries `dictionary_key` for a scalar and `group_type` for a group
+    item, so an attribute is traced when it has either. One with neither has no route
+    at all, and R-5's field-level traceability claim does not hold of it.
+    """
+    layouts = _record_dataclasses()
+    assert len(layouts) >= 27, (
+        f"only {len(layouts)} record dataclasses were discovered; the package defines "
+        "at least one per copybook across 27 modules, so discovery has broken and this "
+        "census would pass by looking at almost nothing"
+    )
+
+    traced = 0
+    unrouted: list[str] = []
+    for layout in layouts:
+        for trace in loader.trace_record(layout):
+            traced += 1
+            if trace.dictionary_key is None and trace.group_type is None:
+                unrouted.append(
+                    f"{layout.__module__}.{layout.__qualname__}.{trace.attribute} "
+                    f"(route tried: {trace.route!r})"
+                )
+
+    assert traced >= 976, (
+        f"only {traced} attributes were traced; the census covered 976 when this was "
+        "written, so a sharp drop means whole records stopped being discovered and a "
+        "green result here would mean nothing"
+    )
+    assert not unrouted, (
+        f"{len(unrouted)} of {traced} record attributes reach no dictionary entry, so "
+        "rule R-5's field-level traceability does not hold of them (MJ-06):\n  "
+        + "\n  ".join(unrouted)
+        + "\n\n  Give the field an explicit route, e.g. "
+        'field(metadata={"dictionary_key": ...}), taking the key from the module\'s '
+        "own key index rather than writing it as a literal."
+    )
+
+
+def test_the_repeated_filler_that_had_no_route_now_has_one() -> None:
+    """`SystemDataBlock.filler_81` routes by stated key, to the entry it names (MJ-06).
+
+    Named specifically as well as counted, because the count alone would go green
+    again if the attribute were deleted rather than routed - and deleting a `FILLER`
+    the frozen record declares would be a change to the layout, not a fix.
+    """
+    from acas_posting.records.system_record import SystemDataBlock
+
+    traces = {trace.attribute: trace for trace in loader.trace_record(SystemDataBlock)}
+    assert "filler_81" in traces, (
+        "SystemDataBlock no longer declares filler_81. The frozen record declares that "
+        "FILLER at [copybooks/wssystem.cob:L81]; removing it changes the layout."
+    )
+    trace = traces["filler_81"]
+    assert trace.dictionary_key == "System-Record.FILLER#81", (
+        f"filler_81 routes to {trace.dictionary_key!r}, not to the entry for the FILLER "
+        "declared at [copybooks/wssystem.cob:L81]."
+    )
+    assert trace.route == "metadata[dictionary_key]", (
+        f"filler_81 routes by {trace.route!r}. The explicit metadata route is the one "
+        "that must find it: the positional route is unavailable here because FIELDS "
+        "carries 46 descriptors against 45 dataclass fields (Scycle REDEFINES Cyclea), "
+        "and no name route can match a suffixed attribute against a bare FILLER."
+    )
+    assert trace.entry is not None, (
+        "filler_81 carries a key that resolves to no entry in the artifact, which is a "
+        "dangling route rather than a route."
+    )
+
+    # The key must come from the module's own total index, not a literal - so a wrong
+    # name or line fails at import. Proven by checking the pair is what the index holds.
+    from acas_posting.records import system_record
+
+    assert system_record._KEY_INDEX[("FILLER", 81)] == trace.dictionary_key, (
+        "the key stated in metadata is not the one the module's key index yields for "
+        "(FILLER, 81), so the two can drift apart."
+    )

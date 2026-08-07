@@ -607,9 +607,15 @@ no skip if absent:
 
   * `Q-4` - the batch-record declared-length contradiction behind A-15. Whether the
     declared length or the field sum governs the record actually read affects the
-    alignment of the trailing fields, and only execution shows which. It matters
+    alignment of the trailing fields, and only execution showed which. Execution has
+    now happened: `Q-4` is `RESOLVED BY ORACLE` (2026-08-07) and the answer is NEITHER -
+    both record copies measure 96, `FUNCTION LENGTH` agrees with the field sum, and the
+    98 in the maintainer's note is false under GnuCOBOL 3.2.0. That answer matters
     directly to this scenario, because `Description`, `posting-data` and `Batch-Start`
-    are the trailing fields of the very record whose non-change is the evidence.
+    are the trailing fields of the very record whose non-change is the evidence: a
+    98-byte reading would have shifted them. Measured is not fixed - the contradictory
+    note is still in the frozen copybook and nothing repairs it (R-4), which is why
+    `docs/migration/anomaly-log.md` carries A-15 as `REPRODUCED - VALUE MEASURED`.
   * The `batch-status`-unassigned path at [general/gl051.cbl:L1099-L1100], whose
     observable effect is measured rather than reasoned about.
   * The deliberate omission of `gl_end_of_cycle`: `gl080` is driven by NO scenario in
@@ -1445,11 +1451,15 @@ def test_vat_is_added_before_the_comparison_is_documented(repo_root) -> None:
         "no actual-DR or actual-CR field. Do not invent one."
     )
     # A-15 / ambiguity `Q-4`: the declared length contradicts the field sum, in the
-    # maintainer's own words. Recorded, never resolved from here.
+    # maintainer's own words. MEASURED, and still not repaired.
     assert "dont understand as I count 96" in batch_copybook, (
-        "anomaly A-15 lives in the frozen comment at [copybooks/wsbatch.cob:L7-L9] and "
-        "is arbitrated by the compiled oracle under ambiguity `Q-4`; it is neither "
-        "resolved nor removed here."
+        "anomaly A-15 lives in the frozen comment at [copybooks/wsbatch.cob:L7-L9]. "
+        "The compiled oracle has arbitrated it: `Q-4` is `RESOLVED BY ORACLE` "
+        "(2026-08-07), the answer is NEITHER - both record copies measure 96 - and "
+        "`docs/migration/anomaly-log.md` carries A-15 as `REPRODUCED - VALUE "
+        "MEASURED`. Measuring it did not repair it, and must not: the contradictory "
+        "note stays in the frozen copybook (R-4), so this assertion requires it to be "
+        "still there."
     )
 
 

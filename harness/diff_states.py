@@ -2215,6 +2215,55 @@ def _validate_table_selection(tables: Sequence[str]) -> tuple[str, ...]:
 # ignore-list here - is forbidden by rule R-4.
 
 
+# ---------------------------------------------------------------------------
+#  ⭐ THE SHARED SCENARIO PARSER IS RESOLVED BY PATH, NOT BY NAME (finding MJ-17).
+#
+#  `harness/scenario_yaml.py` is a SIBLING FILE, not an installed package, so a bare
+#  `import scenario_yaml` resolves only when this directory already sits on `sys.path`.
+#  That holds when this module is run as a script from `harness/` and does NOT hold
+#  when a test loads it by path, which made the import ORDER-DEPENDENT: it resolved if
+#  some other harness module had inserted the directory first and failed otherwise.
+#  The failure was then reported as "PyYAML is not importable" - a different fault with
+#  a different remedy - so the refusal that should have followed was never produced.
+#  Measured symptom: `tests/scenarios/` run on its own failed twelve tests while the
+#  full suite passed, because in the full suite an earlier module did the insert.
+#
+#  Resolved from this module's OWN location, so it behaves identically however the
+#  module was loaded and depends on nothing else having run first. `sys.path` is
+#  deliberately left alone: making one import succeed by mutating the interpreter's
+#  global search path is what allowed the order dependency to hide, and this module is
+#  imported into test processes where a shadowing entry would be a real hazard.
+# ---------------------------------------------------------------------------
+def _load_scenario_yaml_module() -> Any:
+    """Load the sibling `scenario_yaml` module from this file's own directory.
+
+    Returns:
+        The executed `scenario_yaml` module, whose `load_scenario_yaml` rejects a
+            duplicate key instead of applying last-one-wins.
+
+    Raises:
+        ImportError: The sibling file is absent or cannot be executed - which includes
+            PyYAML being unavailable, since `scenario_yaml` imports it at module
+            scope. The message names which of the two it was, so the caller's refusal
+            can say what is actually missing.
+    """
+    import importlib.util  # noqa: PLC0415 - lazy, alongside the import it performs
+
+    sibling = Path(__file__).resolve().parent / "scenario_yaml.py"
+    if not sibling.is_file():
+        raise ImportError(
+            f"the shared duplicate-rejecting scenario parser is absent: {sibling}"
+        )
+    spec = importlib.util.spec_from_file_location(
+        "acas_harness_scenario_yaml", sibling
+    )
+    if spec is None or spec.loader is None:  # pragma: no cover - defensive
+        raise ImportError(f"the shared scenario parser is not loadable: {sibling}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def scenario_expects_empty_state(path: Path | str | None) -> bool:
     """Report whether a scenario declares that an all-empty end state is its outcome.
 
@@ -2241,14 +2290,27 @@ def scenario_expects_empty_state(path: Path | str | None) -> bool:
         return False
     try:
         import yaml
-    except ImportError as exc:  # pragma: no cover - PyYAML is pinned
+
+        #  ⭐ THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17).
+        #  `yaml.safe_load` applies last-one-wins to a repeated key, silently, and a
+        #  scenario definition carries the destructive answers, the fan-out switch
+        #  that decides which tables a run touches and the comparison bound. Imported
+        #  lazily, by sibling name, so this module still imports without PyYAML.
+        scenario_yaml = _load_scenario_yaml_module()
+    except ImportError as exc:
         raise ScenarioFileError(
-            "PyYAML is not importable, so a scenario definition cannot be read."
+            f"the shared scenario parser could not be loaded, so a scenario "
+            f"definition cannot be read: {exc}. harness/scenario_yaml.py is "
+            f"the shared duplicate-rejecting loader and requirements.txt pins "
+            f"PyYAML==6.0.3; the message above names which of the two was "
+            f"missing, because they have different remedies."
         ) from exc
 
     source = Path(path)
     try:
-        document = yaml.safe_load(source.read_text(encoding="utf-8"))
+        document = scenario_yaml.load_scenario_yaml(
+            source.read_text(encoding="utf-8")
+        )
     except OSError as exc:
         raise ScenarioFileError(
             f"could not read the scenario definition {source}: {exc}"
@@ -2291,7 +2353,8 @@ def scenario_tables(path: Path | str) -> tuple[str, ...]:
             order.
 
     Raises:
-        ScenarioFileError: PyYAML is unavailable, or the file is missing, unreadable,
+        ScenarioFileError: The shared scenario parser is unloadable, or the file is
+            missing, unreadable,
             not a mapping, carries neither key or both, or its list is empty or holds
             something that is not a table name.
         UnknownTableError: The list names something that is not a table.
@@ -2299,11 +2362,21 @@ def scenario_tables(path: Path | str) -> tuple[str, ...]:
     """
     try:
         import yaml
-    except ImportError as exc:  # pragma: no cover - PyYAML is pinned
+
+        #  ⭐ THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17).
+        #  `yaml.safe_load` applies last-one-wins to a repeated key, silently, and a
+        #  scenario definition carries the destructive answers, the fan-out switch
+        #  that decides which tables a run touches and the comparison bound. Imported
+        #  lazily, by sibling name, so this module still imports without PyYAML.
+        scenario_yaml = _load_scenario_yaml_module()
+    except ImportError as exc:
         raise ScenarioFileError(
-            "PyYAML is not importable, so a scenario definition cannot be "
-            "read. requirements.txt pins PyYAML==6.0.3. Pass --tables "
-            "instead to name the tables directly."
+            f"the shared scenario parser could not be loaded, so a scenario "
+            f"definition cannot be read: {exc}. The two possible causes have "
+            f"different remedies, which is why this message names the one that "
+            f"applied: harness/scenario_yaml.py is the shared "
+            f"duplicate-rejecting loader, and requirements.txt pins "
+            f"PyYAML==6.0.3. Pass --tables instead to name the tables directly."
         ) from exc
 
     source = Path(path)
@@ -2317,7 +2390,7 @@ def scenario_tables(path: Path | str) -> tuple[str, ...]:
         ) from exc
 
     try:
-        document = yaml.safe_load(text)
+        document = scenario_yaml.load_scenario_yaml(text)
     except yaml.YAMLError as exc:
         raise ScenarioFileError(
             f"the scenario definition {source} is not valid YAML: {exc}"

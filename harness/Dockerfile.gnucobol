@@ -619,7 +619,13 @@ RUN set -eu; \
     python3 -c 'from decimal import Decimal, ROUND_DOWN; q = Decimal("1.239").quantize(Decimal("0.01"), rounding=ROUND_DOWN); assert q == Decimal("1.23"), q; print("ROUND_DOWN 1.239 ->", q)'; \
     \
     echo '--- the pinned set must import ---'; \
-    python3 -c 'import mysql.connector, sqlalchemy, yaml, pytest; print("mysql-connector-python", mysql.connector.__version__); print("SQLAlchemy", sqlalchemy.__version__); print("PyYAML", yaml.__version__); print("pytest", pytest.__version__)'; \
+    python3 -c 'import mysql.connector, yaml, pytest; print("mysql-connector-python", mysql.connector.__version__); print("PyYAML", yaml.__version__); print("pytest", pytest.__version__)'; \
+    \
+    echo '--- and SQLAlchemy must be ABSENT (finding MJ-20) ---'; \
+    if python3 -c 'import sqlalchemy' > /dev/null 2>&1; then \
+        echo 'FATAL: SQLAlchemy is installed. Nothing under acas_posting/ imports it -- an AST census over the package yields exactly one third-party top-level module, mysql -- and it was removed from requirements.txt because three artifacts had been advertising a Core-level data-access boundary the code does not take (MJ-20). Its presence here means requirements.txt has regained the pin, or something else pulled it in.' >&2; exit 1; \
+    fi; \
+    echo 'OK: SQLAlchemy absent, as the reconciled manifest specifies.'; \
     \
     echo '--- R-2 self-check: pandas and numpy MUST be absent ---'; \
     if python3 -c 'import pandas' > /dev/null 2>&1; then \

@@ -740,3 +740,108 @@ def test_neither_skip_leaves_a_trace_in_the_status_block() -> None:
         #  rejections - and it is untouched by a run the double served, because the
         #  double is not the bridge.
         assert observed.logging_data.ws_count_rows == 0
+
+
+# ---------------------------------------------------------------------------
+#  4.  THE EMPTY WORK FILE - THE AT-END PATH, AND WHY A TABLE DUMP CANNOT SEE IT
+#      (finding MJ-14, ambiguity `Q-EMPTY-BATCH-AT-END`)
+#
+#  `loop.` reads `post-trans` and, at end, performs `end-account` and then `end-batch`
+#  before leaving for `end-run.` [general/gl072.cbl:L285-L288]. NEITHER CALL IS
+#  CONDITIONAL ON ANYTHING HAVING BEEN READ. So when `gl071` emitted nothing - an empty
+#  batch - the very first read hits at end with `save-batch` and `save-ledger` still
+#  zero, and the program rewrites the blank nominal record and the blank batch record it
+#  is holding, having first stamped that blank batch `Processed` and dated it.
+#
+#  WHY THIS NEEDS A CALL-SEQUENCE ASSERTION RATHER THAN A STATE DIFF. Those two
+#  rewrites are `UPDATE ... WHERE <key> = 0`, and no row carries key zero, so they match
+#  nothing and change no table. `Q-EMPTY-BATCH-AT-END` is `RESOLVED BY ORACLE`
+#  (2026-08-07) with exactly that answer - neither paragraph leaves any observable
+#  effect - which is what makes `tests/scenarios/test_empty_batch.py`'s green diff a
+#  WITNESS to the two sides agreeing rather than evidence that the calls happen. A
+#  transcription that "sensibly" guarded the at-end clause with `if save-batch not =
+#  zero` would produce the identical empty diff and pass that scenario, and it would be
+#  a behaviour the compiled program does not have. Only the call log discriminates.
+# ---------------------------------------------------------------------------
+
+
+def test_the_empty_work_file_still_performs_end_account_then_end_batch() -> None:
+    """At end on the FIRST read, both paragraphs run - with zero keys (MJ-14).
+
+    The DISCRIMINATING assertion for `Q-EMPTY-BATCH-AT-END`. It fails against a
+    transcription that guards the at-end clause on something having been read, which is
+    the single most likely "obvious improvement" to this paragraph and is invisible to
+    every table dump.
+
+    The order is asserted too, and it is not incidental:
+    [general/gl072.cbl:L287-L288] performs `end-account` BEFORE `end-batch`, so the
+    nominal row is persisted before the batch is stamped posted. Inverting them would
+    leave a batch marked posted with an unclosed final account.
+    """
+    with _shipped_gl072() as gl072:
+        double = _GlFacadeDouble(gl072.facade)
+        system, log = _run(gl072, double, [])
+
+        #  The at-end clause ran, in source order, exactly once each.
+        assert double.calls.count("gl_nominal_rewrite") == 1, double.calls
+        assert double.calls.count("gl_batch_rewrite") == 1, double.calls
+        assert double.calls.index("gl_nominal_rewrite") < double.calls.index(
+            "gl_batch_rewrite"
+        ), (
+            f"end-account must precede end-batch [general/gl072.cbl:L287-L288]; the "
+            f"call order was {double.calls!r}. Inverting them stamps a batch posted "
+            f"while its final account is still unclosed."
+        )
+
+        #  BOTH KEYS ARE ZERO, which is the whole reason no table moves: `save-batch`
+        #  and `save-ledger` were never assigned, so the rewrites address a row that
+        #  does not exist.
+        assert double.batch_rewrites == [(0, _CLEARED_PROCESSED, _RUN_DATE)], (
+            f"the blank batch was rewritten as {double.batch_rewrites!r}. end-batch "
+            f"[general/gl072.cbl:L374-L377] moves 1 to cleared-status and the run date "
+            f"to posted UNCONDITIONALLY, then rewrites - on key zero here."
+        )
+        assert double.ledger_rewrites == [(0, Decimal("0.00"))], (
+            f"the blank nominal record was rewritten as {double.ledger_rewrites!r}. "
+            f"end-account [general/gl072.cbl:L382] rewrites whatever the program is "
+            f"holding, which on an empty file is the blank record."
+        )
+
+        #  R-3/R-4: an empty batch is not an error and the program says nothing about it.
+        _assert_only_the_phase_banner(log)
+
+        #  Nothing was read, so nothing was posted: the program's own saved keys stay
+        #  zero and no balance was accumulated.
+        assert system.system_data_block.run_date == _RUN_DATE
+
+
+def test_the_empty_work_file_reads_once_and_never_looks_up_a_batch() -> None:
+    """The at-end path performs no `get-batch` and no nominal read (MJ-14).
+
+    The complement of the test above: it asserts what does NOT happen, so that a
+    transcription which reached the same two rewrites by some other route - for example
+    by reading a batch first and then falling through - is distinguishable from the
+    frozen one. `get-batch` [general/gl072.cbl:L451-L453] and the sequential nominal
+    read [general/gl072.cbl:L407-L408] both live INSIDE the loop body, past the at-end
+    test, so neither can be reached when the first read hits at end.
+    """
+    with _shipped_gl072() as gl072:
+        double = _GlFacadeDouble(gl072.facade)
+        _run(gl072, double, [])
+
+        assert double.batch_lookups == [], (
+            f"a batch was looked up on an empty work file: {double.batch_lookups!r}. "
+            f"`get-batch` is inside the loop body and unreachable at end."
+        )
+        assert "gl_batch_read_next" not in double.calls, double.calls
+        assert "gl_nominal_read_next" not in double.calls, double.calls
+
+        #  Both files are still OPENED and CLOSED, because that is outside the loop -
+        #  named explicitly so the absences above are not read as "the program did
+        #  nothing".
+        for verb in ("gl_batch_open", "gl_nominal_open", "gl_batch_close",
+                     "gl_nominal_close"):
+            assert verb in double.calls, (
+                f"{verb} is outside the read loop and must still run on an empty "
+                f"file; the call log was {double.calls!r}"
+            )

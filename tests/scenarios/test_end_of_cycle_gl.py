@@ -472,15 +472,34 @@ def test_the_scenario_declares_a_changed_effect(scenario_loader: object) -> None
 @pytest.mark.database
 @pytest.mark.oracle
 def test_end_of_cycle_state_parity(parity: object, protocol: object) -> None:
-    """THE PASS CONDITION: an empty ordering-normalised diff over five tables.
+    """THE PASS CONDITION: an empty ordering-normalised diff over all 22 in-scope tables.
+
+    THE BOUND IS THE PROTOCOL'S, NOT THE SCENARIO'S. This assertion used to require the
+    two to be equal, which was true while the comparison was bounded by the declared
+    `affected_tables` and became false when the bound was widened to all 22 in-scope
+    tables. The widening is deliberate - a bound drawn from what a scenario EXPECTS to
+    move cannot reveal a difference in anything it did not - so the check now asserts
+    the wider bound and asserts SEPARATELY that it contains the declared effect, which
+    is the property that actually matters: nothing the scenario says it touches may fall
+    outside the comparison.
 
     Args:
         parity: The completed run.
         protocol: The stage bundle, for its bound and disposition assertions.
     """
-    assert tuple(parity.tables) == protocol.affected_tables(SCENARIO), (
-        f"{SCENARIO}: the comparison was bounded by {list(parity.tables)} while the "
-        f"scenario declares {list(protocol.affected_tables(SCENARIO))}."
+    bounded = tuple(parity.tables)
+    declared = protocol.affected_tables(SCENARIO)
+
+    assert bounded == protocol.in_scope_tables(), (
+        f"{SCENARIO}: the comparison was bounded by {list(bounded)} and the protocol "
+        f"bounds it by all 22 in-scope tables {list(protocol.in_scope_tables())}. "
+        f"There is no ignore-list in the diff path, so a table missing from the bound "
+        f"was never compared at all."
+    )
+    missing = [table for table in declared if table not in bounded]
+    assert not missing, (
+        f"{SCENARIO}: the scenario declares {missing!r} among its affected tables and "
+        f"the comparison did not cover them."
     )
 
     protocol.assert_declared_statuses(

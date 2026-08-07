@@ -327,10 +327,23 @@ DESPITE THE `[Y]` HINT THERE IS NO DEFAULT. [irs/irs030.cbl:L1716] is display te
 [irs/irs030.cbl:L1718-L1719] re-asks for ever on anything that is neither "Y" nor
 "N". The scenario therefore pins the answer explicitly and this file asserts that it
 did. Answering "Y" performs `acas008-Open-Output`, which this handler converts into a
-mass delete of every row of `PSIRSPOST-REC` — [common/acas008.cbl:L313-L319] sets
+DELETE-ALL against `PSIRSPOST-REC` — [common/acas008.cbl:L313-L319] sets
 `fn-delete-all` (its third leg, [common/acas008.cbl:L315], being
 `and not FS-Cobol-Files-Used`), and [common/acas008.cbl:L566] with
-[common/acas008.cbl:L571-L574] does it again unguarded. That is why the transfer
+[common/acas008.cbl:L571-L574] does it again unguarded.
+
+⚠️ ONE HOP FURTHER, AND IT IS NOT A MASS DELETE. This passage previously called the
+result "a mass delete of every row", which is what the handler ASKS FOR but not what
+the bridge ISSUES. The bridge moves 99999 into both halves of the posting key
+[common/slpostingMT.cbl:L850-L851] and deletes STRICTLY BELOW that sentinel
+[common/slpostingMT.cbl:L860-L868, L885-L891] — its own log text is "Deleting back
+from" [common/slpostingMT.cbl:L870-L871]:
+    DELETE FROM `PSIRSPOST-REC` WHERE `IRS-POST-KEY` < "9999999999"
+A row AT the sentinel would survive the bound built from it. MEASURED on this seed:
+all six rows carry keys 0000101000 to 0000106000, so all six go and ZERO are retained
+— the table does end empty HERE, but as a property of the SEED, not of the handler.
+The bound is described in full in [harness/scenarios/clean_batch_irs.yaml] and
+reproduced at [acas_posting/dal/acas008_spl_posting.py ba085_process_delete_all]. That is why the transfer
 table is on the affected-table list and why the protocol's reset-and-re-seed stage is
 load-bearing rather than hygienic.
 
@@ -1057,8 +1070,10 @@ def parity(
     # ------------------------------------------------------------------
     #  GUARD 2 - THE DESTRUCTIVE ANSWER IS PINNED, and the table it destroys is on
     #  the list. Answering "Y" [irs/irs030.cbl:L1720] performs `acas008-Open-Output`
-    #  [irs/irs030.cbl:L1723], which this handler converts into a mass delete of every
-    #  row of the transfer table [common/acas008.cbl:L313-L319, L571-L574].
+    #  [irs/irs030.cbl:L1723], which this handler converts into a DELETE-ALL against
+    #  the transfer table [common/acas008.cbl:L313-L319, L571-L574]. The bridge bounds
+    #  it to keys strictly below "9999999999" [common/slpostingMT.cbl:L850-L851,
+    #  L885-L891]; see the module docstring above for the measured effect on this seed.
     # ------------------------------------------------------------------
     answer = _clear_postings_answer(definition)
     assert answer in {"Y", "N"}, (
@@ -1906,12 +1921,24 @@ def test_a4_half_posted_double_entry_reproduced(
     both directions are asserted separately because they are materially different
     findings.
 
-    THE TWO DISPOSITIONS ARE DISTINGUISHED AND NEVER COLLAPSED. A missing DEBIT
-    account [irs/irs030.cbl:L1627-L1634], message IR032, is rejection class 1 - a CLEAN
-    no-op, because nothing has been written yet. A missing CREDIT account
-    [irs/irs030.cbl:L1645-L1652], message IR033, is rejection class 3 - a PARTIAL
-    WRITE. Agent Action Plan section 0.8.1: "a single generic rejection path would fail
-    this directive."
+    THE TWO DISPOSITIONS MUST NEVER BE COLLAPSED, AND ONLY ONE OF THEM IS SEEDED HERE
+    (finding MJ-11). A missing DEBIT account [irs/irs030.cbl:L1627-L1634], message
+    IR032, is rejection class 1 - a CLEAN no-op, because nothing has been written yet. A
+    missing CREDIT account [irs/irs030.cbl:L1645-L1652], message IR033, is rejection
+    class 3 - a PARTIAL WRITE. Agent Action Plan section 0.8.1: "a single generic
+    rejection path would fail this directive."
+
+    ⚠️ THIS FIXTURE SEEDS CLASS 3 ONLY. `clean_batch_irs.yaml` withholds exactly one
+    account - the CREDIT one, for A-4 - and requires every DEBIT account the transfer
+    records reference to be present, so the IR032 path is never taken on this route and
+    the assertions below say nothing about it. Nor could a state comparison say much: a
+    clean no-op's whole signature is an ABSENCE, and an implementation that ABORTED the
+    run on a missing debit, or that committed the debit anyway, can leave the same rows.
+    Class 1 is therefore locked directly, by call sequence, in
+    `tests/arithmetic/test_shipped_close_and_rejection_paths.py` section 2 - which
+    drives the shipped `Input-Loop` over two transfer records, the first with a missing
+    debit, and requires the second to be posted in full so that the rejection is proved
+    to be a loop-back rather than a terminator. What THIS test owns is class 3.
 
     THE VAT ASYMMETRY IS PART OF THE SPECIFICATION: the debit side adds VAT when the
     side is "CR" [irs/irs030.cbl:L1636-L1637] and the credit side when it is "DR"
@@ -2341,7 +2368,7 @@ def test_a6_rewrite_verb_can_never_succeed(
         f"`PSIRSPOST-REC` holds {transfer.cobol_row_count} row(s) on the COBOL side "
         f"and {transfer.python_row_count} on the Python side. The only two things this "
         f"route does to the table are a sequential read [irs/irs030.cbl:L1620] and the "
-        f"end-of-job mass delete [irs/irs030.cbl:L1723], so the counts cannot legally "
+        f"end-of-job bounded delete [irs/irs030.cbl:L1723], so the counts cannot legally "
         f"differ."
     )
     # And the fixture is genuinely there to be compared. A zero-row table would satisfy

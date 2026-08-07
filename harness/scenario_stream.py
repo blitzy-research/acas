@@ -52,8 +52,17 @@ the one its counterpart used, which is the defect this file closes.
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
 try:
     import yaml
+
+    #  ⭐ THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17). `yaml.safe_load`
+    #  applies last-one-wins to a repeated key, silently, and a scenario definition
+    #  carries the destructive answers, the fan-out switch that decides which tables a
+    #  run touches and the comparison bound - so a shadowed key means two consumers
+    #  read two different files.
+    import scenario_yaml
 except ModuleNotFoundError as exc:
     sys.stderr.write(
         "PyYAML is not importable by this interpreter (%s). It is the one "
@@ -70,7 +79,7 @@ except OSError as exc:
     raise SystemExit(4)
 
 try:
-    document = yaml.safe_load(text)
+    document = scenario_yaml.load_scenario_yaml(text)
 except yaml.YAMLError as exc:
     sys.stderr.write("the scenario file is not valid YAML: %s\n" % exc)
     raise SystemExit(5)

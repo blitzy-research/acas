@@ -76,8 +76,14 @@ import sys
 from pathlib import Path
 from typing import Final
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 try:
-    import yaml
+    import yaml  # noqa: F401 - imported for its exception types below
+
+    #  ⭐ THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17), which is the only
+    #  route by which this script reads a scenario definition.
+    import scenario_yaml
 except ModuleNotFoundError:  # pragma: no cover - the image installs it
     sys.stderr.write(
         "make_fixtures.py: PyYAML is not installed; it is required to read a "
@@ -2046,7 +2052,12 @@ def main(argv: list[str] | None = None) -> int:
     if not scenario.is_file():
         fail(EX_SCENARIO, f"the scenario file does not exist: {scenario}")
     try:
-        document = yaml.safe_load(scenario.read_text(encoding="utf-8"))
+        #  THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17): a shadowed
+        #  `seed_records` or `seed_files` key would build a fixture from data the
+        #  definition does not appear to declare.
+        document = scenario_yaml.load_scenario_yaml(
+            scenario.read_text(encoding="utf-8")
+        )
     except (OSError, yaml.YAMLError) as exc:
         fail(EX_SCENARIO, f"{scenario} could not be parsed: {exc}")
     if not isinstance(document, dict):

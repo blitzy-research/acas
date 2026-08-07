@@ -1071,7 +1071,8 @@ def test_scenario_definition_preconditions(
     `pl060` SUCCEEDS. Pinning the identical value in both scenarios is what makes them
     a matched pair, and Agent Action Plan section 0.6.4 is explicit that "leaving it at
     a default would make the affected-table list ambiguous". A YAML space or empty
-    value maps to the command-line token `N` while the column still stores a space, and
+    value reaches the command line as the LITERAL SPACE `--irs-instead ' '` - the
+    option publishes no `N` token - so the column stores a space, and
     `harness/normalize.py`'s job 1 trims that identically on BOTH sides.
 
     THE SECOND PURE-GL FIELD IS NOT A YAML KEY, AND THAT IS RECORDED RATHER THAN
@@ -1689,8 +1690,12 @@ def test_a1_control_pl060_terminating_period_is_present(
     three-to-one split is the proof that A-1 is an ACCIDENT AND NOT AN IDIOM, and it is
     the reason the anomaly is worded as a defect at all. This test and
     `tests/scenarios/test_clean_batch_post_sl.py` together make the proof reviewable:
-    one captures the defect, the other captures the control, and both capture COMPILED
-    BEHAVIOUR rather than an argument about it. NEITHER MAY BE NORMALISED TOWARD THE
+    one witnesses the defective route and the other the control route, and both capture
+    COMPILED BEHAVIOUR rather than an argument about it. Neither DETECTS the missing
+    period - a close writes nothing, so both routes' dumps are identical either way
+    (finding MJ-07); that is
+    `tests/arithmetic/test_shipped_close_and_rejection_paths.py`'s job, and it holds the
+    two readings apart by verb sequence. NEITHER MAY BE NORMALISED TOWARD THE
     OTHER - harmonising the two programs would delete the evidence, and under rule R-4
     that is a failure, not an improvement. The reproducing modules are
     `acas_posting/programs/sl060_invoice_posting.py`, where the second conditional is
@@ -2497,10 +2502,33 @@ def test_dump_is_wellformed_on_both_sides(
                             f"space. Job 1 strips them on BOTH sides identically; a "
                             f"survivor means normalisation did not run."
                         )
-                        assert len(value) <= (declared.width or len(value)), (
-                            f"{site}: {len(value)} character(s) in a "
-                            f"`{declared.sql_type}` column."
-                        )
+                        #  A REDACTED CELL IS A SUBSTITUTION, NOT A STORED VALUE, so
+                        #  the declared width does not apply to it. `harness/
+                        #  dump_tables.py` replaces the two credential cells of
+                        #  SYSTEM-REC with `REDACTED_VALUE` on BOTH sides because a
+                        #  capture is committed evidence, and that placeholder is
+                        #  fourteen characters wide - longer than the frozen
+                        #  `PASS-WORD char(4)`. Measuring it against the column width
+                        #  asserted a property of the redaction rather than of the
+                        #  capture, and failed on every scenario that dumps the
+                        #  parameter row. The substitution itself is asserted
+                        #  separately, by identity against the same constant.
+                        if value == dump_tables.REDACTED_VALUE:
+                            assert (table, column_name) in (
+                                dump_tables.REDACTED_COLUMNS
+                            ), (
+                                f"{site}: carries the redaction placeholder but is "
+                                f"not one of the columns "
+                                f"harness/dump_tables.py redacts "
+                                f"{sorted(dump_tables.REDACTED_COLUMNS)!r}. A stored "
+                                f"value that happened to equal the placeholder would "
+                                f"be indistinguishable from a redaction."
+                            )
+                        else:
+                            assert len(value) <= (declared.width or len(value)), (
+                                f"{site}: {len(value)} character(s) in a "
+                                f"`{declared.sql_type}` column."
+                            )
 
             key_index = columns.index(str(dump["primary_key"]))
             keys = tuple(row[key_index] for row in rows)

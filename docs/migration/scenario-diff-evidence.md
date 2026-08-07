@@ -151,6 +151,20 @@ they are quoted and cross-referenced instead.
 Build-only compatibility shims live solely under `$ACAS_BUILD` and never in the
 checkout — see §5.4.
 
+⭐ **AND THE ORACLE EVERY VERDICT BELOW WAS RENDERED AGAINST IS A
+DISCLOSED-TRANSFORMED ONE.** `harness/build_oracle.sh` edits the **build copy** of
+**41** frozen sources, and until this was disclosed the attestation published
+`overrides-used=no` and nothing else, so an empty diff read as parity with the
+untouched checkout. It is not. Every empty diff in this register is parity between
+the migrated cycle and a compiled oracle whose sources differ from the checkout in
+41 declared places, each one listed in `$ACAS_BUILD/oracle-attestation.txt` with its
+frozen digest, its build digest and its reason, and each one a connectivity or `IF`-
+scope repair without which the compiled cycle cannot reach MySQL at all — no
+arithmetic statement, no `ROUNDED` site, no sort key, no control-total comparison and
+no rejection path is touched. README §8.10 gives the four groups and the full
+argument. The **checkout** is untouched: a `git diff` over the frozen paths is empty,
+which is a different and weaker claim than the one this paragraph exists to correct.
+
 ## 2. Verdict vocabulary
 
 Exactly four statuses are used in this register, and they are never blurred
@@ -285,6 +299,16 @@ The driver **aborts at the first non-zero stage** and the run's exit status is
 that stage's own, so a diagnosis is never flattened away. `--keep-going` exists
 for diagnosing a broken harness and is explicitly not the protocol: a verdict
 produced that way is not evidence.
+
+⚠️ **One stage is exempt from that rule, and the exemption is mandated** (finding
+MJ-05). `acas_parity_is_behavioural` in `harness/run_parity.sh` is true for
+**stage 6 with exit 69 and for nothing else**: the Python run stage reporting that an
+operation's observed disposition contradicted the scenario's declared one. There the
+protocol **continues** — deliberately, so the capture, the normalisation and the diff
+all still happen and the divergence can be localised to a table and a column rather
+than being reported only as a status. The outcome is unaffected: the driver remembers
+it, and **the final result cannot be `identical` after it, whatever the diff says.**
+Every other non-zero stage stops the run.
 
 ### 4.2 Seeding constraints
 
@@ -546,14 +570,28 @@ globally unique.** `PUINV-LINES-REC` and `SAINV-LINES-REC` both use
 dump must therefore be keyed by table *as well as* key name; keying by key name
 alone would silently collide two tables.
 
-Finally, the build shim that made the oracle reachable, recorded here because it
-touches the freeze question directly: `copybooks/ACAS-SQLstate-error-list.cob` is
+Finally, the build shims that made the oracle reachable, recorded here because they
+touch the freeze question directly. ⚠️ An earlier revision of this paragraph named
+**one** of them and left the reader to infer there were no others. There are **41**,
+and every one is now published in the attestation with its frozen digest, its build
+digest and its reason — see README §8.10 for the four groups and the ⭐ paragraph in
+§1 for what that means for a verdict.
+
+The one named here remains the clearest case, because it is the only shim that
+CREATES a file rather than editing one: `copybooks/ACAS-SQLstate-error-list.cob` is
 absent from the checkout while being `COPY`'d by 44 frozen files. Direct build
 analysis established that the include contributes **comments only**, so
 `harness/build_oracle.sh` materialises a semantically inert comment-only file
 under `$ACAS_BUILD/copybooks` and adds that writable directory to the compiler's
-copy path. This invents no SQLSTATE mapping and edits nothing under
-`copybooks/`. Cross-reference **A-NEW-13** in
+copy path — and refuses it if it ever acquires text other than blank lines and COBOL
+comments. This invents no SQLSTATE mapping and edits nothing under `copybooks/`.
+
+The other forty are `IF`-scope repairs in six loaders and connection propagation and
+ownership repairs across 25 handlers, three secondary loaders, both
+`mysql-procedures` copybooks, `irs030` and the three menus. None alters an arithmetic
+statement, a `ROUNDED` site, a sort key, a control-total comparison or a rejection
+path, and the build's own completeness measurement makes it impossible to add a
+forty-second without declaring it. Cross-reference **A-NEW-13** in
 [`anomaly-log.md`](anomaly-log.md) and §10.1 of
 [`ambiguity-resolutions.md`](ambiguity-resolutions.md).
 
@@ -731,12 +769,21 @@ subtleties are worth recording:
 - **The third state has no condition name at all.** A space satisfies neither
   `IRS-Used` nor `IRS-Both-Used`, so both predicates are simply false. There is
   nothing to name and nothing named.
-- **The CLI publishes the choice set as `{N, Y, B}`**, so the harness maps a YAML
-  space or empty value to the CLI token **`N`**, while the value written to
-  `SYSTEM-REC.IRS-INSTEAD` remains **the space**. That token substitution is a
-  **deviation** in surface form only, and it is noted as one;
-  `harness/normalize.py` trims the stored column identically on both sides, so it
-  cannot become a diff.
+- **The CLI takes the character itself, and there is no `N` token.**
+  `--irs-instead` accepts ONE character and its own help states that `Y` and `B`
+  are the field's only condition names and that there is no third value "and in
+  particular no `N`". So a YAML space or empty value reaches the command line as
+  the **literal space**, `--irs-instead ' '`, and that is also the value written
+  to `SYSTEM-REC.IRS-INSTEAD`. There is no token substitution and therefore no
+  surface-form deviation to note: the character the scenario declares is the
+  character the option carries and the character the column stores.
+  `harness/normalize.py` trims the stored column identically on both sides, so a
+  trailing space cannot become a diff either.
+  ⚠️ An earlier revision of this bullet described the choice set as `{N, Y, B}`
+  and called the space-to-`N` mapping a recorded deviation. Neither is true of
+  this tree, and the correction matters rather than being cosmetic: a reader
+  following that text would have typed `--irs-instead N`, which stores the
+  character `N` in the column and diverges from every scenario's seeded value.
 
 ### 6.3 Other pinned system values
 
@@ -765,14 +812,32 @@ all.
 
 | Scenario | Affected tables (declared order) | Count |
 | --- | --- | ---: |
-| `clean_batch_gl` | `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC` | 3 |
-| `clean_batch_sl` | `ANALYSIS-REC`, `GLBATCH-REC`, `GLPOSTING-REC`, `PSIRSPOST-REC`, `SAINV-LINES-REC`, `SAINVOICE-REC`, `SAITM3-REC`, `SALEDGER-REC`, `SYSTOT-REC`, `VALUEANAL-REC` | 10 |
-| `clean_batch_pl` | `ANALYSIS-REC`, `GLBATCH-REC`, `GLPOSTING-REC`, `PSIRSPOST-REC`, `PUINV-LINES-REC`, `PUINVOICE-REC`, `PUITM5-REC`, `PULEDGER-REC`, `SYSTOT-REC`, `VALUEANAL-REC` | 10 |
-| `clean_batch_irs` | `IRSDFLT-REC`, `IRSNL-REC`, `IRSPOSTING-REC`, `PSIRSPOST-REC` | 4 |
-| `mixed_accepted_rejected` | `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC` | 3 |
-| `period_end_totals` | `ANALYSIS-REC`, `GLBATCH-REC`, `GLPOSTING-REC`, `PSIRSPOST-REC`, `PUINV-LINES-REC`, `PUINVOICE-REC`, `PUITM5-REC`, `PULEDGER-REC`, `SAINV-LINES-REC`, `SAINVOICE-REC`, `SAITM3-REC`, `SALEDGER-REC`, `SYSTOT-REC`, `VALUEANAL-REC` | **14** |
-| `control_total_mismatch` | `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC` | 3 |
-| `empty_batch` | `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC` | 3 |
+| `clean_batch_gl` | `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC`, `SYSDEFLT-REC`, `SYSTEM-REC` | 5 |
+| `clean_batch_sl` | `ANALYSIS-REC`, `GLBATCH-REC`, `GLPOSTING-REC`, `PSIRSPOST-REC`, `SAINV-LINES-REC`, `SAINVOICE-REC`, `SAITM3-REC`, `SALEDGER-REC`, `SYSTEM-REC`, `SYSTOT-REC`, `VALUEANAL-REC` | **11** |
+| `clean_batch_pl` | `ANALYSIS-REC`, `GLBATCH-REC`, `GLPOSTING-REC`, `PSIRSPOST-REC`, `PUINV-LINES-REC`, `PUINVOICE-REC`, `PUITM5-REC`, `PULEDGER-REC`, `SYSTEM-REC`, `SYSTOT-REC`, `VALUEANAL-REC` | **11** |
+| `clean_batch_irs` | `IRSDFLT-REC`, `IRSNL-REC`, `IRSPOSTING-REC`, `PSIRSPOST-REC`, `SYSTEM-REC` | 5 |
+| `mixed_accepted_rejected` | `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC`, `SYSDEFLT-REC`, `SYSTEM-REC` | 5 |
+| `period_end_totals` | `ANALYSIS-REC`, `GLBATCH-REC`, `GLPOSTING-REC`, `PSIRSPOST-REC`, `PUINV-LINES-REC`, `PUINVOICE-REC`, `PUITM5-REC`, `PULEDGER-REC`, `SAINV-LINES-REC`, `SAINVOICE-REC`, `SAITM3-REC`, `SALEDGER-REC`, `SYSTEM-REC`, `SYSTOT-REC`, `VALUEANAL-REC` | **15** |
+| `control_total_mismatch` | `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC`, `SYSDEFLT-REC`, `SYSTEM-REC` | 5 |
+| `empty_batch` | `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC`, `SYSDEFLT-REC`, `SYSTEM-REC` | 5 |
+| `end_of_cycle_gl` | `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC`, `SYSDEFLT-REC`, `SYSTEM-REC` | 5 |
+
+**Nine scenarios, 67 declared affected-table entries**, generated from the nine
+`harness/scenarios/*.yaml` files rather than transcribed. ⚠️ **This matrix was stale and
+is regenerated** (finding MJ-15): an earlier revision carried **eight** rows with counts
+3, 10, 10, 4, 3, 14, 3 and 3 — forty entries — omitting `end_of_cycle_gl` entirely and
+predating the widening of every list. The union of all nine lists is **20** of the 22
+in-scope tables. The two no scenario declares are **`SYSFINAL-REC`** and
+**`IRSFINAL-REC`** — the final-accounts records, which the posting cycle reads but never
+writes — and they are nonetheless COMPARED on every run, because stages 3, 7 and 10 are
+bounded by all 22 rather than by the declared lists.
+
+⭐ **The declared list is not the comparison bound.** It bounds the state FINGERPRINT
+described above, and the runners assert the declared effect against it, but stages 3, 7
+and 10 all pass `--all-in-scope`, so the diff is taken over all **22** in-scope tables.
+A comparison bounded by what a scenario EXPECTS to move could not show a difference in
+anything it did not expect to move, and AAP §0.8.5 makes an empty diff the single pass
+condition.
 
 Both lists that carry `PSIRSPOST-REC` on a Sales or Purchase route carry it even
 though the fan-out is a space, precisely so that an unexpected fan-out write
@@ -867,10 +932,39 @@ same attested build — module-set digest
 pin, `cobmysqlapi.o`
 `e5f13cd0b848001f0549cf9c69070c9031e1a360f26d440cf559d6a60d2d7242` attested
 `image-built-from-vendored-source`, toolchain `cobc (GnuCOBOL) 3.2.0` and
-`cc 13.3.0`, `overrides-used=no`. `harness/run_parity.sh` verified that
-attestation before stage 2 in every one of the eight runs and re-derived the
-module-set digest from the modules on disk; see README §8.9. A digest is quoted
-here so that evidence can be tied to an oracle rather than to a directory.
+`cc 13.3.0`, `overrides-used=no` — which records that neither IDENTITY substitution
+was used and says nothing about the source transformations.
+`harness/run_parity.sh` verified that attestation before stage 2 in every one of the
+eight runs and re-derived the module-set digest from the modules on disk; see README
+§8.9. A digest is quoted here so that evidence can be tied to an oracle rather than
+to a directory.
+
+⚠️ **The attestation those runs carried was version 1, which did not record the
+source transformations at all.** The build now publishes
+`oracle-source-is-frozen=no`, a transform count and one record per transformed path,
+and `harness/run_parity.sh` prints the count and the transform-set digest beside
+every verdict. Re-running any scenario reproduces the same empty diff with the
+disclosure attached; the figures above are the measurement and the sentence they
+belonged under was the omission. Read them together with the ⭐ paragraph in §1.
+
+⭐ **THE MODULE-SET DIGEST ABOVE IS A BUILD IDENTITY, NOT A BEHAVIOURAL FINGERPRINT,
+and it no longer names the build in the volume.** The oracle image has been rebuilt
+since those eight runs, so `d18b337f…` identifies the build that produced *those rows
+on that date* and nothing else. Measured from `/build/oracle-attestation.txt` as it
+stands now: `attestation-version 2`, `module-set-sha256`
+`c061de9c95561b945896865dc5086fe3aded7bfd3c1eb6789ac7fe681b1e6aef`, `module-count 179`
+— **the same 179 modules**, because the rebuild changed only the image's Python layer —
+with `overrides-used no` and `oracle-source-is-frozen no`. A reader who re-runs today
+should therefore expect the digest to differ from the one quoted above and should not
+read that difference as invalidating this table.
+
+**The empty diffs were re-observed on the rebuilt oracle rather than inherited.**
+`clean_batch_gl` was re-driven through all ten stages, every stage exit 0, verdict
+`identical` over 22 tables (run id `parity-3f6c5f5ac2ec4515`), and `clean_batch_sl`
+likewise returned `identical` over 22 tables. Both carried the version-2 disclosure —
+41 transformed paths, transform-set digest `88dcc5e9…` — and both dumps agreed on
+`scenario_file_sha256`, the provenance field whose absence had previously stopped stage
+10. That is what ties this table to the build now in the volume.
 
 | Scenario | Declared effect | Operation status | Tables | COBOL rows | Python rows | Diff status |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
@@ -976,6 +1070,10 @@ attached to them directly rather than left to a later section:
   citing it as posting parity would not be. Measured directly: after the run
   `GLBATCH-REC` still holds `CLEARED-STATUS 0` and `POSTED 0`, and all four
   `GLLEDGER-REC` balances are `0.00`, on **both** sides.
+  The cause is recorded as anomaly **A-NEW-18**, working alias **`N-KEY`**, in
+  [`anomaly-log.md`](anomaly-log.md), which carries the chain link by link with
+  each link measured; it is named here by identifier rather than only derived,
+  because a defect that is merely derived in passing is a defect nobody can cite.
   Consequence to state plainly: **no scenario in this register demonstrates a
   General Ledger balance moving**, so AAP §0.8.5's "clean batch post per ledger"
   is met for Sales, Purchase and IRS but only at the gate-and-term-code level for
@@ -984,14 +1082,34 @@ attached to them directly rather than left to a later section:
   `tests/arithmetic/test_double_entry_explosion.py` and
   `test_ledger_balance_accumulation.py` — and the open cursor/key-of-reference
   questions remain recorded in `ambiguity-resolutions.md`.
+  ⭐ **The shortfall is now LOCKED rather than only narrated**, which is the
+  change finding MJ-08 asked for. An empty diff is symmetric — it passes whether
+  the two sides agree on a no-op or on a balance movement — so it can be cited as
+  evidence for neither.
+  `tests/scenarios/test_clean_batch_post_gl.py::test_the_gl_route_leaves_the_measured_no_op_on_both_sides`
+  therefore asserts the measured outcome **absolutely and per side**: every
+  `GLLEDGER-REC` balance zero, the seeded `GLBATCH-REC` row unstamped, and at most
+  one `GLPOSTING-REC` row with `POST-RRN` zero. If the frozen path ever changes, or
+  a fixture begins reaching the posting walk, that test fails and this paragraph is
+  re-examined instead of being inherited unread.
 - **`control_total_mismatch`'s empty diff is the point of the scenario, not a
   weakness.** AAP §0.6.5 makes absence the expected database effect of a
   run-aborting rejection, and status `5` was asserted.
 
-The other five rows — `clean_batch_sl`, `clean_batch_pl`, `clean_batch_irs`,
-`period_end_totals` and, for its rejection witness, `mixed_accepted_rejected` —
-do move rows: the seed-to-dump row deltas are +4, +2, +5 and +11 respectively,
-so those diffs are empty over states that genuinely changed.
+The other four rows — `clean_batch_sl`, `clean_batch_pl`, `clean_batch_irs` and
+`period_end_totals` — do move rows: the seed-to-dump row deltas are +4, +2, +5 and
++11 respectively, so those diffs are empty over states that genuinely changed.
+
+⚠️ **NARROWED (MN-07).** This read "The other **five** rows" and included "and, for its
+rejection witness, `mixed_accepted_rejected`" — **five names against four deltas**, and
+it contradicted this same document elsewhere. Measured from the scenario files,
+`mixed_accepted_rejected` declares `expected_table_effect: unchanged`, as do
+`clean_batch_gl`, `control_total_mismatch` and `empty_batch`. Its rejection witness is
+real, but what it witnesses is an **absence** of rows — which is precisely why it
+belongs with the unchanged group and not here. `end_of_cycle_gl` is the fifth scenario
+that *does* declare `changed`; it is absent from the delta list because no re-measured
+delta exists for it (§8 records `—`, and §10.9 carries its evidence), so it is named
+here rather than given a fabricated figure.
 
 The **harness wrapper status** is distinct from the **operation status**. A
 wrapper exits 0 once it has verified that the operation produced the status the
@@ -1098,7 +1216,9 @@ unexpected write to hide.
 
 `harness/run_parity.sh` drives the ten stages of §4.1 for one scenario, mints one
 run id, binds it to every stage that publishes an artifact, and stops at the first
-non-zero. It was invoked once per scenario, sequentially — no `&`, no `xargs -P`,
+non-zero — except at stage 6 with exit 69, where it records a behavioural difference
+and continues so the diff can localise it, and after which the result can never be
+`identical` (§4.1). It was invoked once per scenario, sequentially — no `&`, no `xargs -P`,
 one scenario at a time (R-3):
 
 ```bash
@@ -1237,10 +1357,24 @@ the schema durable in a fresh session.
 ## 10. Per-scenario evidence
 
 Each entry records seed, pinned clock, pinned IRS fan-out, affected-table list,
-expected and observed term code, the anomalies it locks, and its diff status. The
-clock is `21/09/2025` / `Run-Date 155127` and the fan-out is a single space in
-**all nine**, per §6; they are restated per entry because the brief for this
-register requires each entry to stand alone.
+expected and observed term code, the anomalies it **witnesses in state**, and its
+diff status. The clock is `21/09/2025` / `Run-Date 155127` and the fan-out is a
+single space in **all nine**, per §6; they are restated per entry because the brief
+for this register requires each entry to stand alone.
+
+⚠️ **WITNESSED, NOT LOCKED, and the line was previously blurred** (finding MJ-12).
+Every row in this section is an observation of **end state** from a parity run, so
+what it establishes is that the two implementations AGREED — which is real evidence
+and is why the rows are kept. It is not the same as a **lock**, which asserts the
+defect itself so that repairing the defect turns the suite red. A state comparison is
+**symmetric**: it passes whether the two sides agree on a defect or on a repair
+applied to both, and for a defect with no state signature — a file close, a clean
+rejection, an at-end rewrite on a key no row carries — it cannot distinguish them at
+all. `anomaly-log.md` §11 is the authority for which test **owns** each anomaly, and
+the rows below name the tier where a lock lives whenever the two differ. An earlier
+revision of this section headed these rows "Anomalies locked" and, on two GL routes,
+credited an anomaly while stating in the same sentence that it was *"not reached on
+this route"* — which cannot both be true.
 
 ### 10.1 `clean_batch_gl`
 
@@ -1256,9 +1390,14 @@ register requires each entry to stand alone.
 - **Affected tables:** `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC`.
 - **Expected and observed effect:** unchanged.
 - **Expected and observed term code:** 0.
-- **Anomalies locked:** **A-14** (the sequential nominal read), **A-13** (the two
-  silent skips, not reached on this route), **A-NEW-8** (`GLBATCH-REC` survives
-  `Open-Output`).
+- **Anomalies witnessed in state:** **A-14** (the sequential nominal read) and
+  **A-NEW-8** (`GLBATCH-REC` survives `Open-Output`).
+- **Named here but NOT witnessed by this route:** **A-13**, the two entirely silent
+  skips. They are **not reached** — A-NEW-18 starves `gl070`, so `gl072` takes at end
+  on its first read and never evaluates either skip — and an earlier revision listed
+  A-13 as "locked" while saying so in the same sentence. Its lock is
+  `tests/arithmetic/test_gl072_shipped_silent_skips.py`, which drives both branches
+  directly with a facade double.
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 3 tables, 6 rows each side.
 
 **Normalised-tree manifest SHA-256**, 22-table-bound run — COBOL
@@ -1301,13 +1440,20 @@ batch timestamp the zero-key posting can never reach.
 - **Affected tables:** the 10 of §7.1.
 - **Expected and observed effect:** changed.
 - **Expected and observed term code:** 0.
-- **Anomalies locked:** **A-1** (the missing terminating period that swallows the
-  General Ledger posting close in pure-GL mode), **A-8** (double truncation of the
+- **Anomalies witnessed in state:** **A-8** (double truncation of the
   moving average), **A-9** (the credit-note average that never increments its
   counter), **A-10** (three mutually inconsistent guards on one idiom), **A-11**
   (the signed value narrowed to an unsigned host variable and column), **A-12**
   (the bridge that trims), **A-18** (two percentage fields not carried into the
   IRS posting record).
+- **A-1 is WITNESSED here and LOCKED elsewhere**, and the distinction is the whole of
+  finding MJ-07. This is the one route on which A-1 — the missing terminating period
+  that swallows the General Ledger posting close in pure-GL mode — is even reachable,
+  and `GLPOSTING-REC` agreeing on both sides is worth recording. But
+  `GL-Posting-Close` **writes nothing**, so adding the missing period leaves an
+  identical dump and this route passes either way. A-1's lock is
+  `tests/arithmetic/test_shipped_close_and_rejection_paths.py`, which asserts the verb
+  sequence over the full `IRS-Instead` × `Level-1` truth table.
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 10 tables, 21 rows each side.
 
 **Normalised-tree manifest SHA-256**, 22-table-bound run — COBOL
@@ -1361,9 +1507,13 @@ failure.
 - **Affected tables:** the 10 of §7.1.
 - **Expected and observed effect:** changed.
 - **Expected and observed term code:** 0.
-- **Anomalies locked:** **A-1** by contrast — `pl060`'s terminating period **is**
+- **Anomalies witnessed in state:** **A-10**, **A-12** and **A-17**.
+- **A-1's CONTROL route, witnessed not locked.** `pl060`'s terminating period **is**
   present at `[purchase/pl060.cbl:L1031]`, and that divergence from `sl060` is
-  preserved rather than normalised — plus **A-10**, **A-12** and **A-17**.
+  preserved rather than normalised — the three-to-one split across the four sibling
+  sites is what makes A-1 an accident rather than an idiom. As on the Sales route, a
+  close leaves no state, so this is a witness; the lock is the shipped-paragraph truth
+  table named in §10.2.
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 10 tables, 17 rows each side.
 
 **Normalised-tree manifest SHA-256**, 22-table-bound run — COBOL
@@ -1400,7 +1550,7 @@ correction to the migration. Cross-reference **`Q-3`**.
   `PSIRSPOST-REC`.
 - **Expected and observed effect:** changed.
 - **Expected and observed term code:** 0.
-- **Anomalies locked:** **A-4** (half-posted double entry on a missing credit
+- **Anomalies witnessed in state:** **A-4** (half-posted double entry on a missing credit
   account), **A-5** (lost update on the two VAT control accounts), **A-6** (the
   published facade verb that can never succeed), **A-7** (the guarded date
   components and the partially-derived row), **A-19** (the superseded
@@ -1469,7 +1619,16 @@ conversion.
 - **Affected tables:** `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC`.
 - **Expected and observed effect:** unchanged.
 - **Expected and observed term code:** 0.
-- **Anomalies locked:** **A-13**, the two entirely silent skips.
+- **Anomalies witnessed in state:** none with a state signature. `Q-EMPTY-BATCH-AT-END`
+  is `RESOLVED BY ORACLE` (2026-08-07) with the answer that **neither at-end paragraph
+  leaves any observable effect**, so what this route establishes is that the two
+  implementations agree on a run that writes nothing — which is exactly the parity claim
+  §10.8 makes and no more.
+- **Named here but NOT witnessed by this route:** **A-13**, the two entirely silent
+  skips, which A-NEW-18 makes unreachable by any seed; and the at-end calls themselves,
+  whose rewrites address key zero. Both are locked by
+  `tests/arithmetic/test_gl072_shipped_silent_skips.py` — sections 1 to 3 for the skips
+  and section 4 for the at-end path (findings MJ-12, MJ-14).
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 3 tables, 8 rows each side.
 
 **Normalised-tree manifest SHA-256**, 22-table-bound run — COBOL
@@ -1510,7 +1669,7 @@ by this journey.
 - **Affected tables:** the 14 of §7.1.
 - **Expected and observed effect:** changed.
 - **Expected and observed term codes:** 0, 0, 0, 0.
-- **Anomalies locked:** **A-8**, **A-9**, **A-10**, **A-11**, **A-12**,
+- **Anomalies witnessed in state:** **A-8**, **A-9**, **A-10**, **A-11**, **A-12**,
   **A-17**, **A-20**.
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 14 tables, 45 rows each side.
 
@@ -1577,7 +1736,7 @@ list must bound the comparison.
 - **Expected and observed effect:** unchanged.
 - **Expected and observed term code:** **5** — the only non-zero in the register.
 - **Wrapper status:** 0, after verifying the behavioural status.
-- **Anomalies locked:** **A-15** (the batch record's declared length contradicts
+- **Anomalies witnessed in state:** **A-15** (the batch record's declared length contradicts
   the sum of its fields; cross-reference **`Q-4`**).
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 3 tables, 6 rows each side.
 
@@ -1635,7 +1794,7 @@ Return for the end-report acknowledgement.
 - **Affected tables:** `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC`.
 - **Expected and observed effect:** unchanged.
 - **Expected and observed term code:** 0.
-- **Anomalies locked:** **A-NEW-8** — `GLBATCH-REC` is not truncated by
+- **Anomalies witnessed in state:** **A-NEW-8** — `GLBATCH-REC` is not truncated by
   `Open-Output`, so the seeded batch row must still be present at the end.
 - **Diff status:** **`EMPTY DIFF — OBSERVED`** — 3 tables, 5 rows each side
   (`GLPOSTING-REC` empty on both).
@@ -1680,7 +1839,7 @@ register's evidence.
   `SYSDEFLT-REC`, `SYSTEM-REC`.
 - **Expected and observed effect:** changed.
 - **Expected and observed operation status:** 0.
-- **Anomalies locked:** **A-3**, the two disagreeing notions of "current quarter"
+- **Anomalies witnessed in state:** **A-3**, the two disagreeing notions of "current quarter"
   inside `gl080`, and **N-EDIT**, the bridge's structural inability to render a
   minus sign. The seed is engineered so both become visible in *table state* rather
   than only in a unit test; a seed tidied up to make the figures agree would defeat
@@ -1950,23 +2109,49 @@ below is claimed as covered.
   recorded as observed because it was observed, and its scope is recorded because
   the scope is narrower than the claim it supports.
 - **Questions this register does not close.** The scenario journeys resolved
-  `Q-6`, `Q-7` and `Q-10` and partially resolved `Q-8` and `Q-9`. Every other
+  `Q-6`, `Q-7` and `Q-10`, and partially resolved **`Q-9` alone**. Every other
   entry in [`ambiguity-resolutions.md`](ambiguity-resolutions.md) retains its own
   status — a green scenario does not close a question by association, and none is
   treated as closed here.
+  ⚠️ An earlier revision of this bullet listed `Q-8` as partial alongside `Q-9`.
+  It is not: `Q-8` carries the whole-entry status `RESOLVED BY CONSTRUCTION`,
+  settled by a census of the frozen `MOVE` sites shown in full in its own entry,
+  and the register's §17 records it as the single entry holding that status.
+  `Q-9` is the single **partial**. The mis-statement is corrected here rather than
+  absorbed, because a consumer that describes an authority's status wrongly is the
+  defect finding MJ-13 is about, and this register is a consumer.
+- **What remains open in `Q-9`, stated so no reader has to infer it.** The
+  resolved half is the non-fetch **write** path: `initialize TD-GLPOSTING-REC`
+  leaves `HV-POST-RRN` at zero, `bb000-HV-Load` never sets it
+  (`common/glpostingMT.cbl:L1053-L1066`), and every loader write therefore targets
+  the same primary key — which is why a scenario seed persists at most one
+  `GLPOSTING-REC` row. The **open** half is the key of reference and the cursor
+  order: whether `START`/`READ NEXT` follows the declared `POST-KEY`
+  (`common/glpostingMT.scb:L232-L234`) or the schema's primary key `POST-RRN`
+  (`mysql/ACASDB.sql:L155`, `:L169`), which the same bridge's own warning at
+  `common/glpostingMT.scb:L229` says may need to change. **No journey in this
+  register discriminates it, and none claims to.** Deciding it needs rows whose
+  two orderings differ, and the measured single-row limit above makes that seed
+  unreachable through the frozen loaders — so the question stays open rather than
+  being answered from a degenerate walk. `acas_posting/dal/cursor_state.py` names
+  the same open half at the entry that rests on it.
 - **⚠️ `empty_batch`'s green diff establishes agreement, not a value, and the
   distinction is the whole point of that scenario.** `Q-EMPTY-BATCH-AT-END` asks
   what `gl072`'s `end-batch` and `end-account` write when the very first read of
   the sorted work file hits at end, with `save-batch` still zero — it stamps the
   batch cleared and posted, or rewrites a zero-key record, or rewrites nothing.
   §10.8 records the two sides agreeing on whatever it is; it does **not** record
-  which. The question keeps its
-  `PENDING — AWAITING ORACLE EXECUTION` status in
-  [`ambiguity-resolutions.md`](ambiguity-resolutions.md), and
-  `tests/scenarios/test_empty_batch.py` deliberately hard-codes no expectation for
-  `CLEARED-STATUS` or `POSTED`. An agreeing pair of unknown values is real
-  evidence of parity; promoting it to a known value would be the fabrication this
-  register exists to prevent.
+  which, and it could not — a green diff is symmetric and names no value. The
+  question has since been settled **elsewhere and by other means**: a focused
+  compiled probe made `Q-EMPTY-BATCH-AT-END` **`RESOLVED BY ORACLE`** (2026-08-07)
+  in [`ambiguity-resolutions.md`](ambiguity-resolutions.md), with the answer that
+  **neither paragraph leaves any observable effect**. That answer is the probe's,
+  not this journey's, and the distinction is kept deliberately: this bullet still
+  claims only agreement. Accordingly
+  `tests/scenarios/test_empty_batch.py` continues to hard-code no expectation for
+  `CLEARED-STATUS` or `POSTED`, even now that the value is known. An agreeing pair
+  of values is real evidence of parity; crediting this journey with the
+  measurement would be the fabrication this register exists to prevent.
 - **Plaintext transport is permitted only because the compiled program applies no
   stronger check.** Every run reports it as a non-fatal finding naming CWE-319,
   and the harness fails closed unless the caller declares the isolated-oracle
@@ -2111,8 +2296,9 @@ to obtain any of it, and the maintainer's `README*`, `Changelog` and
 section used to record has been withdrawn — see §13, where the old wording is quoted
 rather than deleted. What survives it is narrower and still true: every scenario
 seeds `period: 1`, so **a zero divisor for the cycle-to-period divide is driven by
-no scenario**, and `Q-GL080-DIVIDE-BY-ZERO` was therefore closed by a focused
-compiled probe instead. The second boundary stands unchanged: **`gl051` has no CLI
+no scenario**, and `Q-GL080-DIVIDE-BY-ZERO` was therefore settled by a focused
+compiled probe instead, which carries it as **`RESOLVED BY ORACLE`** (2026-08-07) in
+§13 rather than as a scenario result. The second boundary stands unchanged: **`gl051` has no CLI
 entry point**, and its control-total gate is exercised as a library function rather
 than by a scenario. `PENDING — AWAITING ORACLE EXECUTION` remains in §13 for what
 genuinely has no measurement, because a register whose every line reads "pass" is

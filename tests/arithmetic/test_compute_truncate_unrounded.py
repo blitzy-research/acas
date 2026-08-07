@@ -1004,10 +1004,11 @@ def test_a8_sl060_sales_comp_double_truncation_end_to_end() -> None:
     PROVENANCE of the expected values. Every step is the published behaviour of the
     single audited store path. Of that path's two governing decisions, TRUNCATION
     TOWARD ZERO on an un-`ROUNDED` store is settled and is what every figure here
-    rests on; the INTERMEDIATE PRECISION is question Q-2's open half, recorded beside
-    `arithmetic.INTERMEDIATE_PRECISION` and PENDING in the register. It cannot reach
-    these figures: each is a single store from operands well inside the receiver's
-    declared digits. The field widths are read from the frozen declarations cited
+    rests on; the INTERMEDIATE PRECISION was question Q-2, recorded beside
+    `arithmetic.INTERMEDIATE_PRECISION` and now `RESOLVED BY ORACLE` (2026-08-07) in
+    the register - extended precision throughout, quantized ONCE at the store. It
+    could not reach these figures either way: each is a single store from operands
+    well inside the receiver's declared digits. The field widths are read from the frozen declarations cited
     above. No value here is a guess about what the COBOL ought to produce.
 
     The counter is incremented BEFORE the divide, at L825, so the divisor is the
@@ -1174,9 +1175,10 @@ def test_a9_sl060_credit_comp_never_increments_its_activity_counter() -> None:
 
     PROVENANCE: as for A-8, every step is the published behaviour of the audited
     store path. Its truncation DIRECTION is settled by the language - an
-    un-`ROUNDED` store truncates toward zero - and its intermediate PRECISION is
-    question Q-2's open half, unmeasured and pending. Neither figure below can
-    reach the open half: every operand and every receiver here is a two-place
+    un-`ROUNDED` store truncates toward zero - and its intermediate PRECISION was
+    question Q-2, now `RESOLVED BY ORACLE` (2026-08-07): extended precision
+    throughout, quantized ONCE at the store. Neither figure below turns on that
+    reading in any case: every operand and every receiver here is a two-place
     decimal or an integer.
     """
     # --- this test's own setup, duplicated on purpose (see the block comment) ---
@@ -1340,9 +1342,10 @@ def test_a10_sl100_compute_sales_pay_single_guard_late_counter_and_by_divide() -
 
     PROVENANCE: as for A-8 and A-9, each step is the audited store path's
     published behaviour. The direction of an un-`ROUNDED` store is settled by the
-    language; the intermediate precision is question Q-2's open half and is
-    unmeasured. The figures below are integer arithmetic from end to end, so the
-    open half cannot reach them.
+    language; the intermediate precision was question Q-2 and is now `RESOLVED BY
+    ORACLE` (2026-08-07) - extended precision throughout, quantized ONCE at the
+    store. The figures below are integer arithmetic from end to end, so that
+    reading cannot reach them either way.
     """
     # --- this test's own setup, duplicated on purpose (see the block comment) ---
     #: `03 work-a binary-long value zero.` [sales/sl100.cbl:L182].
