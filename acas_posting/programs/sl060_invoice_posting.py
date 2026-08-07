@@ -934,10 +934,11 @@ class _Sl060State:
     #: program.
     #:
     #: ⭐ IT IS THE ONLY WAY A POLICY REACHES A HANDLER FROM HERE, and its default
-    #: is an empty mapping, which every handler resolves fail-closed:
-    #: ``connection._require_permitted_connection`` permits a Unix socket or a
-    #: loopback address and refuses any other target unless a certificate
-    #: authority is supplied or ``isolated_oracle=True`` is declared. This program
+    #: is an empty mapping, which every handler resolves against the INSTALLED
+    #: PROCESS POLICY: under the exact-parity default
+    #: ``connection._require_permitted_connection`` reports an unencrypted
+    #: non-local hop at WARNING and connects, as the compiled open does (rule
+    #: R-3), and only an explicitly hardened policy refuses it. This program
     #: reaches ``acas019`` for the OTM3 open-item file [:L1039-L1178], so a run
     #: against a non-local server must be given the declaration by its caller
     #: rather than assuming one - see ``run``'s ``dal_options``. Carried opaquely:
@@ -968,7 +969,8 @@ class _Sl060State:
             # that the policy does not depend on which entity a verb happens to
             # touch. `dal/facade.py` projects it onto the extras each handler
             # actually declares, so a handler that takes none is called exactly as
-            # before. Empty by default, which every handler resolves fail-closed.
+            # before. Empty by default, which every handler resolves against the
+            # installed process policy.
             self.dal_options,
         )
 
@@ -1013,7 +1015,7 @@ def _new_state(
         # `dal_options` is NOT bound here and NOT a parameter of `run`. The
         # transport policy reaches every handler through the one process-level
         # policy the CLI boundary installs, so the field keeps its declared `{}` -
-        # which every handler resolves fail-closed - rather than being threaded
+        # which every handler resolves against that installed policy - rather than being threaded
         # call by call. See `_Sl060State.dal_options` and
         # `acas_posting.cli.args.install_connection_policy`.
         ws_sales_record=WsSalesRecord(),

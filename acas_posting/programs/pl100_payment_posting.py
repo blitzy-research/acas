@@ -306,11 +306,12 @@ class _Pl100State:
     # `PERFORM` this program issues.  No COBOL counterpart: the frozen bridge's
     # connect passes six values and no transport policy at all
     # [copybooks/mysql-procedures.cpy:L72-L77] - transport is compiled into
-    # `cobmysqlapi.c`.  An empty mapping is the SAFE answer, not the absent one:
-    # every handler declares `transport: TransportSecurity | None = None` and
-    # `connection._require_permitted_connection` resolves `None` fail-closed,
-    # permitting a Unix socket or a loopback address and refusing every other
-    # target.  Carried opaquely; `dal/facade.py` projects it onto whatever extras
+    # `cobmysqlapi.c`.  An empty mapping is a STATEMENT, not an omission: every
+    # handler declares `transport: TransportSecurity | None = None` and
+    # `connection._require_permitted_connection` resolves `None` against the
+    # INSTALLED PROCESS POLICY, which under the exact-parity default reports an
+    # unencrypted non-local hop at WARNING and connects, as the compiled open does
+    # (rule R-3).  Carried opaquely; `dal/facade.py` projects it onto whatever extras
     # each handler declares.
     dal_options: Mapping[str, object] = dc_field(default_factory=dict)
 
@@ -1541,7 +1542,7 @@ def run(
         file_defs=file_defs,
         ok_to_post=ok_to_post,
         # `None` and `{}` are the same thing - no declaration - and both leave
-        # every handler at its fail-closed default.
+        # every handler under the installed process policy.
         dal_options=dict(dal_options) if dal_options else {},
     )
     # NO ENTRY OR EXIT RECORD.  `pl100` is a `CALL`ed sub-program: the COBOL

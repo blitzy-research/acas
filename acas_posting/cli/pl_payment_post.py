@@ -394,7 +394,7 @@ def load000(
         #  passes five things and no sixth, its bridge having no transport policy
         #  to pass [copybooks/mysql-procedures.cpy:L72-L77] - so it is stated at
         #  the process boundary, which is the only place that knows. `None` states
-        #  the fail-closed policy, which is a statement and not an omission.
+        #  the exact-parity policy, which is a statement and not an omission.
         dal_options=dal_options,
     )
 

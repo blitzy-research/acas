@@ -723,13 +723,18 @@ TRANSPORT_KEY_VARIABLE: Final[str] = "ACAS_DB_TLS_KEY"
 #: this decision across Python, shell, Compose, the tests and the documentation.
 TRANSPORT_ALLOW_PLAINTEXT_VARIABLE: Final[str] = "ACAS_DB_ALLOW_PLAINTEXT"
 
-#: FORCES the refusal even where the plaintext declaration was made, for a
-#: deployment that wants no unencrypted path at all. Strictness outranks
-#: permission: with both set the connection is refused.
+#: ⭐ SELECTS HARDENED MODE for the transport, and it is the ONLY thing that
+#: does. Unset - which is the default and the parity mode - the unprotected-
+#: transport exposure is REPORTED and the connection is made, because the
+#: compiled program applies no such check (rule R-3). Set, the report becomes a
+#: refusal raised before the connect, and it outranks the plaintext declaration:
+#: with both set the connection is refused, so a deployment that has asked for no
+#: unencrypted path cannot have one granted by a stale variable.
 TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE: Final[str] = "ACAS_DB_REQUIRE_TLS"
 
-#: FORCES the placeholder-credential refusal even where the placeholder
-#: declaration was made, on the same terms.
+#: SELECTS HARDENED MODE for the credentials, on exactly the same terms: unset,
+#: the placeholder-credential exposure is reported and the connection is made;
+#: set, it becomes a refusal that outranks the placeholder declaration.
 TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE: Final[str] = (
     "ACAS_DB_REQUIRE_DECLARED_CREDENTIALS"
 )
@@ -926,22 +931,39 @@ class TransportPolicyParams:
     and the entry-point layer turns these values into the one installed
     ``ConnectionPolicy``.
 
-    ⭐ THE DEFAULTS FAIL CLOSED, AND THAT IS THE POINT OF THIS TYPE.
+    ⭐ TWO MODES, AND THE DEFAULT ONE IS EXACT PARITY (rule R-3).
     An environment that sets none of the variables resolves to
-    ``require_encrypted_transport=True`` and
-    ``require_declared_placeholder_credentials=True``: a loopback address or a
-    Unix socket still connects - those never leave the machine, and they are what
-    a normal ACAS installation uses [copybooks/wsfnctn.cob:L57-L64] - while any
-    OTHER target, and any run still carrying the credentials published at
-    [copybooks/wssystem.cob:L138-L139], is REFUSED until the deployment says
-    otherwise. Reporting-and-permitting was the previous default and it is a
-    CWE-319/CWE-798 exposure at a production boundary: a warning in a log nobody
-    reads is not a decision anybody made.
+    ``require_encrypted_transport=False`` and
+    ``require_declared_placeholder_credentials=False``, which is EXACT-PARITY
+    MODE: every target the compiled program would connect to, this one connects
+    to as well. The frozen paragraph has exactly two outcomes - it connects, or it
+    reports ``(FS-Reply 99, We-Error 911)`` [copybooks/mysql-procedures.cpy:L60-L128,
+    L127-L128] - and it inspects neither the address it was given nor whose
+    credentials it was handed. A pre-connect refusal is therefore a disposition
+    the compiled system has not got, and rule R-3 forbids adding one however well
+    motivated it is. What the exposure IS still gets said out loud:
+    ``dal.connection.audit_connection_policy`` returns it as a finding and
+    ``_require_permitted_connection`` logs it at WARNING, naming CWE-319 for an
+    unencrypted hop and CWE-798 for the placeholder credentials of
+    [copybooks/wssystem.cob:L138-L139]. REPORTING IS SEPARATE FROM ACCEPTANCE:
+    the run says what it is exposing and then does what the compiled program does.
 
-    NOTHING COMPARED MOVES BECAUSE OF THIS. The refusal happens before the
-    connect, so it cannot alter a posted figure, a statement or a write order; the
-    parity harness declares :data:`TRANSPORT_ALLOW_PLAINTEXT_VARIABLE` in
-    ``harness/docker-compose.yml`` and connects exactly as before (rule R-6).
+    HARDENED MODE IS OPERATOR-SELECTED, never inherited. Setting
+    :data:`TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE` or
+    :data:`TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE` turns the matching
+    report into a refusal before the connect. That is the right answer for a
+    production deployment and the wrong one for a parity run, so it is a decision
+    an operator makes rather than a default anybody inherits - and a run made
+    under it is NOT behavioural-parity evidence, because a refused connection
+    writes nothing where the compiled program would have written. Supplying
+    :data:`TRANSPORT_CA_VARIABLE` is the other half of the same choice: it
+    encrypts and verifies rather than refusing, and it changes no disposition.
+
+    NOTHING COMPARED MOVES IN EITHER MODE. Exact-parity mode connects where the
+    compiled program connects. Hardened mode refuses BEFORE the connect, so it
+    cannot alter a posted figure, a statement or a write order either - it can only
+    stop the run before any of them happens, which is why a hardened run is
+    reported as such instead of being compared.
 
     Attributes:
         ca_file: :data:`TRANSPORT_CA_VARIABLE`, or ``None`` when unset.
@@ -951,18 +973,20 @@ class TransportPolicyParams:
             boolean by :func:`read_declared_flag`, the one closed spelling set
             the shell half of the harness matches on. The narrow opt-out from
             the transport refusal.
-        require_encrypted_transport: ``True`` unless ``isolated_oracle`` was
-            declared, and ``True`` regardless when
-            :data:`TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE` is set - strictness
-            outranks permission.
-        require_declared_placeholder_credentials: ``True`` unless
-            ``allow_frozen_placeholder_credentials`` was declared, and ``True``
-            regardless when
-            :data:`TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE` is set.
+        require_encrypted_transport: ``True`` only when
+            :data:`TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE` is set, which selects
+            hardened mode for the transport. ``False`` otherwise, including when
+            nothing at all is set, because the compiled program applies no such
+            check (rule R-3). Strictness outranks permission: an explicit
+            requirement wins over ``isolated_oracle``.
+        require_declared_placeholder_credentials: ``True`` only when
+            :data:`TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE` is set, on
+            exactly the same terms.
         allow_frozen_placeholder_credentials:
             :data:`TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE`, read as a
-            boolean. The narrow opt-out from the credential refusal.
-            :data:`TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE`, likewise.
+            boolean. It declares the shipped placeholders intended, which silences
+            the credential REPORT; in hardened mode it is also what satisfies the
+            refusal.
         connect_timeout_seconds: :data:`TRANSPORT_CONNECT_TIMEOUT_VARIABLE`, or
             :data:`CONNECT_TIMEOUT_DEFAULT`. Always finite.
         read_timeout_seconds: :data:`TRANSPORT_READ_TIMEOUT_VARIABLE`, or
@@ -975,8 +999,13 @@ class TransportPolicyParams:
     certificate_file: str | None = None
     key_file: str | None = None
     isolated_oracle: bool = False
-    require_encrypted_transport: bool = True
-    require_declared_placeholder_credentials: bool = True
+    #  EXACT-PARITY DEFAULTS (rule R-3, finding F-02). Both refusals are OFF
+    #  unless the deployment asks for them by name; see the class docstring for
+    #  why an inherited refusal is a behaviour change and a reported exposure is
+    #  not. `dal.connection.ConnectionPolicy` carries the same two defaults, so
+    #  the CLI installs what the data-access layer already assumes.
+    require_encrypted_transport: bool = False
+    require_declared_placeholder_credentials: bool = False
     allow_frozen_placeholder_credentials: bool = False
     connect_timeout_seconds: int = CONNECT_TIMEOUT_DEFAULT
     read_timeout_seconds: int = READ_TIMEOUT_DEFAULT
@@ -1141,15 +1170,19 @@ def resolve_transport_policy(
             mapping and touches the real environment not at all.
 
     Returns:
-        The resolved declaration. With nothing set the two ``require_*`` fields
-        are ``True`` and the two opt-outs are ``False``, which is the fail-closed
-        policy argued on :class:`TransportPolicyParams`.
+        The resolved declaration. With nothing set all four booleans are
+        ``False``, which is the EXACT-PARITY policy argued on
+        :class:`TransportPolicyParams`: the exposure is reported and the
+        connection is made, exactly as the compiled program makes it. Hardened
+        mode is reached only by setting
+        :data:`TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE` or
+        :data:`TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE`.
 
     Raises:
         RdbmsParamError: One of the four boolean settings carries text that is
             neither affirmative nor negative - see :func:`read_declared_flag`
             for why that is refused rather than guessed. An UNSET variable never
-            raises; it resolves to the fail-closed default.
+            raises; it resolves to the exact-parity default.
     """
     mapping = os.environ if env is None else env
     allow_plaintext = read_declared_flag(
@@ -1163,19 +1196,27 @@ def resolve_transport_policy(
         certificate_file=_optional_path(mapping, TRANSPORT_CERTIFICATE_VARIABLE),
         key_file=_optional_path(mapping, TRANSPORT_KEY_VARIABLE),
         isolated_oracle=allow_plaintext,
-        #  FAIL CLOSED UNLESS DECLARED, and strictness outranks permission: an
-        #  explicit `ACAS_DB_REQUIRE_TLS` refuses even where the plaintext
-        #  declaration was made, so a deployment that wants no unencrypted path
-        #  cannot have one granted by a stale variable in its environment.
-        require_encrypted_transport=(
-            read_declared_flag(mapping, TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE)
-            or not allow_plaintext
+        #  ⭐ REFUSE ONLY WHEN ASKED (rule R-3, finding F-02). These two fields
+        #  used to read `read_declared_flag(...) or not allow_*`, which made an
+        #  undeclared deployment REFUSE any non-loopback target and any run still
+        #  carrying the frozen placeholder credentials. The compiled program has no
+        #  such disposition - `Mysql-1000-Open` connects or reports (99, 911)
+        #  [copybooks/mysql-procedures.cpy:L60-L128] and inspects neither the
+        #  address nor the account - so an inherited refusal was a validation the
+        #  migrated cycle has not got, on every one of the seven routes. It is now
+        #  the deployment's own decision, by name, and nothing else turns it on:
+        #  `isolated_oracle` and `allow_frozen_placeholder_credentials` silence the
+        #  REPORT, they do not create a refusal for their absence to imply.
+        #
+        #  Strictness still outranks permission WITHIN hardened mode: setting
+        #  ACAS_DB_REQUIRE_TLS refuses even where the plaintext declaration was
+        #  also made, so a deployment that has asked for no unencrypted path cannot
+        #  have one granted by a stale variable in its environment.
+        require_encrypted_transport=read_declared_flag(
+            mapping, TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE
         ),
-        require_declared_placeholder_credentials=(
-            read_declared_flag(
-                mapping, TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE
-            )
-            or not allow_placeholder
+        require_declared_placeholder_credentials=read_declared_flag(
+            mapping, TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE
         ),
         allow_frozen_placeholder_credentials=allow_placeholder,
         #  THE THREE DRIVER DEADLINES, always finite. The frozen C interface passes

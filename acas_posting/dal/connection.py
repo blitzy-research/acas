@@ -1104,8 +1104,8 @@ def transport_category(
         parameters: the driver keyword arguments
             :func:`connection_parameters` produced. Only the presence of
             ``unix_socket`` and the shape of ``host`` are consulted.
-        security: the caller's declaration, or ``None`` for the fail-closed
-            default.
+        security: the caller's declaration, or ``None`` when the caller declared
+            nothing, in which case the installed process policy governs.
 
     Returns:
         One of :data:`TRANSPORT_CATEGORIES`. ``"local-socket"`` for a Unix

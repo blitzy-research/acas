@@ -11,12 +11,40 @@ It does **not** document the ACAS COBOL system. That is `README.TXT` (with
 edited by this migration — they are the maintainer's own record and this
 migration cross-references them instead. See §15.
 
-WARNING: this is a **behaviourally exact** migration, not a clean-up project,
-and that inverts normal engineering judgement for the whole of it. A legacy
-defect reproduced is correct. A legacy defect "fixed" on the Python side is a
-parity failure, and 15 of the 22 known defects are locked in place by tests
+## READ THIS FIRST: parity against the frozen COBOL is NOT established
+
+**The acceptance criterion of this project has not been met from this checkout,
+and no claim in this file should be read as saying otherwise.** The criterion is
+the AAP's own (§0.1.1, §0.8.5): an empty ordering-normalised diff of the affected
+tables after a Python run versus a **frozen** compiled run against an identical
+seed. It cannot presently be produced, for a reason that is measured rather than
+predicted: a build of the frozen sources exactly as committed **fails**, because
+`copybooks/ACAS-SQLstate-error-list.cob` is absent from the checkout while 22 of
+the 28 generated `common/*MT.cbl` bridges `COPY` it. The member is **not**
+fabricated — inventing a frozen source would breach R-3 and R-4 — so it has to
+come from the maintainer.
+
+Read **[§8.7](#87-stop-the-frozen-oracle-cannot-be-built-from-this-checkout)**
+before you read anything else about parity, then §9.4 for the second measured
+obstacle (the frozen loaders never reach a `COMMIT`), then
+[`docs/migration/scenario-diff-evidence.md`](docs/migration/scenario-diff-evidence.md)
+§0, which is the evidence register and states, verdict by verdict, what has and
+has not been established. `harness/run_parity.sh` enforces this rather than
+trusting a reader's diligence: with no attested frozen oracle it stops at exit
+**77 — EVIDENCE UNAVAILABLE**, a status deliberately distinct from "the two
+states differ", and against a transformed diagnostic oracle it marks every
+verdict **NO PARITY CLAIM**.
+
+WARNING: this migration **targets behavioural exactness** — it is not a clean-up
+project, and that inverts normal engineering judgement for the whole of it. A
+legacy defect reproduced is correct. A legacy defect "fixed" on the Python side is
+a parity failure, and 15 of the 22 known defects are locked in place by tests
 precisely so that a well-meaning correction turns the suite red rather than
-passing unnoticed. Read §2 (rule R-4) and §14 before changing anything.
+passing unnoticed. Read §2 (rule R-4) and §14 before changing anything. What is
+*established* today is the static and unit-level work — the arithmetic tier, the
+determinism tier, the traceability and dictionary deliverables — plus agreement
+with a **disclosed-transformed diagnostic** oracle; what is *not* established is
+frozen parity, per §8.7.
 
 There is **no user rules document for this project**. `review_rules` reports,
 in full, `No user rules provided.` The six binding rules R-1 … R-6 come from
@@ -65,8 +93,14 @@ the harness under `harness/` and never by the shipped package.
 
 What that buys, and what it costs:
 
-- The Python cycle can replace the COBOL cycle without changing a single
-  posted figure. That is the entire value of the exercise.
+- The *objective* is that the Python cycle can replace the COBOL cycle without
+  changing a single posted figure. That is the entire value of the exercise —
+  and it is a property to be **demonstrated**, by the empty diff quoted above,
+  not asserted. On this checkout it is **not yet demonstrated against the frozen
+  oracle** (§8.7), so read every statement here as describing what the code is
+  built to do and what has actually been observed, which §8.7, §9.4 and
+  [`docs/migration/scenario-diff-evidence.md`](docs/migration/scenario-diff-evidence.md)
+  keep separate.
 - Nothing is tidied on the way through. Truncation that loses pence still
   loses pence, a double entry that posts half of itself still posts half of
   itself, and an account located by sequential read is still located by
@@ -426,7 +460,7 @@ Four files sit outside the illustrative tree and inside those patterns:
 
 | File | Covered by | Why it exists rather than being folded into a listed file |
 | --- | --- | --- |
-| `acas_posting/cli/rdbms_params.py` | `acas_posting/cli/*.py` (§0.2.1.2, §0.4.4) | The single process-boundary resolver for connection parameters and the fail-closed plaintext policy. §0.4.1.1 gives `cli/args.py` a different job — binding argv to `WS-Calling-Data` — and putting deployment security policy inside the argument binder would couple two concerns that are separately testable, and separately wrong when coupled |
+| `acas_posting/cli/rdbms_params.py` | `acas_posting/cli/*.py` (§0.2.1.2, §0.4.4) | The single process-boundary resolver for connection parameters and for the deployment's transport declaration — exact-parity by default, hardened only when named (§8.1a). §0.4.1.1 gives `cli/args.py` a different job — binding argv to `WS-Calling-Data` — and putting deployment security policy inside the argument binder would couple two concerns that are separately testable, and separately wrong when coupled |
 | `harness/run_parity.sh` | `harness/*` (§0.2.1.2), `harness/**` (§0.2.1.3) | The ten-stage protocol driver. §0.8.5 defines acceptance as *seed → run compiled → dump → reset → run Python → dump → diff*, and §0.3.2 says explicitly that deterministic staged orchestration "justifies the rigid stage ordering baked into the harness scripts". One driver that cannot be run out of order **is** that design; the alternative is a documented sequence a human retypes, which is the failure mode §0.3.2 warns against |
 | `harness/build_fixtures.sh` | `harness/*`, `harness/**` | Generates the seed flat files each scenario declares. §0.2.1.1 puts `common/masterLD.sh` and the `*LD.cbl` loaders in scope "as the specification for how the harness seeds a scenario", and §0.4.1.7 gives `harness/seed.sh` the job of reproducing that per-file contract — which presupposes the files exist. Something has to produce them |
 | `harness/make_fixtures.py` | `harness/*`, `harness/**` | The generator `build_fixtures.sh` drives. It is separate because it emits COBOL, and emitting COBOL safely requires the literal-encoding guard that a shell script cannot express — see §12's note on generated-source safety |
@@ -790,10 +824,28 @@ up front. Compose publishes `3306`.
 
 ### 8.1a The transport declaration — one key, one closed set
 
-An isolated harness network has no TLS material, so every script and the shipped
-package refuse a **non-loopback** target unless the operator either names a
-certificate authority or declares the network isolated. There is exactly **one**
-name for that declaration and **one** set of spellings for it:
+An isolated harness network has no TLS material, so a connection to it crosses a
+network in the clear. **The two halves of this repository treat that differently,
+on purpose, and the difference is rule R-3.**
+
+* **The five harness scripts REFUSE** a non-loopback target unless the operator
+  either names a certificate authority or declares the network isolated. They are
+  test tooling with no COBOL counterpart, so a refusal there adds nothing to the
+  migrated cycle.
+* **The shipped package REPORTS and CONNECTS.** The compiled `Mysql-1000-Open`
+  has exactly two outcomes — it connects, or it reports `(FS-Reply 99,
+  We-Error 911)` `[copybooks/mysql-procedures.cpy:L60-L128]` — and it inspects
+  neither the address it was given nor whose credentials it was handed. A
+  pre-connect refusal is therefore a disposition the compiled system has not got,
+  and R-3 forbids adding one. So **exact-parity mode is the default**: the
+  exposure is logged at WARNING, named as CWE-319 (unencrypted hop) or CWE-798
+  (the placeholder credentials of `[copybooks/wssystem.cob:L138-L139]`), returned
+  as a finding by `dal.connection.audit_connection_policy` — and the connection is
+  made, exactly where the compiled cycle makes it. Reporting is separate from
+  acceptance.
+
+There is exactly **one** name for the isolation declaration and **one** set of
+spellings for it:
 
 | | |
 |---|---|
@@ -801,7 +853,7 @@ name for that declaration and **one** set of spellings for it:
 | Yes | `1`, `true`, `yes`, `on` (case-insensitive) |
 | No | `0`, `false`, `no`, `off`, or unset |
 | Anything else | **refused** — the run stops and names the accepted spellings |
-| Command line | `--db-allow-plaintext` on every route, which **outranks** the environment |
+| Command line | **none.** No route publishes an option for this. The frozen counterpart takes its settings from outside the command line `[common/acas-get-params.cbl:L30]`, and a certificate path in `argv` is a process-listing leak, so the deployment contract below is the only source |
 | Encrypted alternative | `ACAS_DB_TLS_CA` (plus `ACAS_DB_TLS_CERT` + `ACAS_DB_TLS_KEY` together) |
 
 `harness/docker-compose.yml` sets it for the internal network. The five harness
@@ -812,6 +864,24 @@ everywhere. Writing `false` grants nothing, and unrecognised text stops the run
 rather than resolving to either answer: this variable decides whether a
 credential and every posted figure may cross a network in the clear, and only
 the operator who typed it knows what was meant.
+
+#### Hardened mode — opt-in, and not parity evidence
+
+A production deployment that wants the refusal asks for it by name. Two keys, read
+from the same contract, each switching one report into a refusal raised **before**
+the connect:
+
+| Key | Effect when set |
+|---|---|
+| `ACAS_DB_REQUIRE_TLS` | a non-local, unverified, undeclared target is refused instead of reported. Outranks `ACAS_DB_ALLOW_PLAINTEXT`: with both set the connection is refused |
+| `ACAS_DB_REQUIRE_DECLARED_CREDENTIALS` | a row still carrying the frozen placeholder credentials is refused instead of reported, unless `ACAS_DB_ALLOW_PLACEHOLDER_CREDENTIALS` declares them intended |
+
+Neither is set by the harness and neither is inherited. **A run made under either
+is not behavioural-parity evidence** — a connection refused before it is attempted
+writes nothing where the compiled program would have written — so use them for a
+deployment, never for a comparison. `ACAS_DB_TLS_CA` is the third option and the
+only one that changes no disposition at all: it encrypts and verifies rather than
+refusing.
 
 Define the runner shorthand used throughout §8 to §11:
 
@@ -1027,6 +1097,22 @@ deliberately distinct from "the two states differ". Nothing was compared.
 **The member is not fabricated.** It carries the SQLSTATE list the bridges
 document, and inventing a frozen source file would breach both R-3 (no new
 validations) and R-4 (reproduce, never fix). It must be supplied by the maintainer.
+
+**And it may not be supplied by this migration even from an authentic copy.** AAP
+§0.8.1 states that any diff touching `copybooks/*.cob` **is a defect in the
+migration, regardless of how harmless it appears** — so the member has to arrive as a
+maintainer commit, not as migration work. That single commit is also the highest-value
+one available to this project: it lifts the four class-A questions in
+`docs/migration/ambiguity-resolutions.md` §14.5 as well as this blocker.
+
+**Re-measured 2026-08-07, non-destructively** — the verification build was pointed at
+a container-local `ACAS_BUILD` so the live build tree and the retained per-scenario
+captures were left untouched. Observed: *"frozen oracle: no source transformation
+applied; the build copy is byte-for-byte the checkout"*, then **44** diagnostic lines
+naming **22 distinct** bridges, then *"FATAL: comp-common.sh produced 22 fatal
+diagnostic line(s)"* and **exit 74**. `harness/run_parity.sh` against an unattested
+build then exited **77** with *"Nothing was compared"* — before stage 1, so no
+database was touched. `docs/migration/scenario-diff-evidence.md` §0.1 tabulates both.
 
 #### 8.7.1 What the shim is, and what it is measured to do
 
@@ -1362,6 +1448,20 @@ capture reach a comparison whose pass condition is an empty diff.
   `harness/run_parity.sh` warns to that effect rather than describing it as though
   it were. The measurements are written up in full at
   `docs/migration/ambiguity-resolutions.md`.
+
+  **This is a determinate impossibility, not an outstanding task, and it is worth
+  saying which.** The AAP mandates OFF for seeding; **no** frozen loader reaches a
+  `COMMIT` (zero live `perform aa020-Rollback` / `perform aa030-Commit` sites across
+  all 28 `common/*LD.cbl`, the sole `aa030-Commit` reference commented out at
+  `[common/irsdfltLD.cbl:L437]`); and MariaDB discards an uncommitted session at
+  disconnect. Those three together mean an AAP-conformant durable seed **cannot
+  exist** on this checkout, and the migration may change none of them. Re-measured
+  2026-08-07 in both windows: `off` → exit 76 with 0 rows in all seven seeded tables,
+  `on` → exit 0 with 8 rows across 7 tables. Closing it is therefore a **decision**,
+  and exactly one of two: the maintainer supplies loaders that commit, or the project
+  owner authorises the deviation in writing as an amendment to AAP §0.5.2's premise.
+  `docs/migration/scenario-diff-evidence.md` §0.1 (Obstacle 3) and §0.3 (Action 2)
+  carry the argument and the evidence.
 
   Either way the mode is a **window**: `harness/seed.sh` sets it, runs the
   loaders, then restores whatever the server had, however the run ends. Runtime

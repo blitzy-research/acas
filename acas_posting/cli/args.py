@@ -1336,9 +1336,15 @@ def install_connection_policy(
     would be adding a program input and two refusal outcomes the compiled program
     has not got (rule R-3), which is why the options were withdrawn and why this
     function takes no namespace. Precedence is therefore contract, then nothing -
-    and "nothing" is a fail-closed policy rather than an absent one: a loopback
-    address or a Unix socket connects, and any other target is refused until the
-    deployment states either a CA bundle or the isolated-oracle declaration.
+    and "nothing" installs the EXACT-PARITY policy: every target the compiled
+    program would connect to, this one connects to as well, with the exposure
+    reported at WARNING and by `dal.connection.audit_connection_policy` rather
+    than refused (finding F-02). A deployment that wants the refusal asks for it
+    by name - `ACAS_DB_REQUIRE_TLS`, `ACAS_DB_REQUIRE_DECLARED_CREDENTIALS` - or
+    supplies `ACAS_DB_TLS_CA` to encrypt and verify instead of refusing. A run
+    made under either refusal knob is not behavioural-parity evidence, because a
+    connection refused before it is attempted writes nothing where the compiled
+    program would have written.
 
     Args:
         env: The mapping the declaration is resolved from, passed through to
@@ -1619,9 +1625,9 @@ def _apply_cli_pins(
     #  linkage binders funnel through this function, so every one of the seven
     #  entry points establishes the deployment's declaration before any handler
     #  can open anything, and no handler has to be told about it. See
-    #  `install_connection_policy` for why it is not an argparse option and why
-    #  an undeclared deployment gets a fail-closed policy rather than an absent
-    #  one.
+    #  `install_connection_policy` for why it is not an argparse option and why an
+    #  undeclared deployment gets the exact-parity policy - exposure reported,
+    #  connection made - rather than a refusal the compiled program cannot produce.
     install_connection_policy(env)
 
     #  [copybooks/wssystem.cob:L67] `05 Run-Date binary-long.` - an `int`, never
@@ -3533,8 +3539,10 @@ def _transport_from_contract(
 
     Returns:
         The policy. Every field at its default - which is what an environment
-        declaring nothing resolves to - means loopback and Unix sockets only,
-        because `dal/connection.py` is fail-closed for anything else.
+        declaring nothing resolves to - means the caller declares no transport
+        material, which `dal/connection.py` treats as "nothing declared": a
+        non-local, unencrypted target is REPORTED at WARNING and connected to,
+        as the compiled program connects to it (rule R-3, finding F-02).
 
     Raises:
         ValueError: the contract named a client certificate without its private
@@ -3569,8 +3577,9 @@ def dal_options_for(
     Returns:
         A mapping carrying the transport policy under the key the handlers
         declare it by. Never empty: the policy is always stated, and when the
-        deployment declared nothing it is the fail-closed one, which is a
-        statement rather than an omission.
+        deployment declared nothing it carries the exact-parity declaration -
+        no TLS material and no isolated-oracle claim - which is a statement
+        rather than an omission.
 
     Raises:
         ValueError: as `_transport_from_contract`.

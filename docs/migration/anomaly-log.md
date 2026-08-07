@@ -195,6 +195,19 @@ authoring host. QA remediation later supplied the writable Compose harness,
 completed the strict build, and observed the **eight** mandated parity journeys
 on 2026-08-04. A ninth scenario, `end_of_cycle_gl`, was added afterwards to reach
 `gl080`, and on **2026-08-07 all nine** journeys were observed with empty diffs.
+
+⚠️ **AND EVERY ONE OF THOSE DIFFS IS AGAINST THE DISCLOSED-TRANSFORMED DIAGNOSTIC
+ORACLE, NOT THE FROZEN ONE.** It has to be said here rather than only in the evidence
+register, because a reader arriving at an anomaly's `REPRODUCED` status through this
+sentence would otherwise take it for frozen parity. The frozen sources do not compile
+from this checkout — `copybooks/ACAS-SQLstate-error-list.cob` is absent and 22 of the
+28 generated `common/*MT.cbl` bridges `COPY` it — so the build those journeys ran
+against carried 41 transformed paths, 40 of them repairs to executable logic. What the
+empty diffs establish is that the two implementations agree; what they cannot establish
+is that either reproduces the frozen specification. Every anomaly whose status rests on
+one of those runs is therefore **reproduced against the diagnostic oracle**, and
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md) §0 states the position in
+full, verdict by verdict.
 Both dates are stated rather than the later one silently replacing the earlier,
 because an entry that cites 2026-08-04 evidence was resolved against an
 eight-journey sweep and saying otherwise would backdate a run that had not

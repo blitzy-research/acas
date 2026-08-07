@@ -154,18 +154,21 @@ class FacadeContext:
     and that makes an empty mapping a decision rather than an absence. Every
     handler that opens a connection declares ``transport: TransportSecurity |
     None = None`` and forwards it to ``connection.mysql_1000_open``, whose
-    ``_require_permitted_connection`` then FAILS CLOSED on ``None``: a Unix
-    socket or a loopback address is permitted, and any other target is refused
-    unless a certificate authority is supplied or ``isolated_oracle=True`` is
-    declared. So a caller that leaves ``options`` empty gets the safe answer for
-    every handler, and a caller that must reach a non-local server states it once
-    - ``options={"transport": TransportSecurity(...)}`` - and this context carries
+    ``_require_permitted_connection`` resolves ``None`` AGAINST THE INSTALLED
+    PROCESS POLICY rather than against a permission of its own. Under the
+    exact-parity default that policy reports an unencrypted non-local hop at
+    WARNING and connects, exactly as the compiled open does (rule R-3); under an
+    explicitly hardened policy it refuses unless a certificate authority is
+    supplied or ``isolated_oracle=True`` is declared. So a caller that leaves
+    ``options`` empty gets the SAME answer for every handler, and a caller that
+    must override it for one verb states it once -
+    ``options={"transport": TransportSecurity(...)}`` - and this context carries
     it to whichever handler the verb dispatches to.
 
     That uniformity is the point. It was previously possible for ONE handler to
-    default itself permissive while the other nineteen failed closed, which made
-    the policy depend on which entity a program happened to touch rather than on
-    what the operator had declared (CWE-319, CWE-295). Nothing here inspects or
+    default itself permissive while the other nineteen took the process policy,
+    which made the policy depend on which entity a program happened to touch
+    rather than on what the operator had declared (CWE-319, CWE-295). Nothing here inspects or
     rewrites the mapping: the enforcement lives in ``dal/connection.py`` and the
     declaration lives with the caller, and this field is only the wire between
     them. Forwarding is by keyword, so a handler that does not accept a given key
@@ -283,9 +286,10 @@ def _forward(
     AAP section 0.3.4 sets for a diagnostic.
 
     A handler that DOES declare ``transport`` and is not given one is unaffected:
-    its own default is ``None``, and ``connection._require_permitted_connection``
-    resolves ``None`` fail-closed. Omission is therefore never the permissive
-    answer.
+    its own default is ``None``, which ``connection.py`` resolves to the INSTALLED
+    PROCESS POLICY rather than to a permission of its own. An omitted per-call
+    declaration therefore cannot quietly widen what the deployment declared, and
+    whatever the resolved policy permits is reported at WARNING on the open.
 
     Args:
         ctx: the linkage this verb was performed with.
@@ -310,8 +314,8 @@ def _forward(
         _LOG.warning(
             "facade: %s accepts no keyword extra named %r, so the caller's "
             "declaration(s) of that name are not in force for this verb; the "
-            "handler's own default applies, which for a transport policy is "
-            "fail-closed",
+            "handler's own default applies, which for a transport policy means "
+            "the installed process policy governs the open",
             getattr(target, "__module__", "the handler"),
             sorted(unhonoured),
         )
@@ -328,8 +332,9 @@ def _forward(
 # a module-level declaration function of their own - the equivalent of setting a
 # sub-program's WORKING-STORAGE before the first `CALL`, which is exactly what
 # their COBOL originals do with the six `RDBMS-*` values
-# [common/acas008.cbl:L558-L563] - and four accept none at all and can therefore
-# only ever fail closed.
+# [common/acas008.cbl:L558-L563] - and four accept none at all, so those four
+# always open under the INSTALLED PROCESS POLICY with no per-call declaration of
+# their own.
 #
 # Three mechanisms is two too many for a caller to have to know about, and a
 # caller who knows about none of them is the caller whose policy silently fails
@@ -383,26 +388,31 @@ def declare_connection_policy(
       a module-level declaration and are reached by this function;
     * ``acas007_gl_batch`` supports both routes for compatibility;
     * ``acas005_gl_nominal``, ``acas012_sales``, ``acas026_pinvoice`` and
-      ``acasirsub4_irs_posting`` publish neither, so they can only ever use the
-      fail-closed default - a Unix socket or a loopback address. That is a
-      LIMITATION AND IT IS RECORDED AS ONE: those four cannot be pointed at a
-      non-local server, and the refusal surfaces as the same ``(99, 911)`` the
-      frozen open produces on any connect failure, never as a silent plaintext
-      connection.
+      ``acasirsub4_irs_posting`` publish neither, so those four open under the
+      INSTALLED PROCESS POLICY alone. That is a LIMITATION AND IT IS RECORDED AS
+      ONE: a declaration meant for one of those four cannot be made per call, so
+      it has to be installed process-wide - and where the installed policy is the
+      hardened one, its refusal surfaces as the same ``(99, 911)`` the frozen open
+      produces on any connect failure.
 
     A process boundary should call this once and ALSO pass the same policy on
     every context it builds; the two together are the whole contract. Calling
-    this with no arguments is meaningful and is the fail-closed declaration.
+    this with no arguments is meaningful: it declares no TLS material and no
+    isolated-oracle claim, which is the EXACT-PARITY declaration.
 
     Args:
         transport: the policy. ``None`` means the caller declares nothing, which
-            ``connection._require_permitted_connection`` resolves fail-closed:
-            loopback and Unix sockets are permitted and every other target is
-            refused unless a certificate authority is supplied or
+            ``connection._require_permitted_connection`` resolves against the
+            INSTALLED PROCESS POLICY. Under the exact-parity default that policy
+            reports an unencrypted non-local hop at WARNING and connects, exactly
+            as the compiled open does (rule R-3); under an explicitly hardened
+            policy it refuses unless a certificate authority is supplied or
             ``isolated_oracle=True`` is declared.
         allow_frozen_placeholder_credentials: whether the shipped placeholders of
-            [copybooks/wssystem.cob:L138-L139] may authenticate. ``False``, the
-            default, refuses them.
+            [copybooks/wssystem.cob:L138-L139] are declared intended. ``False``,
+            the default, leaves them REPORTED at WARNING - and refused only where
+            the installed policy sets
+            ``require_declared_placeholder_credentials``.
 
     Returns:
         None. Every effect is on the named handlers' own declaration slots.

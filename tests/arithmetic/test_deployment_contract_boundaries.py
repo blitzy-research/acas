@@ -1373,6 +1373,69 @@ def test_the_dictionary_reader_bounds_what_it_reads() -> None:
         assert "too deeply" in str(recursion_error.value)
 
 
+def test_the_dictionary_reader_follows_no_symbolic_link() -> None:
+    """An explicit artifact path is opened link by link, and a link is REFUSED (F-08).
+
+    The guarantee the loader states has to be the guarantee it enforces. It used to pass
+    an explicit path through `Path.resolve()` before the `O_NOFOLLOW` open, which follows
+    every link in the path and leaves that open nothing to refuse - so a caller-supplied
+    link, or a path through a linked directory, loaded an artifact from somewhere else
+    under a name that looked committed. Four properties are asserted together because
+    they are one contract: the ordinary paths still work, a linked FILE is refused, a
+    linked DIRECTORY component is refused, and a component that is merely not a
+    directory is not mislabelled as a link.
+
+    Infrastructure-free: a temporary directory and the committed artifact's own bytes.
+    """
+    import tempfile
+
+    loader = importlib.import_module("acas_posting.dictionary.loader")
+
+    root = Path(__file__).resolve().parents[2]
+    artifact = root / "data_dictionary" / "acas_posting_dictionary.json"
+    payload = artifact.read_bytes()
+
+    #  The default lookup is unaffected: it resolves its own two candidates, because an
+    #  installed tree legitimately reaches its package data through a linked directory.
+    assert loader.load_dictionary().entries, "the committed dictionary no longer loads"
+
+    with tempfile.TemporaryDirectory() as directory:
+        scratch = Path(directory)
+
+        plain = scratch / "plain.json"
+        plain.write_bytes(payload)
+        assert loader.load_dictionary(plain).entries, "a plain explicit path must load"
+
+        #  An explicit path is made absolute rather than resolved, so a relative one
+        #  still names the same file.
+        assert loader._absolute_document_path(plain).is_absolute()
+
+        linked_file = scratch / "linked.json"
+        linked_file.symlink_to(plain)
+        with pytest.raises(loader.DictionaryNotFoundError) as file_link:
+            loader.load_dictionary(linked_file)
+        assert "SYMBOLIC LINK" in str(file_link.value)
+
+        real_directory = scratch / "real"
+        real_directory.mkdir()
+        (real_directory / "held.json").write_bytes(payload)
+        linked_directory = scratch / "linked"
+        linked_directory.symlink_to(real_directory, target_is_directory=True)
+        with pytest.raises(loader.DictionaryNotFoundError) as directory_link:
+            loader.load_dictionary(linked_directory / "held.json")
+        assert "SYMBOLIC LINK" in str(directory_link.value)
+
+        #  `..` is walked rather than collapsed, and through real directories it still
+        #  arrives: refusing links must not refuse ordinary paths.
+        assert loader.load_dictionary(real_directory / ".." / "plain.json").entries
+
+        #  A component that is an ordinary file reports the same ENOTDIR the platform
+        #  reports for a linked directory, and must NOT be described as a link.
+        with pytest.raises(loader.DictionaryNotFoundError) as not_a_directory:
+            loader.load_dictionary(plain / "under-a-file.json")
+        assert "SYMBOLIC LINK" not in str(not_a_directory.value)
+
+
 def test_no_artifact_recommends_an_unhashed_install() -> None:
     """Install guidance names the hash-verified route, never a bare `pip install` (DEP-02).
 

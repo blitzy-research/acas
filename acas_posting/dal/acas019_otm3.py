@@ -1365,7 +1365,7 @@ def _reset_working_storage() -> None:
     # The two security declarations are reset with everything else, and for two
     # reasons. Determinism (rule R-6): a declaration `dispatch` recorded for one
     # scenario must not survive into the next, or two runs of the same scenario
-    # differ by whichever ran before them. And fail-closed: a permissive
+    # differ by whichever ran before them. And NON-INHERITANCE: a permissive
     # declaration is the one piece of state that must never be inherited by a
     # caller who did not ask for it.
     _BRIDGE.transport = None
@@ -3714,8 +3714,8 @@ def dispatch(
     # The two keyword-only declarations are recorded in working storage BEFORE the
     # dispatch, because `ba020-Process-Open` reads them from there - it is reached
     # through the nine-arm `evaluate` and cannot take arguments of its own. `None`
-    # means "the caller stated nothing", which leaves the fail-closed default in
-    # place rather than overwriting it with a permissive one.
+    # means "the caller stated nothing", which leaves the INSTALLED PROCESS POLICY
+    # in force rather than overwriting it with a permissive one.
     if transport is not None:
         _BRIDGE.transport = transport
     if allow_frozen_placeholder_credentials is not None:

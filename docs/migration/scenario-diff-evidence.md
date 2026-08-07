@@ -38,11 +38,26 @@ so in those words.
 
 ## 0. EVIDENCE STATUS — READ THIS BEFORE ANY OTHER SECTION
 
+### 0.0 The verdict, in one place
+
+| | |
+|---|---|
+| **Acceptance criterion** (AAP §0.1.1, §0.8.5) | an empty ordering-normalised diff of the affected tables, Python run versus **frozen** compiled run, from an identical seed |
+| **Verdict** | ❌ **NOT MET, and not meetable from this checkout.** Nothing below is a frozen-parity claim |
+| **Obstacle 1** | the frozen sources **do not compile**: `copybooks/ACAS-SQLstate-error-list.cob` is absent and 22 of the 28 generated `common/*MT.cbl` bridges `COPY` it. Re-measured **2026-08-07**: `build_oracle.sh` with no flags, byte-for-byte the checkout, **exit 74**, 22 bridges named |
+| **Obstacle 2** | the nine empty diffs below were produced against a **disclosed-transformed diagnostic** oracle — 41 transformed paths, 40 of them repairs to executable logic. Agreement with a repaired specification is not evidence about the frozen one |
+| **Obstacle 3** | an **AAP-conformant seed cannot exist**: the AAP mandates autocommit OFF for seeding, no frozen loader reaches a `COMMIT`, so a fresh session sees zero rows. Re-measured 2026-08-07 in both windows — OFF: exit **76**, 0 rows in all 7 seeded tables; ON: exit **0**, 8 rows across 7 tables |
+| **What IS established** | the ten-stage protocol runs end to end; the Python cycle agrees table-for-table with the diagnostic oracle on nine scenarios; two Python runs under one pinned clock are byte-identical; the arithmetic, dictionary and traceability deliverables stand on their own |
+| **Enforced, not merely disclosed** | `run_parity.sh` exits **77 — EVIDENCE UNAVAILABLE** with no attested oracle (verified 2026-08-07: exit 77 before stage 1, nothing compared) and marks every verdict **NO PARITY CLAIM** against a transformed one; `seed.sh` exits **76** rather than certifying a comparison of two empty databases |
+| **What a human must do** | obtain `copybooks/ACAS-SQLstate-error-list.cob` from the maintainer (§0.2), and settle the seeding authorisation (§0.3). Both are outside an implementing agent's authority — AAP §0.8.1 makes any diff touching `copybooks/*.cob` a defect in the migration, so the member may not be written here even from an authentic copy |
+
 **Parity against the frozen COBOL specification is NOT established by this
 document, and cannot presently be established from this repository.** Every empty
 diff recorded below is a real measurement, and none of them is a parity claim
-against the frozen checkout. Two independent, measured obstacles stand in the way,
-and both are now enforced by the tooling rather than left to a reader's diligence.
+against the frozen checkout. Three independent, measured obstacles stand in the way,
+and all three are now enforced by the tooling rather than left to a reader's diligence.
+
+### 0.1 The three obstacles, each re-measured
 
 **Obstacle 1 — the frozen oracle does not compile.** `harness/build_oracle.sh`
 defaults to a zero-transformation build of the frozen sources. Measured on
@@ -53,6 +68,30 @@ because inventing a frozen source would breach R-3 and R-4; it must be supplied 
 the maintainer. No attestation is written, and `harness/run_parity.sh` reports exit
 **77 — EVIDENCE UNAVAILABLE**, a status deliberately distinct from the ones meaning
 the two states differ. See README §8.7.
+
+⭐ **Re-measured 2026-08-07, independently of the run that first recorded it, and with
+the live diagnostic build left intact** — the four rows below are a **report of an
+observed run rather than a retained artefact**, in this register's own sense (see
+[`ambiguity-resolutions.md`](ambiguity-resolutions.md) §17), and every one of them is
+reproducible by the command in its own row — the verification build was directed at a
+container-local `ACAS_BUILD` so that neither the existing build tree nor the retained
+per-scenario captures on the `out` volume were disturbed. Observed, in order:
+
+| Step | Observation |
+|---|---|
+| `build_oracle.sh` with no flags, `ACAS_BUILD` outside the live tree | announces *"frozen oracle: no source transformation applied; the build copy is byte-for-byte the checkout"* and *"verified by MEASUREMENT: zero source transformations"* |
+| the same run's compile stage | **44 diagnostic lines** naming **22 distinct** `*MT.cbl` bridges, each `ACAS-SQLstate-error-list.cob: No such file or directory` — `analMT`, `auditMT`, `delfolioMT`, `deliveryMT`, `dfltMT`, `finalMT`, `glbatchMT`, `glpostingMT`, `irsdfltMT`, `irsfinalMT`, `irsnominalMT`, `irspostingMT`, `nominalMT`, `otm3MT`, `otm5MT`, `paymentsMT`, `sldelinvnosMT`, `slpostingMT`, `stockMT`, `sys4MT`, `systemMT`, `valueMT` |
+| exit status | **74**, with *"FATAL: comp-common.sh produced 22 fatal diagnostic line(s)"* — the frozen script itself exits 0 regardless `[common/comp-common.sh:L59]`, `[comp-all.sh:L44-L45]`, which is why the scan and not the status is what detects the failure |
+| `run_parity.sh` against an unattested build | **exit 77**, *"ORACLE UNAVAILABLE: no provenance attestation exists"*, *"THIS IS NOT A BEHAVIOURAL DIFFERENCE. Nothing was compared"* — refused **before stage 1**, so no database was touched |
+
+**Why this cannot be closed from inside the repository.** The member is a frozen
+source, and AAP §0.8.1 states that any diff touching `copybooks/*.cob` **is a defect
+in the migration, regardless of how harmless it appears**. So even an authentic copy
+may not be committed by an implementing agent: writing one here would be the
+migration modifying the specification it is being measured against. It is a
+maintainer action, and the one action that lifts the largest number of open items in
+this project (see [`ambiguity-resolutions.md`](ambiguity-resolutions.md) §14.5, where
+four class-A questions wait on exactly this).
 
 **Obstacle 2 — the runs below used a transformed oracle.** They were produced
 before the frozen build became the default, against a build carrying **41**
@@ -68,16 +107,47 @@ cannot show that the migration reproduces the frozen one.
 `--accept-transformed-oracle` is given, and then marks every verdict
 `identical-against-diagnostic-oracle` / **NO PARITY CLAIM**. See README §8.10.
 
-**A third condition also applies to the seed.** The seeding window now defaults to
-the mode the AAP mandates (autocommit **off**, §0.2.1.1/§0.4.1.7/§0.5.2). Measured
-under that default, `clean_batch_gl` stage 1 exits **76**: seven loaders run, all
-return success, and all seven seeded tables read **zero rows** — the frozen
-no-COMMIT defect, reproduced and refused rather than papered over. The runs below
-were therefore also produced under an explicitly declared seeding deviation
-(`ACAS_SEED_AUTOCOMMIT=on`), which is the only mode measured to leave a durable row
-(8 rows across 7 tables). See README §9.4.
+**Obstacle 3 — an AAP-conformant seed cannot exist, and that is now a proof rather
+than a pending task.** The seeding window defaults to the mode the AAP mandates
+(autocommit **off**, §0.2.1.1/§0.4.1.7/§0.5.2). Measured under that default,
+`clean_batch_gl` stage 1 exits **76**: seven loaders run, all return success, and all
+seven seeded tables read **zero rows** — the frozen no-COMMIT defect, reproduced and
+refused rather than papered over. The runs below were therefore also produced under an
+explicitly declared seeding deviation (`ACAS_SEED_AUTOCOMMIT=on`), the only mode
+measured to leave a durable row (8 rows across 7 tables). See README §9.4.
 
-### 0.1 What the sections below therefore do and do not establish
+⭐ **Re-measured 2026-08-07, both windows, one session, shipped default first** — again a
+report of an observed run rather than a retained artefact, reproducible by setting the
+variable and re-running stage 1:
+
+| Window | Loaders | Rows a FRESH session sees | `reset_db.sh` exit |
+|---|---|---|---|
+| `off` — the shipped default, AAP-literal | seven, all reporting success | **0** in every one of the seven seeded tables | **76** |
+| `on` — the declared deviation | the same seven, same success | `SYSTEM-REC` 1, `SYSTOT-REC` 1, `GLBATCH-REC` 1, `GLLEDGER-REC` 4, `GLPOSTING-REC` 1 = **8 rows across 7 tables** | **0** |
+
+**Why it is a proof.** Three facts compose, and the migration may change none of them:
+the AAP mandates OFF for seeding and is the frozen specification of this work; **no
+frozen loader commits** — zero live `perform aa020-Rollback` / `perform aa030-Commit`
+sites across all 28 `common/*LD.cbl`, the sole `aa030-Commit` reference commented out
+at `[common/irsdfltLD.cbl:L437]`; and MariaDB discards an uncommitted session at
+disconnect. Therefore zero rows persist, necessarily. Issuing the missing `COMMIT` on
+the loaders' behalf would repair the very defect this engagement exists to reproduce
+(R-4), and the loaders are frozen. Two further checks in the same session rule the
+shims out as a cause: the **build copy's** loaders carry zero live commit or rollback
+performs too, and no entry in `build_oracle.sh`'s 41-path transform register touches a
+transaction statement. So the seeding outcome is a property of the frozen loaders.
+
+**What a human must decide — exactly one of two things, neither available to an
+implementing agent:** either **the maintainer** supplies loaders that reach their own
+`COMMIT`, fixing the frozen defect at its source, by the only party entitled to; or
+**the project owner** authorises the `ACAS_SEED_AUTOCOMMIT=on` deviation in writing,
+amending the premise AAP §0.5.2 rests on — a comment banner at
+`[common/glbatchLD.cbl:L9-L13]` that cannot set the session mode, since the vendored C
+interface exposes `MySQL_commit` and `MySQL_rollback` and no `MySQL_autocommit` at all.
+Full argument and evidence: [`ambiguity-resolutions.md`](ambiguity-resolutions.md)
+[`Q-10`](ambiguity-resolutions.md#q-10).
+
+### 0.2 What the sections below therefore do and do not establish
 
 | Claim | Status |
 |---|---|
@@ -85,14 +155,36 @@ were therefore also produced under an explicitly declared seeding deviation
 | The Python cycle agrees, table for table, with a **disclosed-transformed diagnostic** oracle on nine scenarios | **ESTABLISHED as measured.** This is what the empty diffs below are |
 | The Python cycle reproduces the **frozen** COBOL specification | **NOT ESTABLISHED.** The frozen specification does not compile (Obstacle 1) |
 | Two Python runs under one pinned clock are byte-identical | **ESTABLISHED.** It depends on neither obstacle — see §12 |
-| A seeded oracle state can be produced in the AAP-mandated configuration | **NOT ESTABLISHED**, and measured to be impossible with the frozen loaders |
+| A seeded oracle state can be produced in the AAP-mandated configuration | **PROVEN IMPOSSIBLE** on this checkout — §0.1's Obstacle 3 gives the three-fact proof, twice measured. Not a pending task but a decision awaiting a human (§0.3, Action 2) |
 
-**What a human must do to close this.** Obtain
+### 0.3 What a human must do to close this — two actions, in this order
+
+**Action 1 (unblocks Obstacle 1, and with it Obstacle 2).** Obtain
 `copybooks/ACAS-SQLstate-error-list.cob` from the maintainer and commit it to the
-frozen tree; then `harness/build_oracle.sh` with no flags either succeeds — in which
-case re-run §15 and every row below becomes a parity claim against the frozen
-specification — or fails for a new reason that is then the next finding. Nothing in
-this repository should be changed to make it pass.
+frozen tree. **An implementing agent may not do this**: AAP §0.8.1 makes any diff
+touching `copybooks/*.cob` a defect in the migration regardless of how harmless it
+appears, so the member must arrive as a maintainer commit rather than as migration
+work — and it must not be reconstructed, however confidently, since the only thing
+known about its contents is that they are comments (the `COPY` site is in the
+`IDENTIFICATION DIVISION`). Then `harness/build_oracle.sh` with no flags either
+succeeds — in which case re-run §15, every row below becomes a parity claim against
+the frozen specification, and the four class-A questions in
+[`ambiguity-resolutions.md`](ambiguity-resolutions.md) §14.5 become experiments that
+can simply be run — or it fails for a new reason that is then the next finding.
+**Nothing in this repository should be changed to make it pass.**
+
+**Action 2 (unblocks Obstacle 3).** Settle the seeding authorisation, as §0.1's
+Obstacle 3 sets out: either the maintainer supplies loaders that reach their own
+`COMMIT`, or the project owner authorises `ACAS_SEED_AUTOCOMMIT=on` in writing as an
+amendment to AAP §0.5.2's premise. Both are decisions rather than engineering, and
+until one is taken the durable fixture remains a declared deviation whose results are
+labelled as such.
+
+**Why the order matters.** Action 2 alone changes nothing about parity: a durable seed
+feeds a comparison that still has no frozen oracle to compare against. Action 1 alone
+leaves the protocol able to build the specification but unable to seed it in the
+mandated mode. Both are required for a frozen-parity result, which is why neither is
+described here as progress toward one.
 
 The measurements below are retained verbatim rather than deleted, because they are
 observations and deleting them would destroy evidence. Read them as what they are.

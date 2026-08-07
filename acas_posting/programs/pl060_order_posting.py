@@ -265,9 +265,10 @@ class _FacadeContext:
     #: policy - which have no COBOL counterpart because the frozen bridge has none:
     #: its connect passes six values and no transport policy at all
     #: [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
-    #: ``cobmysqlapi.c``. An empty mapping is the SAFE answer, not the absent one:
-    #: every handler resolves an unstated policy fail-closed, permitting a Unix
-    #: socket or a loopback address and refusing every other target.
+    #: ``cobmysqlapi.c``. An empty mapping is a STATEMENT, not an omission: every
+    #: handler resolves an unstated policy against the INSTALLED PROCESS POLICY,
+    #: which under the exact-parity default reports an unencrypted non-local hop
+    #: at WARNING and connects, as the compiled open does (rule R-3).
     dal_options: Mapping[str, object] = field(default_factory=dict)
 
 
@@ -743,10 +744,11 @@ class _Ws:
     #: the transport-security policy - carried onto every facade context this
     #: program builds. No COBOL counterpart: the frozen bridge's connect passes six
     #: values and no transport policy at all
-    #: [copybooks/mysql-procedures.cpy:L72-L77]. An empty mapping is the SAFE
-    #: answer, not the absent one - an unstated policy resolves fail-closed,
-    #: permitting a Unix socket or a loopback address and refusing every other
-    #: target. Carried opaquely; ``dal/facade.py`` projects it onto whatever extras
+    #: [copybooks/mysql-procedures.cpy:L72-L77]. An empty mapping is a STATEMENT,
+    #: not an omission - an unstated policy resolves against the INSTALLED PROCESS
+    #: POLICY, which under the exact-parity default reports an unencrypted
+    #: non-local hop at WARNING and connects, as the compiled open does (rule
+    #: R-3). Carried opaquely; ``dal/facade.py`` projects it onto whatever extras
     #: each handler declares.
     dal_options: Mapping[str, object] = field(default_factory=dict)
 
@@ -894,7 +896,7 @@ def run(
         # NOT a linkage operand, NOT a parameter of `run`, and NOT bound here: the
         # transport policy reaches every handler through the one process-level
         # policy the CLI boundary installs, so this field keeps its declared `{}`,
-        # which every handler resolves fail-closed. See
+        # which every handler resolves against that installed policy. See
         # `acas_posting.cli.args.install_connection_policy`.
     )
     _init01(ws)

@@ -340,11 +340,12 @@ class _WorkingStorage:
     # [copybooks/mysql-procedures.cpy:L72-L77], transport being compiled into
     # `cobmysqlapi.c`.
     #
-    # An empty mapping is the SAFE answer, not the absent one: every handler
-    # declares `transport: TransportSecurity | None = None` and
-    # `connection._require_permitted_connection` resolves `None` fail-closed,
-    # permitting a Unix socket or a loopback address and refusing every other
-    # target.  Carried opaquely - nothing here reads a key of it - and
+    # An empty mapping is a STATEMENT, not an omission: every handler declares
+    # `transport: TransportSecurity | None = None` and
+    # `connection._require_permitted_connection` resolves `None` against the
+    # INSTALLED PROCESS POLICY, which under the exact-parity default reports an
+    # unencrypted non-local hop at WARNING and connects, exactly as the compiled
+    # open does (rule R-3).  Carried opaquely - nothing here reads a key of it - and
     # `dal/facade.py` projects it onto whatever extras each handler declares.
     dal_options: Mapping[str, object]
 
@@ -1107,7 +1108,7 @@ def run(
         post_record_cnt=0,
         clear_posting_file=clear_posting_file,
         # `None` and `{}` are the same thing - no declaration - and both leave
-        # every handler at its fail-closed default.  Copied rather than aliased so
+        # every handler under the installed process policy.  Copied rather than aliased so
         # the caller's mapping cannot change under a run in progress.
         dal_options=dict(dal_options) if dal_options else {},
     )

@@ -369,7 +369,10 @@ the seven `acas_posting/cli/` route modules, and importing all seven pulls in el
 program modules — but **none of their own functions is called**. Import proves the module parses and
 that its own imports resolve; it does not exercise its logic. What closes that gap is the scenario
 tier, and the evidence for it is the per-scenario empty diff in
-[`scenario-diff-evidence.md`](scenario-diff-evidence.md) §10, not this table.
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md) §10, not this table — and that diff is
+against the **disclosed-transformed diagnostic** oracle rather than the frozen one, because the frozen
+sources do not compile from this checkout. So the gap is closed to the extent that the two
+implementations are shown to agree, and no further; §0 of that document states the position.
 
 ---
 

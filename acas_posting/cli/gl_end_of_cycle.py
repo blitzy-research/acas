@@ -569,7 +569,7 @@ def load00(
             COBOL operand - the frozen `CALL` [general/general.cbl:L715-L718]
             passes four things and no fifth. `None`, which `main` leaves it at,
             means "use the one policy `args.install_connection_policy` installed",
-            and every handler resolves that fail-closed.
+            and every handler resolves an unstated declaration against it.
 
     Returns:
         `WS-Term-Code` as the callee left it - `pic 99` [copybooks/wscall.cob:L10], so
@@ -607,7 +607,7 @@ def load00(
         #  having no transport policy to pass
         #  [copybooks/mysql-procedures.cpy:L72-L77] - so it is stated at the
         #  process boundary, which is the only place that knows. `None` states the
-        #  fail-closed policy, which is a statement and not an omission.
+        #  exact-parity policy, which is a statement and not an omission.
         dal_options=dal_options,
     )
 

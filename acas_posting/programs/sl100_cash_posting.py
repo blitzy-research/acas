@@ -202,12 +202,12 @@ class _State:
     #
     # ⭐ THE DEFAULT IS AN EMPTY MAPPING, WHICH IS THE SAFE ANSWER, NOT THE ABSENT
     # ONE. Every handler declares ``transport: TransportSecurity | None = None``
-    # and ``connection._require_permitted_connection`` resolves ``None``
-    # fail-closed: a Unix socket or a loopback address is permitted and any other
-    # target is refused unless a certificate authority is supplied or
-    # ``isolated_oracle=True`` is declared. This program reaches ``acas019`` for
-    # the OTM3 open-item file, so a run against a non-local server must be given
-    # the declaration by its caller - see ``run``'s ``dal_options``. Carried
+    # and ``connection._require_permitted_connection`` resolves ``None`` against
+    # the INSTALLED PROCESS POLICY: under the exact-parity default an unencrypted
+    # non-local hop is reported at WARNING and connected to, as the compiled open
+    # does (rule R-3), and only an explicitly hardened policy refuses it. This
+    # program reaches ``acas019`` for the OTM3 open-item file, so a declaration
+    # meant for it comes from its caller - see ``run``'s ``dal_options``. Carried
     # opaquely: nothing here reads a key of it.
     dal_options: Mapping[str, object]
 
@@ -321,7 +321,7 @@ def _new_state(
     file_access = FileAccess()
     dal_common = AcasDalCommonData()
     # `None` and `{}` are the same thing here - no declaration - and both leave
-    # every handler at its fail-closed default. Copied rather than aliased so the
+    # every handler under the installed process policy. Copied rather than aliased so the
     # caller's mapping cannot change under a run in progress.
     handler_options: Mapping[str, object] = dict(dal_options) if dal_options else {}
 

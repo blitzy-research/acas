@@ -146,12 +146,19 @@ services:
     #    3. It trains the wrong habit: a fixture that needs no credential
     #       management is the fixture people copy into something that matters.
     #
-    #  Failing closed costs one export each:
+    #  Failing closed costs one export each, and EVERY ONE OF THEM IS GENERATED.
+    #  A literal here would be the committed default this block has just spent
+    #  three numbered reasons refusing -- printed as a copy-paste line, which is
+    #  the form most likely to be pasted into something that matters (finding
+    #  F-07). The application password is generated to the X(12) ceiling below:
     #
     #      export MARIADB_ROOT_PASSWORD="$(openssl rand -base64 24)"
     #      export ACAS_DB_USER=acas                   # the account the loaders expect
-    #      export ACAS_DB_PASSWORD=AcasPass1          # MAX 12 CHARS, see above
+    #      export ACAS_DB_PASSWORD="$(openssl rand -base64 12 | tr -dc 'A-Za-z0-9' | cut -c1-12)"
     #      docker compose -f harness/docker-compose.yml up -d mariadb
+    #
+    #  Keep the generated value for the whole session -- every stage of the
+    #  protocol authenticates with it -- and let it die with the shell.
     #
     #  AND WHY THE 12-CHARACTER CEILING IS NOT COSMETIC. A longer application
     #  password is silently TRUNCATED into `DB-UPass`, after which the COBOL side

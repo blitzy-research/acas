@@ -38,6 +38,7 @@ that still looked right.
 
 import dataclasses
 import difflib
+import errno
 import json
 import os
 import stat
@@ -283,21 +284,43 @@ def _default_document_candidates() -> tuple[Path, ...]:
 
 
 def _absolute_document_path(path: Path | None) -> Path:
-    """Return the absolute, symlink-free path of the document to read.
+    """Return the absolute path of the document to read, LINKS LEFT INTACT.
 
-    order: the packaged copy, which is the only one an installed distribution carries,
-    then the repository copy, which is the only one a source checkout carries.
+    Two candidates when nothing is asked for, in this order: the packaged copy, which is
+    the only one an installed distribution carries, then the repository copy, which is
+    the only one a source checkout carries.
+
+    ⭐ AN EXPLICIT PATH IS **NOT** RESOLVED, and that is the whole point of this
+    function (finding F-08). It used to return `Path(path).resolve()`, which follows
+    every symbolic link in the path BEFORE the `O_NOFOLLOW` open in
+    `_read_text_without_following_links` ever sees it - so the open was handed a path
+    with no links left in it, `O_NOFOLLOW` had nothing to refuse, and this module's
+    stated guarantee that it refuses a symbolic link was not the guarantee it enforced.
+    A caller-supplied path that is a link, or that passes through one, could therefore
+    load an artifact from somewhere else entirely under a name that looked committed.
+    It is now made absolute WITHOUT resolution - `Path.absolute()` prepends the working
+    directory and touches nothing else, leaving every `..` and every link in place for
+    `_open_without_following_links` to walk and refuse component by component.
+
+    The two DEFAULT candidates are resolved, and the difference is deliberate: they are
+    derived from this distribution's own installed location and from
+    `DATA_DICTIONARY_SEARCH_PATH`, not from a caller, and an installed tree legitimately
+    reaches its package data through a linked directory - a virtual environment's
+    `site-packages`, a linked build tree. Resolving them is what keeps the ordinary
+    default working; refusing to resolve a caller's path is what keeps the guarantee.
 
     Args:
         path: An explicit artifact path, or None for this distribution's own default.
 
     Returns:
-        The location to read, expressed absolutely, so that two spellings of one file -
-            a relative path, a path through a symbolic link - share a single memo entry
-            and therefore a single read.
+        The location to read, expressed absolutely. Two spellings of one file therefore
+            share a memo entry only when they are the same spelling: an explicit path
+            that reaches the artifact by another route reads it again rather than
+            silently borrowing the first read, which is the price of not resolving and
+            is the correct side to err on.
     """
     if path is not None:
-        return Path(path).resolve()
+        return Path(path).absolute()
     candidates = _default_document_candidates()
     for candidate in candidates:
         if candidate.is_file():
@@ -416,11 +439,133 @@ def _document_depth_exceeds(tree: object, limit: int) -> bool:
     return False
 
 
+#: Whether this platform can open a name RELATIVE TO AN OPEN DIRECTORY, which is what
+#: makes a component-by-component no-follow walk possible at all. True on Linux, where
+#: this project runs; a platform without it gets the reduced guarantee stated on
+#: `_open_without_following_links`, and says so rather than implying the stronger one.
+_SUPPORTS_DIRECTORY_RELATIVE_OPEN: Final[bool] = (
+    os.open in os.supports_dir_fd and hasattr(os, "O_NOFOLLOW")
+)
+
+
+def _open_without_following_links(path: Path) -> int:
+    """Open `path` for reading with NO symbolic link followed at ANY component.
+
+    ⭐ THE ENFORCEMENT BEHIND THE GUARANTEE (finding F-08). A single
+    `os.open(path, O_NOFOLLOW)` protects the LAST component only: every directory above
+    it is still traversed through whatever links it contains, and if the caller's path
+    was resolved first there is nothing left for even that to refuse. So the walk is
+    done here explicitly - open the anchor, then each intermediate component relative to
+    the directory already open, each with `O_DIRECTORY | O_NOFOLLOW`, and finally the
+    artifact itself with `O_NOFOLLOW`. A link anywhere in the path fails the walk with
+    `ELOOP` at the component that is one, which is a refusal naming its own cause.
+
+    `..` is passed to the kernel as a name rather than collapsed lexically, because
+    collapsing it here would erase the very component the walk needs to inspect: in
+    `dir/link/../file` a lexical collapse yields `dir/file` and never notices `link`.
+
+    Args:
+        path: The ABSOLUTE path of the artifact to open. Not resolved - see
+            `_absolute_document_path` for why.
+
+    Returns:
+        An open, read-only file descriptor the caller owns and must close.
+
+    Raises:
+        ValueError: `path` is relative, or names a directory root with no file part.
+            Both are programming errors in this module rather than operator input.
+        OSError: `ELOOP` where a component is a symbolic link, `ENOENT` where a
+            component does not exist, `ENOTDIR` where one is not a directory, `EACCES`
+            where one cannot be read. Mapped to this module's own failures by the caller.
+    """
+    if not path.is_absolute():
+        raise ValueError(
+            f"_open_without_following_links needs an absolute path; got {path}"
+        )
+    anchor, *components = path.parts
+    if not components:
+        raise ValueError(
+            f"_open_without_following_links needs a file part; got the root {path}"
+        )
+
+    close_on_exec = getattr(os, "O_CLOEXEC", 0)
+    no_follow = getattr(os, "O_NOFOLLOW", 0)
+    directory_flag = getattr(os, "O_DIRECTORY", 0)
+
+    if not _SUPPORTS_DIRECTORY_RELATIVE_OPEN:
+        # The reduced guarantee, stated where it applies: the artifact itself is still
+        # refused if it is a link, but the directories above it cannot be checked without
+        # directory-relative opens. Unreachable on this project's platforms.
+        return os.open(path, os.O_RDONLY | no_follow | close_on_exec)  # pragma: no cover
+
+    # The anchor cannot itself be a link, so it needs no `O_NOFOLLOW`.
+    directory = os.open(anchor, os.O_RDONLY | directory_flag | close_on_exec)
+    try:
+        for component in components[:-1]:
+            below = _open_component(
+                component,
+                directory,
+                os.O_RDONLY | directory_flag | no_follow | close_on_exec,
+            )
+            os.close(directory)
+            directory = below
+        return _open_component(
+            components[-1],
+            directory,
+            os.O_RDONLY | no_follow | close_on_exec,
+        )
+    finally:
+        os.close(directory)
+
+
+def _open_component(name: str, directory: int, flags: int) -> int:
+    """Open one path component relative to `directory`, naming a link as a link.
+
+    ⭐ WHY THE ERRNO IS RE-STATED. `O_NOFOLLOW` on its own reports `ELOOP` for a linked
+    FILE but Linux reports `ENOTDIR` when `O_DIRECTORY` is also set and the component is
+    a linked DIRECTORY - the same refusal under an errno that also means "a component is
+    an ordinary file". Both are correct refusals, and a caller cannot act on either
+    until it is told which happened, so the component is `lstat`ed relative to the same
+    open directory and a link is re-raised as `ELOOP`. `lstat` is the one call that
+    describes the link rather than its target, and doing it through `dir_fd` keeps the
+    answer about the component this walk just refused.
+
+    Args:
+        name: One component, exactly as it appeared in the path. May be `..`.
+        directory: An open descriptor for the directory `name` is looked up in.
+        flags: The `os.open` flags for this component.
+
+    Returns:
+        An open descriptor for `name`.
+
+    Raises:
+        OSError: As `os.open` raises it, except that a symbolic-link component is always
+            reported as `ELOOP` whatever errno the platform chose.
+    """
+    try:
+        return os.open(name, flags, dir_fd=directory)
+    except OSError as error:
+        try:
+            is_link = stat.S_ISLNK(os.lstat(name, dir_fd=directory).st_mode)
+        except OSError:
+            is_link = False
+        if is_link and error.errno != errno.ELOOP:
+            raise OSError(
+                errno.ELOOP,
+                f"{os.strerror(errno.ELOOP)}: '{name}' is a symbolic link",
+            ) from error
+        raise
+
+
 def _read_text_without_following_links(path: Path) -> str:
     """Read one file's text, refusing a symbolic link or anything but a plain file.
 
-    `Path.resolve()` has already followed every symbolic link in the path, so what
-    remains is the window between that resolution and the open.
+    The refusal is real rather than nominal: `path` reaches here UNRESOLVED
+    (`_absolute_document_path`) and `_open_without_following_links` walks it one
+    component at a time with `O_NOFOLLOW`, so a link at any position is refused instead
+    of followed. What the opened descriptor is, is then checked on the descriptor itself
+    with `fstat`, so no second lookup of the name can substitute a different inode
+    between the two.
 
     Args:
         path: The absolute path of the artifact to read.
@@ -429,23 +574,31 @@ def _read_text_without_following_links(path: Path) -> str:
         The file's contents decoded as UTF-8.
 
     Raises:
-        DictionaryNotFoundError: Nothing is at `path`, or what is there is not a plain
-            file.
+        DictionaryNotFoundError: Nothing is at `path`, a component of `path` is a
+            symbolic link, or what is there is not a plain file.
         DictionaryParseError: The file is larger than `_MAX_DOCUMENT_BYTES`. Raised
             while reading rather than afterwards, so an oversized file is never held in
             memory whole just to be rejected.
         OSError: The file exists and is plain but cannot be read.
     """
     try:
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        descriptor = _open_without_following_links(path)
     except FileNotFoundError:
         raise DictionaryNotFoundError(_absence_message(path)) from None
     except OSError as error:
         # ELOOP from O_NOFOLLOW, ENOTDIR from a path component that is not a directory,
-        # EACCES from an unreadable file.
+        # EACCES from an unreadable file or directory.
+        symlink_note = (
+            "\nOne component of that path is a SYMBOLIC LINK. This reader follows "
+            "none, at any position, so that an artifact cannot be substituted for "
+            "the committed one under a name that looks like it: pass the real path "
+            "of the file to read."
+            if error.errno == errno.ELOOP
+            else ""
+        )
         raise DictionaryNotFoundError(
             f"{_absence_message(path)}\n"
-            f"The attempt to open it failed with: {error}"
+            f"The attempt to open it failed with: {error}{symlink_note}"
         ) from error
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):

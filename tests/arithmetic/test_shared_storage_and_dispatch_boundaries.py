@@ -557,8 +557,20 @@ def test_acas016_reuses_bridge_connection_across_fresh_buffers(
 #  `ACAS_DB_ISOLATED_ORACLE` by the policy installer - so a harness run exported
 #  the declaration, the installer never saw it, and every handler open logged the
 #  unprotected-transport warning while the Compose file said the declaration had
-#  been made. These tests fail if the two halves drift apart again, and if the
-#  fail-closed default is ever softened back into a warning.
+#  been made. These tests fail if the two halves drift apart again.
+#
+#  ⭐ AND THEY LOCK THE TWO MODES THE RIGHT WAY ROUND (finding F-02, rule R-3).
+#  An earlier revision of this block asserted that an undeclared deployment
+#  REFUSES a non-local target and refuses the frozen placeholder credentials, and
+#  said in these words that it should fail "if the fail-closed default is ever
+#  softened back into a warning". That locked a disposition the compiled program
+#  cannot produce: `Mysql-1000-Open` connects or reports (99, 911)
+#  [copybooks/mysql-procedures.cpy:L60-L128] and inspects neither the address nor
+#  the account, so a pre-connect refusal installed by DEFAULT was a validation the
+#  migrated cycle has not got - on all seven routes. The default is now
+#  exact-parity: the exposure is REPORTED and the connection is made. Hardened
+#  mode is asserted separately, below, and a run made under it is explicitly NOT
+#  parity evidence.
 #
 #  Infrastructure-free: no database, no COBOL, no Docker. Every environment is an
 #  explicit mapping, so the process environment is never read.
@@ -581,20 +593,63 @@ def test_the_plaintext_declaration_has_exactly_one_variable_name() -> None:
     ]
 
 
-def test_an_undeclared_deployment_resolves_to_the_fail_closed_policy() -> None:
-    """Nothing set means both refusals are ON, which is the production boundary."""
+def test_an_undeclared_deployment_resolves_to_the_exact_parity_policy() -> None:
+    """Nothing set means NEITHER refusal, which is what the compiled open does.
+
+    The parity contract, asserted at the resolver rather than inferred from the
+    data-access layer's own defaults: an environment that declares nothing must
+    not install a pre-connect refusal, because the frozen paragraph has no such
+    outcome [copybooks/mysql-procedures.cpy:L60-L128] (rule R-3, finding F-02).
+    """
     rdbms_params = importlib.import_module("acas_posting.cli.rdbms_params")
 
     declaration = rdbms_params.resolve_transport_policy({})
 
-    assert declaration.require_encrypted_transport is True
-    assert declaration.require_declared_placeholder_credentials is True
+    assert declaration.require_encrypted_transport is False
+    assert declaration.require_declared_placeholder_credentials is False
     assert declaration.isolated_oracle is False
     assert declaration.allow_frozen_placeholder_credentials is False
+    #  And the type's own defaults say the same thing, so a caller that builds one
+    #  directly cannot get a refusing policy it did not ask for either.
+    bare = rdbms_params.TransportPolicyParams()
+    assert bare.require_encrypted_transport is False
+    assert bare.require_declared_placeholder_credentials is False
+    #  The two layers must agree: `dal.connection.ConnectionPolicy` is what the
+    #  handlers read, and the CLI installs into it.
+    connection = importlib.import_module("acas_posting.dal.connection")
+    installed_default = connection.ConnectionPolicy()
+    assert installed_default.require_encrypted_transport is False
+    assert installed_default.require_declared_placeholder_credentials is False
+
+
+def test_hardened_mode_is_reached_only_by_naming_it_and_is_not_parity() -> None:
+    """Each refusal exists, and each is switched on by ITS OWN variable only.
+
+    Hardened mode is the right answer for a production deployment and the wrong
+    one for a parity run, so it is asserted here rather than in the default: a run
+    made under either variable refuses before the connect and therefore writes
+    nothing where the compiled program would have written, which is why the
+    project makes NO parity claim for such a run
+    ([docs/migration/scenario-diff-evidence.md]).
+    """
+    rdbms_params = importlib.import_module("acas_posting.cli.rdbms_params")
+
+    tls_only = rdbms_params.resolve_transport_policy(
+        {rdbms_params.TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE: "1"}
+    )
+    assert tls_only.require_encrypted_transport is True
+    #  One knob, one effect: asking for TLS does not also refuse the credentials.
+    assert tls_only.require_declared_placeholder_credentials is False
+
+    credentials_only = rdbms_params.resolve_transport_policy(
+        {rdbms_params.TRANSPORT_REQUIRE_DECLARED_CREDENTIALS_VARIABLE: "yes"}
+    )
+    assert credentials_only.require_declared_placeholder_credentials is True
+    assert credentials_only.require_encrypted_transport is False
 
 
 def test_the_declaration_is_the_narrow_opt_out_and_strictness_outranks_it() -> None:
-    """The harness's declaration permits plaintext; an explicit strict setting wins."""
+    """The harness's declaration silences the report; an explicit strict setting wins."""
     rdbms_params = importlib.import_module("acas_posting.cli.rdbms_params")
 
     declared = rdbms_params.resolve_transport_policy(
@@ -602,8 +657,10 @@ def test_the_declaration_is_the_narrow_opt_out_and_strictness_outranks_it() -> N
     )
     assert declared.isolated_oracle is True
     assert declared.require_encrypted_transport is False
-    # Granting plaintext grants nothing else: the credential refusal stays on.
-    assert declared.require_declared_placeholder_credentials is True
+    #  Granting plaintext grants nothing else, and it CREATES no refusal either:
+    #  the credential exposure stays reported-and-permitted until a deployment
+    #  names the credential refusal.
+    assert declared.require_declared_placeholder_credentials is False
 
     forced = rdbms_params.resolve_transport_policy(
         {
@@ -625,8 +682,11 @@ def test_the_installed_policy_carries_the_resolved_declaration() -> None:
     try:
         undeclared = args.install_connection_policy({})
         assert undeclared is connection.connection_policy()
-        assert undeclared.require_encrypted_transport is True
-        assert undeclared.require_declared_placeholder_credentials is True
+        #  EXACT PARITY ON EVERY ROUTE: this function is reached by all seven, so
+        #  these two assertions are what keep a refusal the compiled program cannot
+        #  produce off the shipped critical path (rule R-3, finding F-02).
+        assert undeclared.require_encrypted_transport is False
+        assert undeclared.require_declared_placeholder_credentials is False
 
         declared = args.install_connection_policy(
             {rdbms_params.TRANSPORT_ALLOW_PLAINTEXT_VARIABLE: "yes"}
@@ -635,6 +695,15 @@ def test_the_installed_policy_carries_the_resolved_declaration() -> None:
         assert declared.transport is not None
         assert declared.transport.isolated_oracle is True
         assert declared.require_encrypted_transport is False
+
+        #  And the hardened declaration DOES reach the installed policy, so the
+        #  operator's choice is honoured rather than quietly dropped.
+        hardened = args.install_connection_policy(
+            {rdbms_params.TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE: "1"}
+        )
+        assert hardened is connection.connection_policy()
+        assert hardened.require_encrypted_transport is True
+        assert hardened.require_declared_placeholder_credentials is False
     finally:
         connection.set_connection_policy(previous)
 

@@ -55,7 +55,17 @@ name = "acas-posting"                        # import name is `acas_posting`
 # the COBOL system's own release, which is the maintainer's record in README.TXT
 # and Changelog and is not modified here.
 version = "0.1.0"
-description = "Behaviourally exact Python 3.12 migration of the ACAS COBOL batch posting cycle"
+# ⭐ "TARGETING", NOT "IS" (finding F-05). The migration's objective is behavioural
+# exactness against the compiled COBOL, and the acceptance test for it - an empty
+# ordering-normalised state diff against the FROZEN oracle (AAP sections 0.1.1 and
+# 0.8.5) - has NOT been met from this checkout: the frozen sources do not compile,
+# because `copybooks/ACAS-SQLstate-error-list.cob` is absent while 22 of the 28
+# generated `common/*MT.cbl` bridges COPY it. See README-python-migration.md section
+# 8.7 and docs/migration/scenario-diff-evidence.md section 0. Package metadata is read
+# far from those documents - on an index page, in `pip show` - so it states the
+# objective and not an unearned result. Restore an unqualified claim only when
+# zero-transformation frozen parity evidence exists.
+description = "Python 3.12 migration of the ACAS COBOL batch posting cycle, targeting behavioural exactness (frozen-oracle parity pending)"
 # The migration's own document. README.TXT documents the COBOL system and is
 # never edited or repurposed.
 readme = "README-python-migration.md"
