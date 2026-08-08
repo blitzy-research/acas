@@ -696,7 +696,7 @@ def _move_to_unsigned_host_variable(value: int, binding: _ColumnBinding) -> int:
     """Reproduce a signed binary field's ``MOVE`` into an UNSIGNED host variable.
 
     ANOMALY ``N-signloss-twelve``, the largest instance in the checkout and the purchase
-    twin of Agent Action Plan anomaly #11.
+    twin of Agent Action Plan anomaly A-11.
 
     Args:
         value: The record field's value, signed as the copybook declares it.
@@ -2467,8 +2467,8 @@ def purchmt_ba999_end(
             declares it ``value 1``, so logging is ON as shipped.
     """
     # `if Testing-1` [common/purchMT.cbl:L1195]. The Python record exposes no condition-
-    # name predicate, so the 88 is tested inline [copybooks/Test-Data-
-    # Flags.cob:L10-L11].
+    # name predicate, so the 88 is tested inline
+    # [copybooks/Test-Data-Flags.cob:L10-L11].
     if dal_common.sw_testing == 1:
         purchmt_ca_process_logs(file_access, dal_common)
 
@@ -2597,7 +2597,7 @@ def purchmt_ca_process_logs(
 
     ``Log-File-Rec-Written`` IS NOW ADVANCED, by the adapter, modulo one
     million - the range of the frozen ``pic 9(6)``
-    [copybooks/Test-Data-Flags.cob:L20]. Leaving it alone was wrong: the counter
+    [copybooks/Test-Data-Flags.cob:L18]. Leaving it alone was wrong: the counter
     lives in ``ACAS-DAL-Common-data``, which the CALLER owns and carries across
     calls, so it is not the COBOL program's private state but part of the linkage
     this module is reproducing.

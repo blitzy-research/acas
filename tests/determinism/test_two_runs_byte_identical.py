@@ -263,7 +263,7 @@ through to the COBOL indexed-file path and never touch MySQL, both dumps come ba
 empty, the comparison exits 0, and the run is a SILENT FALSE PASS. Every scenario
 YAML pins `system.file_system_used: 1` precisely to prevent this.
 
-CHANNEL 2 - ANOMALY 16 MASKS A REJECTED DATE AS `Run-Date = 0`.
+CHANNEL 2 - ANOMALY A-16 MASKS A REJECTED DATE AS `Run-Date = 0`.
 `common/maps04.cbl` has two reject paths - the six-part test at L140-L145 reaching
 `L146 go to Main-Exit.` and the calendar-validity test at L153 reaching
 `L154 go to Main-Exit.` - and BOTH reach `Main-Exit` without touching `A-Bin`, while
@@ -429,11 +429,8 @@ FOUR AGENT-ACTION-PLAN LOCATOR DISCREPANCIES, recorded rather than quietly corre
 GOVERNING RULES
 -------------------------------------------------------------------------------
 
-THERE IS NO USER RULES DOCUMENT. `review_rules` returns exactly "No user rules
-provided.", and that one line is the complete document - so no rules file is to be
-looked for, nothing is invented to fill the gap, and enterprise-standard best
-practice applies wherever the Plan is silent. The binding rules are the six embedded
-in Agent Action Plan section 0.7.2:
+ENTERPRISE-STANDARD BEST PRACTICE APPLIES WHEREVER THE PLAN IS SILENT. The binding
+rules are the six embedded in Agent Action Plan section 0.7.2:
 
     R-1  No COBOL at runtime. Only the Python cycle is driven, out of process,
          through `harness/run_python_scenario.sh`. No `cobc`, no `cobcrun`, no
@@ -617,7 +614,7 @@ POST_FINGERPRINT_NAME: Final[str] = "python.post-fingerprint"
 # comparable while every individual assertion still passes.
 #
 # It is the `--table-digest` MODE of the dump tool rather than a program of its own
-# (finding M-10): the digest is taken over that module's `serialise_dump` output, so the
+#: the digest is taken over that module's `serialise_dump` output, so the
 # separate file existed only to load this one by path and digest what it produced.
 TABLE_DIGEST_PRODUCER: Final[str] = "dump_tables.py --table-digest"
 
@@ -707,7 +704,7 @@ FORBIDDEN_CLOCK_TOKENS: Final[tuple[str, ...]] = (
 # test outright. Both reach `Main-Exit` without touching the output field
 # [common/maps04.cbl:L146, L154], and the documented zero contract
 # [common/maps04.cbl:L163] holds only because the caller pre-zeroes at
-# [copybooks/Proc-ACAS-Mapser-RDB.cob:L78]. THAT IS ANOMALY 16, REPRODUCED AND NOT
+# [copybooks/Proc-ACAS-Mapser-RDB.cob:L78]. THAT IS ANOMALY A-16, REPRODUCED AND NOT
 # FIXED (R-4): a rejected date is specified behaviour, so neither case may raise.
 REJECTED_DATE_TEXTS: Final[tuple[str, ...]] = ("31/02/2025", "rubbish")
 REJECTED_DATE_RUN_DATE: Final[int] = 0
@@ -780,7 +777,7 @@ class DeterminismEvidence:
             CONDITION.
         diagnosis: `harness/diff_states.py`'s VALUE-FREE summary of that `TreeDiff` -
             table, column and counts, with no differing value and no primary key
-            (finding SEC-05). The EMPTY STRING when the two agree, exactly as the
+. The EMPTY STRING when the two agree, exactly as the
             report itself is zero bytes on a pass. The values are not discarded: they
             are in the two normalised trees this evidence already names.
         filenames: The filename set both trees hold, already asserted equal.
@@ -933,7 +930,7 @@ def _assert_five_keys_in_order(
     meaningful only because a dump has no timestamp, no server version, no connection
     info, no scenario name and no side - a single such key would make this whole file
     pass trivially on every run. `harness/diff_states.py` makes the same check inside
-    `load_dump`; it is repeated here under its own name so a reviewer can see the
+    `load_dump`; it is repeated here under its own name so a reader can see the
     argument being defended rather than having to trust that it is made somewhere.
 
     Args:
@@ -1085,7 +1082,7 @@ def _assert_effect_witness(
 ) -> tuple[str, ...]:
     """LAYER 2b - assert THIS run did to the bounded tables what the scenario declares.
 
-    ⭐ THE GAP THIS CLOSES, AND WHY THE OTHER FOUR LAYERS CANNOT. Layer 1 proves the
+    THE GAP THIS CLOSES, AND WHY THE OTHER FOUR LAYERS CANNOT. Layer 1 proves the
     trees are present and well formed. Layer 2 proves run A's tables are not all empty -
     but the SEEDED rows are counted, so it passes for a run that wrote nothing. Layer 2a
     proves run A reached the declared exit status - but a no-op exits zero. Layer 3
@@ -1222,7 +1219,7 @@ def _assert_clock_witness(run: RelocatedRun) -> None:
       channel documented at [copybooks/wssystem.cob:L111-L114] and
       [common/acas007.cbl:L316-L320].
     * the Run-Date PASS marker is emitted only after the runner reads `RUN-DAT` back
-      after the operation and observes the pinned 155127. This closes anomaly 16's
+      after the operation and observes the pinned 155127. This closes anomaly A-16's
       silent-zero channel [common/maps04.cbl:L146, L154] and
       [copybooks/Proc-ACAS-Mapser-RDB.cob:L78].
 
@@ -1252,7 +1249,7 @@ def _assert_clock_witness(run: RelocatedRun) -> None:
         f"{RUN_DATE_WITNESS!r}.\n"
         f"  The runner emits that marker only after reading SYSTEM-REC.RUN-DAT back "
         f"from MariaDB after the operation and observing {PINNED_RUN_DATE}. A zero "
-        f"would expose anomaly 16: maps04 returns without touching its output at "
+        f"would expose anomaly A-16: maps04 returns without touching its output at "
         f"[common/maps04.cbl:L146, L154], masked by the caller's pre-zero at "
         f"[copybooks/Proc-ACAS-Mapser-RDB.cob:L78].\n"
         f"  The old GLBATCH-REC.POSTED witness is intentionally not used: measured "
@@ -1314,7 +1311,7 @@ def _execute_run(
     # BEHAVIOURAL result whose database effect must still be captured. Absence is
     # evidence, and a helper that short-circuited the dump would destroy it.
     run = protocol.run_python(scenario)
-    #  WRAPPER HEALTH, DIAGNOSED BY CATEGORY (finding F-14). Wrapper health is distinct
+    #  WRAPPER HEALTH, DIAGNOSED BY CATEGORY. Wrapper health is distinct
     #  from operation disposition and must be zero before this leg's OPERATION_STATUS
     #  record or database readback can be trusted - but the two reasons it can be
     #  non-zero are not the same finding: 69 is `EX_BEHAVIOUR`, the cycle ran and
@@ -1862,7 +1859,7 @@ def test_two_python_runs_are_byte_identical(
     #
     #  EVERY TABLE DUMP, and deliberately NOT `_manifest.json`. The obligation quoted
     #  above is that two runs "produce byte-identical DUMPS", and the manifest is not a
-    #  dump - it is the provenance OF one. Since finding F-34 expanded it, it records
+    #  dump - it is the provenance OF one. It records
     #  this run's `run_id`, the exact `command` that produced it and the digest of the
     #  manifest it was normalised from, so two runs' manifests MUST differ: the
     #  same-side contract selected in the fixture requires the two run ids to be
@@ -1872,8 +1869,7 @@ def test_two_python_runs_are_byte_identical(
     #
     #  THE MANIFEST IS STILL COMPARED, on the part of it that is state rather than
     #  provenance - see COMPARISON 3. Skipping it outright would drop the row-count and
-    #  per-file-digest cross-check the earlier version of this comparison was really
-    #  relying on.
+    #  per-file-digest cross-check that this comparison actually relies on.
     #
     #  This is where a serialisation-level difference is caught. The structural diff
     #  reads parsed JSON, so it would report two dumps with different key order,
@@ -2112,7 +2108,7 @@ def test_clock_has_no_real_time_fallback(
     # [common/maps04.cbl:L153-L154] - while its own remarks claim "Date errors
     # returned as A-Bin equal zero" [common/maps04.cbl:L163]. The contract holds only
     # because the caller pre-zeroes at [copybooks/Proc-ACAS-Mapser-RDB.cob:L78]. THAT
-    # IS ANOMALY 16, AND IT IS REPRODUCED, NOT FIXED (R-4). No validation is added
+    # IS ANOMALY A-16, AND IT IS REPRODUCED, NOT FIXED (R-4). No validation is added
     # here to reject these texts earlier or more loudly (R-3): the point is precisely
     # that a rejected date is silent, which is why layer 3 requires the runner's
     # post-run database readback marker rather than trusting an exception that never
@@ -2126,7 +2122,7 @@ def test_clock_has_no_real_time_fallback(
             f"[common/maps04.cbl:L146, L154], and the caller's pre-zero at "
             f"[copybooks/Proc-ACAS-Mapser-RDB.cob:L78] is what makes the documented "
             f"zero contract [common/maps04.cbl:L163] true. That masking mechanism is "
-            f"anomaly 16 and must be reproduced exactly - a value other than zero "
+            f"anomaly A-16 and must be reproduced exactly - a value other than zero "
             f"means acas_posting/clock.py has stopped reproducing it, and a raised "
             f"exception would mean a validation had been ADDED (R-3, R-4)."
         )
@@ -2384,7 +2380,7 @@ def test_the_effect_witness_discriminates_a_no_op_from_a_posting_run(
 ) -> None:
     """LAYER 2b's own logic, proven on a bare host - because the layer itself cannot be.
 
-    ⭐ WHY THIS TEST HAS TO EXIST. Layer 2b lives inside `determinism_pair`, which is
+    WHY THIS TEST HAS TO EXIST. Layer 2b lives inside `determinism_pair`, which is
     marked `database`/`oracle` and SKIPS without the Compose stack. So on a bare host
     the guard that closes channel 3 is never executed, and a guard that has never run
     is indistinguishable from one that cannot fire. This test drives

@@ -2,7 +2,7 @@
 # ACAS -- COBOL to Python migration of the batch posting cycle.
 #
 # SCENARIO control_total_mismatch -- the rejection route of the General Ledger
-# posting cycle. It is one of the nine scenario definitions the protocol
+# posting cycle. It is one of the eight scenario definitions the protocol
 # expects, per Agent Action Plan section 0.8.5 and
 # [harness/docker-compose.yml "STAGES."]: clean_batch_gl, clean_batch_sl,
 # clean_batch_pl, clean_batch_irs, mixed_accepted_rejected, period_end_totals,
@@ -51,7 +51,7 @@
 # UNBALANCED, because that state IS the scenario. Making the control totals
 # agree would delete the behaviour under test.
 #
-# KEYS APPEAR IN A FIXED ORDER, identically in all nine scenario files, and
+# KEYS APPEAR IN A FIXED ORDER, identically in all eight scenario files, and
 # the file is UTF-8, ASCII-only, LF-terminated, two-space indented and free of
 # tabs. It carries no wall-clock reading, no host identity, no process id, no
 # random value and no absolute host path, so two captures of one scenario are
@@ -408,7 +408,7 @@ description: |
   [general/general.cbl:L462-L463]. The field is Cyclea, a binary character
   [copybooks/wssystem.cob:L62], redefined as scycle
   [copybooks/wssystem.cob:L63], and the seeded batch's Bcycle must equal it.
-  period and date_form are pinned so that all nine scenario files share one
+  period and date_form are pinned so that all eight scenario files share one
   system block and the seeded record is fully determined. period is the
   cycles-per-quarter divisor used only by gl080, which no scenario in this
   harness drives, so it is INERT on this route
@@ -422,7 +422,7 @@ description: |
   three-state switch as an explicit option and the harness maps a space or an
   empty value to the off state, so the seeded row must carry the same space.
   sl_autogen, pl_autogen, s_flag_p and p_flag_p are INERT on this General Ledger
-  route and are present only so that all nine scenario files share one system
+  route and are present only so that all eight scenario files share one system
   block.
 
   THE CREDENTIAL PRECONDITION
@@ -475,27 +475,16 @@ description: |
   none, which is why no answer key is declared below.
 
   THE ACCEPTANCE PROTOCOL, AND WHAT AN EMPTY DIFF PROVES HERE
-  TEN stages, in this order, one scenario at a time and nothing
-  alongside it. harness/normalize.py is the single registry and
-  `harness/normalize.py --print-stages' prints it, so this list is a restatement
-  and never the authority:
-    1 reset the schema and seed the scenario
-    2 run the compiled COBOL cycle
-    3 dump the COBOL state
-    4 normalise the COBOL dump
-    5 reset the schema and RE-SEED THE SAME SCENARIO -- the same fixture bytes, so
-      the Python cycle starts from the state the COBOL cycle started from and not
-      the state it left
-    6 run the migrated Python cycle
-    7 dump the Python state
-    8 normalise the Python dump
-    9 verify both captures are published -- BEFORE a single row is compared,
-      because two PARTIAL captures can produce an empty diff and so pass a
-      comparison that compared nothing
-    10 diff the two normalised trees
-  harness/build_oracle.sh and harness/seed.sh --build-fixtures come before stage 1 and are
-  not stages: the first runs once per image, the second once per change to a
-  scenario's seed records.
+  TEN stages, one scenario at a time and nothing alongside it.
+  `harness/normalize.py --print-stages' is the registry and the authority. The
+  two stages a reader would not guess are stage 5, which re-seeds THE SAME
+  FIXTURE BYTES so the Python cycle starts from the state the COBOL cycle
+  started from rather than the state it left, and stage 9, which verifies both
+  captures are published BEFORE a single row is compared, because two PARTIAL
+  captures produce an empty diff and so pass a comparison that compared nothing.
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures precede stage 1
+  and are not stages: the first runs once per image, the second once per change
+  to a scenario's seed records.
   AN EMPTY NORMALISED DIFF IS THE ONLY PASS CONDITION; a stage that exits non-zero
   has produced no evidence rather than weaker evidence, so the protocol is
   restarted from the seed rather than carried forward. The per-scenario outcome
@@ -510,23 +499,23 @@ description: |
   degeneration described under THE CYCLE FILTER MUST MATCH.
   Two runs of this scenario under the same pinned clock must additionally
   produce byte-identical dumps; that is what the determinism suite asserts.
-  This file's consumers are all present in the checkout:
-  the four documents under docs/migration/, the eight modules under
-  tests/scenarios/ (one per scenario), and harness/run_python_scenario.sh.
-  The seed FLAT FILES are deliberately not in the
-  checkout: the records are declared above under seed_records and
-  harness/seed.sh --build-fixtures builds the files from them inside the image, because
-  fifteen of the seventeen frozen loaders read ORGANIZATION INDEXED or RELATIVE
-  files whose on-disk form belongs to the Berkeley DB version that image carries.
-  THE GENERAL LEDGER CAVEAT APPLIES HERE WITH MAXIMUM FORCE. The maintainer
-  records that he has "not had any time to work with General at all since it was
-  migrated over" to the current compiler [README.TXT:L50-L53], while testing is
-  complete for the other ledgers. The General Ledger is therefore the
-  least-exercised ledger in the system, and this scenario deliberately drives a
-  REJECTION path through it. So EXPECTED VALUES COME ONLY FROM THE ORACLE, never
-  from the documentation and never from reasoning about intent. If the compiled
-  General Ledger cycle behaves surprisingly, the surprise is the specification.
-
+  This file's consumers are all in the checkout: the four documents under
+  docs/migration/, the eight modules under tests/scenarios/ and
+  harness/run_python_scenario.sh. Its seed FLAT FILES are not: the records are
+  declared above under seed_records and harness/seed.sh --build-fixtures builds
+  the files inside the image, because fifteen of the seventeen frozen loaders
+  read ORGANIZATION INDEXED or RELATIVE files whose on-disk form belongs to the
+  Berkeley DB version that image carries.
+  THE GENERAL LEDGER CAVEAT -- WHY EXPECTED VALUES COME ONLY FROM THE ORACLE
+  The maintainer reports the other ledgers as tested but records no work on
+  General since it was migrated to the current compiler [README.TXT:L50-L53],
+  and General contributes most of the in-scope programs.
+  It is also the least-exercised ledger in the system, and this scenario
+  deliberately drives a REJECTION path through it.
+  So no expected value for this scenario is derived from documentation or from
+  reasoning about intent: if the compiled cycle behaves surprisingly, THE
+  SURPRISE IS THE SPECIFICATION (rule R-6), and the arbitration is recorded in
+  docs/migration/ambiguity-resolutions.md.
   THE CONSUMER CONTRACT -- WHY SOME VALUES APPEAR UNDER TWO KEYS
   This file serves consumers with two different reading strategies, so a few
   values are published under both a grouped and a flat key. THE PAIRS ARE
@@ -573,25 +562,15 @@ description: |
   map is empty.
 
   LOCATOR PROVENANCE
-  Every line number cited above was read directly out of the frozen source in
-  this checkout rather than copied from a plan, and several planning citations
-  were found to be misattributed. The ones corrected here are worth knowing when
-  cross-reading: the phase-one and phase-two labels are at
-  [general/gl070.cbl:L284] and [general/gl070.cbl:L292] and not the lines above
-  them; the terminate-code raise is at [general/gl070.cbl:L289] and not at
-  [general/gl070.cbl:L288], which performs a display paragraph; the range
-  [general/gl070.cbl:L312-L313] is the phase-one CYCLE FILTER and raises
-  nothing; the phase-two filter is at [general/gl070.cbl:L457-L458] with its
-  extra status conditions at [general/gl070.cbl:L460-L463]; the batch record has
-  no actual-DR or actual-CR field at all [copybooks/wsbatch.cob:L40-L44]; and
-  the end-batch paragraph of the control-total gate runs to
-  [general/gl051.cbl:L1134] with the verdict banner ending at
-  [general/gl051.cbl:L1133].
+  Every line number cited above was read out of the frozen source in this
+  checkout; docs/migration/traceability.md carries the corrected-locator record.
+  Two facts are cited only here: the batch record has no actual-DR or actual-CR
+  field at all [copybooks/wsbatch.cob:L40-L44], and the end-batch paragraph of the
+  control-total gate runs to [general/gl051.cbl:L1134] with the verdict banner
+  ending at [general/gl051.cbl:L1133].
   THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common, copybooks,
   general, sales, purchase, irs, stock or mysql is a defect in the migration
   however harmless it looks.
-
-
 subsystem: general
 
 # Read by the COBOL runner as the default for its --operation option. The
@@ -609,7 +588,7 @@ clock:
 # so it stays text: unquoted it would parse as a date object, which the reader
 # refuses [harness/run_python_scenario.sh acas_py_read_scenario]. The binary form is the
 # Run-Date binary-long the system record must hold
-# [copybooks/wssystem.cob:L67]. Identical in all nine scenario files.
+# [copybooks/wssystem.cob:L67]. Identical in all eight scenario files.
 run_date_text: "21/09/2025"
 run_date_binary: 155127
 

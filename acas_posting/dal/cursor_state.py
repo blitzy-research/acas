@@ -28,8 +28,6 @@ Everything here follows from those three sentences:
 3. **The interface defines which key and the relation** - the caller supplies
    both, the key through the key-of-reference number and the relation through
    ``Access-Type``.
-
-EMULATED, NOT APPROXIMATED
 """
 
 from __future__ import annotations
@@ -580,7 +578,7 @@ TABLE_OF_KEYNAMES: Final[Mapping[str, tuple[KeyOfReference, ...]]] = (
                 ),
             ),
             # -----------------------------------------------------------------
-            #  ⭐ THE ONE KEY OF REFERENCE THAT RESTS ON AN OPEN QUESTION (MJ-09).
+            #  THE ONE KEY OF REFERENCE THAT RESTS ON AN OPEN QUESTION.
             #
             #  `POST-KEY` is transcribed here because that is what the frozen bridge
             #  DECLARES as its key of reference [common/glpostingMT.scb:L232-L234] --
@@ -591,8 +589,8 @@ TABLE_OF_KEYNAMES: Final[Mapping[str, tuple[KeyOfReference, ...]]] = (
             #  maintainer's own warning, at [common/glpostingMT.scb:L229] and verbatim
             #  in the generated program at [common/glpostingMT.cbl:L229]:
             #
-            #      *>  WARNING POST-KEY MAY WELL NEED CHANGING TO POST-RRN & RDB made
-            #          to index fld.
+            #  *>  WARNING POST-KEY MAY WELL NEED CHANGING TO POST-RRN & RDB made
+            #  to index fld.
             #
             #  And the schema agrees with the warning rather than the declaration:
             #  `POST-RRN` is GLPOSTING-REC's PRIMARY KEY [mysql/ACASDB.sql:L155, :L169],
@@ -608,7 +606,7 @@ TABLE_OF_KEYNAMES: Final[Mapping[str, tuple[KeyOfReference, ...]]] = (
             #  [common/glpostingMT.cbl:L1053-L1066] -- and it explicitly does NOT claim
             #  that START/READ NEXT follows `POST-RRN`, nor erase the warning.
             #
-            #  ⚠️ WHY IT IS STILL OPEN, WHICH IS NOT FOR WANT OF TRYING. Deciding it
+            #   WHY IT IS STILL OPEN, WHICH IS NOT FOR WANT OF TRYING. Deciding it
             #  needs a walk over rows whose `POST-KEY` and `POST-RRN` orderings DIFFER.
             #  That seed is unreachable through the frozen loaders: because
             #  `HV-POST-RRN` is never loaded while `POST-RRN` is the primary key, every
@@ -808,7 +806,7 @@ TABLE_OF_KEYNAMES: Final[Mapping[str, tuple[KeyOfReference, ...]]] = (
 # Read from the frozen `mysql/ACASDB.sql`, whose twenty-two in-scope tables each declare
 # a SINGLE-COLUMN primary key and ZERO secondary indexes.
 #
-# ⭐ `GLPOSTING-REC` is the one table whose primary key here (`POST-RRN`) is NOT the key
+# `GLPOSTING-REC` is the one table whose primary key here (`POST-RRN`) is NOT the key
 # of reference declared above (`POST-KEY`). That divergence is the frozen source's, not
 # this module's, and it is the open half of `Q-9` -- see the annotated entry above.
 TABLE_PRIMARY_KEYS: Final[Mapping[str, str]] = MappingProxyType(
@@ -1888,8 +1886,8 @@ def start(
         fs_reply, we_error, locator = refusal
         #  ONE ERROR, at the level a refusal deserves. The verb was rejected and
         #  `FS-Reply` 99 goes back to the caller, so this is a failure and not a
-        #  trace - it used to be DEBUG, which made a permanently-failing verb
-        #  (anomaly A6) invisible at the level an operator watches. Only the table
+        #  trace. At DEBUG it would leave a permanently-failing verb (anomaly A6)
+        #  invisible at the level an operator watches. Only the table
         #  name, the paragraph and the frozen locator are reported: no key, no
         #  statement, no value.
         log_handler_failure(
@@ -1981,16 +1979,16 @@ def start(
     except Exception as error:  # any driver error takes this path - see below
         # A failed statement reaches `(21, 0)` by being OVERWRITTEN, not by
         # being classified, and both steps are in the frozen source:
-        #   1. `Mysql-1210-Command` calls `MySQL_query` and on a non-zero return
-        #      performs `Mysql-1100-Db-Error`
-        #      [copybooks/mysql-procedures.cpy:L165-L177], which sets `(99, 911)`
-        #      [copybooks/mysql-procedures.cpy:L127-L128]. There is NO `go to`
-        #      after it, so execution continues and leaves `WS-MYSQL-Count-Rows`
-        #      at zero.
-        #   2. Back in `ba060`, `if WS-MYSQL-Count-Rows = zero` is therefore
-        #      true, errno is non-zero, and `move 21 to fs-reply` /
-        #      `move zero to we-error` [common/glpostingMT.cbl:L779-L780]
-        #      REPLACE the pair from step 1.
+        #  1. `Mysql-1210-Command` calls `MySQL_query` and on a non-zero return
+        #  performs `Mysql-1100-Db-Error`
+        #  [copybooks/mysql-procedures.cpy:L165-L177], which sets `(99, 911)`
+        #  [copybooks/mysql-procedures.cpy:L127-L128]. There is NO `go to`
+        #  after it, so execution continues and leaves `WS-MYSQL-Count-Rows`
+        #  at zero.
+        #  2. Back in `ba060`, `if WS-MYSQL-Count-Rows = zero` is therefore
+        #  true, errno is non-zero, and `move 21 to fs-reply` /
+        #  `move zero to we-error` [common/glpostingMT.cbl:L779-L780]
+        #  REPLACE the pair from step 1.
         #
         # So the observable status of a broken START statement is `(21, 0)` - not
         # `(99, 911)`, and not the `990`/`989` that belong to read-indexed. The

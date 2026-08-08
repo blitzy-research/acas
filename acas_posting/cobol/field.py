@@ -229,9 +229,10 @@ class FieldDescriptor:
                     "characters or table entries cannot be negative"
                 )
 
-        # digits == integer_digits + scale holds for all 1015 entries of the generated
-        # artifact, with zero exceptions, so a contradiction here is always a hand-
-        # authoring slip - typically a scale copied from a neighbouring declaration.
+        # digits == integer_digits + scale holds for every one of the 388 entries of the
+        # generated artifact that carries a digit count, with zero exceptions, so a
+        # contradiction here is always a hand-authoring slip - typically a scale copied
+        # from a neighbouring declaration.
         if (
             self.digits is not None
             and self.integer_digits is not None

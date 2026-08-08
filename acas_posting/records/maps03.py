@@ -203,7 +203,7 @@ carries no `Mapa03Ws` alias, no `A-*` name and nothing merged in from
 fixed is a failure, and two disagreeing declarations of one record are
 evidence, not noise.
 
-ANOMALY #16 - WHAT `u-bin` HOLDS AFTER A REJECTED DATE (RULES R-4, R-6)
+ANOMALY A-16 - WHAT `u-bin` HOLDS AFTER A REJECTED DATE (RULES R-4, R-6)
 -----------------------------------------------------------------------
 The date module documents one contract and implements another. Its own comments
 say errors come back as zero - "Date errors returned as A-Bin equal zero"
@@ -265,70 +265,42 @@ TYPE DISCIPLINE (R-2), LAYERING (0.4.3) AND DETERMINISM (R-6)
     the ten `pic 99` components   ->  int  (DISPLAY, 2 digits, no fraction)
     u-bin           binary-long   ->  int  (signed 32-bit)
 
-`u-bin` being an `int` is not a shortcut. It counts whole days, so it has no
-fractional part to carry, and any other carrier would invite fractional-day
-arithmetic that COBOL cannot express. This record holds no money at all, so no
-exact-decimal carrier is needed here and none is imported. One derived detail
-is worth stating exactly, because it is the kind of value that gets asserted
-from habit rather than read: `u-bin` carries NO picture, NO digit count and NO
-scale - the copybook declares `binary-long` on the field itself and states no
-PICTURE clause [copybooks/wsmaps03.cob:L30], so the dictionary reports all
-three as absent rather than as zero. Its whole-number nature travels on its
-usage instead: BINARY-LONG, `python_storage` INT, a four-byte width and an
-integral value domain. Writing a scale of zero here would be inventing a value
-the frozen source does not state. The ten `pic 99` components DO carry a
-picture, and their digit count and scale come from it.
+`u-bin` being an `int` is not a shortcut: it counts whole days, so it has no
+fractional part, and any other carrier would invite fractional-day arithmetic
+COBOL cannot express. This record holds no money at all, so no exact-decimal
+carrier is needed and none is imported. One derived detail is worth stating
+exactly, because it is the kind of value that gets asserted from habit rather
+than read: `u-bin` carries NO picture, NO digit count and NO scale - the copybook
+declares `binary-long` on the field and states no PICTURE clause
+[copybooks/wsmaps03.cob:L30], so the dictionary reports all three ABSENT rather
+than zero, and its whole-number nature travels on its usage instead (BINARY-LONG,
+`python_storage` INT, four bytes, integral domain). Writing a scale of zero here
+would invent a value the frozen source does not state. The ten `pic 99`
+components do carry a picture, so their digits and scale come from it.
 
-Only `FieldDescriptor` is imported of the two a record module is granted. In
-particular this module does NOT import `acas_posting.dates`: the edge runs one
-way - the date module consumes this record, and this record knows nothing about
-the date module - so a leaf that imported it would close a cycle and drag date
-logic into the record layer.
-
-LAYERING - A LEAF MODULE (SECTION 0.4.3)
-----------------------------------------
-    MAY import       the standard library, `acas_posting.cobol.field`,
-                     `acas_posting.dictionary.loader`
-    MUST NOT import  anything else - "this keeps the record layer a leaf"
-
-`FieldDescriptor` is the one package import taken, because every field is
-dictionary-backed and `FieldDescriptor.cite` already surfaces the loader's
-provenance string.
-
-That permission is also why the fixed-width mechanics the redefinition views
-need - an alphanumeric move, a reference modification and a component poke -
-are three module-private functions here rather than an import of
+`acas_posting.records` states the leaf-layering contract for every record module;
+two consequences are specific to this one. First, the fixed-width mechanics the
+redefinition views need - an alphanumeric move, a reference modification and a
+component poke - are three module-private functions rather than an import of
 `acas_posting.cobol.move`, which owns the general MOVE verb but is not on the
-record layer's list. `acas_posting/dates.py` carries the same three for its own
-working-storage records. The duplication is small, is confined to character
-mechanics that hold no business rule, and is recorded at the definitions
-instead of being removed by an import the layering forbids.
-
-This module does NOT import `acas_posting.dates`. The edge runs one way - the
-date module consumes this record, and this record knows nothing about the date
-module - so a leaf that imported it would close a cycle and drag date logic into
-the record layer. Nor does it import any other record module, any data-access
-module, the program modules, the entry points, the clock or the comparison
-oracle in its sibling tree. Nothing here starts an external process, loads a
-shared library or reaches outside Python, so the migrated cycle runs on a host
-with no COBOL compiler and no COBOL runtime present (rule R-1).
+record layer's permitted list; `acas_posting/dates.py` carries the same three for
+its own working storage, and the duplication is confined to character mechanics
+that hold no business rule and is recorded at the definitions. Second, this
+module does NOT import `acas_posting.dates`: the edge runs one way, the date
+module consuming this record and this record knowing nothing of it, so a leaf
+that imported it would close a cycle and drag date logic into the record layer.
 
 DETERMINISM (RULE R-6)
 ----------------------
 Section 0.1.1 records that "every one of the in-scope posting programs contains
 zero clock reads; the date arrives purely through linkage". THIS RECORD IS THAT
-LINKAGE. The frozen call chain holds FOURTEEN ambient date and time reads, every
-one of them in an out-of-scope menu shell or in the date-service copybook those
-shells COPY - the census is in `acas_posting/clock.py`. The one that bears on a
-posting run is `move function current-date to wse-date-block`
-[copybooks/Proc-ACAS-Mapser-RDB.cob:L72], and even that runs only on the
-FIRST-TIME capture path; a normal run derives the date from the stored
-`Run-Date`. The migration pins both observables at the entry-point boundary, in
-`acas_posting/clock.py`. So there
-is no clock here, no unpredictable value, no process-environment read and no
-filesystem walk: a date reaches these fields only because a caller put it
-there. The one thing read at import is the generated dictionary, through the
-loader's lazy cached read. See `acas_posting.records` for shared conventions.
+LINKAGE. The frozen call chain's fourteen ambient date and time reads all sit in
+out-of-scope menu shells or the date-service copybook they COPY, and the census
+plus the pinning of both observables live in `acas_posting/clock.py`. So there is
+no clock here, no unpredictable value, no environment read and no filesystem
+walk: a date reaches these fields only because a caller put it there. The one
+thing read at import is the generated dictionary, through the loader's lazy
+cached read. See `acas_posting.records` for shared conventions.
 """
 
 from __future__ import annotations
@@ -447,7 +419,7 @@ class Maps03Ws:
 
     u_date: str = " " * _DATE_TEXT_WIDTH
 
-    # u-bin binary-long [copybooks/wsmaps03.cob:L30] ANOMALY #16, RECORDED HERE AND
+    # u-bin binary-long [copybooks/wsmaps03.cob:L30] ANOMALY A-16, RECORDED HERE AND
     # SETTLED NOWHERE (rules R-4, R-6).
     u_bin: int = 0
 

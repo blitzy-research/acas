@@ -46,7 +46,7 @@ Rule R-4 makes reproducing this mandatory: the field stays in the record
 dataclass and is ABSENT FROM EVERY SQL STATEMENT here. See anomaly A3.
 
 **3. A FAILED WRITE REPORTS SUCCESS - AND IT TAKES TWO DEFECTS TO DO IT.**
-Neither is visible from one file, which is why a reviewer who checked only one
+Neither is visible from one file, which is why a reader who checked only one
 would pass it:
 
     (a) THE HANDLER SILENTLY RETRIES A FAILED WRITE AS A REWRITE, HAVING FIRST
@@ -67,7 +67,7 @@ would pass it:
     NET EFFECT: a write that fails on all 26 rows returns
     `(FS-Reply 0, WE-Error 0)` - indistinguishable from success.
 
-This is the IDENTICAL CONSTRUCT CLASS as Agent Action Plan anomaly #1, "A
+This is the IDENTICAL CONSTRUCT CLASS as Agent Action Plan anomaly A-1, "A
 missing terminating period nests a second conditional inside the first"
 [sales/sl060.cbl:L1172-L1178]. Here it is a missing `end-if` rather than a
 missing period, but the mechanism and the consequence are the same. And it is
@@ -182,61 +182,30 @@ section 0.8.2's point, quoted verbatim: "The maintainer's one-way
 COBOL-to-MySQL bridge defines the authoritative record-layout <-> table mapping
 - it is the data dictionary for this migration."
 
-THE COMPLETE DRIFT TABLE
-========================
-    #  column (type)                          host variable          copybook
-    -  ------------------------------------   --------------------   --------
-    1  IRS-FINAL-ACC-REC-KEY                  HV-IRS-FINAL-ACC-      NONE -
-       tinyint(2) unsigned  [mysql/ACASDB.sql:L215] REC-KEY 9(03) COMP     the array
-                                              [common/irsfinalMT.cbl:L172]  subscript
-       drift: bridge-only column; (none) -> 3 digits -> 2; `IRS-` prefix added;
-              written from `move A to HV-...` [common/irsfinalMT.cbl:L481] and read
-              back as the subscript at [:L455-L456]
-
-    2  IRS-AR1 char(24)     [mysql/ACASDB.sql:L216] HV-IRS-AR1 X(24)       ar1-1 ...
-                                              [common/irsfinalMT.cbl:L173]  ar1-26
-                                                                     [:L9-L34]
-                                                    redefined `ar1 occurs 26`
-                                                    [copybooks/irswsfinal.cob:L36]
-       drift: 26 copybook fields -> 1 column x 26 rows; width EXACT (no
-              24->32 drift as in `nominalMT`); `IRS-` prefix added
-
-    3  IRS-AR2 char(1)      [mysql/ACASDB.sql:L217] HV-IRS-AR2 X(1)        ar2-1 ...
-                                              [common/irsfinalMT.cbl:L174]  ar2-26
-                                                                     [:L39-L64]
-                                                    redefined `ar2 occurs 26`
-                                                    [copybooks/irswsfinal.cob:L66]
-       drift: 26 copybook fields -> 1 column x 26 rows; width EXACT; `IRS-`
-              prefix added
-
-    -  NO COLUMN                              NO HOST VARIABLE       ar3 x(5)
-                                                              [copybooks/irswsfinal.cob:L68]
-       drift: SILENTLY DROPPED - see headline 2 and anomaly A3
-
 THE FIELD-TO-DICTIONARY MAPPING IS UNUSUAL THREE WAYS  (rule R-5)
 =================================================================
 Rule R-5 requires every field to map to a data-dictionary entry, and section
-0.8.1 makes the ordering a directive rather than a preference: "Data dictionary
-first. ... every Python field definition cites its entry. This ordering is a
-directive, not a preference - it is what prevents fields being transcribed by
-eye." All three peculiarities here are recorded in the generated artifact and
-re-read at import time by :data:`COLUMNS`:
+0.8.1 makes the ordering a directive: "Data dictionary first. ... every Python
+field definition cites its entry." All three peculiarities are recorded in the
+generated artifact and re-read at import time by :data:`COLUMNS`; the
+column-by-column copybook / host-variable / column table with its drift and
+derivation flags is in ``docs/migration/traceability.md`` under ``IRSFINAL-REC``
+and is not restated here. What is local to this module:
 
-    `IRS-FINAL-ACC-REC-KEY`   HAS NO COPYBOOK FIELD. Its entry is one-sided,
-                              `presence(in_copybook=False, in_bridge=True,
-                              in_column=True)`, and carries a derivation note
-                              naming the array subscript as its ONLY source -
-                              `move A to HV-IRS-FINAL-ACC-REC-KEY`
-                              [common/irsfinalMT.cbl:L481] on write, and
-                              `AR1 (HV-IRS-FINAL-ACC-REC-KEY)`
-                              [common/irsfinalMT.cbl:L455-L456] on read.
-    `IRS-AR1` / `IRS-AR2`     EACH MAP TO 26 COPYBOOK FIELDS - `ar1-1` ...
-                              `ar1-26` and `ar2-1` ... `ar2-26` - plus the
-                              `occurs 26` redefines that overlay them.
-    `ar3`                     MAPS TO NOTHING AT ALL. A deliberate omission
-                              with no column, recorded as an omission per
-                              section 0.5.3, "Deliberate omissions are recorded
-                              as omissions."
+* ``IRS-FINAL-ACC-REC-KEY`` **has no copybook field.** Its entry is one-sided -
+  ``presence(in_copybook=False, in_bridge=True, in_column=True)`` - and its
+  derivation note names the array subscript as its ONLY source: ``move A to
+  HV-IRS-FINAL-ACC-REC-KEY`` [common/irsfinalMT.cbl:L481] on write and
+  ``AR1 (HV-IRS-FINAL-ACC-REC-KEY)`` [:L455-L456] on read. Widths drift twice on
+  the way out, none -> 3 digits -> 2, and the ``IRS-`` prefix is the bridge's.
+* ``IRS-AR1`` and ``IRS-AR2`` **each map to 26 copybook fields** - ``ar1-1`` ...
+  ``ar1-26`` [copybooks/irswsfinal.cob:L9-L34] and ``ar2-1`` ... ``ar2-26``
+  [:L39-L64] - plus the ``occurs 26`` views that redefine them [:L36] [:L66], so
+  one record is 26 rows. Both widths are EXACT at all three layers, with none of
+  the 24 -> 32 drift ``nominalMT`` shows.
+* ``ar3 x(5)`` [copybooks/irswsfinal.cob:L68] **maps to nothing at all** - no
+  host variable and no column, so it is silently dropped (A3). Recorded as an
+  omission per section 0.5.3 rather than left implicit.
 
 THE `REDEFINES` PAIR - WHO KEEPS IT IN STEP
 ===========================================
@@ -367,12 +336,12 @@ ANOMALY REGISTER - REPRODUCED, NEVER FIXED  (rule R-4)
 Rule R-4, verbatim: "There is no test suite: compiled COBOL execution is the
 behavioral specification, defects included. A defect reproduced is correct; a
 defect fixed is a failure." Section 0.7.4 C-4 adds the mechanism: "a comment at
-each reproduction site citing the COBOL locator." A1 to A31 are this module's
-register as enumerated in the migration brief; A32 to A47 were found while
-reading the frozen source for this module and are new. Every entry below either
-has a `[<path>:L<n>]` comment at its reproduction site, or - where it is
-flat-file-only and therefore outside the RDB surface - is named here as a
-deliberate omission with its locator.
+each reproduction site citing the COBOL locator." FORTY-SEVEN entries, A1 to A47:
+A1 to A31 come from the migration brief and A32 to A47 were found while reading
+the frozen source for this module. Every entry either has a `[<path>:L<n>]`
+comment at its reproduction site - twenty-nine do - or is named here as a
+deliberate omission with its locator, which is the disposition of the flat-file
+-only ones outside the RDB surface.
 
     A1   A FAILED WRITE REPORTS SUCCESS. Handler [common/acasirsub5.cbl:L470-L483];
          bridge [irsfinalMT.cbl:L563, :L571-L573]. Never surfaced.
@@ -387,20 +356,17 @@ deliberate omission with its locator.
          and `FS-Reply` is NOT set [common/irsfinalMT.cbl:L426-L428].
     A6   THE STATUS-SQUASHING LOOP - each iteration's failure is stashed and
          cleared, so only the LAST survives and the loop never stops early
-         [common/irsfinalMT.cbl:L509-L516]. `ba070` SETS NO `WE-Error` OF ITS OWN -
-         every one of its own status statements writes `FS-Reply` alone - but
-         that does NOT mean a caller sees zero there. `bb200-Insert` performs
-         `MYSQL-1210-COMMAND` [common/irsfinalMT.cbl:L655], which on a query failure
-         performs `Mysql-1100-Db-Error`
-         [copybooks/mysql-procedures.cpy:L166-L177], and THAT paragraph does
-         `move 99 to fs-Reply` / `move 911 to We-Error` unconditionally
-         [copybooks/mysql-procedures.cpy:L127-L128]. `ba070` then overwrites the
-         `FS-Reply` (to 22 or 99) and leaves the 911 standing, and the squash
-         saves and clears `FS-Reply` only. So a failed write returns
-         `(<last FS-Reply>, 911)` - the 911 belonging to the shared DB-error
-         paragraph rather than to this one, which is why `WE-Error` carries no
-         information about WHICH row failed. Verified by ad-hoc test rather
-         than assumed.
+         [common/irsfinalMT.cbl:L509-L516]. `ba070`'s own status statements write
+         `FS-Reply` alone and never `WE-Error`, but a caller does NOT see zero
+         there: `bb200-Insert` performs `MYSQL-1210-COMMAND` [:L655], which on a
+         query failure performs `Mysql-1100-Db-Error`
+         [copybooks/mysql-procedures.cpy:L166-L177], and that paragraph moves 99
+         to `FS-Reply` and 911 to `WE-Error` unconditionally [:L127-L128]. `ba070`
+         then overwrites the `FS-Reply` (22 or 99) and the squash saves and clears
+         `FS-Reply` only, so the 911 stands: a failed write returns
+         `(<last FS-Reply>, 911)`, the 911 belonging to the shared DB-error
+         paragraph rather than to this one - which is why `WE-Error` says nothing
+         about WHICH row failed. Verified by ad-hoc test rather than assumed.
     A7   THE BLANK-SLOT SKIP IS COMMENTED OUT, so all 26 rows are always
          written, blank ones included [common/irsfinalMT.cbl:L477-L480].
     A8   A READ VERB THAT CREATES THE FILE and writes one all-spaces record when
@@ -664,55 +630,43 @@ site, and listed here. This module has ONE.
         array-only calling pattern the read path itself produces is unchanged;
         without the guard, reading a table and rewriting it would blank every row.
 
-RULE COMPLIANCE  (Agent Action Plan section 0.7.2)
-==================================================
-There is NO user rules document for this project - `review_rules` reports "No
-user rules provided." The six binding rules are the ones section 0.7.2
-enumerates, and each is honoured here as follows.
-
-R-1, NO COBOL AT RUNTIME. No `subprocess`, `os.system`, `os.popen`, `os.exec*`,
-`ctypes` or `cffi`; no `cobc`, `cobcrun` or `cobmysqlapi.o`; no `import
-harness`; and no `fhlogger`. Every construct is reimplemented natively: the
-`SELECT`/`INSERT`/`UPDATE` the bridge assembles as literal text become bound
-statements here, and the handler's synthesised open/verb/close triples become
-Python calls.
-
-R-2, ZERO BINARY FLOATING POINT. There is no numeric DATA column in this table,
-so no `Decimal` is required and no monetary value passes through - but nothing
-here touches `float`, `complex`, `math`, builtin `round`, builtin `abs`,
-`numpy` or `pandas` either. The one numeric value, the subscript-derived key, is
-an `int` and is rendered to text by the two functions that reproduce the
-bridge's own two renderings.
-
-R-3, NOTHING ADDED. Only `SELECT`, `INSERT` and `UPDATE` are issued - and no
-`DELETE`, because the bridge has none. No DDL of any kind, no index, view or
-trigger, no Alembic; no `sessionmaker`, `Session`, `declarative_base`,
-`DeclarativeBase`, `relationship`, `Mapper`, `registry` or `MetaData`; no
-`threading`, `asyncio`, `multiprocessing`, `concurrent.futures` or pooling; and
-no `COMMIT`, `ROLLBACK` or `START TRANSACTION` - `dal/connection.py` owns the
-autocommit policy. No validation is added: no bounds check the source lacks, no
-skip of blank array slots, no `ar3` in any statement, and no check that the rows
-returned are contiguous or complete. Correction C1 is not an exception to this:
-it re-establishes the byte aliasing `redefines` already gives the compiled
-program, and adds no field, width, column, check or skip.
-
-R-4, ANOMALIES REPRODUCED. The forty entries above, each with a locator at its
-reproduction site or a named omission here.
-
-R-5, FULL TRACEABILITY. A named function per bridge and handler paragraph, the
-`CALL` parameter order preserved exactly, :data:`COLUMNS` and every width read
-from :mod:`acas_posting.dictionary.loader` rather than transcribed, and a footer
-mapping every paragraph of both files to its Python function with the `GO TO`
-class annotated at each transfer site. The one statement that has no COBOL
-counterpart is numbered and indexed rather than left unexplained - see
-TRANSLATION CORRECTIONS above and item 10 of the traceability footer.
-
-R-6, COMPILED BEHAVIOUR IS THE TIE-BREAKER. No clock, no `random`, no `uuid`,
-no `os.urandom` and no `time.sleep` - the frozen bridge cannot sleep either, per
-A39. The bridge's explicit `ORDER BY` is reproduced because it is in the source;
-it exists for REASSEMBLY rather than for determinism, and section 0.6.6's "no
-ordering nondeterminism from a secondary index" still holds because the ordering
-column is the primary key. Two questions are marked rather than guessed.
+RULE COMPLIANCE, FILE-SPECIFIC FACTS ONLY  (the six rules are Agent Action Plan
+section 0.7.2; README-python-migration.md states them once)
+==============================================================================
+R-1  Every construct is reimplemented natively: the `SELECT`/`INSERT`/`UPDATE`
+     the bridge assembles as literal text become bound statements here, and the
+     handler's synthesised open/verb/close triples become Python calls. No
+     process is spawned, no foreign library loaded, no toolchain artefact named,
+     nothing imported from the oracle's tree, and `fhlogger` is not reached.
+R-2  There is no numeric DATA column in this table, so no `Decimal` is required
+     and no monetary value passes through. The one numeric value, the
+     subscript-derived key, is an `int`, rendered to text by the two functions
+     that reproduce the bridge's own two renderings. No binary-radix numeric
+     type or numeric library appears anywhere in this file.
+R-3  Only `SELECT`, `INSERT` and `UPDATE` are issued - and no `DELETE`, because
+     the bridge has none. No DDL, no index, view or trigger, no migration tool,
+     no ORM entity or session machinery, no concurrency primitive or pool, and
+     no `COMMIT` / `ROLLBACK` / `START TRANSACTION` - `dal/connection.py` owns
+     the autocommit policy. No validation is added: no bounds check the source
+     lacks, no skip of blank array slots, no `ar3` in any statement, and no
+     check that the rows returned are contiguous or complete. Correction C1 is
+     not an exception: it re-establishes the byte aliasing `redefines` already
+     gives the compiled program, and adds no field, width, column or check.
+R-4  The forty-seven entries above, each with a locator at its reproduction site
+     or named here as a deliberate omission.
+R-5  A named function per bridge and handler paragraph, the `CALL` parameter
+     order preserved exactly, :data:`COLUMNS` and every width read from
+     :mod:`acas_posting.dictionary.loader` rather than transcribed, and a footer
+     mapping every paragraph of both files to its Python function with the
+     `GO TO` class annotated at each transfer site. The one statement with no
+     COBOL counterpart is numbered and indexed rather than left unexplained -
+     see TRANSLATION CORRECTIONS above and item 10 of the footer.
+R-6  No clock, entropy source, unique-identifier generator or sleep - the frozen
+     bridge cannot sleep either, per A39. The bridge's explicit `ORDER BY` is
+     reproduced because it is in the source; it exists for REASSEMBLY rather
+     than for determinism, and section 0.6.6's "no ordering nondeterminism from
+     a secondary index" still holds because the ordering column is the primary
+     key. Two questions are marked rather than guessed.
 
 AMBIGUITIES, ARBITRATED AGAINST COMPILED BEHAVIOUR  (rule R-6)
 ==============================================================
@@ -753,9 +707,9 @@ changes a line of code - which is what arbitrating rather than guessing was for.
           EXIST.
           RESOLVED FROM THE FROZEN SOURCE - no oracle run needed, because the
           question that remained was about INTENT and not behaviour, and R-4 makes
-          intent irrelevant: a defect reproduced is correct. The note used to say
-          "no reading of the source settles whether a caller was ever meant to be
-          able to tell", which is true and is not a behavioural question. THE
+          intent irrelevant: a defect reproduced is correct. That no reading of the
+          source settles whether a caller was ever meant to be able to tell is true,
+          and is not a behavioural question. THE
           BEHAVIOUR IS FULLY DETERMINED: the bridge tolerates a short table by
           design - "having initialised record as some rows may not be present"
           [common/irsfinalMT.cbl:L320]; the exhaustion arm sets `(10, 10)` on its way out
@@ -1587,8 +1541,8 @@ def _issue_command(
 
     ANOMALY A39 - THERE IS NO RETRY AND THERE CAN BE NONE. The whole retry arm of that
     `if`, including `perform Mysql-1300-DB-Error`, the `WE-Error = 910` test and the `go
-    to Mysql-1210-Command` re-issue, IS COMMENTED OUT [copybooks/mysql-
-    procedures.cpy:L167-L175].
+    to Mysql-1210-Command` re-issue, IS COMMENTED OUT
+    [copybooks/mysql-procedures.cpy:L167-L175].
 
     Args:
         connection: A connection from `mysql_1000_open`.

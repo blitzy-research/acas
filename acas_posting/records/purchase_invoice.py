@@ -288,7 +288,8 @@ class WsInvoiceKey:
     ih_invoice: int = field(metadata=_cited("PUINVOICE-REC.IH-INVOICE"))
 
     # `07 ih-Test pic 99 value zero. *> was binary-char value zero.`
-    # [copybooks/plwspinv.cob:L12] The comment records what this field used to be.
+    # [copybooks/plwspinv.cob:L12] The frozen comment records the field's superseded
+    # COBOL declaration; the live declaration is the `pic 99` one.
     ih_test: int = field(default=0, metadata=_cited("PUINVOICE-REC.IH-TEST"))
 
 

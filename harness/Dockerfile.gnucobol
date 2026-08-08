@@ -16,7 +16,7 @@
 #  what harness/run_cobol_scenario.sh needs to drive them.
 #
 #  EVERY EXTERNAL INPUT IS PINNED AND GATED. The ARGs below are declared so a
-#  reviewer sees each input in one place, but an ARG is only a default: the step
+#  reader sees each input in one place, but an ARG is only a default: the step
 #  after them compares every value against a hard-coded literal and FAILS THE
 #  BUILD on any deviation. That is deliberate. The compiled Cobol IS the
 #  behavioural specification, so `--build-arg GNUCOBOL_VERSION=3.1.2' would
@@ -48,7 +48,7 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - GnuCOBOL" \
       acas.harness.runtime.user="acas"
 
 
-# Declared as ARGs so a reviewer can see every external input in one place and
+# Declared as ARGs so a reader can see every external input in one place and
 # a maintainer can audit or mirror them.
 
 # GnuCOBOL 3.2 FINAL. The version is repository evidence, not a preference.
@@ -621,7 +621,7 @@ RUN set -eu; \
     echo '--- the pinned set must import ---'; \
     python3 -c 'import mysql.connector, yaml, pytest; print("mysql-connector-python", mysql.connector.__version__); print("PyYAML", yaml.__version__); print("pytest", pytest.__version__)'; \
     \
-    echo '--- the DECLARED runtime closure must be installed in full, SQLAlchemy included (finding DEP-01) ---'; \
+    echo '--- the DECLARED runtime closure must be installed in full, SQLAlchemy included ---'; \
     python3 -c 'import sqlalchemy, greenlet, typing_extensions; print("SQLAlchemy", sqlalchemy.__version__); print("greenlet", greenlet.__version__)' \
       || { echo 'FATAL: the declared runtime closure is incomplete. AAP section 0.5.1 fixes it at four names -- mysql-connector-python 26.7.0, SQLAlchemy 2.0.51 and, as SQLAlchemy s own requirements, greenlet 3.5.4 and typing_extensions 4.16.0 -- and requirements.txt section 1 pins all four hash-verified, so a --require-hashes install of that file must leave every one of them importable. One of them is not. Either a pin was dropped from the manifest or the install did not complete.' >&2; exit 1; }; \
     python3 -c 'import sqlalchemy, greenlet; assert sqlalchemy.__version__ == "2.0.51", f"FATAL: expected SQLAlchemy 2.0.51, found {sqlalchemy.__version__}"; assert greenlet.__version__ == "3.5.4", f"FATAL: expected greenlet 3.5.4, found {greenlet.__version__}"'; \
@@ -693,7 +693,7 @@ RUN set -eu; \
 #  holds one empty directory. That distinction is load-bearing for
 #  `build_oracle.sh': its clearable-build-tree guard admits an empty tree, a tree
 #  of directories only (which is exactly what this layer hands over, and which by
-#  construction contains no data), or a tree it previously marked as its own. An
+#  construction contains no data), or a tree it has already marked as its own. An
 #  earlier form of that guard tested only for strict emptiness and consequently
 #  refused every first run on a genuinely fresh stack. Either half of the pair may
 #  be changed -- this layer may stop creating `bin', or the guard may keep
@@ -777,14 +777,14 @@ ARG ACAS_UID=1001
 ARG ACAS_GID=1001
 ARG ACAS_USER=acas
 
-#  ⭐ m-02.  ONE IDENTITY, CREATED ONCE, FROM THE BUILD ARGUMENTS.
+#  m-02.  ONE IDENTITY, CREATED ONCE, FROM THE BUILD ARGUMENTS.
 #
-#  This layer used to hard-code `1001` and `acas` while the ARGs above declared
-#  `ACAS_UID`/`ACAS_GID`/`ACAS_USER`, so a build that overrode them got an account
+#  Hard-coding `1001` and `acas` here while the ARGs above declare
+#  `ACAS_UID`/`ACAS_GID`/`ACAS_USER` would give a build that overrode them an account
 #  created HERE at 1001:1001 and then RECONCILED by a second `groupmod`/`usermod`
 #  layer further down - two creations, two sources of truth, and a window in which
-#  the ownership assertions below described a different identity from the one the
-#  image finally ran as. Everything now derives from the arguments, and the
+#  the ownership assertions below describe a different identity from the one the image
+#  finally runs as. Everything derives from the arguments instead, and the
 #  reconciliation layer below verifies rather than re-creates.
 #
 #  AN OCCUPIED UID OR GID IS HANDLED EXPLICITLY, which is the other half of the
@@ -944,11 +944,10 @@ RUN set -eu; \
 #  compose side, which already neuters the set-user-ID bit at the kernel level --
 #  both are kept because they fail independently.
 # -----------------------------------------------------------------------------
-#  ⭐ m-02.  THIS LAYER VERIFIES THE IDENTITY; IT NO LONGER CREATES A SECOND ONE.
+#  THIS LAYER VERIFIES THE IDENTITY; IT DOES NOT CREATE A SECOND ONE.
 #
-#  It used to be a second, ARG-parameterised creator sitting downstream of a
-#  hard-coded 1001:1001 creator, reconciling the difference with
-#  `groupmod`/`usermod`. That arrangement had three faults the finding named:
+#  An ARG-parameterised creator sitting downstream of a hard-coded 1001:1001 creator,
+#  reconciling the difference with `groupmod`/`usermod`, would have three faults:
 #    * TWO SOURCES OF TRUTH for one identity, so the ownership assertions in the
 #      earlier layer could describe an identity the image did not finally run as;
 #    * the reconciliation could not help when the conflict was with a DIFFERENT
@@ -1079,13 +1078,12 @@ ENV ACAS_DB_HOST=mariadb \
 #      build time, so an ad-hoc install would make the running arbiter differ
 #      from the one that was built.
 # -----------------------------------------------------------------------------
-#  ⭐ m-02.  ONE `USER` DIRECTIVE, AND IT IS NUMERIC.
+#  ONE `USER` DIRECTIVE, AND IT IS NUMERIC.
 #
-#  There used to be TWO - `USER ${ACAS_UID}:${ACAS_GID}` here and a bare
-#  `USER acas` three lines further down - and the second silently overrode the
-#  first, so the numeric one was dead. They happened to resolve to the same
-#  account, which is exactly why the duplication was hard to see and worth
-#  removing: nothing warns when a Dockerfile sets USER twice.
+#  TWO would be a defect - `USER ${ACAS_UID}:${ACAS_GID}` here and a bare `USER acas`
+#  further down - because the second silently overrides the first, leaving the numeric one
+#  dead. Both resolving to the same account is exactly what makes such a duplication hard
+#  to see: nothing warns when a Dockerfile sets USER twice.
 #
 #  THE NUMERIC FORM IS THE ONE KEPT, deliberately. A name has to be resolved
 #  through /etc/passwd inside the container, so it depends on a file the runtime
@@ -1097,7 +1095,7 @@ USER ${ACAS_UID}:${ACAS_GID}
 
 WORKDIR /build
 
-#  ⭐ m-02.  `HOME` follows ${ACAS_USER} rather than repeating the literal, and the
+#  m-02.  `HOME` follows ${ACAS_USER} rather than repeating the literal, and the
 #  verification layer above asserts that the account's sixth passwd field really is
 #  /home/${ACAS_USER} - so this value cannot drift away from the account it names.
 #  It matters because `USER` with a NUMERIC id leaves HOME unset otherwise, and the

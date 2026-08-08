@@ -1101,7 +1101,7 @@ def _bridge_initialise(file_access: FileAccess) -> None:
 
     Args:
         file_access: the ``File-Access`` linkage block whose ``Logging-Data`` sub-block
-            carries the diagnostic fields [copybooks/wsfnctn.cob:L44-L56].
+            carries the diagnostic fields [copybooks/wsfnctn.cob:L44-L55].
     """
     logging_data = file_access.logging_data
     logging_data.sql_state = "0" * SQL_STATE_WIDTH
@@ -1503,7 +1503,7 @@ def open_(
     Args:
         system: the ``System-Record`` linkage parameter [common/acas029.cbl:L219], whose
             ``RDBMS-`` fields carry the six connection parameters
-            [copybooks/wsfnctn.cob:L57-L64].
+            [copybooks/wsfnctn.cob:L56-L62].
         file_access: the ``File-Access`` linkage block.
         transport: TLS material for the connection. ``None`` - what every
             in-scope caller passes - defers to the ONE policy the deployment
@@ -1972,7 +1972,7 @@ def delete_all(file_access: FileAccess) -> StatusPair:
 def _sorted_where_1_to_j(function: FileFunction) -> str:
     """Return ``WS-Where (1:J)`` for one of the two sorted reads.
 
-    ⭐ THE POINTER OVERRUNS BY ONE, AND THAT ONE CHARACTER IS OBSERVABLE. ``J`` starts at
+    THE POINTER OVERRUNS BY ONE, AND THAT ONE CHARACTER IS OBSERVABLE. ``J`` starts at
     1 and ``STRING ...
 
     Args:
@@ -2121,7 +2121,7 @@ def _sorted_read_next(
 ) -> StatusPair:
     """The body ``ba140`` and ``ba150`` share, statement for statement.
 
-    ⭐⭐ ANOMALY N-sorted-order-is-a-syntax-error. THREE INDEPENDENT DEFECTS COMPOUND
+    ANOMALY N-sorted-order-is-a-syntax-error. THREE INDEPENDENT DEFECTS COMPOUND
     HERE, and the third hides the first two.
 
     Args:
@@ -2269,8 +2269,8 @@ def _process_logs(file_access: FileAccess, dal_common: AcasDalCommonData) -> Non
     """Reproduce ``Ca-Process-Logs`` [common/acas029.cbl:L617-L621].
 
     The frozen paragraph calls ``fhlogger`` passing ``File-Access`` and ``ACAS-DAL-
-    Common-data``, gated on the ``Testing-1`` condition name [copybooks/Test-Data-
-    Flags.cob:L11] over ``SW-Testing pic 9 value 1``.
+    Common-data``, gated on the ``Testing-1`` condition name
+    [copybooks/Test-Data-Flags.cob:L11] over ``SW-Testing pic 9 value 1``.
 
     Args:
         file_access: the ``File-Access`` linkage block, whose ``Logging-Data`` sub-block
@@ -2287,7 +2287,7 @@ def _process_logs(file_access: FileAccess, dal_common: AcasDalCommonData) -> Non
     # and `WS-Log-Where` is a predicate carrying it as a literal, and escaping either
     # leaves its content intact (CWE-532).
     #
-    # `Log-File-Rec-Written` [copybooks/Test-Data-Flags.cob:L20] is `pic 9(6)`, and
+    # `Log-File-Rec-Written` [copybooks/Test-Data-Flags.cob:L18] is `pic 9(6)`, and
     # the adapter advances it by one modulo a million exactly once per record it
     # emits. The advance USED TO BE DONE HERE as well as being the adapter's job in
     # every sibling handler; doing it in one place is what makes the counter mean the

@@ -28,15 +28,13 @@ whether the migrated cycle produced what the compiled COBOL produced. Agent Acti
 Plan section 0.3.2 reinforces it: expected values come "from the compiled oracle, never
 from reading the COBOL and reasoning about what it should produce" - which is also why
 `test_the_stamped_batch_columns_agree_on_both_sides` is framed as "both sides agree" and
-never as "the value is 1". ⚠️ IT WAS ONCE NAMED
+never as "the value is 1".  IT WAS ONCE NAMED
 `test_batch_is_stamped_cleared_and_posted`, which asserted an OUTCOME the oracle
 refutes on this route: the batch is NOT stamped here, because A-NEW-18 starves the
 posting walk. A test name is read far more often than a test body, so a name that
-states a false outcome is a false claim however careful the body is (finding MJ-08).
+states a false outcome is a false claim however careful the body is.
 
-THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports that none was
-provided, so there is no on-disk rules file and no reader should look for one. The six
-binding rules R-1 to R-6 live in the Agent Action Plan itself, section 0.7.2, and their
+THE SIX BINDING RULES R-1 to R-6 live in Agent Action Plan section 0.7.2, and their
 exact wording is retrievable from the requirements. Summarised, and each named at the
 site that honours it:
 
@@ -259,7 +257,7 @@ gl072's FULL facade-verb census is eight verbs, and it was measured over the fil
 rather than assumed:
 
     GL-Batch-Open        [general/gl072.cbl:L276]
-    GL-Nominal-Open      [general/gl072.cbl:L277]
+    GL-Nominal-Open      [general/gl072.cbl:L274]
     GL-Batch-Rewrite     [general/gl072.cbl:L377]
     GL-Nominal-Rewrite   [general/gl072.cbl:L382]
     GL-Nominal-Read-Next [general/gl072.cbl:L408]
@@ -379,12 +377,12 @@ TERM_CODE_OPEN_BATCH = 5
 #  EVERY STAGE AND EVERY GUARD HAPPENS HERE, so that the two outcomes pytest can
 #  report stay separable:
 #
-#    * a stage whose failure destroys the evidence - the seed, the reset, either
-#      capture, either normalisation - and the comparison's own exit 2 raise
-#      `HarnessFaultError`. Raised from a FIXTURE, pytest reports an ERROR: the
-#      question was never asked.
-#    * a genuine behavioural difference reaches the test body and fails an `assert`,
-#      so pytest reports a FAILURE: the question was asked and answered.
+#  * a stage whose failure destroys the evidence - the seed, the reset, either
+#  capture, either normalisation - and the comparison's own exit 2 raise
+#  `HarnessFaultError`. Raised from a FIXTURE, pytest reports an ERROR: the
+#  question was never asked.
+#  * a genuine behavioural difference reaches the test body and fails an `assert`,
+#  so pytest reports a FAILURE: the question was asked and answered.
 #
 #  In pytest an exception raised in a TEST BODY is reported FAILED whatever its type,
 #  so preparation performed in a body destroys that distinction - and during bring-up,
@@ -476,7 +474,7 @@ def parity(protocol, vocabulary):
     # ERROR, while a Python side that diverges from the oracle is a behavioural
     # regression and is reported as a FAILURE by
     # `test_python_reproduced_the_oracles_disposition`.
-    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST (finding F-12). The
+    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST. The
     #  comparison below is between one COBOL run and one Python run, and it means
     #  nothing unless the two drove the same work in the same order - an empty diff
     #  between a short run and a full one being the most dangerous false pass this tier
@@ -604,16 +602,16 @@ def test_scenario_definition_preconditions(pinned_clock, vocabulary) -> None:
 
     # -------------------------------------------------------------------------
     # THE FALSE-PASS TRAP. [copybooks/wssystem.cob:L111-L114]:
-    #     111         05  RDBMS-Flat-Statuses.
-    #     112             07  File-System-Used  pic 9.
-    #     113                 88  FS-Cobol-Files-Used    value zero.
-    #     114                 88  FS-MySql-Used          value 1.
+    #  111         05  RDBMS-Flat-Statuses.
+    #  112             07  File-System-Used  pic 9.
+    #  113                 88  FS-Cobol-Files-Used    value zero.
+    #  114                 88  FS-MySql-Used          value 1.
     # and the GL-Batch handler [common/acas007.cbl:L316-L320]:
-    #     316       if       not FS-Cobol-Files-Used
-    #     317                move RDBMS-Flat-Statuses to FA-RDBMS-Flat-Statuses
-    #     318                perform  ba-Process-RDBMS
-    #     319                go to AA-Main-Exit
-    #     320       end-if.
+    #  316       if       not FS-Cobol-Files-Used
+    #  317                move RDBMS-Flat-Statuses to FA-RDBMS-Flat-Statuses
+    #  318                perform  ba-Process-RDBMS
+    #  319                go to AA-Main-Exit
+    #  320       end-if.
     # With File-System-Used = 0 the handler falls through to the COBOL-indexed path
     # and NEVER TOUCHES MySQL. Both dumps would come back empty, the comparison
     # would exit 0, and the result would be a SILENT FALSE PASS.
@@ -650,9 +648,9 @@ def test_scenario_definition_preconditions(pinned_clock, vocabulary) -> None:
     assert definition[vocabulary.scenario_keys["run_date_binary"]] == clock["run_date"]
 
     # THE IRS FAN-OUT SWITCH, PINNED EXPLICITLY. [copybooks/wssystem.cob:L179-L181]:
-    #     179         05  IRS-Instead     pic x.
-    #     180             88  IRS-Used                   value "Y".
-    #     181             88  IRS-Both-Used              value "B".   *> 26/11/16
+    #  179         05  IRS-Instead     pic x.
+    #  180             88  IRS-Used                   value "Y".
+    #  181             88  IRS-Both-Used              value "B".   *> 26/11/16
     # THREE states, and the third - a space, General Ledger only - HAS NO CONDITION
     # NAME AT ALL: both predicates are simply False. Agent Action Plan section 0.6.4:
     # "leaving it at a default would make the affected-table list ambiguous", so it
@@ -669,9 +667,9 @@ def test_scenario_definition_preconditions(pinned_clock, vocabulary) -> None:
     )
 
     # THE ACCOUNTING CYCLE. [copybooks/wssystem.cob:L62-L64]:
-    #     62         05  Cyclea          binary-char.  *> 99.
-    #     63         05  Scycle Redefines cyclea  binary-char.
-    #     64         05  Period          binary-char.  *> 99.
+    #  62         05  Cyclea          binary-char.  *> 99.
+    #  63         05  Scycle Redefines cyclea  binary-char.
+    #  64         05  Period          binary-char.  *> 99.
     # The seeded batch's `Bcycle` [copybooks/wsbatch.cob:L34] must equal it, or
     # [general/gl070.cbl:L312-L313] skips the batch on BOTH passes and nothing is
     # posted at all - a run that looks clean and proves nothing.
@@ -816,22 +814,22 @@ def test_affected_tables_are_in_scope_and_alphabetical(harness, vocabulary) -> N
     # `System-*` facade verbs, so no in-scope PROGRAM persists any of the four system
     # tables. What persists them is the MENU SHELL's exit path
     # [general/general.cbl:L656-L691]:
-    #     656  overrewrite.
-    #     657       if       File-System-Used NOT = zero
-    #     659                move     1 to File-Key-No       <- KEY 1, SYSTEM-REC
-    #     664                move     2 to File-Key-No       <- KEY 2
-    #     667                move     4 to File-Key-No       <- KEY 4
+    #  656  overrewrite.
+    #  657       if       File-System-Used NOT = zero
+    #  659                move     1 to File-Key-No       <- KEY 1, SYSTEM-REC
+    #  664                move     2 to File-Key-No       <- KEY 2
+    #  667                move     4 to File-Key-No       <- KEY 4
     # writing keys 1, 2 and 4 to both stores - and `acas_posting/cli/args.py::overrewrite`
     # REPRODUCES IT, writing key 1 unconditionally, key 2 only when the route loaded the
     # defaults record and key 4 only when it loaded the totals record. EVERY ONE OF THE
     # SEVEN ROUTES CALLS IT, so key 1 is written on BOTH SIDES OF EVERY SCENARIO: the
     # General route writes keys 1, 2 and 4, Sales and Purchase write keys 1 and 4, and
-    # the IRS route writes key 1 alone. An earlier draft of this comment said the Python
-    # command line "has no menu and never does this"; that was true before the command
-    # line grew its menu-exit persistence and is not true now.
+    # the IRS route writes key 1 alone. The Python command line DOES do this - it carries
+    # menu-exit persistence of its own - so the plausible claim that it "has no menu and
+    # never does this" is false.
     #
-    # That was ONCE taken to mean all four system tables had to be excluded as
-    # guaranteed false failures. Measurement refuted it for keys 1 and 2: SYSTEM-REC and
+    # Nor does the asymmetry mean all four system tables must be excluded as guaranteed
+    # false failures. Measurement refutes that for keys 1 and 2: SYSTEM-REC and
     # SYSDEFLT-REC come back byte-identical on the two sides, so both are now DECLARED
     # above as well as compared.
     #
@@ -916,30 +914,30 @@ def test_affected_tables_are_in_scope_and_alphabetical(harness, vocabulary) -> N
 #  database, and "a single generic rejection path would fail this directive".
 #  The five differ precisely in that second dimension:
 #
-#    1. CLEAN REJECTION, NO DATABASE EFFECT - the two entirely silent skips,
-#       [general/gl072.cbl:L291-L292] on a non-numeric batch number and
-#       [general/gl072.cbl:L306-L307] on `we-error = 999`, with a second
-#       `we-error` site at [general/gl072.cbl:L348-L349]. No message, no
-#       counter, no trace (A-13). Exercised by `mixed_accepted_rejected`.
-#    2. RUN-ABORTING REJECTION - a control-total mismatch leaves the batch open,
-#       gl070 raises 5 [general/gl070.cbl:L289], the menu gate
-#       [general/general.cbl:L810-L811] returns to the menu, and gl071 and gl072
-#       NEVER RUN. The database effect is THE ABSENCE of everything the later
-#       phases would have written, and absence is evidence. Exercised by
-#       `control_total_mismatch`.
-#    3. PARTIAL DATABASE EFFECT - the IRS half-posted double entry
-#       [irs/irs030.cbl:L1635-L1652] (A-4) and the lost update on the two VAT
-#       control accounts, snapshotted at [irs/irs030.cbl:L1602] and
-#       [irs/irs030.cbl:L1612] and rewritten from those snapshots at
-#       [irs/irs030.cbl:L1704-L1708] (A-5). Exercised by `clean_batch_irs`.
-#    4. FILE-ABANDONING REJECTION - a posting-record write failure jumps straight
-#       to end of job [irs/irs030.cbl:L1673-L1678], which still performs the two
-#       snapshot rewrites and the closes, so THE PARTIAL STATE IS COMMITTED, NOT
-#       ROLLED BACK.
-#    5. PERMANENTLY FAILING FACADE VERB - the transfer-file handler refuses four
-#       of its published verbs unconditionally at entry, each answered with
-#       `WE-Error 988` and `fs-reply 99` [common/acas008.cbl:L299-L307] (A-6), so
-#       the published Rewrite verb can never succeed.
+#  1. CLEAN REJECTION, NO DATABASE EFFECT - the two entirely silent skips,
+#  [general/gl072.cbl:L291-L292] on a non-numeric batch number and
+#  [general/gl072.cbl:L306-L307] on `we-error = 999`, with a second
+#  `we-error` site at [general/gl072.cbl:L348-L349]. No message, no
+#  counter, no trace (A-13). Exercised by `mixed_accepted_rejected`.
+#  2. RUN-ABORTING REJECTION - a control-total mismatch leaves the batch open,
+#  gl070 raises 5 [general/gl070.cbl:L289], the menu gate
+#  [general/general.cbl:L810-L811] returns to the menu, and gl071 and gl072
+#  NEVER RUN. The database effect is THE ABSENCE of everything the later
+#  phases would have written, and absence is evidence. Exercised by
+#  `control_total_mismatch`.
+#  3. PARTIAL DATABASE EFFECT - the IRS half-posted double entry
+#  [irs/irs030.cbl:L1635-L1652] (A-4) and the lost update on the two VAT
+#  control accounts, snapshotted at [irs/irs030.cbl:L1602] and
+#  [irs/irs030.cbl:L1612] and rewritten from those snapshots at
+#  [irs/irs030.cbl:L1704-L1708] (A-5). Exercised by `clean_batch_irs`.
+#  4. FILE-ABANDONING REJECTION - a posting-record write failure jumps straight
+#  to end of job [irs/irs030.cbl:L1673-L1678], which still performs the two
+#  snapshot rewrites and the closes, so THE PARTIAL STATE IS COMMITTED, NOT
+#  ROLLED BACK.
+#  5. PERMANENTLY FAILING FACADE VERB - the transfer-file handler refuses four
+#  of its published verbs unconditionally at entry, each answered with
+#  `WE-Error 988` and `fs-reply 99` [common/acas008.cbl:L299-L307] (A-6), so
+#  the published Rewrite verb can never succeed.
 #
 #  A CLEAN BATCH TRIPS NONE OF THEM. That is not asserted by inspecting a
 #  counter - no counter exists - but by the empty diff over the three bounded
@@ -1055,47 +1053,47 @@ def test_clean_batch_post_gl_state_parity(parity, harness) -> None:
 #  R-3 SEEDING AND SCHEMA CONSTRAINTS - documented here, implemented nowhere
 #  here. This file emits no DDL and issues no statement of its own.
 #
-#    NO DDL. The seeded schema is mysql/ACASDB.sql applied VERBATIM. It already
-#    carries all 33 `DROP TABLE IF EXISTS`, so re-applying it IS the
-#    drop-and-recreate; the database name must be on the client command line
-#    because the file has no `USE`. Census: 33 `CREATE TABLE`, 33 `DROP TABLE IF
-#    EXISTS`, 0 real `ALTER TABLE`, 0 `CREATE INDEX`, 0 `CREATE DATABASE`, 0
-#    `USE`, 0 `INSERT INTO`, 0 `FLOAT`/`DOUBLE`/`REAL`, 0 `TIMESTAMP`.
+#  NO DDL. The seeded schema is mysql/ACASDB.sql applied VERBATIM. It already
+#  carries all 33 `DROP TABLE IF EXISTS`, so re-applying it IS the
+#  drop-and-recreate; the database name must be on the client command line
+#  because the file has no `USE`. Census: 33 `CREATE TABLE`, 33 `DROP TABLE IF
+#  EXISTS`, 0 real `ALTER TABLE`, 0 `CREATE INDEX`, 0 `CREATE DATABASE`, 0
+#  `USE`, 0 `INSERT INTO`, 0 `FLOAT`/`DOUBLE`/`REAL`, 0 `TIMESTAMP`.
 #
-#    AUTOCOMMIT MUST BE OFF WHILE SEEDING, AND ONLY THERE. harness/seed.sh owns
-#    that window and is the only place the mode is ever changed; every connection
-#    outside it is runtime access, asserted as `1, 1` by
-#    `conftest.assert_runtime_autocommit_on`, by harness/reset_db.sh and by
-#    harness/run_cobol_scenario.sh, with harness/Dockerfile.mariadb declaring the
-#    runtime mode. The scoping is the settled half of
-#    docs/migration/ambiguity-resolutions.md#q-10. The batch loader's banner is
-#    what the requirement derives from, [common/glbatchLD.cbl:L9-L12] verbatim:
-#        9  *>  This modules uses commit and rollback so *
-#       10  *>  you MUST ensure that autocommit is OFF   *
-#       11  *>   in the rdb settings. It is as default   *
-#       12  *>   set ON.                                 *
+#  AUTOCOMMIT MUST BE OFF WHILE SEEDING, AND ONLY THERE. harness/seed.sh owns
+#  that window and is the only place the mode is ever changed; every connection
+#  outside it is runtime access, asserted as `1, 1` by
+#  `conftest.assert_runtime_autocommit_on`, by harness/reset_db.sh and by
+#  harness/run_cobol_scenario.sh, with harness/Dockerfile.mariadb declaring the
+#  runtime mode. The scoping is the settled half of
+#  docs/migration/ambiguity-resolutions.md#q-10. The batch loader's banner is
+#  what the requirement derives from, [common/glbatchLD.cbl:L9-L12] verbatim:
+#  9  *>  This modules uses commit and rollback so *
+#  10  *>  you MUST ensure that autocommit is OFF   *
+#  11  *>   in the rdb settings. It is as default   *
+#  12  *>   set ON.                                 *
 #
-#    common/masterLD.sh IS NEVER INVOKED, for three verified reasons: its own
-#    header says "THIS SCRIPT HAS NOT YET BEEN TESTED" [common/masterLD.sh:L4];
-#    it is not valid shell - all 24 loader lines [common/masterLD.sh:L93-L116]
-#    omit the `;` before `fi`, so `bash -n` rejects a 123-line file at line 124;
-#    and it ends by paging SYS-DISPLAY.log through `less`, which would block a
-#    non-interactive run forever. It is FROZEN AND NOT FIXED (R-3, R-4);
-#    harness/seed.sh reproduces its documented per-file contract instead
-#    [common/masterLD.sh:L44-L115] and checks the loader exit codes, whose values
-#    above 63 abort the load.
+#  common/masterLD.sh IS NEVER INVOKED, for three verified reasons: its own
+#  header says "THIS SCRIPT HAS NOT YET BEEN TESTED" [common/masterLD.sh:L4];
+#  it is not valid shell - all 24 loader lines [common/masterLD.sh:L93-L116]
+#  omit the `;` before `fi`, so `bash -n` rejects a 123-line file at line 124;
+#  and it ends by paging SYS-DISPLAY.log through `less`, which would block a
+#  non-interactive run forever. It is FROZEN AND NOT FIXED (R-3, R-4);
+#  harness/seed.sh reproduces its documented per-file contract instead
+#  [common/masterLD.sh:L44-L115] and checks the loader exit codes, whose values
+#  above 63 abort the load.
 #
-#    R-4 ITEMS PRESERVED RATHER THAN FIXED: the `dfltLD` strict-versus-lenient
-#    exit asymmetry, tested with `if [ $rc != 0 ]` at [common/masterLD.sh:L83]
-#    where its three siblings tolerate up to 63; the charset caveat, where
-#    [mysql/ACASDB.sql:L16] declares `SET NAMES utf8mb4` while all 33 tables
-#    declare `DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_general_ci`; and the
-#    `tinyint(1) unsigned` display-width quirk on GLBATCH-REC's `BATCH-STATUS`
-#    [mysql/ACASDB.sql:L83] and `CLEARED-STATUS` [mysql/ACASDB.sql:L84].
+#  R-4 ITEMS PRESERVED RATHER THAN FIXED: the `dfltLD` strict-versus-lenient
+#  exit asymmetry, tested with `if [ $rc != 0 ]` at [common/masterLD.sh:L83]
+#  where its three siblings tolerate up to 63; the charset caveat, where
+#  [mysql/ACASDB.sql:L16] declares `SET NAMES utf8mb4` while all 33 tables
+#  declare `DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_general_ci`; and the
+#  `tinyint(1) unsigned` display-width quirk on GLBATCH-REC's `BATCH-STATUS`
+#  [mysql/ACASDB.sql:L83] and `CLEARED-STATUS` [mysql/ACASDB.sql:L84].
 #
-#    STRICTLY SEQUENTIAL. No test-distribution plugin, no parallelism, no
-#    randomised ordering: parallel scenario runs against one shared MariaDB
-#    would break the seed/run/dump/reset/run/dump/diff protocol outright.
+#  STRICTLY SEQUENTIAL. No test-distribution plugin, no parallelism, no
+#  randomised ordering: parallel scenario runs against one shared MariaDB
+#  would break the seed/run/dump/reset/run/dump/diff protocol outright.
 # ---------------------------------------------------------------------------
 
 
@@ -1166,7 +1164,7 @@ def test_diff_exit_contract_is_honoured(
     AVAILABLE IN THIS TREE, so the mapping is exercised rather than trusted. Rule R-6
     makes an empty diff the pass condition ONLY when a comparison actually happened.
 
-    ⭐ DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
+    DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
     `tests/conftest.py`'s `assert_diff_exit_contract` publishes two synthetic sides with
     `harness/dump_tables.py`'s own writer, canonicalises them with `harness/normalize.py`
     and compares them with `harness/diff_states.py` - once for each of the four cases.
@@ -1238,36 +1236,36 @@ def test_diff_exit_contract_is_honoured(
 #  artefacts, and NEVER make two genuinely different stored values compare
 #  equal, so that Agent Action Plan section 0.6.6 holds.
 #
-#    JOB 1 - TRAILING SPACES IN FIXED-CHARACTER COLUMNS. `rstrip(" ")`, TRAILING
-#    ONLY, ASCII U+0020 only, by DECLARED type including `char(1)`. Leading
-#    spaces are CONTENT, because a COBOL alphanumeric MOVE is left-justified with
-#    right padding. Motivated by A-12: `pic x(24)`
-#    [copybooks/wsledger.cob:L27] becomes `PIC X(32)`
-#    [common/nominalMT.cbl:L299] and `` `LEDGER-NAME` char(32) NOT NULL, ``
-#    [mysql/ACASDB.sql:L127]. The schema declares 238 `char(` columns and zero
-#    `varchar(`.
+#  JOB 1 - TRAILING SPACES IN FIXED-CHARACTER COLUMNS. `rstrip(" ")`, TRAILING
+#  ONLY, ASCII U+0020 only, by DECLARED type including `char(1)`. Leading
+#  spaces are CONTENT, because a COBOL alphanumeric MOVE is left-justified with
+#  right padding. Motivated by A-12: `pic x(24)`
+#  [copybooks/wsledger.cob:L27] becomes `PIC X(32)`
+#  [common/nominalMT.cbl:L299] and `` `LEDGER-NAME` char(32) NOT NULL, ``
+#  [mysql/ACASDB.sql:L127]. The schema declares 238 `char(` columns and zero
+#  `varchar(`.
 #
-#    JOB 2 - DECIMAL SCALE RENDERING AT THE DECLARED SCALE, which is NOT
-#    uniformly 2: 68 columns are (9,2), 57 are (10,2), 17 are (4,2), 12 are
-#    (5,2), 4 are (14,2), 2 are (2,0), 2 are (14,4), plus singletons. A value
-#    implying MORE places RAISES rather than rounds, because rounding there would
-#    hide a real finding. GLBATCH-REC's four money columns are
-#    `decimal(14,2) unsigned` [mysql/ACASDB.sql:L90-L93], matching the UNSIGNED
-#    `pic 9(9)v99 comp-3` under the group at [copybooks/wsbatch.cob:L40-L44];
-#    GLLEDGER-REC.LEDGER-BALANCE [mysql/ACASDB.sql:L128] derives from
-#    `pic s9(8)v99 comp-3` [copybooks/wsledger.cob:L28].
+#  JOB 2 - DECIMAL SCALE RENDERING AT THE DECLARED SCALE, which is NOT
+#  uniformly 2: 68 columns are (9,2), 57 are (10,2), 17 are (4,2), 12 are
+#  (5,2), 4 are (14,2), 2 are (2,0), 2 are (14,4), plus singletons. A value
+#  implying MORE places RAISES rather than rounds, because rounding there would
+#  hide a real finding. GLBATCH-REC's four money columns are
+#  `decimal(14,2) unsigned` [mysql/ACASDB.sql:L90-L93], matching the UNSIGNED
+#  `pic 9(9)v99 comp-3` under the group at [copybooks/wsbatch.cob:L40-L44];
+#  GLLEDGER-REC.LEDGER-BALANCE [mysql/ACASDB.sql:L128] derives from
+#  `pic s9(8)v99 comp-3` [copybooks/wsledger.cob:L28].
 #
-#    JOB 3 - THE TWO- VERSUS FOUR-DIGIT DATE TEXT FORMS, under an EXPLICIT
-#    FIVE-COLUMN ALLOW-LIST and nothing else: GLPOSTING-REC.POST-DAT,
-#    IRSPOSTING-REC.POST4-DAT, PSIRSPOST-REC.IRS-POST-DAT,
-#    SYSTEM-REC.STATS-DATE-PERIOD and SALEDGER-REC.SALES-STATS-DATE. `char(8)`
-#    DOES NOT IMPLY DATE - PUITM5-REC.OI5-BATCH and SAITM3-REC.OI3-BATCH are
-#    batch references and are excluded. And MOST in-scope "dates" are BINARY DAY
-#    NUMBERS that job 3 must not touch: GLBATCH-REC's ENTERED, PROOFED, POSTED
-#    and STORED are all `int(8) unsigned` [mysql/ACASDB.sql:L86-L89], from the
-#    four `binary-long` fields at [copybooks/wsbatch.cob:L36-L39], so
-#    [general/gl072.cbl:L376]'s `move run-date to posted` stamps an INTEGER and
-#    not date text.
+#  JOB 3 - THE TWO- VERSUS FOUR-DIGIT DATE TEXT FORMS, under an EXPLICIT
+#  FIVE-COLUMN ALLOW-LIST and nothing else: GLPOSTING-REC.POST-DAT,
+#  IRSPOSTING-REC.POST4-DAT, PSIRSPOST-REC.IRS-POST-DAT,
+#  SYSTEM-REC.STATS-DATE-PERIOD and SALEDGER-REC.SALES-STATS-DATE. `char(8)`
+#  DOES NOT IMPLY DATE - PUITM5-REC.OI5-BATCH and SAITM3-REC.OI3-BATCH are
+#  batch references and are excluded. And MOST in-scope "dates" are BINARY DAY
+#  NUMBERS that job 3 must not touch: GLBATCH-REC's ENTERED, PROOFED, POSTED
+#  and STORED are all `int(8) unsigned` [mysql/ACASDB.sql:L86-L89], from the
+#  four `binary-long` fields at [copybooks/wsbatch.cob:L36-L39], so
+#  [general/gl072.cbl:L376]'s `move run-date to posted` stamps an INTEGER and
+#  not date text.
 # ---------------------------------------------------------------------------
 
 
@@ -1345,7 +1343,7 @@ def test_glposting_rec_is_an_unchanged_witness(
 
     THE MEASURED CENSUS BEHIND THIS TEST. gl072 issues exactly eight facade verbs -
     `GL-Batch-Open` [general/gl072.cbl:L276], `GL-Nominal-Open`
-    [general/gl072.cbl:L277], `GL-Batch-Rewrite` [general/gl072.cbl:L377],
+    [general/gl072.cbl:L274], `GL-Batch-Rewrite` [general/gl072.cbl:L377],
     `GL-Nominal-Rewrite` [general/gl072.cbl:L382], `GL-Nominal-Read-Next`
     [general/gl072.cbl:L408], `GL-Batch-Close` [general/gl072.cbl:L441],
     `GL-Nominal-Close` [general/gl072.cbl:L442] and `GL-Batch-Read-Next`
@@ -1431,7 +1429,7 @@ def test_the_stamped_batch_columns_agree_on_both_sides(
 ) -> None:
     """The two columns `end-batch` stamps must AGREE BETWEEN THE TWO SIDES.
 
-    ⚠️ RENAMED FROM `test_batch_is_stamped_cleared_and_posted` (finding MJ-08). On this
+     RENAMED FROM `test_batch_is_stamped_cleared_and_posted`. On this
     route the batch is NOT stamped: A-NEW-18 starves `gl070` so no work record is
     written, `gl072` takes at end on its first read, and the rewrite it performs
     addresses key zero. Measured after a real ten-stage run: `CLEARED-STATUS` 0 and
@@ -1539,9 +1537,8 @@ def test_the_stamped_batch_columns_agree_on_both_sides(
 def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, protocol: object) -> None:
     """THE PARAMETER ROW IS BOUNDED TWICE - by the dump, and by a digest of it.
 
-    WHAT THIS CLOSES. An earlier draft kept `SYSTEM-REC` off every scenario's
-    `affected_tables` and justified that by claiming no side writes it. That claim is
-    FALSE:
+    WHAT THIS CLOSES. The tempting shortcut is to keep `SYSTEM-REC` off every scenario's
+    `affected_tables` on the ground that no side writes it. THAT GROUND IS FALSE:
     `acas_posting/cli/args.py`'s `overrewrite` reproduces
     [general/general.cbl:L656-L672] and every one of the seven routes calls it, so the
     parameter row is written on BOTH sides of every scenario. Until this assertion
@@ -1576,11 +1573,10 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
-    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
-    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
-    counter -- that scenario has since been removed (findings M-09 and M-17), and the
-    observation is recorded because it is what established that half.
+    over the eight committed scenarios, which is all four `unchanged` ones. THE `changed`
+    HALF IS NOT COVERED BY ANY COMMITTED SCENARIO: it was established on a definition that
+    declared `changed` and moved the row by construction, its Phase 5 advancing the cycle
+    and rotating the quarter counter, and no scenario in `harness/scenarios/` does that.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 
@@ -1614,7 +1610,7 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
 
 # ---------------------------------------------------------------------------
 #  THE ACCEPTANCE CRITERION THIS ROUTE CANNOT MEET, PINNED RATHER THAN NARRATED
-#  (finding MJ-08)
+#
 #
 #  Agent Action Plan section 0.8.5 lists "clean batch post per ledger" among the
 #  acceptance criteria, and for the General Ledger the natural reading of "post" is a
@@ -1650,7 +1646,7 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
 def test_the_gl_route_leaves_the_measured_no_op_on_both_sides(
     parity, protocol, frozen_schema
 ) -> None:
-    """A-NEW-18's consequence, asserted ABSOLUTELY rather than by agreement (MJ-08).
+    """A-NEW-18's consequence, asserted ABSOLUTELY rather than by agreement.
 
     Three measured facts, each required on BOTH sides independently:
 

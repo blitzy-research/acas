@@ -297,12 +297,12 @@ lines that must not be migrated.
 
 - **`general/gl051.cbl` — only the control-total gate**: the `batch-print`
   section §999 and its `end-batch` paragraph,
-  `[general/gl051.cbl:L1096-L1133]`. The paragraph's closing
+  `[general/gl051.cbl:L1096-L1134]`. The paragraph's closing
   `go to main-exit.` is `[general/gl051.cbl:L1134]`. Everything else in that
   1282-line program — screen sections, accept loops, the amendment dialogs — is
   out of scope.
 - **`irs/irs030.cbl` — only `Ledger-Postings-Add`**:
-  `[irs/irs030.cbl:L1569-L1733]`, which is the section that walks the transfer
+  `[irs/irs030.cbl:L1569-L1730]`, which is the section that walks the transfer
   file and updates the IRS nominal ledger. `L1733` is the end of the file. The
   interactive posting-entry program around it is out of scope, with one
   exception noted in §4: the end-of-job question that decides whether the
@@ -465,11 +465,11 @@ patterns.** Neither is a file of its own:
 | `harness/seed.sh --build-fixtures` | `harness/*`, `harness/**` | Generates the seed flat files each scenario declares. §0.2.1.1 puts `common/masterLD.sh` and the `*LD.cbl` loaders in scope "as the specification for how the harness seeds a scenario", and §0.4.1.7 gives `harness/seed.sh` the job of reproducing that per-file contract — which presupposes the files exist. Something has to produce them |
 | `harness/dump_tables.py --make-fixtures` | `harness/*`, `harness/**` | The generator `harness/seed.sh --build-fixtures` drives. It lives in `dump_tables.py` because that module already owns the record layout and a value's external form; it stays a distinct mode because it emits COBOL, and emitting COBOL safely requires the literal-encoding guard a shell script cannot express — see §12's note on generated-source safety |
 
-**The ten-stage driver is NOT among them any longer.** `harness/run_parity.sh` was
-the last file justified on this reasoning, and it is gone (finding M-06): the
-Agent Action Plan's harness inventory names eleven files plus `scenarios/` and it was
-not among them, and §0.8.5's acceptance sequence is satisfied by the stages themselves. Every gate it
-uniquely owned moved into the stage that owns the state it protects and the
+**THERE IS NO TEN-STAGE DRIVER, and a `harness/run_parity.sh` would be the one file
+this reasoning could not justify:** the Agent Action Plan's harness inventory names
+eleven files plus `scenarios/` and such a driver is not among them, and §0.8.5's
+acceptance sequence is satisfied by the stages themselves. Every gate such a driver
+would uniquely own lives in the stage that owns the state it protects, and the
 orchestration was already implemented in `tests/conftest.py` — §11.1 tabulates
 where each went, and §11.1a is the operator's own ten-stage recipe.
 
@@ -538,9 +538,9 @@ package by a `package-dir` mapping nor carried as `package-data`, and
 artifact, one location, no possibility of two copies disagreeing.
 
 So neither mode ships: both belong to harness files, which is what R-1
-requires of them. **The connection-parameter resolver is no longer among them.**
-It used to be `acas_posting/cli/rdbms_params.py`; it is now SECTION 0 of
-`acas_posting/cli/args.py`, because §0.4.1.1 gives that module the job of binding
+requires of them. **The connection-parameter resolver is not among them.** It is
+SECTION 0 of `acas_posting/cli/args.py` rather than a module of its own, because
+§0.4.1.1 gives that module the job of binding
 the system records and the six `RDBMS-*` fields of `SYSTEM-REC` are part of
 exactly that binding — they are the only carrier by which a connection parameter
 reaches the handlers `[common/acas008.cbl:L558-L563]`. Every name it published is
@@ -630,7 +630,7 @@ dependency, with its pin:
 `coverage`, `pluggy`, `iniconfig`, `packaging`, `Pygments` and the `setuptools`
 build backend are pinned alongside them in `requirements.txt`'s section 3.
 
-⚠️ **`SQLAlchemy` is declared and is not imported, and both halves are
+**`SQLAlchemy` is declared and is not imported, and both halves are
 deliberate.** This is the one place in the dependency set where what is
 *declared* is wider than what is *executed*, so it is stated outright rather than
 left to be inferred from either artifact alone.
@@ -654,12 +654,12 @@ official MySQL driver and the primary database path"* and §0.1.2's diagram labe
 the edge *"SQLAlchemy Core / connector"*, an alternative rather than a stack. The
 connector is the path taken, which is the one the plan itself calls primary.
 
-**An earlier revision resolved the same tension the other way**, by deleting the
-three pins from both manifests so that declared and imported coincided (finding
-MJ-20). That removed a real defect — three artifacts had been describing the Core
-boundary as *active* — but it also left the manifests narrower than the frozen
-plan, which is finding DEP-01. The pins are restored; the false activity claims
-are not. What replaced them is the sentence you are reading.
+**Resolving the tension the other way would trade one defect for another.**
+Deleting the three pins from both manifests so that declared and imported coincide
+would remove the false claim that the Core boundary is *active*, but it would also
+leave the manifests narrower than the frozen plan, which pins SQLAlchemy
+explicitly. So the pins stand and the activity claims do not: what stands in their
+place is the sentence you are reading.
 
 **What decided it was the frozen behaviour, not the tidier diagram.**
 `acas_posting/dal/connection.py` does not merely open connections; it reproduces
@@ -922,7 +922,7 @@ C="docker compose -f harness/docker-compose.yml run --rm -T \
 piped stage would appear to hang. Redirect stdin from `/dev/null` as well when a
 command is backgrounded.
 
-⚠️ **`ACAS_SEED_AUTOCOMMIT=on` is REQUIRED to obtain a fixture, and it is a
+**`ACAS_SEED_AUTOCOMMIT=on` is REQUIRED to obtain a fixture, and it is a
 declared deviation from the AAP.** The default is the AAP-mandated `off` (§9.4), and
 without this flag every seeding stage — `harness/seed.sh`, `harness/reset_db.sh` and
 therefore protocol stages 1 and 5 — exits **76**, "the seed reported success
@@ -1150,7 +1150,7 @@ comments-only include under the **writable build copy**, at
 `$ACAS_BUILD/copybooks/ACAS-SQLstate-error-list.cob` — 13 lines, not one of them a
 statement. The checkout's own `copybooks/` is never written.
 
-**It is generated, not committed** (finding M-03).
+**It is generated, not committed.**
 `[harness/build_oracle.sh acas_install_sqlstate_comment_shim]` emits the text, then
 **re-reads what it wrote** and fails the build if a single line is neither blank nor a
 `*>` comment, and logs a disclosure naming the absent archive member every time it
@@ -1643,10 +1643,9 @@ every one of them. A scenario that declares operations without either a repeated
 `--operation` or an `operations:` list is *refused* rather than having its first
 operation silently run.
 
-⚠️ **This section said "ONE operation per invocation" until finding MJ-04**, which
-described the runner as it was before it learned the list. The distinction is not
-cosmetic: under the old contract a four-operation scenario was driven by four
-separate invocations, only the last of which published a disposition, so nothing
+**"ONE operation per invocation" WOULD BE THE WRONG CONTRACT, and the distinction is
+not cosmetic:** under it a four-operation scenario would be driven by four separate
+invocations, only the last of which published a disposition, so nothing
 downstream could tell a clean run of four operations from a clean run of one
 followed by three that aborted — and the record that *was* published described
 operation one while the database held the effects of all four. The runner states
@@ -1707,7 +1706,7 @@ What each dispatches:
 
 #### The options each route requires, and why three of them have no default
 
-⚠️ **Three routes will not run without an answer you have to supply, and one runs
+**Three routes will not run without an answer you have to supply, and one runs
 destructively without one.** That asymmetry is not an oversight — it follows from
 what the frozen prompt does. A prompt with **no defaultable answer** becomes a
 required option, because inventing a default would be inventing the one answer
@@ -1718,7 +1717,7 @@ behaviour change (R-4).
 | Route | Required options | Prompt-derived options and their defaults |
 | --- | --- | --- |
 | `general post-cycle` | `--run-date` | — |
-| `general end-of-cycle` | `--run-date` | ⚠️ `--run-confirmed` / `--no-run-confirmed`, **defaulting to `--run-confirmed`**, and `--disk-change-option`, choices `{0, 9}`, **defaulting to `0`**. Both defaults **proceed**, so a bare command line writes. `[general/gl080.cbl:L295-L302]` moves `space` into the reply before the accept and aborts only on Esc or `A`/`a`; `[general/gl080.cbl:L545-L549]` exits on `9` and re-prompts on anything other than `0` |
+| `general end-of-cycle` | `--run-date` | `--run-confirmed` / `--no-run-confirmed`, **defaulting to `--run-confirmed`**, and `--disk-change-option`, choices `{0, 9}`, **defaulting to `0`**. Both defaults **proceed**, so a bare command line writes. `[general/gl080.cbl:L295-L302]` moves `space` into the reply before the accept and aborts only on Esc or `A`/`a`; `[general/gl080.cbl:L545-L549]` exits on `9` and re-prompts on anything other than `0` |
 | `sales invoice-post` | `--run-date` | — |
 | `sales cash-post` | `--run-date`, **`--ok-to-post` / `--no-ok-to-post`** | none — the switch has **no default at all**, so the command exits `2` without it. The frozen prompt is `[sales/sl100.cbl:L311-L319]`: it accepts at `L314`, exits on `"NO"` at `L316-L317` and **re-prompts on anything that is not `"YES"`** at `L318-L319`, so a blank answer neither proceeds nor declines. It sits before the first `OTM3-Open` at `L321`, so declining reaches no file at all |
 | `purchase order-post` | `--run-date` | — |
@@ -1779,11 +1778,11 @@ rests on, and it was counted rather than assumed: `function current-date` appear
 in none of `gl051`, `gl070`, `gl071`, `gl072`, `gl080`, `sl055`, `sl060`,
 `sl100`, `pl055`, `pl060`, `pl100` or `irs030`.
 
-⚠️ **The reads live one level up, and there are five of them in the cycle's call
-chain, not one.** An earlier revision of this section called the date-service
-copybook *"the single clock read in the entire call chain"*, following the Agent
-Action Plan's own phrasing at §0.1.1. That is imprecise and a reader can
-disprove it with one `grep`, so the census is given in full:
+**The reads live one level up, and there are five of them in the cycle's call
+chain, not one.** Calling the date-service copybook *"the single clock read in the
+entire call chain"* — the Agent Action Plan's own phrasing at §0.1.1 — is
+imprecise, and a reader can disprove it with one `grep`, so the census is given in
+full:
 
 | Where | Locator | Role |
 | --- | --- | --- |
@@ -1818,7 +1817,7 @@ current time**: every route requires its run date as an argument.
 `IRS-Instead` is a single character in the system record, with condition names
 for "IRS instead" and "IRS as well as" — `88 IRS-Used value "Y"` and
 `88 IRS-Both-Used value "B"` `[copybooks/wssystem.cob:L179-L181]`. It is a
-three-state switch, it is tested at three sites in each of the four Sales and
+three-state switch, it is tested at 27 sites across the four Sales and
 Purchase posting programs, and **its state changes which tables a run touches**.
 
 Every scenario therefore pins it explicitly. Leaving it at a default would make
@@ -1844,7 +1843,7 @@ demand rather than anything restating them:
 $C /repo/harness/normalize.py --print-stages
 ```
 
-⚠️ **That is the shape; the count is ten.** The line above names the eight
+**That is the shape; the count is ten.** The line above names the eight
 *logical* steps and reads as nine because the reset appears once. The protocol
 numbers **ten**, because it counts the reset on both sides and makes the
 publication check its own gate. Anywhere in this project's older prose that says
@@ -1862,11 +1861,12 @@ non-zero has produced no evidence, so re-seed rather than carry a partial
 capture forward.
 
 **There is no driver script: the operator runs the ten stages, in order, stopping at
-the first non-zero exit** (finding M-06). A `harness/run_parity.sh` used to run them
-from one invocation and it is gone — the Agent Action Plan's harness inventory
-(§0.3.1) names eleven harness files plus `scenarios/`, and that was not one of them.
-**`harness/` now holds exactly those eleven files and the eight scenario definitions,
-and nothing else.** Nothing it uniquely enforced was dropped. Each gate moved into **the stage that owns the state it
+the first non-zero exit.** A `harness/run_parity.sh` running them from one invocation
+is not available and would not be admissible — the Agent Action Plan's harness
+inventory (§0.3.1) names eleven harness files plus `scenarios/`, and such a driver is
+not one of them. **`harness/` holds exactly those eleven files and the eight scenario
+definitions, and nothing else.** Nothing such a driver would uniquely enforce is
+missing. Each gate lives in **the stage that owns the state it
 protects**, which is stronger than a wrapper rather than weaker, because a
 hand-driven stage is now guarded exactly as a composed one is:
 
@@ -1878,11 +1878,11 @@ hand-driven stage is now guarded exactly as a composed one is:
 | Destructive-target bypasses refused on the evidence path | Each stage refuses **its own**, on any run carrying `ACAS_PARITY_RUN_ID`: `reset_db.sh::acas_assert_no_evidence_bypass` for the two allow-lists and the two acknowledgements, `run_cobol_scenario.sh::acas_assert_no_evidence_bypass` and `run_python_scenario.sh::acas_py_assert_no_evidence_bypass` for the drive-side pair |
 | The ten stages in order, aborting at the first non-zero | The operator, following the table below. `tests/conftest.py::run_scenario_parity` composes the identical sequence for the scenario tier, stage by stage |
 | The stage registry, printed on demand | `harness/normalize.py --print-stages` |
-| The per-stage administrative-credential scrub | The **file set**: only `reset_db.sh` and the `seed.sh` it delegates to may hold the pair, and every other harness script `unset`s it at entry (§7.1, SEC-04) |
+| The per-stage administrative-credential scrub | The **file set**: only `reset_db.sh` and the `seed.sh` it delegates to may hold the pair, and every other harness script `unset`s it at entry (§7.1) |
 | The published parity claim | `harness/diff_states.py`'s own `verdict.json` (§11.4) |
 
-⚠️ **One consequence of the relocation had to be repaired, and it was found by
-measurement rather than by reading.** The gate now fires for anything that invokes
+**ONE CONSEQUENCE OF PLACING THE GATE HERE NEEDS ITS OWN HANDLING, and it was found by
+measurement rather than by reading.** The gate fires for anything that invokes
 `reset_db.sh` — which includes `tests/conftest.py`'s stage 1 and stage 5. Setting
 `ACAS_ACCEPT_TRANSFORMED_ORACLE=1`, the documented way to run the stack-bound tiers
 against a diagnostic build, therefore un-skipped those tiers and then failed all
@@ -1895,7 +1895,7 @@ unacknowledged run still meets exit 77. Both halves are locked by
 `test_the_reset_refuses_a_transformed_oracle_as_evidence`, including the negative
 direction: a waiver passed unconditionally fails that test.
 
-⚠️ **Four options are deliberately not carried forward.** Each is named so that
+**Four options are deliberately not carried forward.** Each is named so that
 nobody hunts for it:
 
 - **`--from` / `--to`** — resume a range by stage number. This was the sharpest of
@@ -1910,8 +1910,8 @@ nobody hunts for it:
 - **the `parity-result` summary file** — replaced by `verdict.json`, which is the
   machine-readable claim `harness/diff_states.py` publishes on both outcomes.
 
-⚠️ **There is exactly one exception to "stop at the first non-zero", and it is
-deliberate** (finding MJ-05): **stage 6 exiting 69**, the Python run stage reporting
+**There is exactly one exception to "stop at the first non-zero", and it is
+deliberate:** **stage 6 exiting 69**, the Python run stage reporting
 that an operation's observed disposition contradicted the scenario's declared one. In
 that one case the run **continues**, so that the capture, the normalisation and the
 diff still happen and can localise the divergence to a table and a column instead of
@@ -1943,7 +1943,7 @@ the COBOL side's *ending* state.
 
 #### The operator contract — the four things that bind the ten stages
 
-⚠️ **Four requirements make a hand-driven run mean what a composed one means. Each
+**Four requirements make a hand-driven run mean what a composed one means. Each
 was implicit in the deleted driver, so each is now stated.**
 
 **One — ONE run id across all ten stages.** `ACAS_PARITY_RUN_ID` is what makes ten
@@ -1966,7 +1966,7 @@ usually still produces an empty diff, and is the reason the mistake survives: th
 sides agree on a state neither of them established.
 
 **Four — `--all-in-scope` is REQUIRED on all three capture and comparison stages,
-and omitting it silently narrows the evidence** (finding MJ-03). Pass
+and omitting it silently narrows the evidence.** Pass
 `--all-in-scope` *and* `--scenario-file` at stages 3, 7 and 10; the two flags do
 different jobs. `--all-in-scope` sets the **comparison bound** to all 22 in-scope
 tables, while `--scenario-file` supplies the **provenance digest** that
@@ -2038,9 +2038,9 @@ the composed protocol, the operator's own `export` for a hand-driven one — and
 it is bound, each stage refuses every bypass it would otherwise honour
 (`reset_db.sh::acas_assert_no_evidence_bypass` and the two runner gates beside it).
 Unbound, the hatches remain, because then the script is the administrative tool and
-not a stage. This is where the deleted driver's entry gate went (finding M-06), and
-it is stronger there: the guard now travels with the stage, so a **hand-driven**
-stage 1 is scoped exactly as a composed one is, which the driver could never do.
+not a stage. This is where a driver's entry gate belongs, and it is stronger here:
+the guard travels with the stage, so a **hand-driven** stage 1 is scoped exactly as a
+composed one is, which a driver could never do.
 
 Every one of the following is required, and each failure is refused before the stage
 acts rather than discovered part-way through:
@@ -2100,10 +2100,11 @@ that a difference was found and acted on.
 because an evidence directory that accumulates indefinitely with nothing said about
 its lifetime is a defect in its own right — and the contents are not neutral.
 
-**What is actually in there, measured rather than assumed.** On this clone the
-evidence volume holds **1410 files, 11.5 MB**, across nine scenario trees — the eight
-committed scenarios plus the removed `end_of_cycle_gl`, whose retained tree is cited by
-the evidence register and is therefore kept (see the retention rule below). Each
+**What is actually in there.** The evidence volume holds one tree per scenario the
+protocol has been run for — at most the **eight** committed scenarios of
+`harness/scenarios/`, plus any tree a previous run left behind, which is kept rather
+than pruned (see the retention rule below). The volume is host state, not repository
+state, so its size is whatever the runs on that host produced. Each
 tree carries `cobol/`, `cobol.normalized/`, `python/`, `python.normalized/`,
 `diff.txt` and `verdict.json`. The dumps are `SELECT *` over the
 in-scope tables, so they contain **monetary amounts** and **the primary keys that
@@ -2147,7 +2148,7 @@ docker volume rm "acas-harness-${CLONE_INDEX}-out"
 docker volume ls --format '{{.Name}}' | grep -- '-out$'
 ```
 
-⚠️ **Never `docker volume prune`, never `docker volume rm $(docker volume ls -q)`,
+**Never `docker volume prune`, never `docker volume rm $(docker volume ls -q)`,
 and never `rm -rf` a host path under the shared workspace root.** All three reach
 volumes and working trees this clone does not own. The clone-namespaced name is the
 guard, and it only works if it is the thing you type.
@@ -2200,7 +2201,7 @@ still diffed, every other column byte for byte, so this is redaction and not an
 ignore-list; withholding a secret symmetrically cannot conceal a difference in
 anything the cycle computes. The row is **fingerprinted** as well, before and
 after every run on both sides, and the two post-run digests are compared over all
-169 columns including those two — see §11.5.
+169 columns including those two — see §11.4.
 
 `--scenario-file` (narrow to the declared effect), `--tables` (one table by hand)
 and `diff_states.py --all-tables` (the union of the two captures) are **debugging
@@ -2285,12 +2286,13 @@ latches, and `Date-Form`, which the frozen date sections write back
 `[copybooks/wssystem.cob:L127]` — so declaring it could in principle tie a
 scenario's effect claim to fields the scenario does not reason about. It does not:
 **the digest holds on all four scenarios that declare `unchanged` and moves on every one
-that declares `changed`.** That was measured over the eight scenarios that existed when
-the measurement was taken — which is all four `unchanged` ones — and the ninth,
-`end_of_cycle_gl`, declared `changed` and moved the row by construction, its Phase 5
-advancing the cycle and rotating the quarter counter — that scenario has since been
-removed (findings M-09 and M-17), and the observation is recorded because it is what
-established the `changed` half of the claim. The fingerprint is kept
+that declares `changed`.** The `unchanged` half was measured over all four committed
+scenarios that declare it. The `changed` half was established on a ninth definition,
+`end_of_cycle_gl`, which declared `changed` and moved the row by construction, its
+Phase 5 advancing the cycle and rotating the quarter counter; that definition is not
+committed — the Agent Action Plan's inventory names EIGHT — so no committed scenario
+covers the `changed` half today, and the observation is recorded as the report it is
+rather than as durable evidence. The fingerprint is kept
 on top of the dump because it adds what the dump cannot — a SHA-256 over all 169
 columns, the two withheld cells included, and a SHA-256 is not a disclosure.
 `tests/conftest.py`'s `assert_system_record_parity` compares the two sides' post-run
@@ -2334,11 +2336,11 @@ formulations, the `gl080` cycle divide, the double-entry explosion, the
 control-total comparison, the ledger-balance accumulation, and the derived IRS
 date components — **fourteen files, which is exactly the set AAP §0.4.1.7 names**.
 
-The tier once held twenty. Six further groups were written during QA remediation
-and given files of their own, which put the directory outside the planned
-inventory; each has since been **merged verbatim into the planned file that owns
-its subject**, so the fourteen names are also the whole of the tier. No assertion
-moved subject and none was lost — the collected test-name multiset was compared
+Six further groups exist beyond that set and NONE has a file of its own, because a
+file of its own would put the directory outside the planned inventory; each is
+**merged verbatim into the planned file that owns its subject**, so the fourteen
+names are also the whole of the tier. No assertion moved subject and none was lost —
+the collected test-name multiset was compared
 before and after every merge and was identical each time. Two of the six are
 **structural** rather than arithmetic and live in this tier for its defining
 property, which is not its subject but its dependencies: it needs no database,
@@ -2385,21 +2387,22 @@ tier's own helpers legitimately import program modules in function scope to driv
 the shipped paragraphs, and an absence check would make the claim depend on which
 file happened to run first.
 
-**They are mandatory and are never skipped.** An earlier revision guarded them
-with `pytest.importorskip`, which let a host lacking the pinned driver report a
-*passing* arithmetic tier while those anomaly locks silently vanished — the worst
-possible failure mode for a suite whose job is to stop a defect being "fixed".
+**They are mandatory and are never skipped.** Guarding them with
+`pytest.importorskip` would let a host lacking the pinned driver report a *passing*
+arithmetic tier while those anomaly locks silently vanished — the worst possible
+failure mode for a suite whose job is to stop a defect being "fixed".
 `mysql-connector-python` is a hard `[project.dependencies]` entry, so an installed
 package always satisfies the import; if it ever does not, the tier **errors**
-rather than skipping. There are now **zero** live `pytest.importorskip` calls in
-the suite; the six textual occurrences that remain are comments recording this
-history.
+rather than skipping. There are **zero** live `pytest.importorskip` calls in the
+suite; the six textual occurrences that remain are comments warning against
+reintroducing one.
 
-**There is no `xfail` anywhere in this tier, and there used to be eighteen.** Each
-one asserted the *naive* reading of a question the oracle had not settled, so that a
-change making the naive reading true would XPASS and turn the suite red. All
-eighteen questions have since been measured against the compiled program, and every
-one of those tests now asserts the MEASURED value as a fact — and, where the
+**There is no `xfail` anywhere in this tier, and the eighteen questions that would
+each justify one are all measured.** An `xfail` here would assert the *naive*
+reading of a question the oracle had not settled, so that a change making the naive
+reading true would XPASS and turn the suite red. All eighteen have been measured
+against the compiled program, and every one of those tests asserts the MEASURED
+value as a fact — and, where the
 measurement refuted a reading, asserts the refutation too. That is strictly
 stronger: an `xfail` goes red only when the naive reading starts holding, whereas
 asserting both the measurement and the refutation goes red the moment either half
@@ -2436,7 +2439,7 @@ ledgers exercise materially different code paths. As noted in §10.5, the
 **control-total mismatch case is General-Ledger-specific**, since Sales and
 Purchase batches balance by construction.
 
-⚠️ **There was a ninth, and it has been removed — with a cost worth stating.** The
+**There was a ninth, and it has been removed — with a cost worth stating.** The
 eight above discharge the mandate exactly: AAP §0.8.5 asks for clean batch per ledger,
 mixed accepted-and-rejected, period-end totals, control-total mismatch and empty batch,
 and **none of those five is an end-of-period run**. A ninth definition,
@@ -2445,9 +2448,9 @@ drive the real `gl_end_of_cycle` route — `general/general.cbl`'s `load09.` dis
 `gl080` — with `tests/scenarios/test_end_of_cycle_gl.py` beside it, and it was measured
 end to end.
 
-Both files have been **deleted** (findings M-09 and M-17), because the Agent Action
-Plan's inventory names eight scenario definitions and eight scenario tests and this tree
-is held to that inventory. **The consequence, stated rather than glossed: `gl080` — one
+**NEITHER FILE IS COMMITTED**, because the Agent Action Plan's inventory names eight
+scenario definitions and eight scenario tests and this tree is held to that inventory.
+**The consequence, stated rather than glossed: `gl080` — one
 of the twelve in-scope programs, and the owner of one of the migration's five `ROUNDED`
 stores at `[general/gl080.cbl:L328]` — has no table-state comparison behind it.** What
 remains is not nothing: anomaly **A-2** (the unbounded quarter subscript) and anomaly
@@ -2519,18 +2522,17 @@ CPython 3.12.13:
 | Branches | 1,529 of 6,874 |
 | Overall, branch-inclusive | **43.4 %** |
 
-**What that number is, and is not.** ⚠️ **Two of these figures moved, and the
-movement is recorded rather than overwritten.** The row above read *1,217 passed
-/ 126 deselected / 90 modules / one module at zero / 41.9 %* until the six
-arithmetic groups added during QA remediation were merged into the fourteen
-planned files (findings M-11 to M-16) and `cli/rdbms_params.py` was folded into
-`cli/args.py` (M-01). Merging changed the deselection arithmetic and folding
-removed a module, so the figures are re-measured here rather than carried.
+**What that number is, and is not.** Every figure above is re-measured against the
+tree as it stands rather than carried forward, because two of them are sensitive to
+the tree's shape: merging the six extra arithmetic groups into the fourteen planned
+files changes the deselection arithmetic, and keeping the connection-parameter
+resolver inside `cli/args.py` rather than in a module of its own changes the module
+count.
 
-**No module is at zero any more**, and the one that used to be — the dictionary
-**generator** — is now reached at **24 %** by the merged deployment-contract
-group, which reads it to close the traceability census. Its own exercise is
-still the one that matters, because the generator's job is to be *run*:
+**NO MODULE IS AT ZERO.** The lowest is the dictionary **generator**, reached at
+**24 %** by the merged deployment-contract group, which reads it to close the
+traceability census. Its own exercise is still the one that matters, because the
+generator's job is to be *run*:
 
 ```bash
 python -m coverage run -m acas_posting.dictionary.generate --check
@@ -2568,8 +2570,8 @@ the `CREATE TABLE` column definition. It currently carries 1067 entries covering
 513 columns, 513 host variables, **1001 distinct physical copybook declarations**
 through 1007 copybook-view entries — the two figures differ because an `OCCURS`
 declaration bound by several columns yields one entry per occurrence, and
-publishing both is what makes a missing declaration visible instead of masked
-(finding M-18) — and 46 work-file fields
+publishing both is what makes a missing declaration visible instead of masked —
+and 46 work-file fields
 across the 22 in-scope tables and 20 bridges. Regenerate or verify with:
 
 ```bash
@@ -2625,23 +2627,21 @@ a dropped value or a behaviour that has not been proven for every caller — so 
 state diff and no arithmetic assertion can see them. Each is nonetheless carried
 at its reproduction site by a comment citing the same locator the register cites.
 
-⚠️ **This table read `14 + 1 + 3 + 4` with `A-6` in a `state-level lock only` row of
-its own, and it was the STALE of two disagreeing censuses** (finding MJ-12). The
-register's §11 carries the reconciled one and this copy now matches it, verified by
-extracting the dagger set from the register's twenty-two entry headings mechanically
-rather than by reading: fifteen daggers, and they are exactly the fifteen above.
-`A-6` moved into the behaviour-lock row because
+**A census of `14 + 1 + 3 + 4`, with `A-6` in a `state-level lock only` row of its
+own, would be the stale reading.** The register's §11 carries the reconciled census
+and this copy matches it, verified by extracting the dagger set from the register's
+twenty-two entry headings mechanically rather than by reading: fifteen daggers, and
+they are exactly the fifteen above. `A-6` belongs in the behaviour-lock row because
 `tests/arithmetic/test_comp_binary.py` now calls the
 migrated `acas008` directly and asserts the measured `WE-Error 988` / `FS-Reply 99`
 pair; its scenario-tier no-change assertion is a *second* lock on an
 already-locked entry, not a category of its own. **The register is the authority for
 this census**; a count here that disagrees with §11 is this copy being out of date.
 
-⭐ **One entry's credit changed BASIS rather than category, and it is worth naming**
-(findings MJ-07 and MJ-12). `A-1`'s behaviour-lock credit used to rest on a scenario
-state comparison — and a state comparison cannot see it, because `GL-Posting-Close`
-writes nothing, so adding the missing period left an identical dump and that test
-passed either way. Its lock is now
+**ONE ENTRY'S CREDIT RESTS ON A DIFFERENT BASIS FROM THE OBVIOUS ONE, and it is worth
+naming.** `A-1` cannot be behaviour-locked by a scenario state comparison, because
+`GL-Posting-Close` writes nothing: adding the missing period leaves an identical dump,
+so such a test would pass either way. Its lock is
 `tests/arithmetic/test_double_entry_explosion.py`, which drives the shipped
 paragraph and asserts the verb sequence across the whole `IRS-Instead` × `Level-1`
 truth table; the scenario tests are recorded as **state witnesses**. Only direct

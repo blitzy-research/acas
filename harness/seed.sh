@@ -49,14 +49,13 @@ readonly EX_NOT_DURABLE=76    # the loaders reported success and left NO rows --
                               # the reproduced no-COMMIT defect, refused rather
                               # than passed on to a comparison (R-4 + R-6)
 
-# THE `--build-fixtures' MODE HAS ITS OWN TWO CODES (finding M-04), because the numbers
-# it has always reported are ones this script's SEEDING band already spends on other
-# facts. Both are the values the mode reported when it was harness/build_fixtures.sh, so
-# an operator's expectations and every recipe that quotes them are unchanged:
+# THE `--build-fixtures' MODE HAS ITS OWN TWO CODES, because the numbers the mode
+# reports are ones this script's SEEDING band already spends on other facts. The two
+# constants keep the mode's documented values while leaving the band's meanings intact:
 readonly EX_BF_BUILD=72       # at least one scenario's fixtures could not be built.
                               # 72 in the SEEDING band is EX_DATABASE, which is why the
                               # two are separate constants rather than one
-readonly EX_BF_TIMEOUT=78     # the builder overran ACAS_BF_TIMEOUT (finding F-29). The
+readonly EX_BF_TIMEOUT=78     # the builder overran ACAS_BF_TIMEOUT. The
                               # seeding band's own timeout is 74; a fixture-build
                               # deadline is a different fact and keeps its own number
 
@@ -70,7 +69,7 @@ ACAS_TIMEOUT_RESOLVED=''      # out-parameter of acas_timeout_seconds
 declare -a ACAS_DEADLINE_ARGV=()   # populated by acas_deadline_prefix
 
 # THIS SCRIPT'S OWN DIRECTORY, so its sibling harness/normalize.py -- which owns the
-# one duplicate-rejecting scenario parser (findings MJ-17 and M-05) -- can be imported
+# one duplicate-rejecting scenario parser -- can be imported
 # by the embedded Python that reads the definition. Resolved from BASH_SOURCE and never
 # from $PATH.
 case "${BASH_SOURCE[0]}" in
@@ -249,32 +248,15 @@ acas_have() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# ---------------------------------------------------------------------------
-#  THE CLIENT-DIAGNOSTIC SUMMARY  (OBS-008)
+#  THE CLIENT-DIAGNOSTIC SUMMARY
 #
-#  A database client's diagnostic is text the SERVER supplied, captured here with
-#  `2>&1`, and it is NOT safe to replay:
-#
-#    * it routinely names the account and the host -- "Access denied for user
-#      'acas'@'db.internal'" -- and on a statement failure it can quote the
-#      statement and its parameters, which are live accounting values (CWE-532);
-#    * it is multi-line and arbitrary, so a newline inside it forges a further
-#      line in whatever log collects this script's output (CWE-117);
-#    * these scripts run under Compose, where standard output and standard error
-#      are collected as container logs and kept.
-#
-#  So the RAW text is persisted to a private mode-0600 file and never printed,
-#  and the console gets a bounded, identity-free summary: a token from a fixed
-#  vocabulary, the client's own numeric error and SQLSTATE when it printed them,
-#  the size, and the artifact's path and SHA-256. This is the same
-#  console/artifact split `harness/diff_states.py` and `harness/normalize.py`
-#  apply to their own detail, with the same reasoning and the same vocabulary.
-#
-#  NOTHING BELOW ECHOES A BYTE OF ITS INPUT. The category comes from a `case`
-#  over fixed globs; the error and SQLSTATE are re-validated against their
-#  documented shapes and replaced by `unknown` when they do not match, so a
-#  server that returned `28000\nERROR: forged` cannot get that through.
-# ---------------------------------------------------------------------------
+#  A client diagnostic is SERVER-supplied text: it names the account and host, can
+#  quote a statement and its live accounting parameters (CWE-532), and is multi-line
+#  and arbitrary so a newline in it forges a log line (CWE-117). The raw text goes to a
+#  private mode-0600 file and is never printed; the console gets a bounded,
+#  identity-free summary built from a fixed vocabulary, with the error and SQLSTATE
+#  re-validated against their documented shapes. Nothing below echoes a byte of its
+#  input. Full rationale: harness/build_oracle.sh, same heading.
 
 #: Where the raw text of the most recent diagnostic was kept, or empty when none
 #: was produced or it could not be persisted.
@@ -492,26 +474,12 @@ acas_assert_not_timed_out() {
     "The child was sent TERM at the deadline and KILL ${ACAS_TIMEOUT_GRACE}s later."
 }
 
-# ---------------------------------------------------------------------------
-#  THE TARGET, DESCRIBED WITHOUT NAMING IT (finding F-39)
+#  THE TARGET, DESCRIBED WITHOUT NAMING IT
 #
-#  This script's transcripts are retained evidence: they are read by operators,
-#  attached to reports and, on the Python side, replayed to a container log. A line
-#  reading `acas@mariadb:3306/ACASDB` puts the deployment's topology and the database
-#  ACCOUNT NAME into all of that, which is half of a credential and a map of the
-#  network for anybody who reads it (CWE-532). Nothing downstream needs the names:
-#  what a reader needs is WHICH KIND of target this was, and whether two runs used
-#  the SAME one.
-#
-#  So the transcript carries a CATEGORY and a stable FINGERPRINT. The category is
-#  derived from the host alone and is the same vocabulary
-#  `acas_posting/dal/connection.py` uses. The fingerprint is the first twelve hex
-#  digits of a SHA-256 over `host:port/schema` - never the password and never the
-#  account name, neither of which is in the digest at all - so two runs against one
-#  target print the same value and a run against a different target prints a
-#  different one, while the value itself discloses no name. The full values remain in the environment, where the tools that
-#  need them read them.
-# ---------------------------------------------------------------------------
+#  Transcripts are retained as evidence and quoted into reports, so the host, port,
+#  socket path and account are never printed. What identifies the target is a SHA-256
+#  over its connection identity, which two scripts can compare without either of them
+#  disclosing it. Full rationale: harness/build_oracle.sh, same heading.
 acas_target_category() {
   local host="${ACAS_DB_HOST-}" socket="${ACAS_DB_SOCKET-}"
 
@@ -529,13 +497,10 @@ acas_target_category() {
 acas_target_fingerprint() {
   local raw digest
 
-  # The ACCOUNT IS DELIBERATELY NOT IN THE DIGEST. Two reasons, both load-bearing.
-  # The digest identifies the TARGET, so harness/seed.sh (which connects as the
-  # application account) and harness/reset_db.sh (which connects as the admin
-  # account) print the SAME fingerprint for the same database -- which is exactly
-  # what makes two transcripts comparable. And an account name that is never an
-  # input can never be recovered from the output, not even by a reader who can
-  # enumerate candidate names.
+  #  The ACCOUNT IS DELIBERATELY NOT IN THE DIGEST: the digest identifies the TARGET, so
+  #  two scripts connecting as different accounts must agree that they reached the same
+  #  database, and an account name is identity a transcript must not carry. Full
+  #  rationale: harness/build_oracle.sh, same heading.
   raw="${ACAS_DB_HOST-}:${ACAS_DB_PORT-}/${ACAS_DB_NAME-}"
 
   if command -v sha256sum >/dev/null 2>&1; then
@@ -1104,14 +1069,10 @@ acas_assert_environment() {
     acas_die "$EX_PRECONDITION" \
       "ACAS_DB_PORT must be numeric; got '$ACAS_DB_PORT'."
   fi
-  # THE RANGE IS THE FROZEN CARRIER'S, 1..9999, NOT THE TCP RANGE.
-  # `LK-Port-Number pic x(4)' [common/acas-get-params.cbl:L158] and
-  # `01 Ws-Mysql-Port-Number pic x(4)' [copybooks/mysql-variables.cpy:L91] are
-  # FOUR characters, and every bridge STRINGs DB-Port into the second of them
-  # [common/glpostingMT.cbl:L410-L413]. So a five-digit port reaches the compiled
-  # cycle TRUNCATED - 13306 becomes 1330 - while this script would probe and drive
-  # the untruncated one, and the two sides of the comparison would be talking to
-  # different servers. Refused here rather than truncated silently.
+  #  THE RANGE IS THE FROZEN CARRIER'S, 1..9999, NOT THE TCP RANGE.
+  #  `LK-Port-Number pic x(4)' [common/acas-get-params.cbl:L158] cannot carry a five-digit
+  #  port, so a port above 9999 is refused rather than truncated. Full rationale:
+  #  harness/build_oracle.sh, same heading.
   if (( 10#$ACAS_DB_PORT < 1 || 10#$ACAS_DB_PORT > 9999 )); then
     acas_die "$EX_PRECONDITION" \
       "ACAS_DB_PORT must be between 1 and 9999; got '$ACAS_DB_PORT'." \
@@ -1386,12 +1347,9 @@ acas_assert_library_paths() {
 }
 
 
-# TRANSPORT SECURITY (CWE-295 certificate validation, CWE-319 cleartext).
-# The transport is decided ONCE, before anything connects, and never downgraded
-# silently. A local target may use plaintext; a non-local target needs either a
-# CA bundle in ACAS_DB_TLS_CA, whose certificate and hostname are then verified,
-# or an explicit ACAS_DB_ALLOW_PLAINTEXT declaration -- otherwise the run aborts
-# with a named cause, because the probe authenticates with a real credential.
+#  TRANSPORT SECURITY (CWE-295 certificate validation, CWE-319 cleartext). Decided ONCE,
+#  before anything connects, and never downgraded afterwards. Full rationale:
+#  harness/build_oracle.sh, same heading.
 
 # True when the target is reachable without leaving the machine: a unix socket,
 # an empty host, a loopback name, or a numeric loopback address.
@@ -1407,15 +1365,10 @@ acas_target_is_local() {
   return 1
 }
 
-# ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED.
-# `1|true|yes|on' is affirmative and `|0|false|no|off' is negative, matched
-# case-insensitively; the identical set lives in
-# acas_posting/cli/args.py as AFFIRMATIVE_SPELLINGS / NEGATIVE_SPELLINGS
-# and is read there by read_declared_flag, so one exported value cannot mean two
-# different things to the two halves of the harness. Anything else STOPS the run
-# rather than resolving to either answer: the value governs whether a credential
-# and every posted figure may cross a network in the clear, and only the operator
-# who typed it knows what was meant. The message never echoes the value.
+#  ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED. `1|true|yes|on' is
+#  affirmative, `|0|false|no|off' negative, matched case-insensitively; ANY other text
+#  stops the run rather than being read as a no. Full rationale:
+#  harness/build_oracle.sh, same heading.
 acas_plaintext_declared() {
   local declared="${ACAS_DB_ALLOW_PLAINTEXT-}"
   case "${declared,,}" in
@@ -1558,7 +1511,7 @@ acas_sql_scalar_as() {
 
 acas_db_tcp_probe() {
   # The port range is asserted in acas_assert_environment, before anything
-  # connects, so `int(sys.argv[2])' here can no longer receive 99999 and fail
+  # connects, so `int(sys.argv[2])' here cannot receive 99999 and fail
   # with an OverflowError that names neither the variable nor the value.
   acas_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
   "${ACAS_DEADLINE_ARGV[@]}" python3 - "$ACAS_DB_HOST" "$ACAS_DB_PORT" <<'PY'
@@ -1605,7 +1558,7 @@ acas_wait_for_database() {
     if (( elapsed >= timeout )); then
       acas_die "$EX_DATABASE" \
         "the $(acas_target_description) database did not accept a TCP connection within ${timeout}s." \
-        'The host and port are deliberately not printed (F-39): read them from' \
+        'The host and port are deliberately not printed: read them from' \
         'ACAS_DB_HOST and ACAS_DB_PORT in this environment, which is where the' \
         'tools that need them read them from too.' \
         'The load programs connect through the bridge C interface, so nothing can' \
@@ -2441,9 +2394,9 @@ acas_report_out_of_scope() {
 #     prompt is dropped: a pause whose only effect is to block a terminal has no
 #     database effect and is not reproduced.
 #
-#  2. THE LOG'S CONTENT IS NOT REPLAYED (OBS-008). It used to be `cat'-ed in
-#     full, or `tail'-ed when large, onto standard output -- which Compose
-#     collects as a container log and keeps. Three reasons that is wrong, and the
+#  2. THE LOG'S CONTENT IS NOT REPLAYED. `cat'-ing it in full, or `tail'-ing it
+#     when large, onto standard output -- which Compose collects as a container log and
+#     keeps -- is wrong for three reasons, and the
 #     first alone settles it:
 #       * THE FILE IS APPEND-ONLY AND SPANS EVERY PREVIOUS RUN. The frozen
 #         loaders append and nothing in the frozen path clears it, so replaying
@@ -2656,16 +2609,16 @@ acas_assert_scenario() {
 readonly ACAS_FIXTURE_MARKER='.acas-scenario-fixture'
 
 # The completion manifest harness/seed.sh --build-fixtures writes LAST into a published
-# fixture (finding F-25). Its presence proves the build finished; its digest is
+# fixture. Its presence proves the build finished; its digest is
 # recorded in the staged marker below so both cycles can be bound to the same bytes
-# (finding F-22).
+#.
 readonly ACAS_BUILD_MANIFEST='.acas-fixture-manifest'
 
 # The marker that authorises the recursive clear of a staged scenario directory
-# (finding F-27). $ACAS_SEED_DATA_DIR/<scenario> is removed and rebuilt on every
-# seed; it used to be removed under any data directory that resolved outside the
-# checkout, so a mis-set ACAS_DATA pointed that delete at somebody else's tree. The
-# staging ROOT now has to carry this file, written only for a root that is empty or
+# $ACAS_SEED_DATA_DIR/<scenario> is removed and rebuilt on every
+# seed. Removing it under any data directory that merely resolved outside the checkout
+# would let a mis-set ACAS_DATA point that delete at somebody else's tree, so the
+# staging ROOT has to carry this file, written only for a root that is empty or
 # already holds staged scenarios.
 readonly ACAS_STAGING_ROOT_MARKER='.acas-harness-staged-data'
 
@@ -2698,9 +2651,8 @@ acas_stage_scenario_seed() {
 """Emit the scenario's declared seed directory and seed file names.
 
 THE TRANSPORT IS CONTROL-FREE AND SELF-CHECKING, and it is that way because the
-receiving end is a shell loop. An earlier revision emitted `KEY<TAB>value' and
-read it with `IFS=$'\t' read -r key value', which trusted two things the YAML
-could break: that no value contained a TAB (one would split the record and the
+receiving end is a shell loop. Emitting `KEY<TAB>value' and reading it with
+`IFS=$'\t' read -r key value' would trust two things the YAML can break: that no value contained a TAB (one would split the record and the
 reader would keep only the fragment before it) and that no value contained a
 NEWLINE (one would let a scenario file FORGE a whole extra record -- CWE-93 and
 CWE-20, and by way of a forged SEED_DIR, CWE-22). A NUL-delimited stream is the
@@ -2755,7 +2707,7 @@ def emit(key, value):
     """Write one length-prefixed record."""
     sys.stdout.write('%s\t%d\t%s\n' % (key, len(value), value))
 
-#  THE SHARED DUPLICATE-REJECTING LOADER (findings MJ-17 and M-05). `yaml.safe_load`
+#  THE SHARED DUPLICATE-REJECTING LOADER. `yaml.safe_load`
 #  applies last-one-wins to a repeated key, silently, and this program reads `seed_dir`
 #  and `seed_files` -- the paths the seeding stage then loads. A shadowed `seed_dir`
 #  seeds from a directory the definition does not appear to name. The loader lives in
@@ -2765,7 +2717,7 @@ sys.path.insert(0, sys.argv[2])
 
 #  THE TWO IMPORTS ARE REPORTED SEPARATELY, because they are different faults with
 #  different remedies. Reporting a missing sibling as "PyYAML is not installed" is the
-#  exact masking finding MJ-17's second half was raised about.
+#  exact masking a shared parser must not perform.
 try:
     import yaml
 except ImportError:
@@ -3006,7 +2958,7 @@ PY
     'The frozen order seeds the system block first and unconditionally' \
     '[common/masterLD.sh:L50-L88]; every later loader depends on it.'
 
-  # ⭐ A BUILT FIXTURE MUST BE A PUBLISHED ONE (findings F-25, F-22).
+  # A BUILT FIXTURE MUST BE A PUBLISHED ONE.
   # harness/seed.sh --build-fixtures builds in a private staging directory and writes its
   # completion manifest LAST, so the manifest is present only in a fixture that was
   # published whole. Requiring it here is what stops an interrupted build - a
@@ -3094,7 +3046,7 @@ PY
       "could not restrict staged fixture permissions for $staging/$name."
   done
 
-  # THE IDENTITY MARKER, AND WHAT MAKES IT AN IDENTITY (finding F-22). One
+  # THE IDENTITY MARKER, AND WHAT MAKES IT AN IDENTITY. One
   # `file<TAB>name<TAB>sha256' row per staged file, in sorted order, plus the digest
   # of the completion manifest the fixture was published with. Both runners hash
   # THIS FILE and record the digest in their run-status record, harness/dump_tables.py
@@ -3131,7 +3083,7 @@ PY
 
 # python3 is already required, so the marker can never silently lose its
 # digests.
-# THE STAGING ROOT IS DECLARED, NOT INFERRED (finding F-27).
+# THE STAGING ROOT IS DECLARED, NOT INFERRED.
 #
 # $ACAS_SEED_DATA_DIR/<scenario> is cleared recursively on every scenario seed. The
 # root above it must therefore be a directory this harness owns: system directories,
@@ -3139,7 +3091,7 @@ PY
 # components are refused outright; a root carrying the marker is accepted; an EMPTY
 # root is claimed by writing the marker; and a root holding other content without a
 # marker is refused, because the delete would reach data this harness did not create.
-# THE ONE ESCAPE FROM THE DEPTH RULE, AND WHY IT IS A MEASUREMENT (finding F-27).
+# THE ONE ESCAPE FROM THE DEPTH RULE, AND WHY IT IS A MEASUREMENT.
 #
 # `/data` is one path component deep AND is the directory the shipped stack mounts as
 # its data volume, prefixes onto every loader's file name, and that the refusal above
@@ -3218,7 +3170,7 @@ acas_claim_staging_root() {
 }
 
 # acas_assert_staged_removable <path>
-#   Re-validated IMMEDIATELY BEFORE the clear (finding F-27): the root was checked a
+#   Re-validated IMMEDIATELY BEFORE the clear: the root was checked a
 #   moment ago and a symlink or a mount can appear in between. The target must be a
 #   real directory exactly one component below the claimed root, and the root must
 #   still carry its marker.
@@ -3264,7 +3216,7 @@ PY
 # MAIN Strictly sequential (R-3). No stage is backgrounded and none is
 # parallelised. Nothing here writes to $ACAS_REPO.
 # ======================================================================================
-#  THE `--build-fixtures' MODE  -  BUILD A SCENARIO'S FLAT SEED FILES (finding M-04)
+#  THE `--build-fixtures' MODE  -  BUILD A SCENARIO'S FLAT SEED FILES
 #
 #  WHY THE FIXTURES ARE BUILT RATHER THAN COMMITTED. Fifteen of the seventeen flat files
 #  the frozen loaders read are ORGANIZATION INDEXED or RELATIVE, and GnuCOBOL writes
@@ -3284,9 +3236,9 @@ PY
 #  frozen specification (rule R-3). So the fixtures are built under the data volume and
 #  `--seed-dir' is what points the loaders at them.
 #
-#  ⭐ WHY IT IS A MODE OF THIS SCRIPT RATHER THAN A SCRIPT OF ITS OWN. It was
+#  WHY IT IS A MODE OF THIS SCRIPT RATHER THAN A SCRIPT OF ITS OWN. It was
 #  `harness/seed.sh --build-fixtures`, which the Agent Action Plan section 0.3.1 harness
-#  inventory does not name (finding M-04). This script is stage 1: it is the consumer
+#  inventory does not name. This script is stage 1: it is the consumer
 #  that REQUIRES the fixtures, refuses with EX_FIXTURE when they are absent, and already
 #  owns the completion-manifest contract and the fixture-root derivation that the builder
 #  writes. Building and consuming the same artifact from one file is what stops the two
@@ -3297,28 +3249,28 @@ PY
 # ======================================================================================
 
 readonly ACAS_BF_SELF='harness/seed.sh --build-fixtures'
-# The builder is the `--make-fixtures' MODE of the dump tool (finding M-02), so this
+# The builder is the `--make-fixtures' MODE of the dump tool, so this
 # names the file and the flag is added at the invocation below.
 readonly ACAS_BF_BUILDER='dump_tables.py'
 readonly ACAS_BF_BUILDER_FLAG='--make-fixtures'
 
-# THE MARKER THAT MAKES A DESTRUCTIVE ROOT A DECLARED ONE (finding F-27). This
-# script removes a whole scenario directory before rebuilding it, and it used to do
-# so under any root that merely resolved outside the checkout -- so `--out /root'
-# or an ACAS_FIXTURES left over from another tool pointed the recursive delete at
-# somebody else's data. A root is now usable only if it CARRIES this file, and the
+# THE MARKER THAT MAKES A DESTRUCTIVE ROOT A DECLARED ONE. This
+# script removes a whole scenario directory before rebuilding it, and doing so under
+# any root that merely resolved outside the checkout would point the recursive delete
+# at somebody else's data -- `--out /root', or an ACAS_FIXTURES left over from another
+# tool. A root is usable only if it CARRIES this file, and the
 # file is created only for a root that is empty or already a fixture root. Nothing
 # is deleted under a root that could not have been built by this mode.
 readonly ACAS_BF_ROOT_MARKER='.acas-harness-fixture-root'
 
-# THE COMPLETION MANIFEST (finding F-25). Written LAST, inside the staging
+# THE COMPLETION MANIFEST. Written LAST, inside the staging
 # directory, and therefore present only in a fixture that was published whole. Its
 # absence is what tells harness/seed.sh that a directory is a partial build rather
 # than a fixture -- a distinction an interrupted build could not otherwise make,
 # because the files it had already written looked exactly like a finished set.
 readonly ACAS_BF_MANIFEST='.acas-fixture-manifest'
 
-# The builder's deadline, in seconds (finding F-29). It compiles and runs up to
+# The builder's deadline, in seconds. It compiles and runs up to
 # seventeen generated COBOL programs, so the budget is generous; what it rules out
 # is an unbounded wait, which in a container looks like progress. Overridable for a
 # slower host, and validated rather than trusted.
@@ -3548,7 +3500,7 @@ acas_bf_assert_environment() {
   acas_bf_claim_root
 }
 
-# THE DESTRUCTIVE ROOT IS DECLARED, NOT INFERRED (finding F-27).
+# THE DESTRUCTIVE ROOT IS DECLARED, NOT INFERRED.
 #
 # Three refusals, then one claim:
 #   * a root that is `/', a filesystem root, a home directory, an ancestor of the
@@ -3558,7 +3510,7 @@ acas_bf_assert_environment() {
 #   * a root that holds NOTHING ELSE is claimed by writing the marker;
 #   * a root that holds other content and no marker is REFUSED, because a
 #     recursive delete under it would remove data this mode did not create.
-# THE ONE ESCAPE FROM THE DEPTH RULE (finding F-27), the same measurement
+# THE ONE ESCAPE FROM THE DEPTH RULE, the same measurement
 # harness/seed.sh records at its own copy: a one-component root is a dedicated volume
 # when it sits on its own filesystem, and `/data` in the shipped stack does. An
 # unknown answer - either `stat` failing - is read as NO.
@@ -3621,7 +3573,7 @@ acas_bf_claim_root() {
       'This script removes <root>/<scenario> recursively before each rebuild, so a' \
       'root it cannot prove it owns is not one it will delete under. Use an empty' \
       'directory, or create the marker deliberately if this really is a fixture' \
-      'root built by an earlier version.'
+      'root built by another invocation.'
   fi
 
   {
@@ -3637,7 +3589,7 @@ acas_bf_claim_root() {
 # acas_bf_assert_removable <path>
 #   Re-validated IMMEDIATELY BEFORE the delete, because the root was checked when
 #   the script started and a symlink or a mount can appear in between (finding
-#   F-27). The path must be a real directory, must sit exactly one component below
+#   The path must be a real directory, must sit exactly one component below
 #   the claimed root, and the root must still carry its marker.
 acas_bf_assert_removable() {
   local target="$1" resolved parent
@@ -3692,7 +3644,7 @@ acas_bf_resolve_scenarios() {
 }
 
 # acas_bf_write_manifest <stem> <staging>
-#   THE COMPLETION MANIFEST, WRITTEN LAST (finding F-25). One `file<TAB>name<TAB>sha256'
+#   THE COMPLETION MANIFEST, WRITTEN LAST. One `file<TAB>name<TAB>sha256'
 #   row per built file, in sorted order, so the manifest is a function of the content
 #   and not of the order the builder happened to write it. Its presence is what makes
 #   a published directory provably whole; harness/seed.sh requires it.
@@ -3747,28 +3699,12 @@ acas_bf_publish() {
 }
 
 acas_bf_main() {
-  # ---------------------------------------------------------------------------
-  #  DROP THE ADMINISTRATIVE CREDENTIAL BEFORE ANYTHING IS SPAWNED (finding SEC-04)
+  #  DROP THE ADMINISTRATIVE CREDENTIAL BEFORE ANYTHING IS SPAWNED
   #
-  #  harness/docker-compose.yml puts ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD in the
-  #  `gnucobol' service environment because protocol stages 1 and 5 -- and only those
-  #  two, both harness/reset_db.sh -- drop and re-apply the frozen schema and so need DDL
-  #  rights. A service-wide variable is inherited by every descendant, which put the
-  #  database SUPERUSER password into the environment of the GnuCOBOL compiler, the
-  #  preSQL translator, every bridge and menu binary, the migrated Python cycle and
-  #  pytest itself.
-  #
-  #  THIS MODE NEVER USES THAT PAIR -- it invokes neither reset_db.sh nor the seeding
-  #  path of this script -- so it removes both from the environment HERE, before its
-  #  first child exists. Least privilege by construction rather than by convention: a
-  #  compile cannot reach the credential even by accident, because it is not there to
-  #  reach. The seeding path of this script does need the pair, for `SET GLOBAL
-  #  autocommit', which is exactly why the unset lives in this function and not at the
-  #  top of the file.
-  #
-  #  Application access is unaffected: ACAS_DB_USER / ACAS_DB_PASSWORD remain, and that
-  #  account holds SELECT, INSERT, UPDATE and DELETE on the one schema.
-  # ---------------------------------------------------------------------------
+  #  harness/docker-compose.yml supplies the administrative pair to the stages that need
+  #  it, and a spawned child inherits the whole environment. This script unsets it before
+  #  it spawns anything, so no compiler, menu or tool ever sees it. Full rationale:
+  #  harness/build_oracle.sh, same heading.
   unset ACAS_DB_ADMIN_USER ACAS_DB_ADMIN_PASSWORD
 
   acas_bf_parse "$@"
@@ -3788,8 +3724,8 @@ acas_bf_main() {
   for file in "${scenarios[@]}"; do
     stem="${file%.yaml}"
     target="$ACAS_BF_OUT/$stem"
-    # BUILT IN A PRIVATE STAGING DIRECTORY AND PUBLISHED IN ONE MOVE (F-25). The
-    # build used to write straight into $target, so an interruption left a
+    # BUILT IN A PRIVATE STAGING DIRECTORY AND PUBLISHED IN ONE MOVE. The
+    # build writing straight into $target would let an interruption leave a
     # directory that held some of the declared files and looked exactly like a
     # finished fixture -- and harness/seed.sh would stage it. The staging name is
     # deliberately NOT a scenario name, so it cannot be mistaken for one, and it
@@ -3804,7 +3740,7 @@ acas_bf_main() {
 
     printf -- '--- %s\n' "$stem"
     rc=0
-    # BOUNDED (F-29). `timeout' sends TERM at the deadline and KILL ten seconds
+    # BOUNDED. `timeout' sends TERM at the deadline and KILL ten seconds
     # later; exit 124 is its own report that the deadline was reached, which is
     # classified separately below rather than folded into "the build failed".
     timeout --kill-after=10s "${ACAS_BF_TIMEOUT}s" \
@@ -3814,10 +3750,10 @@ acas_bf_main() {
         --repo "$ACAS_BF_REPO" \
         --modules "$ACAS_BF_MODULES" </dev/null || rc=$?
 
-    # ⭐ THE GENERATED SOURCE IS SCRUBBED ON EVERY PATH, SUCCESS OR FAILURE (F-31).
-    # It used to be kept on failure "for diagnosis", and it carried the database
-    # account: the builder wrote the six connection values into MOVE literals. The
-    # builder no longer emits any credential -- it emits `ACCEPT ... FROM
+    # THE GENERATED SOURCE IS SCRUBBED ON EVERY PATH, SUCCESS OR FAILURE.
+    # Keeping it on failure "for diagnosis" would retain the database account if the
+    # builder wrote the six connection values into MOVE literals. The
+    # builder emits no credential -- it emits `ACCEPT ... FROM
     # ENVIRONMENT' -- and the directory is still removed unconditionally unless
     # --keep-work asks for it, because a compiler listing beside credential-bearing
     # DATA is not something to leave lying about either way.
@@ -3865,7 +3801,7 @@ acas_bf_main() {
     done
     acas_bf_warn 'Each diagnostic above is the builder'"'"'s own; it names the' \
       'scenario, the file, the record and the field it refused.'
-    # A TIMEOUT IS NOT A REFUSAL, AND IS NOT REPORTED AS ONE (finding F-29). The
+    # A TIMEOUT IS NOT A REFUSAL, AND IS NOT REPORTED AS ONE. The
     # builder that ran out of time said nothing about the scenario; the host or the
     # budget is what needs attention, so the status is its own.
     if (( timeouts > 0 && timeouts == failures )); then

@@ -274,8 +274,8 @@ BRIDGE_PARAGRAPH_TRACE: Final[Mapping[str, int]] = MappingProxyType(
 # ---------------------------------------------------------------------------
 # The two bad-function paragraphs return DIFFERENT We-Error values, and both are
 # reachable, so both are named.
-#   handler [common/acas016.cbl:L535-L536]:  move 999 to WE-Error / move 99 to fs-reply
-#   bridge  [common/slinvoiceMT.cbl:L1414-L1415]: move 990 to WE-Error / move 99 to Fs-Reply
+#  handler [common/acas016.cbl:L535-L536]:  move 999 to WE-Error / move 99 to fs-reply
+#  bridge  [common/slinvoiceMT.cbl:L1414-L1415]: move 990 to WE-Error / move 99 to Fs-Reply
 # Note the handler's 999 is the value the bridge's own documentation calls
 # "Not used here - Yet" [common/slinvoiceMT.cbl:L185] - a further divergence
 # between the two layers' vocabularies, recorded and not harmonised.
@@ -526,7 +526,7 @@ _LINE_BY_COLUMN: Final[Mapping[str, ColumnBinding]] = MappingProxyType(
 def narrow_signed_host_variable(binding: ColumnBinding, value: int) -> int:
     """Reproduce ``MOVE <signed source> TO <unsigned host variable>``.
 
-    N-signloss, AAP anomaly #11 family. Six of this bridge's 45 fields are declared
+    N-signloss, AAP anomaly A-11 family. Six of this bridge's 45 fields are declared
     SIGNED in the copybook and UNSIGNED in both the host variable and the column, so
     **the sign is lost at the bridge, before any SQL executes**.
     """
@@ -1047,7 +1047,7 @@ def _new_header_record() -> SInvoiceHeader:
 def _new_line_record() -> SilInvoiceLine:
     """``initialize`` a line view - every field zero or space, nothing absent.
 
-    ⭐⭐ N-back-ordered-dropped. ``sil_back_ordered`` IS initialised here, because
+    N-back-ordered-dropped. ``sil_back_ordered`` IS initialised here, because
     ``copybooks/slwsinv.cob:L97-L98`` declares it (added 03/03/24, replacing an older
     filler) - but it has NO host variable and NO column.
     """
@@ -1064,7 +1064,7 @@ def _new_line_record() -> SilInvoiceLine:
         sil_vat=Decimal("0.00"),
         sil_vat_code=0,
         sil_update=" ",
-        # ⭐ Declared, initialised, and never carried to any column.  See above.
+        # Declared, initialised, and never carried to any column.  See above.
         sil_back_ordered=" ",
     )
 
@@ -2362,7 +2362,7 @@ def ba050_process_read_indexed(ctx: _BridgeContext) -> None:
         return
     _fetch_into_group(ctx.state.td_sainvoice_rec, HEADER_COLUMNS, row)
     bb100_unload_hvs(ctx.state, ctx.buffer)
-    # move HV-SINVOICE-KEY to WS-File-Key. [:L938] ⭐ The header key host variable IS
+    # move HV-SINVOICE-KEY to WS-File-Key. [:L938] The header key host variable IS
     # read - but only for LOGGING.
     _move_to_ws_file_key(ctx, str(ctx.state.td_sainvoice_rec[HEADER_KEY_COLUMN]))
     ba999_end(ctx)
@@ -2416,7 +2416,7 @@ def ba060_process_start(ctx: _BridgeContext) -> None:
     if header_rows != 0:
         header_cursor.set_cursor_active()
         header_cursor.position_at(header_key)
-    # ⭐ NO 'else set Cursor-Not-Active' here. The header cursor is left as it was found
+    # NO 'else set Cursor-Not-Active' here. The header cursor is left as it was found
     # on an empty result. Asymmetric with the RG1 block below.
     if header_rows == 0:
         ctx.file_access.fs_reply = int(FsReply.INVALID_KEY_ON_START)
@@ -2613,7 +2613,7 @@ def ba090_process_rewrite(ctx: _BridgeContext) -> None:
 def ba100_bad_function(ctx: _BridgeContext) -> None:
     """``ba100-Bad-Function.`` [common/slinvoiceMT.cbl:L1412]
 
-    ⚠ The BRIDGE's bad-function pair is 990/99. The HANDLER's is 999/99
+    The BRIDGE's bad-function pair is 990/99. The HANDLER's is 999/99
     [common/acas016.cbl:L535-L539]. Different codes for the same condition at the two
     layers; both reproduced, neither harmonised.
     """
@@ -2625,7 +2625,7 @@ def ba100_bad_function(ctx: _BridgeContext) -> None:
 def ba998_free(ctx: _BridgeContext) -> None:
     """``ba998-Free.`` [common/slinvoiceMT.cbl:L1421]
 
-    ⚠ ONLY THE PRIMARY RESULT IS FREED. The lines result (``TP-SAINV-LINES-REC``) is
+    ONLY THE PRIMARY RESULT IS FREED. The lines result (``TP-SAINV-LINES-REC``) is
     freed only by ``bc998-Free``, which nothing calls - see :func:`bc998_free`.
     N-bc998-never-called.
     """
@@ -2651,7 +2651,7 @@ def ba999_end(ctx: _BridgeContext) -> None:
 def bc050_process_read_indexed(ctx: _BridgeContext) -> None:
     """``bc050-Process-Read-Indexed.`` [common/slinvoiceMT.cbl:L2381]
 
-    ⭐ THE POINTER SAVE/RESTORE IS THE WHOLE POINT. Because one MySQL result pointer is
+    THE POINTER SAVE/RESTORE IS THE WHOLE POINT. Because one MySQL result pointer is
     shared, reading a line row would destroy the header walk's position.
     """
     logging_data = ctx.logging_data
@@ -2712,7 +2712,7 @@ def bc051_fetch_rg1(ctx: _BridgeContext) -> None:
         _initialise_ws_invoice_record(ctx.buffer)
         ctx.file_access.fs_reply = int(FsReply.KEY_NOT_FOUND)
     _move_to_ws_file_key(ctx, _record_key_slice(ctx, ctx.k, ctx.ell))
-    # move zero to FS-Reply WE-Error. [:L2507] ⭐⭐ THIS DESTROYS THE 23 SET ABOVE.
+    # move zero to FS-Reply WE-Error. [:L2507] THIS DESTROYS THE 23 SET ABOVE.
     # Unconditional, two lines after it was set. N-fetch-rg1-status-erased. Do NOT guard
     # this.
     ctx.file_access.fs_reply = int(FsReply.SUCCESS)
@@ -2737,7 +2737,7 @@ def bc058_restore_pointers(ctx: _BridgeContext) -> None:
 def bc070_process_write(ctx: _BridgeContext) -> None:
     """``bc070-Process-Write.`` [common/slinvoiceMT.cbl:L2519]
 
-    ⭐ ``*> Same as WS-Sil-Key`` at [:L2525] asserts by COMMENT that the invoice key and
+    ``*> Same as WS-Sil-Key`` at [:L2525] asserts by COMMENT that the invoice key and
     the line key are the same ten bytes. Nothing in the code checks it.
     """
     logging_data = ctx.logging_data
@@ -2795,7 +2795,7 @@ def bc080_process_delete(ctx: _BridgeContext) -> None:
             ctx,
             f"Delete for {key_value} only found (rg01) {outcome.count_rows} Rows",
         )
-        # go to ba999-End [:L2622] ⭐ NO 'move 99 to fs-reply' and NO 'move 995 to WE-
+        # go to ba999-End [:L2622] NO 'move 99 to fs-reply' and NO 'move 995 to WE-
         # Error' on this arm, unlike ba080/ba085/bc085. The miss is silent.
         ba999_end(ctx)
         return
@@ -2874,7 +2874,7 @@ def bc090_process_rewrite(ctx: _BridgeContext) -> None:
 def bc998_free(ctx: _BridgeContext) -> None:
     """``bc998-Free.`` [common/slinvoiceMT.cbl:L3239] - AND NOTHING EVER CALLS IT.
 
-    ⭐⭐ N-bc998-never-called. Searching the whole 3259-line bridge for ``bc998`` returns
+    N-bc998-never-called. Searching the whole 3259-line bridge for ``bc998`` returns
     exactly ONE hit: its own label at [common/slinvoiceMT.cbl:L3239]. No ``perform``, no
     ``go to``, from any paragraph. Consequences, all reproduced.
     """
@@ -2887,17 +2887,17 @@ def bc998_free(ctx: _BridgeContext) -> None:
 def ca_process_logs(ctx: _BridgeContext) -> None:
     """``Ca-Process-Logs.`` [common/slinvoiceMT.cbl:L3251]
 
-    ⚠ ``fhlogger`` is ``common/fhlogger.cbl``, which AAP section 0.2.2 lists as OUT OF
+    ``fhlogger`` is ``common/fhlogger.cbl``, which AAP section 0.2.2 lists as OUT OF
     SCOPE. So the call is not reproduced as a call.
     """
     logging_data = ctx.logging_data
-    #  ONE ADAPTER FOR ALL TWENTY HANDLERS, at one level, with one field set.
+    #  ONE ADAPTER FOR ALL SEVENTEEN HANDLER MODULES, at one level, with one field set.
     # `WS-File-Key` is WITHHELD - for this table it is the invoice number, a
     # business key - and so is `WS-Log-Where`, which this bridge fills with the
     # WHOLE STATEMENT [see `_run_statement`], making it the single most exposing
     # field in the module (CWE-532). `sanitise_for_log` escaped both and removed
     # neither. The adapter also advances `Log-File-Rec-Written` modulo one million,
-    # the range of the frozen `pic 9(6)` [copybooks/Test-Data-Flags.cob:L20], which
+    # the range of the frozen `pic 9(6)` [copybooks/Test-Data-Flags.cob:L18], which
     # this paragraph did not advance at all.
     log_file_handler_record(
         _LOG,
@@ -2932,7 +2932,7 @@ def slinvoice_mt(
     ``CALL "slinvoiceMT"`` actually lands in.
 
     Args:
-        file_access: ``File-Access`` [copybooks/wsfnctn.cob:L23-L38], carrying the
+        file_access: ``File-Access`` [copybooks/wsfnctn.cob:L22-L41], carrying the
             function code, the access type, the status pair and ``Logging-Data``.
         dal_common: ``ACAS-DAL-Common-data`` [copybooks/Test-Data-Flags.cob], whose
             ``sw-testing`` gates logging exactly as ``Testing-1`` does.
@@ -3146,7 +3146,7 @@ def aa040_process_read_next(ctx: _HandlerContext) -> None:
 def aa045_eval_keys(ctx: _HandlerContext) -> None:
     """``aa045-Eval-Keys.`` [common/acas016.cbl:L398]
 
-    ⭐ AND NOTE WHICH FUNCTIONS ARE ABSENT: 3 and 34. A read-next therefore leaves ``WS-
+    AND NOTE WHICH FUNCTIONS ARE ABSENT: 3 and 34. A read-next therefore leaves ``WS-
     File-Key`` at whatever the previous call put there, until the paragraph body
     overwrites it. Reproduced by simply not listing them.
     """
@@ -3165,7 +3165,7 @@ def aa045_eval_keys(ctx: _HandlerContext) -> None:
 def aa050_process_read_indexed(ctx: _HandlerContext) -> None:
     """``aa050-Process-Read-Indexed.`` [common/acas016.cbl:L416]
 
-    ⭐ The trailing 998 at [:L437] carries the comment ``*> file seeks key type out of
+    The trailing 998 at [:L437] carries the comment ``*> file seeks key type out of
     range but should never get here 998`` - the author knew the guard at [:L256] had
     already rejected key numbers other than 1, so this is defence in depth against his
     own dispatch.
@@ -3197,7 +3197,7 @@ def aa050_process_read_indexed(ctx: _HandlerContext) -> None:
 def aa060_process_start(ctx: _HandlerContext) -> None:
     """``aa060-Process-Start.`` [common/acas016.cbl:L442]
 
-    ⭐ AND THIS GUARD SETS ``WE-Error`` WITHOUT SETTING ``FS-Reply``. Compare the key
+    AND THIS GUARD SETS ``WE-Error`` WITHOUT SETTING ``FS-Reply``. Compare the key
     guard at [:L256-L259], which sets both 998 AND ``fs-reply`` 99.
     """
     logging_data = ctx.logging_data
@@ -3264,7 +3264,7 @@ def aa090_process_rewrite(ctx: _HandlerContext) -> None:
 def aa100_bad_function(ctx: _HandlerContext) -> None:
     """``aa100-Bad-Function.`` [common/acas016.cbl:L534]
 
-    ⭐⭐ N-delete-all-bad-function. FUNCTION CODE 6 ARRIVES HERE. The dispatch's ``when
+    N-delete-all-bad-function. FUNCTION CODE 6 ARRIVES HERE. The dispatch's ``when
     other`` comment claims ``*> 6 is spare / unused`` [common/acas016.cbl:L309], yet
     ``fn-Delete-All value 6`` exists [copybooks/wsfnctn.cob:L94] and the facade
     publishes ``Invoice-Delete-All`` [copybooks/Proc-ACAS-FH-Calls.cob:L911].
@@ -3339,14 +3339,14 @@ def ca_exit_handler(ctx: _HandlerContext) -> None:
     del ctx
 
 
-# acas016's OWN 'ba' section - the RDBMS branch ⚠ N-paragraph-name-collision.
+# acas016's OWN 'ba' section - the RDBMS branch N-paragraph-name-collision.
 
 
 def ba010_test_ws_rec_size_handler(ctx: _HandlerContext) -> None:
     """``ba010-Test-WS-Rec-Size.`` [common/acas016.cbl:L561]
 
     The paragraph then FALLS THROUGH into ``ba012-Test-WS-Rec-Size-2`` [:L569] with no
-    transfer of control. ⚠ THE FALL-THROUGH IS DRIVEN BY
+    transfer of control. THE FALL-THROUGH IS DRIVEN BY
     :func:`ba_process_rdbms_handler`, NOT BY THIS FUNCTION, because COBOL's two PERFORM
     forms differ and both are used against this section.
     """
@@ -3367,7 +3367,7 @@ def ba012_test_ws_rec_size_2_handler(ctx: _HandlerContext) -> bool:
     """
     # if A = zero *> so it is being called first time [:L571] move function Length (WS-
     # Invoice-Record) to A [:L572-L574] move function length (Invoice-Record) to B
-    # [:L575-L577] if A < B -> 901 / 99 [:L578-L581] ⚠ DELIBERATE OMISSION, RECORDED
+    # [:L575-L577] if A < B -> 901 / 99 [:L578-L581] DELIBERATE OMISSION, RECORDED
     # (R-5).
     ctx.file_access.rdb_data = load_rdb_data_once(ctx.system_record)
     return False
@@ -3375,7 +3375,7 @@ def ba012_test_ws_rec_size_2_handler(ctx: _HandlerContext) -> bool:
 
 def ba015_test_ends_handler(ctx: _HandlerContext) -> None:
     """``ba015-Test-Ends.`` [common/acas016.cbl:L611]"""
-    # call "slinvoiceMT" using File-Access ACAS-DAL-Common-data WS-Invoice-Record ⭐ THE
+    # call "slinvoiceMT" using File-Access ACAS-DAL-Common-data WS-Invoice-Record THE
     # PARAMETER ORDER IS THE BRIDGE'S, NOT THE HANDLER'S. The handler was entered with
     # System-Record first and File-Access third.
     slinvoice_mt(
@@ -3419,7 +3419,7 @@ def dispatch(
 ) -> FileAccess:
     """``call "acas016" using ...`` - the handler, entered as its callers enter it.
 
-    ⭐⭐ ONE RECORD PARAMETER FOR TWO TABLES. ``WS-Invoice-Record`` is a UNION buffer with
+    ONE RECORD PARAMETER FOR TWO TABLES. ``WS-Invoice-Record`` is a UNION buffer with
     three redefining views [copybooks/slwsinv2.cob:L27], [:L38], [:L91], and the
     function code together with ``WS-Sih-Test`` decides which table is touched.
 
@@ -3428,7 +3428,7 @@ def dispatch(
             Statuses`` selects the ISAM or the RDB path and whose ``RDBMS-*`` fields
             carry the credentials.
         invoice: ``WS-Invoice-Record`` - the ONE union buffer for BOTH tables.
-        file_access: ``File-Access`` [copybooks/wsfnctn.cob:L23-L38].
+        file_access: ``File-Access`` [copybooks/wsfnctn.cob:L22-L41].
         file_defs: ``File-Defs`` [copybooks/wsnames.cob]. Carried because the linkage
             carries it; the RDB path does not read it, which is itself recorded as a
             deliberate omission.
@@ -3484,7 +3484,7 @@ def dispatch(
         # go to AA-Main-Exit - Class 3.
         aa_main_exit(ctx)
         return file_access
-    # *> Test Rec lengths first. [:L277] ⚠ A PARAGRAPH PERFORM, NOT A SECTION PERFORM.
+    # *> Test Rec lengths first. [:L277] A PARAGRAPH PERFORM, NOT A SECTION PERFORM.
     # It runs ba012's body ALONE and returns.
     if ba012_test_ws_rec_size_2_handler(ctx):
         aa999_main_exit(ctx)
@@ -3515,7 +3515,7 @@ def dispatch(
     elif function_code == int(FileFunction.START):
         aa060_process_start(ctx)
     else:
-        # when other *> 6 is spare / unused [common/acas016.cbl:L309-L310] ⭐⭐⭐ N-delete-
+        # when other *> 6 is spare / unused [common/acas016.cbl:L309-L310] N-delete-
         # all-bad-function, AND THE TWO LAYERS DISAGREE. Verified.
         aa100_bad_function(ctx)
         return file_access
@@ -3524,7 +3524,7 @@ def dispatch(
 
 
 # The linkage projection - `copy "slwsinv2.cob" replacing Invoice-Record by WS-Invoice-
-# Record` [common/acas016.cbl:L218-L221] ⭐⭐ WHY THIS EXISTS AT ALL.
+# Record` [common/acas016.cbl:L218-L221] WHY THIS EXISTS AT ALL.
 
 
 def _projected_record_views(record: object) -> tuple[object, object] | None:
@@ -3545,7 +3545,7 @@ def _projected_record_views(record: object) -> tuple[object, object] | None:
 def linkage_buffer_for(record: object) -> InvoiceBuffer:
     """Adopt the caller's record area as this handler's ``WS-Invoice-Record``.
 
-    ⭐ THE BUFFER IS THE SAME ONE ON EVERY CALL for a given record area, and it has to
+    THE BUFFER IS THE SAME ONE ON EVERY CALL for a given record area, and it has to
     be.
 
     Args:

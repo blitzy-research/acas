@@ -5,7 +5,7 @@
 # Ledger posting cycle, and the last of the eight scenario definitions the
 # protocol MANDATES (Agent Action Plan section 0.8.5) -- which are now exactly the
 # eight this directory holds, a ninth having been added to reach gl080 and then
-# removed by findings M-09 and M-17. One closed, waiting
+# not present in the committed eight. One closed, waiting
 # General Ledger batch that carries NO transactions is run through the whole
 # cycle, gl070 -> gl071 -> gl072. The cycle must complete, must raise no term
 # code, and must post nothing.
@@ -120,19 +120,16 @@ description: |
   was never seeded, not because it was cleared.
 
   THE PHASE LABELS, AND WHY THEIR NUMBERING IS NOT EXECUTION ORDER
-  The programs label their own phases on screen:
-    [general/gl070.cbl:L284]  Phase - 1.  Batch Check
-    [general/gl070.cbl:L292]  Phase - 2.  Transaction Pre-process
-    [general/gl072.cbl:L274]  Phase - 4.  Transaction Update
-  gl071 displays only a wait message [general/gl071.cbl:L170] and is
-  unnumbered. Phase three is transaction DELETION and lives in gl080, which
-  executes AFTER phase four and which no scenario in this harness drives. The
-  numbering is preserved as found and is not renumbered.
-
+  The programs label their own phases on screen -- phase one and phase two at
+  [general/gl070.cbl:L284] and [general/gl070.cbl:L292], phase four at
+  [general/gl072.cbl:L274] -- while gl071 shows only a wait message
+  [general/gl071.cbl:L170] and is unnumbered. Phase THREE is transaction
+  deletion, lives in gl080 and executes AFTER phase four. The numbering is
+  preserved as found and is not renumbered.
   HOW AN EMPTY BATCH TRAVELS THE CYCLE -- THE MEASURED PATH
   This is the spine of the scenario, so it is traced statement by statement.
   PHASE ONE, gl071a section [general/gl070.cbl:L300]. The flag that drives the
-  abort is cleared first, move zero to a [general/gl070.cbl:L283]; the batch
+  abort is cleared first, move zero to a [general/gl070.cbl:L284]; the batch
   file is opened for input [general/gl070.cbl:L303]; the read loop begins
   [general/gl070.cbl:L305] with GL-Batch-Read-Next
   [general/gl070.cbl:L308] and leaves on end-of-file
@@ -166,7 +163,8 @@ description: |
   [general/gl070.cbl:L473].
   PHASE THREE OF THE DISPATCH, gl071. An empty input is sorted to an empty
   output; see below. PHASE FOUR, gl072, then reads that empty work file, and
-  what it does there is the one genuinely open question in this file.
+  what it does there was the one question this file had to have arbitrated; it is
+  now settled -- see THE AT-END ARBITRATION below.
 
   THE CODE THAT DOES NOT EXECUTE -- WHAT MAKES "POSTED NOTHING" CONCRETE
   Naming the code that CANNOT run is what turns a vague claim into a reviewable
@@ -213,12 +211,13 @@ description: |
   body. The scenario that does exercise the silent skips is
   mixed_accepted_rejected.
 
-  THE CENTRAL OPEN QUESTION -- AN EXPLICIT RULE R-6 ARBITRATION
-  What does gl072 do to a batch when the sorted work file is empty? This is the
-  one genuinely undecided thing in this scenario, and it is posed here rather
-  than guessed, because rule R-6 makes the compiled program the arbiter: where a
-  semantic question is ambiguous, the compiled program's observed behaviour
-  decides it.
+  THE AT-END ARBITRATION -- AN EXPLICIT RULE R-6 QUESTION, NOW ANSWERED
+  What does gl072 do to a batch when the sorted work file is empty? It was posed
+  here rather than guessed, because rule R-6 makes the compiled program the
+  arbiter, and it was then measured: Q-EMPTY-BATCH-AT-END is RESOLVED BY ORACLE
+  (2026-08-07) in docs/migration/ambiguity-resolutions.md section 13 -- NEITHER
+  at-end paragraph leaves any observable effect. expected_table_effect: unchanged
+  is therefore the measured reading and not a prediction.
   WHAT IS MEASURED AND CERTAIN. gl072 opens the batch and nominal files
   [general/gl072.cbl:L276-L277], opens the sorted work file for input
   [general/gl072.cbl:L278] and the print file for output
@@ -251,18 +250,17 @@ description: |
   an absent key and changes nothing, or something else again, depends on
   handler and bridge behaviour that cannot be settled by reading -- and the
   General Ledger caveat below means the documentation cannot settle it either.
-  SO: RUN THE ORACLE, OBSERVE GLBATCH-REC, AND RECORD THE ANSWER. The arbitration
-  belongs in docs/migration/ambiguity-resolutions.md, alongside the experiment
-  that produced it. GLBATCH-REC therefore STAYS in affected_tables whatever the
-  answer turns out to be: it is the table that records it, and a table left
+  THE ORACLE WAS RUN AND GLBATCH-REC OBSERVED: neither rewrite moved a column, and
+  the arbitration is recorded in docs/migration/ambiguity-resolutions.md alongside
+  the experiment that produced it. GLBATCH-REC therefore STAYS in affected_tables: it is the table that records it, and a table left
   unobserved cannot corroborate anything. And run_date_binary is pinned
   precisely so that IF the posted date is stamped, it is stamped
   deterministically: GLBATCH-REC.POSTED is int(8) unsigned in the frozen
   schema, so the value is diff-visible on both sides.
-  Whatever the oracle shows, the Python side must show the SAME. If the oracle
-  stamps the empty batch, the migrated cycle stamps it too; if the oracle
-  leaves it untouched, so does the migrated cycle. Neither outcome is a defect
-  to be corrected (rule R-4).
+  The Python side must show the SAME as the oracle, and the tests assert exactly
+  that rather than the measured value, so a later re-measurement cannot be
+  contradicted by a hard-coded expectation. Neither outcome would be a defect to
+  be corrected (rule R-4).
   After the branch, control leaves for end-run [general/gl072.cbl:L289], which
   closes the work and print files [general/gl072.cbl:L440] and then the batch
   and nominal files [general/gl072.cbl:L441-L442]. The spool-out that follows,
@@ -334,7 +332,7 @@ description: |
   [general/gl070.cbl:L481], GL-Posting-Read-Next [general/gl070.cbl:L486] and
   GL-Posting-Close [general/gl070.cbl:L466]. gl071 issues NONE. gl072 issues
   exactly eight -- GL-Batch-Open [general/gl072.cbl:L276], GL-Nominal-Open
-  [general/gl072.cbl:L277], GL-Batch-Rewrite [general/gl072.cbl:L377],
+  [general/gl072.cbl:L274], GL-Batch-Rewrite [general/gl072.cbl:L377],
   GL-Nominal-Rewrite [general/gl072.cbl:L382], GL-Nominal-Read-Next
   [general/gl072.cbl:L408], GL-Batch-Close [general/gl072.cbl:L441],
   GL-Nominal-Close [general/gl072.cbl:L442] and GL-Batch-Read-Next
@@ -400,14 +398,13 @@ description: |
   run has no behaviour of its own to observe there.
 
   TWO CELLS OF SYSTEM-REC ARE WITHHELD FROM THE CAPTURE, AND ONLY TWO.
-  `RDBMS-Passwd pic x(12)' [copybooks/wssystem.cob:L139] and the frozen schema's
-  shorter PASS-WORD column are the database's own password as seeded, and a dump
-  is SELECT *, so harness/dump_tables.py's REDACTED_COLUMNS replaces exactly
-  those two cells, on BOTH sides, with one fixed marker -- which is why this file
-  declares neither field. The row is still dumped and still diffed, every other
-  column byte for byte, so this is not an ignore-list -- the differ is required to
-  carry none -- and withholding a secret symmetrically cannot conceal a difference
-  in anything the cycle computes.
+  `RDBMS-Passwd' [copybooks/wssystem.cob:L139] and the frozen schema's shorter
+  PASS-WORD column are the seeded database password, and a dump is SELECT *, so
+  harness/dump_tables.py's REDACTED_COLUMNS replaces those two cells, on BOTH
+  sides, with one fixed marker -- which is why this file declares neither field.
+  The row is still dumped and still diffed, every other column byte for byte, so
+  this is not an ignore-list, and an ignore-list in the diff stage remains
+  forbidden outright.
   THE ROW IS ALSO FINGERPRINTED, ON EVERY SCENARIO AND ON BOTH SIDES:
   acas_resolve_fingerprint_tables appends it when a scenario has not declared it,
   and tests/conftest.py's `assert_system_record_parity' compares the two sides'
@@ -640,39 +637,24 @@ description: |
       using clause at L177 and the giving clause at L178.
 
   THE GENERAL LEDGER CAVEAT -- WHY EXPECTED VALUES COME ONLY FROM THE ORACLE
-  The maintainer records that he has not worked with General at all since it
-  was migrated to the current compiler [README.TXT:L50-L53], while the same
-  passage reports the other ledgers as tested. The General Ledger also
-  contributes the majority of the in-scope programs. It follows that no
-  expected value for this scenario may be derived from documentation or from
-  reasoning about intended behaviour: if the compiled cycle behaves
-  surprisingly, THE SURPRISE IS THE SPECIFICATION (rule R-6). That applies with
-  unusual force here, because the behaviour of the compiled cycle on a
-  zero-transaction batch is genuinely unknown until it is run -- which is the
-  arbitration set out above.
-
+  The maintainer reports the other ledgers as tested but records no work on
+  General since it was migrated to the current compiler [README.TXT:L50-L53],
+  and General contributes most of the in-scope programs.
+  So no expected value for this scenario is derived from documentation or from
+  reasoning about intent: if the compiled cycle behaves surprisingly, THE
+  SURPRISE IS THE SPECIFICATION (rule R-6), and the arbitration is recorded in
+  docs/migration/ambiguity-resolutions.md.
   THE ACCEPTANCE PROTOCOL
-  TEN stages, in this order, one scenario at a time and nothing
-  alongside it. harness/normalize.py is the single registry and
-  `harness/normalize.py --print-stages' prints it, so this list is a restatement
-  and never the authority:
-    1 reset the schema and seed the scenario
-    2 run the compiled COBOL cycle
-    3 dump the COBOL state
-    4 normalise the COBOL dump
-    5 reset the schema and RE-SEED THE SAME SCENARIO -- the same fixture bytes, so
-      the Python cycle starts from the state the COBOL cycle started from and not
-      the state it left
-    6 run the migrated Python cycle
-    7 dump the Python state
-    8 normalise the Python dump
-    9 verify both captures are published -- BEFORE a single row is compared,
-      because two PARTIAL captures can produce an empty diff and so pass a
-      comparison that compared nothing
-    10 diff the two normalised trees
-  harness/build_oracle.sh and harness/seed.sh --build-fixtures come before stage 1 and are
-  not stages: the first runs once per image, the second once per change to a
-  scenario's seed records.
+  TEN stages, one scenario at a time and nothing alongside it.
+  `harness/normalize.py --print-stages' is the registry and the authority. The
+  two stages a reader would not guess are stage 5, which re-seeds THE SAME
+  FIXTURE BYTES so the Python cycle starts from the state the COBOL cycle
+  started from rather than the state it left, and stage 9, which verifies both
+  captures are published BEFORE a single row is compared, because two PARTIAL
+  captures produce an empty diff and so pass a comparison that compared nothing.
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures precede stage 1
+  and are not stages: the first runs once per image, the second once per change
+  to a scenario's seed records.
   An EMPTY normalised diff is the pass condition, and the evidence is recorded
   per scenario in
   docs/migration/scenario-diff-evidence.md.
@@ -720,7 +702,7 @@ clock:
   run_date: 155127
 
 # Flat mirrors of the clock block, required by
-# [harness/run_cobol_scenario.sh acas_resolve_pinned_values] and [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
+# [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
 # The date text is QUOTED so that it stays a ten-character string, the width of
 # to-day pic x(10), instead of being parsed as some other scalar type (R-2). The
 # binary value is the matching Run-Date [copybooks/wssystem.cob:L67]; the pair is
@@ -744,7 +726,7 @@ system:
   p_flag_p: 2
 
 # Flat mirrors of the two system values the COBOL runner reads directly:
-# [harness/run_cobol_scenario.sh acas_resolve_pinned_values] and [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
+# [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
 date_form: 1
 irs_instead: " "
 

@@ -287,6 +287,12 @@ def load000(
         program: the migrated callee's published `run`. In the COBOL the target comes
             from the field itself - `call ws-called` is a dynamic call by name - so the
             two travel together here.
+        menu_state: the menu's own WORKING-STORAGE, whose `system_record` and
+            `system_record_4` are the SAME instances the linkage carries, so the
+            callee's by-reference writes are already visible to `overrewrite`.
+        channel: the open-item carrier that `pl055` hands to `pl060`, modelling the
+            single `assign file-28` both programs name. `None` dispatches without one,
+            which is what a single-program call does.
 
     Returns:
         `WS-Term-Code` as the callee left it. The caller decides what that means:
@@ -397,6 +403,8 @@ def load08(linkage: args.SlPlLinkage, *, menu_state: args.MenuState) -> int:
 
     Args:
         linkage: the five linkage operands. ONE instance for the whole route.
+        menu_state: the menu's own WORKING-STORAGE, threaded through to `load000` so
+            that the persist arm can reach `overrewrite`.
 
     Returns:
         `WS-Term-Code` after the last dispatch that ran - `pl060`'s normally, or
@@ -517,16 +525,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             vector, including a missing `--run-date`, and left to propagate with
             argparse's own status and its own message.
     `args.RdbmsParamError` - the deployment contract for the six connection
-    parameters being absent or unusable - is CAUGHT here, and only that exact type
-    (finding CLI-09). `args.report_configuration_failure` returns the one status
+    parameters being absent or unusable - is CAUGHT here, and only that exact type. `args.report_configuration_failure` returns the one status
     every route of this package shares: 8 when the contract is absent, 1 when it is
-    unusable. The reason an earlier draft let it propagate still stands as far as
-    it went - a run that cannot reach the provisioned database must stop before it
-    writes anything, rather than connect silently to the placeholder endpoint the
-    frozen copybook declares [copybooks/wssystem.cob:L137-L144] - and it still
-    does stop, before the store is opened and before any program is entered. What
-    changed is only that the stop is now DIAGNOSABLE and identical across the seven
-    routes instead of route-dependent. The status is not a `WS-Term-Code` value and
+    unusable. Catching it does not soften the contract that a run unable to reach
+    the provisioned database must stop before it writes anything, rather than
+    connect silently to the placeholder endpoint the frozen copybook declares
+    [copybooks/wssystem.cob:L137-L144]: the raise happens while the six parameters
+    are resolved, before the store is opened and before any program is entered, so
+    nothing has been written when it surfaces. Catching it makes that stop
+    DIAGNOSABLE and identical across the seven routes rather than route-dependent.
+    The status is not a `WS-Term-Code` value and
     is not claimed to be one; it is the migration's own boundary
     (Q-CLI-EXITSTATUS). `ValueError` at large is NOT caught.
 
@@ -582,11 +590,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     #  4 into `WS-System-Record-4` and file-key 1 into `System-Record`, TWO keys
     #  where the General Ledger shell reads three - so both programs receive the
     #  PERSISTED records. `pl055` ACCUMULATES into the period totals
-    #  [purchase/pl055.cbl:L582] and [:L584] rather than initialising them, so
-    #  binding declared defaults discarded every prior period's figures
-    #  (finding CLI-02).
+    #  [purchase/pl055.cbl:L582] and [:L584] rather than initialising them, so the
+    #  binder must supply the persisted figures rather than declared defaults.
     #
-    #  THE EXACT TYPE IS CAUGHT, NOT `ValueError` (finding CLI-09). The six
+    #  THE EXACT TYPE IS CAUGHT, NOT `ValueError`. The six
     #  connection parameters are resolved inside the binder before the store is
     #  opened, so a failure here has touched nothing.
     try:
@@ -698,11 +705,10 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 #      sales/sales.cbl:L765-L766.
 #
 # DRIFT NOTE  -  the sibling payment route `load12.` is at
-#   purchase/purchase.cbl:L786-L790, measured. One planning document cites
-#   L785-L789, which is one line early: L785 is a `*>` separator, L786 is the
-#   `load12.` label, L789 is `move "pl100" to ws-called.` and L790 is `go to
-#   load000.`. The correct span is already used by this package's own marker.
-#   That route belongs to cli/pl_payment_post.py, not here.
+#   purchase/purchase.cbl:L786-L790, measured: L785 is a `*>` separator, L786 the
+#   `load12.` label, L789 `move "pl100" to ws-called.` and L790 `go to load000.`.
+#   The planning material cites L785-L789, one line early. Every file in this tree
+#   carries the measured span. That route belongs to cli/pl_payment_post.py.
 #
 # OMISSIONS  -  recorded as omissions so that a reader comparing the two trees
 # does not conclude something was lost:
@@ -782,7 +788,7 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 # docs/migration/ambiguity-resolutions.md)
 #   Q-CLI-OVERREWRITE   SETTLED at the `< 8` branch of `load000`, by reproducing
 #     the paragraph rather than by measuring the gap. `overrewrite` is the sole
-#     persistence of SYSTEM-REC and SYSTOT-REC and SYSTOT-REC is where this
+#     persistence of SYSTEM-REC and SYSTOT-REC, and SYSTOT-REC is where this
 #     route's three period totals accumulate, so leaving it out could not satisfy
 #     Agent Action Plan section 0.8.5's empty diff. `args.overrewrite` now runs on
 #     both branches. What remains for the oracle is narrower and lives in
@@ -801,37 +807,28 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 #     no experiment to run. The identity is a boundary decision, total and
 #     lossless over `pic 99`. Nothing here re-encodes it.
 #
-# RULES  -  NO USER RULES DOCUMENT EXISTS FOR THIS PROJECT: `review_rules`
-# reports "No user rules provided." The six below are the Agent Action Plan's
-# own, section 0.7.2, and enterprise-standard best practice applies wherever
-# they are silent. None has been invented.
-#   R-1  No COBOL at runtime - satisfied structurally. The imports of this
-#        module are `argparse`, `logging`, `collections.abc`, `typing`,
-#        `cli.args` and the two program modules. No child process, no shell
-#        out, no foreign-function interface, no toolchain lookup, no import of
-#        the comparison-oracle tree, and no option that reaches it. This module
-#        runs on a host with no COBOL compiler and no COBOL runtime.
-#   R-2  Zero binary floating point - satisfied by type. `WS-Term-Code` is
-#        `pic 99` copybooks/wscall.cob:L10 and is an `int`; `to-day` is `str`;
-#        the exit status is an `int`. No binary-radix numeric type appears in
-#        any signature, option or expression, and this module performs no
-#        arithmetic at all.
-#   R-3  No new validations, fields or schema, and no concurrency - satisfied
-#        by omission. No file-existence pre-check (`pl055` makes that test
-#        itself, purchase/pl055.cbl:L278-L280); no gate added between the
-#        phases; no run-date validation; no added option beyond the shared
-#        fragments; no SQL and no schema access; and no thread, event loop,
-#        subordinate process or pool of any kind - the two phases run one at a
-#        time in one flow of control.
-#   R-4  Anomalies reproduced, never fixed - the register above, each with its
-#        locator at the reproduction site. The headline reproduction is an
-#        ABSENCE, and the deliberate non-normalisation of the three divergent
-#        gate forms is the whole substance of this file.
-#   R-5  Full traceability - paragraph-named public functions, a `GO TO` class
-#        with a per-site proof at the one transfer site, an explicit record
-#        that `load08` has none, and this footer.
-#   R-6  Compiled behaviour is the tie-breaker - the run date arrives only as
-#        the required `--run-date` and is pinned through `args.resolve_clock`
-#        into both observables, so nothing ambient can make two runs of one
-#        scenario differ; the three questions above are marked, not guessed.
+# RULE COMPLIANCE, FILE-SPECIFIC FACTS ONLY (the six are the Agent Action Plan's
+# own, section 0.7.2; README-python-migration.md states them once)
+#   R-1  The imports are `argparse`, `logging`, `collections.abc`, `typing`,
+#        `cli.args` and the two program modules - no child process, no shell out,
+#        no foreign-function interface, no toolchain lookup, nothing from the
+#        comparison-oracle tree and no option reaching it.
+#   R-2  `WS-Term-Code` is `pic 99` copybooks/wscall.cob:L10 and an `int`;
+#        `to-day` is `str`; the exit status is an `int`. No binary-radix numeric
+#        in any signature, option or expression, and no arithmetic at all here.
+#   R-3  No file-existence pre-check (`pl055` makes that test itself,
+#        purchase/pl055.cbl:L278-L280); no gate added between the phases; no
+#        run-date validation; no option beyond the shared fragments; no SQL, no
+#        schema access, and no concurrency primitive - the two phases run one at
+#        a time in one flow of control.
+#   R-4  The register above, each entry with its locator at the reproduction
+#        site. The headline reproduction is an ABSENCE, and the deliberate
+#        non-normalisation of the three divergent gate forms is the whole
+#        substance of this file.
+#   R-5  Paragraph-named public functions, a `GO TO` class with a per-site proof
+#        at the one transfer site, an explicit record that `load08` has none, and
+#        this footer.
+#   R-6  The run date arrives only as the required `--run-date` and is pinned
+#        through `args.resolve_clock` into both observables, so nothing ambient
+#        can make two runs of one scenario differ.
 # -----------------------------------------------------------------------------

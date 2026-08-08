@@ -654,7 +654,7 @@ def _tokenise_clauses(text: str) -> tuple[str, ...]:
             index += 1
             continue
         if character in LITERAL_DELIMITERS:
-            # ⭐ A LITERAL ALWAYS BEGINS A TOKEN OF ITS OWN, even with no separator
+            # A LITERAL ALWAYS BEGINS A TOKEN OF ITS OWN, even with no separator
             # before it.
             if current:
                 tokens.append("".join(current))
@@ -806,10 +806,10 @@ def _scan_sign_clause(
 ) -> int:
     """Read a SIGN clause, keeping the source's own spelling.
 
-    ⛔ THE TWO LIVE SPELLINGS ARE NOT UNIFIED. `sign leading` [copybooks/wspost-
-    irs.cob:L21] and `sign is leading` [copybooks/irswspost.cob:L14] both describe the
-    same storage, and both resolve to the same `SignPosition`, but `sign_clause_text`
-    comes back as whichever the source wrote. Rule R-4.
+    THE TWO LIVE SPELLINGS ARE NOT UNIFIED. `sign leading`
+    [copybooks/wspost-irs.cob:L21] and `sign is leading` [copybooks/irswspost.cob:L14] both
+    describe the same storage, and both resolve to the same `SignPosition`, but
+    `sign_clause_text` comes back as whichever the source wrote. Rule R-4.
     """
     consumed = [tokens[index]]
     index += 1
@@ -1540,7 +1540,7 @@ def parse_entries(
 ) -> tuple[ParsedEntry, ...]:
     """Read a whole record, or a whole working-storage group, in source order.
 
-    ⭐ THIS IS THE FUNCTION THAT GETS GROUP-LEVEL USAGE RIGHT, and it is the one a caller
+    THIS IS THE FUNCTION THAT GETS GROUP-LEVEL USAGE RIGHT, and it is the one a caller
     should reach for by default. `parse_entry` cannot.
 
     Args:

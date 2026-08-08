@@ -82,10 +82,8 @@ varies `sort-ac` and `sort-post` in OPPOSITE directions.
 
 THE SIX BINDING RULES, as they bind this file
 ---------------------------------------------
-There is NO user rules document for this project: `review_rules` returns exactly
-"No user rules provided." The binding rules R-1 to R-6 live in the Technical
-Specification section 0.7.2, and where it is silent, enterprise-standard best
-practice applies and nothing is invented.
+The binding rules R-1 to R-6 live in the Technical Specification section 0.7.2, and
+where it is silent, enterprise-standard best practice applies.
 
 R-1  No COBOL at runtime. "tests/arithmetic/* touch neither COBOL nor a
      database." The paragraph modelled here performs `GL-Nominal-Read-Next`
@@ -121,7 +119,7 @@ R-6  Compiled behavior is the tie-breaker. THIS FILE OWNS THE SORT TIE-ORDER
      so there is no `xfail` in this file and `ARBITRATED_QUESTIONS` below records
      each question with the measurement that closed it. That structure was called
      `OPEN_QUESTIONS` while holding only settled entries, which described a
-     resolution backlog this file does not have (finding MJ-13). Where a measurement refuted a
+     resolution backlog this file does not have. Where a measurement refuted a
      reading, the refutation is asserted, so a change back in that direction fails
      by name rather than passing unnoticed.
 
@@ -181,21 +179,21 @@ pytestmark = pytest.mark.arithmetic
 #
 #  Each is a question that reading the frozen source CANNOT settle and that only
 #  the compiled program could answer. Both were measured on GnuCOBOL 3.2.0
-#  (finding F-19) and the entries below record the measurement, so no assertion
+# and the entries below record the measurement, so no assertion
 #  here is `xfail`ed: the tie order is asserted, and the edited rendering's
 #  REFUSAL is asserted as a scope decision with its measurement on record.
 #
 #  Two questions that might be expected here are deliberately ABSENT, because
 #  they are not open:
 #
-#    * the unsigned store into `tot-dr` / `tot-cr` - both are declared
-#      `pic 9(8)v99` [general/gl072.cbl:L165-L166], with no `s`, so the sign is
-#      dropped on store. `acas_posting.cobol.usage` states that rule for a
-#      declared digit count and its zoned questions Q-5.1, Q-5.2 and Q-5.3 are
-#      already settled there, so the value is asserted plainly below.
-#    * the high-order digit discard of an un-ROUNDED store - same module, same
-#      settled rule: nothing is raised and nothing is clamped.
-#  ⭐ RENAMED FROM `OPEN_QUESTIONS` (finding MJ-13). Not one of the three entries
+#  * the unsigned store into `tot-dr` / `tot-cr` - both are declared
+#  `pic 9(8)v99` [general/gl072.cbl:L165-L166], with no `s`, so the sign is
+#  dropped on store. `acas_posting.cobol.usage` states that rule for a
+#  declared digit count and its zoned questions Q-5.1, Q-5.2 and Q-5.3 are
+#  already settled there, so the value is asserted plainly below.
+#  * the high-order digit discard of an un-ROUNDED store - same module, same
+#  settled rule: nothing is raised and nothing is clamped.
+#  RENAMED FROM `OPEN_QUESTIONS`. Not one of the three entries
 #  below is open: `Q-SORT-TIE-ORDER` was measured to preserve input order,
 #  `Q-SORT-TIE-ORDER-ANSWER` records that measurement, and
 #  `Q-EDITED-BLANK-WHEN-ZERO` was measured and deliberately not implemented. The name
@@ -236,7 +234,7 @@ ARBITRATED_QUESTIONS: Final[dict[str, str]] = {
         "a tie."
     ),
     "Q-EDITED-BLANK-WHEN-ZERO": (
-        "MEASURED, AND DELIBERATELY NOT IMPLEMENTED (finding F-19, rule R-3). "
+        "MEASURED, AND DELIBERATELY NOT IMPLEMENTED (rule R-3). "
         "The characters the compiled program renders into a `blank when zero` "
         "numeric-edited print item - `l6-account pic 9999.99 blank when zero` "
         "[general/gl072.cbl:L233], `l6-debit` and `l6-credit pic z(7)9.99 "
@@ -613,14 +611,14 @@ DIVIDE_INTO_EDITED_SITES: Final[tuple[str, ...]] = (
 #
 #  Two statements are deliberately NOT modelled, and neither is skipped silently:
 #
-#    * `perform zz070-convert-date.` [general/gl072.cbl:L418] and `move ws-date to
-#      l6-date.` [general/gl072.cbl:L419]. The date sections are locked in the date
-#      tier and `acas_posting.dates` is outside this file's import surface. What
-#      matters to A-14 is that L418-L419 sit UNGUARDED between guard two and guard
-#      three, and that is asserted through the un-guarded statements this file can
-#      reach - L413, L429 and L431.
-#    * the print writes at [general/gl072.cbl:L433-L435]. They have no database
-#      effect, so section 0.3.4 drops them.
+#  * `perform zz070-convert-date.` [general/gl072.cbl:L418] and `move ws-date to
+#  l6-date.` [general/gl072.cbl:L419]. The date sections are locked in the date
+#  tier and `acas_posting.dates` is outside this file's import surface. What
+#  matters to A-14 is that L418-L419 sit UNGUARDED between guard two and guard
+#  three, and that is asserted through the un-guarded statements this file can
+#  reach - L413, L429 and L431.
+#  * the print writes at [general/gl072.cbl:L433-L435]. They have no database
+#  effect, so section 0.3.4 drops them.
 
 
 @dataclass(frozen=True, slots=True)
@@ -760,7 +758,7 @@ def new_account(
         )
     )
 
-    # ⭐ AND THE MOVE STORES. This transcription used to compute `key_image` and stop
+    # AND THE MOVE STORES. This transcription used to compute `key_image` and stop
     # there, leaving the ledger area's key untouched - a DEFECT found by the conformance
     # lock at the foot of this file, which drives the shipped paragraph and compares. It
     # was invisible on every path where the read at L408 happens, because the record the
@@ -1389,7 +1387,7 @@ def test_a14_numeric_key_orders_by_magnitude_not_by_character() -> None:
     ANOMALY A-14, [general/gl071.cbl:L141] and [general/gl071.cbl:L174]. THE PAIR:
     `sort-ac` 100 against `sort-ac` 99.
 
-    ⭐ WHAT THIS PAIR CAN AND CANNOT ESTABLISH, stated exactly, because the obvious
+    WHAT THIS PAIR CAN AND CANNOT ESTABLISH, stated exactly, because the obvious
     reading of it is wrong. At the field's DECLARED WIDTH the two byte images are
     `000100` and `000099`, and for a zero-filled UNSIGNED field character order and
     magnitude order COINCIDE - `000099` sorts below `000100` either way. So no pair of
@@ -1449,7 +1447,7 @@ def test_a14_numeric_key_orders_by_magnitude_not_by_character() -> None:
 def test_a14_a_signed_key_orders_algebraically_not_by_byte_image() -> None:
     """The DISCRIMINATING case for A-14: a signed key, where the two readings differ.
 
-    ⭐ WHY THIS TEST EXISTS. The unsigned-account pair above cannot distinguish "the
+    WHY THIS TEST EXISTS. The unsigned-account pair above cannot distinguish "the
     sort compares bytes" from "the sort compares numbers", because a zero-filled
     unsigned field makes the two orders identical. A SIGNED field does not: the sign
     lives in the ZONE of one digit position, so the byte carrying it is not a digit
@@ -1822,11 +1820,11 @@ def test_q_sort_tie_order_compiled_tie_order_is_input_order() -> None:
     ANOMALY A-14, [general/gl071.cbl:L172-L178]. The frozen statement declares no
     `with duplicates in order` phrase, so ISO leaves the compiler free to place tied
     records either way round - and `gl072` then locates each posting's nominal account
-    with a SEQUENTIAL read [general/gl072.cbl:L410-L412], which makes the order
+    with a SEQUENTIAL read [general/gl072.cbl:L408], which makes the order
     load-bearing rather than cosmetic. Only the compiled program could settle it, so
     this test used to assert the match under `xfail(strict=True)`.
 
-    THE MEASUREMENT (finding F-19). GnuCOBOL 3.2.0, `cobc -x -free`, default flags,
+    THE MEASUREMENT. GnuCOBOL 3.2.0, `cobc -x -free`, default flags,
     reproducing the frozen statement and its four keys verbatim with NO duplicates
     phrase, over five records of which three carry an identical key tuple:
 
@@ -1881,7 +1879,7 @@ def test_q_sort_tie_order_compiled_tie_order_is_input_order() -> None:
     ], (
         "the tied records must emerge in INPUT order. GnuCOBOL 3.2.0 measures "
         "lhs, rhs, third for exactly this statement and these records, and gl072 "
-        "reads the resulting stream SEQUENTIALLY [general/gl072.cbl:L410-L412] - so a "
+        "reads the resulting stream SEQUENTIALLY [general/gl072.cbl:L408] - so a "
         "different order posts to the wrong nominal account with no diagnostic "
         "(anomaly A-14)."
     )
@@ -1925,7 +1923,7 @@ def test_a14_key_move_at_l405_does_not_decide_which_record_is_read() -> None:
     [general/gl071.cbl:L172-L178].
 
     CITATION CORRECTION: the specification body cites the sequential read as
-    [general/gl072.cbl:L410-L412]; the real sites are L405, L407 and L408.
+    [general/gl072.cbl:L408]; the real sites are L405, L407 and L408.
 
     Reproduced, not repaired: the move stays, no key comparison is introduced and
     nothing is logged when the key and the record disagree (rules R-3 and R-4).
@@ -2552,10 +2550,10 @@ def test_q_edited_blank_when_zero_is_measured_and_deliberately_not_implemented(
 
     Two separate statements, and conflating them is what this test exists to prevent.
 
-    FIRST, THE QUESTION IS ANSWERED (finding F-19). It used to be recorded as
-    unarbitrated on the ground that a print item reaches no table, so no state diff can
-    observe it. That is true of the SCENARIO tier, but it is not true of the compiler: a
-    focused probe can render the picture and print the characters, and one did. GnuCOBOL
+    FIRST, THE QUESTION IS ANSWERED, AND IS NOT UNARBITRATED. The tempting reading is
+    that a print item reaches no table, so no state diff can observe it and nothing can
+    settle it. That is true of the SCENARIO tier but NOT of the compiler: a focused probe
+    can render the picture and print the characters, and one did. GnuCOBOL
     3.2.0, `cobc -x -free`, default flags, reproducing [general/gl072.cbl:L233] and
     [general/gl072.cbl:L241,L243] verbatim:
 
@@ -2767,7 +2765,7 @@ def test_a13_silent_skips_are_noted_here_and_locked_elsewhere() -> None:
 #  `sortverb` has changed. That tuple is the one `gl071` runs with, and anomaly A-14
 #  makes a wrong one SILENT MISPOSTING - Agent Action Plan section 0.6.4's words -
 #  because `gl072` locates the nominal-ledger row with a SEQUENTIAL read
-#  [general/gl072.cbl:L410-L412] and is correct only while the stream arrives in
+#  [general/gl072.cbl:L408] and is correct only while the stream arrives in
 #  nominal-key order. There is no error, no diagnostic and no counter; the balances
 #  are simply wrong. So the production tuple is asserted here directly.
 #
@@ -3049,7 +3047,7 @@ def test_a14_reaching_the_production_sort_loads_no_database_and_no_driver() -> N
 # ===========================================================================
 #  THE CONFORMANCE LOCK - `new_account` AGAINST THE SHIPPED PARAGRAPH
 #
-#  ⭐ `new_account` ABOVE IS A SECOND SOURCE, AND THIS IS WHAT STOPS IT DRIFTING.
+#  `new_account` ABOVE IS A SECOND SOURCE, AND THIS IS WHAT STOPS IT DRIFTING.
 #  Twelve assertions consume it, and it executes [general/gl072.cbl:L402-L431] as its
 #  own sequence over the production primitives - so without this section those twelve
 #  were checking a copy of the paragraph against the reasoning that produced the copy.
@@ -3278,21 +3276,14 @@ def test_new_account_transcription_agrees_with_the_shipped_paragraph(
 
 
 # ==========================================================================
-#  MERGED GROUP - was tests/arithmetic/test_gl072_shipped_silent_skips.py
-#
-#  Relocated verbatim so that this directory holds exactly the fourteen test
-#  modules the Agent Action Plan section 0.3.1 inventory names. Nothing was
-#  rewritten: the group's own preamble follows, as its author wrote it, and
-#  every test below is the test that ran under the old file name.
-# ==========================================================================
 #
 #  `gl072`'s two SILENT SKIPS, proved reachable and proved silent.
 #
 #  WHY THIS FILE EXISTS. Agent Action Plan section 0.6.5 classifies five kinds of rejection
 #  in the migrated cycle, and the first kind is the hardest to test: *"Clean rejection, no
 #  database effect. `gl072` skips a posting whose batch number is non-numeric
-#  [general/gl072.cbl:L289-L290] and skips a record whose handler returned a specific error
-#  [general/gl072.cbl:L303-L304]. Both are silent - no message, no counter, no trace."*
+#  [general/gl072.cbl:L291-L292] and skips a record whose handler returned a specific error
+#  [general/gl072.cbl:L306-L307]. Both are silent - no message, no counter, no trace."*
 #
 #  A rejection with no message, no counter and no database effect leaves NOTHING for a state
 #  diff to compare. The scenario tier's mixed-batch test can therefore only assert that the
@@ -3302,32 +3293,32 @@ def test_new_account_transcription_agrees_with_the_shipped_paragraph(
 #  one level where "this branch executed" is observable: by driving the shipped program and
 #  asserting the consequences that only the branch produces.
 #
-#  ⭐ WHAT MAKES EACH PROOF DISCRIMINATING. Neither test asserts merely that nothing
+#  WHAT MAKES EACH PROOF DISCRIMINATING. Neither test asserts merely that nothing
 #  happened. Each asserts the difference between "the skip fired" and "the skip did not":
 #
-#    THE NON-NUMERIC SKIP [general/gl072.cbl:L289-L290] sits BEFORE the two batch-opening
-#    blocks at [general/gl072.cbl:L292-L302]. Were it removed, control would fall into
-#    `if save-batch equal zero` [general/gl072.cbl:L299], which moves the non-numeric batch
-#    number into `save-batch` and performs `headings` - and `headings` performs `get-batch`
-#    [general/gl072.cbl:L437], which CALLS THE BATCH HANDLER. So the branch has a positive
-#    witness: with the skip, `save-batch` stays zero and the handler is never called; without
-#    it, both change. Both are asserted.
+#  THE NON-NUMERIC SKIP [general/gl072.cbl:L291-L292] sits BEFORE the two batch-opening
+#  blocks at [general/gl072.cbl:L292-L302]. Were it removed, control would fall into
+#  `if save-batch equal zero` [general/gl072.cbl:L299], which moves the non-numeric batch
+#  number into `save-batch` and performs `headings` - and `headings` performs `get-batch`
+#  [general/gl072.cbl:L437], which CALLS THE BATCH HANDLER. So the branch has a positive
+#  witness: with the skip, `save-batch` stays zero and the handler is never called; without
+#  it, both change. Both are asserted.
 #
-#    THE `we-error = 999` SKIP [general/gl072.cbl:L303-L304] sits BEFORE the account blocks
-#    at [general/gl072.cbl:L306-L313]. Were it removed, control would reach `new-account`,
-#    which READS THE NOMINAL LEDGER [general/gl072.cbl:L410-L412] and whose balance
-#    accumulation is then rewritten. So its witness is that `gl-nominal-read-next` is never
-#    called while `gl-batch-read-next` IS - the batch was looked up, judged unusable, and the
-#    posting dropped.
+#  THE `we-error = 999` SKIP [general/gl072.cbl:L306-L307] sits BEFORE the account blocks
+#  at [general/gl072.cbl:L306-L313]. Were it removed, control would reach `new-account`,
+#  which READS THE NOMINAL LEDGER [general/gl072.cbl:L408] and whose balance
+#  accumulation is then rewritten. So its witness is that `gl-nominal-read-next` is never
+#  called while `gl-batch-read-next` IS - the batch was looked up, judged unusable, and the
+#  posting dropped.
 #
-#  ⛔ AND EACH SKIP IS PROVED SILENT (R-3, R-4). The frozen program emits nothing at either
+#  AND EACH SKIP IS PROVED SILENT (R-3, R-4). The frozen program emits nothing at either
 #  site: no `display`, no counter, no accumulator. A migration that added a warning would be
 #  adding behaviour, and an operator comparing the two runs would see a log line the compiled
 #  program never produced. Every test below asserts the program logger emitted exactly the
 #  one record the shipped module does emit - the phase banner
-#  [general/gl072.cbl:L277] - and nothing else.
+#  [general/gl072.cbl:L274] - and nothing else.
 #
-#  ⚠ ONE CONSEQUENCE OF THE FROZEN LOOP THAT EVERY TEST HERE HAS TO ACCOUNT FOR. The at-end
+#  ONE CONSEQUENCE OF THE FROZEN LOOP THAT EVERY TEST HERE HAS TO ACCOUNT FOR. The at-end
 #  branch performs `end-account` and `end-batch` UNCONDITIONALLY
 #  [general/gl072.cbl:L285-L288], so even a run in which every posting was skipped rewrites
 #  the ledger record and the batch record it is holding - which at that point are the blank
@@ -3337,23 +3328,19 @@ def test_new_account_transcription_agrees_with_the_shipped_paragraph(
 #
 #  THE RULES, as they bind this file (Agent Action Plan section 0.7.2):
 #
-#    R-1  No COBOL at runtime, no database. The handlers are a double and the work file is
-#         the shipped in-process one. The import of the program pulls
-#         `acas_posting.dal.facade` and the driver in transitively, and the loader purges
-#         every tier-isolated name it added.
-#    R-2  Zero binary floating point: every amount is a `Decimal` from a string.
-#    R-3  ⛔ No added validation, no added diagnostic. The skips stay silent, and the
-#         non-numeric batch number is neither rejected earlier nor repaired.
-#    R-4  Both skips are anomalies (Agent Action Plan section 0.6.7 entry 13) and are
-#         reproduced rather than fixed. These tests exist so that "improving" either into a
-#         logged, counted or raised rejection fails the suite.
-#    R-5  Every test names its `[general/gl072.cbl:Lnnn]` and the shipped function.
-#    R-6  Nothing here is expected because reading the COBOL suggests it; every figure is
-#         either transcribed from a frozen line or read out of the shipped module.
-#
-#  ⚠ PROVENANCE OF RULES. There is no user rules document - `review_rules` returns exactly
-#  `No user rules provided.` The rules above are the Technical Specification's, section
-#  0.7.2.
+#  R-1  No COBOL at runtime, no database. The handlers are a double and the work file is
+#  the shipped in-process one. The import of the program pulls
+#  `acas_posting.dal.facade` and the driver in transitively, and the loader purges
+#  every tier-isolated name it added.
+#  R-2  Zero binary floating point: every amount is a `Decimal` from a string.
+#  R-3  No added validation, no added diagnostic. The skips stay silent, and the
+#  non-numeric batch number is neither rejected earlier nor repaired.
+#  R-4  Both skips are anomalies (Agent Action Plan section 0.6.7 entry 13) and are
+#  reproduced rather than fixed. These tests exist so that "improving" either into a
+#  logged, counted or raised rejection fails the suite.
+#  R-5  Every test names its `[general/gl072.cbl:Lnnn]` and the shipped function.
+#  R-6  Nothing here is expected because reading the COBOL suggests it; every figure is
+#  either transcribed from a frozen line or read out of the shipped module.
 #
 # ==========================================================================
 
@@ -3382,7 +3369,7 @@ _RUN_DATE: Final[int] = 20250921
 #: `01 to-day pic x(10).` in the DD/MM/CCYY form the menu shell supplies.
 _TO_DAY: Final[str] = "21/09/2025"
 
-#: `display "Phase - 4.  Transaction Update"` [general/gl072.cbl:L277] - the one record
+#: `display "Phase - 4.  Transaction Update"` [general/gl072.cbl:L274] - the one record
 #: the shipped module emits, and therefore the whole of what a silent run may log.
 _PHASE_BANNER: Final[str] = "Phase - 4.  Transaction Update"
 
@@ -3439,7 +3426,7 @@ def _shipped_gl072() -> Iterator[types.ModuleType]:
 class _GlFacadeDouble:
     """The `acas005` and `acas007` facades, in memory, with a call log.
 
-    ⭐ THE BATCH LOOKUP IS KEYED, because `get-batch` sets `WS-Batch-Nos` from the
+    THE BATCH LOOKUP IS KEYED, because `get-batch` sets `WS-Batch-Nos` from the
     posting and then performs a read [general/gl072.cbl:L451-L453]: the handler is
     expected to come back with THAT batch. A double that ignored the key would make the
     `we-error` test meaningless, since every posting would see the same batch whatever
@@ -3582,7 +3569,7 @@ def _system() -> SystemRecord:
 def _work_files(gl072: types.ModuleType, records: list[PostTransRecord]) -> Any:
     """A `post-trans` work file holding `records`, closed and ready to be read.
 
-    ⭐ THE WORK FILE DOES NOT VALIDATE, AND MUST NOT (R-3). `post-trans` is a
+    THE WORK FILE DOES NOT VALIDATE, AND MUST NOT (R-3). `post-trans` is a
     LINE SEQUENTIAL scratch file [general/gl072.cbl:L157-L162] written by `gl071` and
     read here, and the frozen program's own defence against a corrupt line is the
     non-numeric test at [general/gl072.cbl:L289] - which is only reachable because
@@ -3669,7 +3656,7 @@ def _assert_only_the_phase_banner(log: list[logging.LogRecord]) -> None:
 
 
 # ---------------------------------------------------------------------------
-#  1.  THE NON-NUMERIC BATCH NUMBER - [general/gl072.cbl:L289-L290]
+#  1.  THE NON-NUMERIC BATCH NUMBER - [general/gl072.cbl:L291-L292]
 # ---------------------------------------------------------------------------
 
 
@@ -3686,7 +3673,7 @@ def test_the_non_numeric_batch_number_reaches_the_shipped_test_at_all() -> None:
     bytes intact, and `move.is_numeric_class` - the verb the shipped program uses -
     answers False for them and True for a well-formed number.
 
-    ⛔ THE ABSENCE OF VALIDATION IS THE REPRODUCTION (R-3). Adding a check to the work
+    THE ABSENCE OF VALIDATION IS THE REPRODUCTION (R-3). Adding a check to the work
     file would remove the frozen program's own defence and turn a silent skip into an
     upstream error.
     """
@@ -3705,9 +3692,9 @@ def test_the_non_numeric_batch_number_reaches_the_shipped_test_at_all() -> None:
 
 
 def test_the_non_numeric_posting_is_skipped_before_the_batch_is_ever_looked_up() -> None:
-    """`if post-batch not numeric go to loop` [general/gl072.cbl:L289-L290].
+    """`if post-batch not numeric go to loop` [general/gl072.cbl:L291-L292].
 
-    ⭐ THE POSITIVE WITNESS. The skip's whole effect is that control returns to the top
+    THE POSITIVE WITNESS. The skip's whole effect is that control returns to the top
     of the loop BEFORE [general/gl072.cbl:L299-L301], and those two lines are what would
     otherwise move the batch number into `save-batch` and perform `headings` - which
     performs `get-batch` [general/gl072.cbl:L437] and therefore CALLS `acas007`. So:
@@ -3793,12 +3780,12 @@ def test_a_numeric_posting_beside_a_non_numeric_one_is_posted_normally() -> None
 
 
 # ---------------------------------------------------------------------------
-#  2.  `we-error = 999` - [general/gl072.cbl:L303-L304]
+#  2.  `we-error = 999` - [general/gl072.cbl:L306-L307]
 # ---------------------------------------------------------------------------
 
 
 def test_a_batch_that_is_not_waiting_sets_the_marker_and_drops_its_postings() -> None:
-    """`if we-error equal 999 go to loop` [general/gl072.cbl:L303-L304].
+    """`if we-error equal 999 go to loop` [general/gl072.cbl:L306-L307].
 
     HOW THE MARKER IS SET. `get-batch` reads the batch and tests it
     [general/gl072.cbl:L455]: `if not waiting` - `88 Waiting value 0.`
@@ -3806,9 +3793,9 @@ def test_a_batch_that_is_not_waiting_sets_the_marker_and_drops_its_postings() ->
     [general/gl072.cbl:L459-L460]. A batch already stamped Processed is therefore judged
     unusable, and every posting belonging to it is dropped in silence.
 
-    ⭐ THE POSITIVE WITNESS. The skip returns to the top of the loop BEFORE
+    THE POSITIVE WITNESS. The skip returns to the top of the loop BEFORE
     [general/gl072.cbl:L306-L313], and those lines are what reach `new-account`, whose
-    first act is to READ THE NOMINAL LEDGER [general/gl072.cbl:L410-L412]. So:
+    first act is to READ THE NOMINAL LEDGER [general/gl072.cbl:L408]. So:
 
         with the skip     `gl-batch-read-next` IS called - the batch was looked up - and
                           `gl-nominal-read-next` is NOT
@@ -3817,7 +3804,7 @@ def test_a_batch_that_is_not_waiting_sets_the_marker_and_drops_its_postings() ->
     Both halves are asserted, and together they are the shape of this rejection:
     the batch was examined and the posting was discarded.
 
-    ⭐ AND `save-batch` STAYS ZERO, which is why the lookup happens once per posting
+    AND `save-batch` STAYS ZERO, which is why the lookup happens once per posting
     rather than once per batch: [general/gl072.cbl:L299] re-arms on every record.
     Asserted with two postings for the same batch, which produce two lookups.
     """
@@ -3836,7 +3823,7 @@ def test_a_batch_that_is_not_waiting_sets_the_marker_and_drops_its_postings() ->
         assert "gl_nominal_read_next" not in double.calls
         assert double.ledger_rewrites == [(0, Decimal("0.00"))]
 
-        #  ⭐⭐ THE SKIP IS CLEAN; THE AT-END BRANCH IS NOT, AND THIS IS MEASURED RATHER
+        #  THE SKIP IS CLEAN; THE AT-END BRANCH IS NOT, AND THIS IS MEASURED RATHER
         #  THAN ASSUMED. `get-batch` moves the posting's batch number into
         #  `WS-Batch-Nos` BEFORE it reads [general/gl072.cbl:L451-L453], so after the
         #  refusal the program is still HOLDING batch 7's record - and the at-end
@@ -3945,7 +3932,7 @@ def test_neither_skip_leaves_a_trace_in_the_status_block() -> None:
     of the last verb. Neither is a count, and nothing anywhere records how many records
     were skipped.
 
-    ⛔ This is the assertion that fails if a well-meaning change adds `skipped += 1` and
+    This is the assertion that fails if a well-meaning change adds `skipped += 1` and
     reports it - which would be new behaviour, however harmless it looks (R-4).
     """
     with _shipped_gl072() as gl072:
@@ -3982,7 +3969,7 @@ def test_neither_skip_leaves_a_trace_in_the_status_block() -> None:
                 f"skip tally would live - and the frozen program keeps no tally."
             )
         #  `Ws-Count-Rows` is the bridge's ROW COUNT for the statement it last executed
-        #  [copybooks/wsfnctn.cob:L44-L56] and has nothing to do with skipping. It is
+        #  [copybooks/wsfnctn.cob:L44-L55] and has nothing to do with skipping. It is
         #  named here so that its presence in the block is not mistaken for a counter of
         #  rejections - and it is untouched by a run the double served, because the
         #  double is not the bridge.
@@ -3991,7 +3978,7 @@ def test_neither_skip_leaves_a_trace_in_the_status_block() -> None:
 
 # ---------------------------------------------------------------------------
 #  4.  THE EMPTY WORK FILE - THE AT-END PATH, AND WHY A TABLE DUMP CANNOT SEE IT
-#      (finding MJ-14, ambiguity `Q-EMPTY-BATCH-AT-END`)
+#  (ambiguity `Q-EMPTY-BATCH-AT-END`)
 #
 #  `loop.` reads `post-trans` and, at end, performs `end-account` and then `end-batch`
 #  before leaving for `end-run.` [general/gl072.cbl:L285-L288]. NEITHER CALL IS
@@ -4013,7 +4000,7 @@ def test_neither_skip_leaves_a_trace_in_the_status_block() -> None:
 
 
 def test_the_empty_work_file_still_performs_end_account_then_end_batch() -> None:
-    """At end on the FIRST read, both paragraphs run - with zero keys (MJ-14).
+    """At end on the FIRST read, both paragraphs run - with zero keys.
 
     The DISCRIMINATING assertion for `Q-EMPTY-BATCH-AT-END`. It fails against a
     transcription that guards the at-end clause on something having been read, which is
@@ -4063,7 +4050,7 @@ def test_the_empty_work_file_still_performs_end_account_then_end_batch() -> None
 
 
 def test_the_empty_work_file_reads_once_and_never_looks_up_a_batch() -> None:
-    """The at-end path performs no `get-batch` and no nominal read (MJ-14).
+    """The at-end path performs no `get-batch` and no nominal read.
 
     The complement of the test above: it asserts what does NOT happen, so that a
     transcription which reached the same two rewrites by some other route - for example

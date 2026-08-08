@@ -135,8 +135,10 @@ class DictionaryError(Exception):
 class DictionaryNotFoundError(DictionaryError, FileNotFoundError):
     """The dictionary artifact is not present at the path asked for.
 
-    The artifact is committed as a repository sibling of the package AND installed as
-    package data, so this means one of three things.
+    The artifact lives in exactly ONE place - the committed repository sibling
+    `data_dictionary/` - because `pyproject.toml` names `data_dictionary*` in its
+    packaging exclusion list and sets `include-package-data = false`, so it is never
+    shipped as package data and no second copy can exist.
     """
 
 
@@ -199,7 +201,7 @@ _ABSENT_VIEW: Final[str] = "absent"
 
 
 # --------------------------------------------------------------------------------------
-#  READ BUDGETS (finding SEC-07)
+#  READ BUDGETS
 #
 #  The read below is otherwise unbounded in two ways: it loops until the file ends, and
 #  `json.loads` recurses once per level of nesting. Neither is a code-execution risk -
@@ -262,11 +264,12 @@ def _absolute_document_path(path: Path | None) -> Path:
     the only location this migration publishes - `pyproject.toml` excludes
     `data_dictionary*` from packaging, so there is no second copy anywhere.
 
-    ⭐ AN EXPLICIT PATH IS **NOT** RESOLVED, and that is the whole point of this
-    function (finding F-08). It used to return `Path(path).resolve()`, which follows
-    every symbolic link in the path BEFORE the `O_NOFOLLOW` open in
-    `_read_text_without_following_links` ever sees it - so the open was handed a path
-    with no links left in it, `O_NOFOLLOW` had nothing to refuse, and this module's
+    AN EXPLICIT PATH IS **NOT** RESOLVED, and that is the whole point of this
+    function. Returning `Path(path).resolve()` would follow every symbolic link in
+    the path BEFORE the `O_NOFOLLOW` open in
+    `_read_text_without_following_links` ever saw it - the open would be handed a path
+    with no links left in it, `O_NOFOLLOW` would have nothing to refuse, and this
+    module's
     stated guarantee that it refuses a symbolic link was not the guarantee it enforced.
     A caller-supplied path that is a link, or that passes through one, could therefore
     load an artifact from somewhere else entirely under a name that looked committed.
@@ -422,7 +425,7 @@ _SUPPORTS_DIRECTORY_RELATIVE_OPEN: Final[bool] = (
 def _open_without_following_links(path: Path) -> int:
     """Open `path` for reading with NO symbolic link followed at ANY component.
 
-    ⭐ THE ENFORCEMENT BEHIND THE GUARANTEE (finding F-08). A single
+    THE ENFORCEMENT BEHIND THE GUARANTEE. A single
     `os.open(path, O_NOFOLLOW)` protects the LAST component only: every directory above
     it is still traversed through whatever links it contains, and if the caller's path
     was resolved first there is nothing left for even that to refuse. So the walk is
@@ -492,7 +495,7 @@ def _open_without_following_links(path: Path) -> int:
 def _open_component(name: str, directory: int, flags: int) -> int:
     """Open one path component relative to `directory`, naming a link as a link.
 
-    ⭐ WHY THE ERRNO IS RE-STATED. `O_NOFOLLOW` on its own reports `ELOOP` for a linked
+    WHY THE ERRNO IS RE-STATED. `O_NOFOLLOW` on its own reports `ELOOP` for a linked
     FILE but Linux reports `ENOTDIR` when `O_DIRECTORY` is also set and the component is
     a linked DIRECTORY - the same refusal under an errno that also means "a component is
     an ordinary file". Both are correct refusals, and a caller cannot act on either
@@ -634,7 +637,7 @@ def _read_document(path: Path) -> DataDictionary:
     except RecursionError as error:
         # Nesting deeper than the interpreter's recursion limit. Caught so the read
         # fails as a refusal naming the cause, rather than as a bare RecursionError
-        # from inside the JSON scanner (finding SEC-07).
+        # from inside the JSON scanner.
         raise DictionaryParseError(
             f"The data dictionary at {path} nests too deeply to parse: the JSON "
             f"reader exhausted the interpreter's recursion limit.\n"
@@ -735,9 +738,8 @@ def _absence_message(path: Path) -> str:
         preamble = (
             "That path was given explicitly, through the path= argument, so "
             "it was used exactly as passed and no default location was "
-            "consulted. Omitting path= searches the two locations this "
-            "distribution considers legitimate: the copy inside an installed "
-            "distribution first, then the repository's own "
+            "consulted. Omitting path= uses the one location this "
+            "distribution considers legitimate: the repository's own "
             "data_dictionary/acas_posting_dictionary.json.\n"
         )
     return (
@@ -805,8 +807,9 @@ class _DocumentIndex:
         entries_by_copybook_file: dict[RepoPath, list[DictionaryEntry]] = {}
         for entry in document.entries:
             entries_by_key[entry.key] = entry
-            # A null table is the ordinary case for a copybook-only field - 502 of the
-            # 1015 entries - and never an error.
+            # A null table is the ordinary case for a field that reaches no column -
+            # 554 of the 1067 entries, being the 508 copybook-only fields and the 46
+            # program-source work-file fields - and never an error.
             if entry.table is not None:
                 entries_by_table.setdefault(entry.table, []).append(entry)
             if entry.copybook is not None:
@@ -877,10 +880,10 @@ def load_dictionary(path: Path | None = None) -> DataDictionary:
     it is used as the memo key. Nothing is read at import time.
 
     Args:
-        path: An explicit artifact path, or None for the location
-            `acas_posting/__init__.py` resolved - the installed package data at
-            `acas_posting/data_dictionary/`, or the repository sibling
-            `data_dictionary/` when this is an uninstalled checkout.
+        path: An explicit artifact path, or None for the one location
+            `acas_posting/__init__.py` resolves - the committed repository sibling
+            `data_dictionary/`, which is the sole entry in
+            `DATA_DICTIONARY_SEARCH_PATH`.
 
     Returns:
         The document as an immutable tree of `model` records: `meta`, `sources`,

@@ -25,12 +25,9 @@ Because the arithmetic tier must run anywhere, THIS MODULE IMPORTS NO HARNESS
 MODULE, OPENS NO CONNECTION AND SPAWNS NO SUBPROCESS AT IMPORT TIME. Every one of
 those happens inside a helper, on demand.
 
-THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports that none
-was provided, so there is no on-disk rules file to consult and no downstream reader
-should look for one. The six binding rules R-1 to R-6 live in the Agent Action Plan
-itself, section 0.7.2, and their exact wording is retrievable from the requirements
-via `review_prompt`. Summarised, in this module's own words, and each named at the
-site that honours it:
+THE SIX BINDING RULES R-1 to R-6 live in Agent Action Plan section 0.7.2, and their
+exact wording is retrievable from the requirements via `review_prompt`. Summarised, in
+this module's own words, and each named at the site that honours it:
 
     R-1  No COBOL at runtime. The compiled oracle exists only under harness/ and is
          reached only out of process, through the harness shell scripts. harness/ is
@@ -161,7 +158,7 @@ AMBIGUITY_RESOLUTIONS_DOC: Final[Path] = (
 
 # The other two documents a reader of a failing comparison needs: the register of
 # reproduced legacy defects (rule R-4) and the per-scenario empty-diff evidence
-# (rule R-6). Named so that a failure message or a reviewer can find them.
+# (rule R-6). Named so that a failure message or a reader can find them.
 ANOMALY_LOG_DOC: Final[Path] = REPO_ROOT / "docs" / "migration" / "anomaly-log.md"
 SCENARIO_DIFF_EVIDENCE_DOC: Final[Path] = (
     REPO_ROOT / "docs" / "migration" / "scenario-diff-evidence.md"
@@ -175,11 +172,10 @@ RESET_SCRIPT: Final[Path] = HARNESS_DIR / "reset_db.sh"
 RUN_COBOL_SCRIPT: Final[Path] = HARNESS_DIR / "run_cobol_scenario.sh"
 RUN_PYTHON_SCRIPT: Final[Path] = HARNESS_DIR / "run_python_scenario.sh"
 
-#: THERE IS NO SEPARATE PROTOCOL DRIVER (finding M-06). A `harness/run_parity.sh` used to
-#: run the ten stages from one invocation, and this module never drove it: the tests
-#: COMPOSE the ten stages themselves - see `_run_scenario_parity_stages` - so that each
-#: stage's status is available individually. The three gates that script alone owned now
-#: live in the stages whose state they protect: the oracle-provenance gate and the
+#: THERE IS NO SEPARATE PROTOCOL DRIVER, and no script runs the ten stages from one
+#: invocation. The tests COMPOSE the ten stages themselves - see
+#: `_run_scenario_parity_stages` - so that each stage's status is available individually.
+#: The three gates a single driver would own live in the stages whose state they protect: the oracle-provenance gate and the
 #: seed-file pre-flight in `harness/reset_db.sh` (which is where a refusal happens before
 #: a table is dropped), and the cross-side operations check in
 #: `harness/run_cobol_scenario.sh` (before the first operation produces state). A
@@ -187,7 +183,7 @@ RUN_PYTHON_SCRIPT: Final[Path] = HARNESS_DIR / "run_python_scenario.sh"
 #: directly, in the order `README-python-migration.md` section 8 sets out, and is guarded
 #: at each stage by that stage itself rather than by a wrapper.
 
-#: The module that OWNS the canonical stage registry (findings F-16 and M-08). The rows
+#: The module that OWNS the canonical stage registry. The rows
 #: were a shell file of its own; they are now `PARITY_STAGES` in `harness/normalize.py`,
 #: published to shell through `--print-stage-shell` and to everything else through
 #: `--print-stages`. Read through that published interface rather than parsed, so this
@@ -203,9 +199,9 @@ STAGE_REGISTRY_SCRIPT: Final[Path] = HARNESS_DIR / "normalize.py"
 #  never re-implements that validation (R-4).
 #
 #  The database half derives from `03 RDB-Data.` [copybooks/wsfnctn.cob:L56-L62]:
-#      05  DB-Schema   pic x(12)     05  DB-Host     pic x(32)
-#      05  DB-UName    pic x(12)     05  DB-Socket   pic x(64)
-#      05  DB-UPass    pic x(12)     05  DB-Port     pic x(5)
+#  05  DB-Schema   pic x(12)     05  DB-Host     pic x(32)
+#  05  DB-UName    pic x(12)     05  DB-Socket   pic x(64)
+#  05  DB-UPass    pic x(12)     05  DB-Port     pic x(5)
 #  so ACAS_DB_USER and ACAS_DB_PASSWORD are each capped at TWELVE characters: a
 #  longer value is silently truncated by the COBOL side while the Python side
 #  sends it whole, and the two cycles would then authenticate differently.
@@ -260,7 +256,7 @@ ENV_DB_ADMIN_PASSWORD: Final[str] = "ACAS_DB_ADMIN_PASSWORD"
 # operator's ability to bisect a seed (R-3, R-4).
 ENV_SEED_STRICT: Final[str] = "ACAS_SEED_STRICT"
 
-# ⭐ THE ONE RUN ID EVERY STAGE OF ONE PROTOCOL RUN CARRIES (finding F-37).
+# THE ONE RUN ID EVERY STAGE OF ONE PROTOCOL RUN CARRIES.
 #
 # ONE id is minted and exported before stage 1, which is how all ten stages come to
 # agree - by this module for the composed protocol and by the operator for a
@@ -272,7 +268,7 @@ ENV_SEED_STRICT: Final[str] = "ACAS_SEED_STRICT"
 # PROVENANCE_MUST_MATCH names `run_id' and two captures of different runs are not two
 # sides of one comparison. `harness/reset_db.sh` publishes the seed identity under the
 # same id and `acas_read_seed_identity` DISCARDS a record staged by another attempt,
-# so an unbound protocol also lost the seed marker that F-22 requires to be equal.
+# so an unbound protocol also loses the seed marker the two sides must share.
 # Binding it here is therefore not a convenience: it is what makes the composed
 # protocol and a hand-driven one the same protocol.
 ENV_PARITY_RUN_ID: Final[str] = "ACAS_PARITY_RUN_ID"
@@ -483,7 +479,7 @@ def assert_exact_numeric(value: object, *, where: str) -> None:
 # The harness Python modules this suite loads, by file name without the extension:
 # the three state tools a test drives.
 #
-# THERE IS NO FOURTH ENTRY ANY MORE (finding M-05). The one duplicate-rejecting scenario
+# THERE IS NO FOURTH ENTRY ANY MORE. The one duplicate-rejecting scenario
 # parser was `harness/normalize.py`, a path the Agent Action Plan section 0.3.1
 # harness inventory does not name. It now lives in `harness/normalize.py` beside the
 # other definitions every consumer must agree on, so loading `normalize` loads the
@@ -712,20 +708,20 @@ def frozen_schema_map() -> Mapping[str, Mapping[str, Any]]:
 #  census, `accept ... from date` and `from time` included.
 #  So the controlled clock pins exactly these and nothing deeper:
 #
-#    1. THE TEXT DATE, `to-day pic x(10)` in DD/MM/CCYY form. It is the 3rd
-#       parameter of the General-Ledger linkage shape and the 4th of the
-#       Sales/Purchase shape. The IRS shape takes NEITHER `to-day` NOR the
-#       calling-data block: [irs/irs030.cbl:L552-L554] is
-#       `using IRS-System-Params, WS-System-Record, File-Defs`.
-#    2. THE BINARY RUN DATE, declared `05  Run-Date        binary-long.` at
-#       [copybooks/wssystem.cob:L67]. It is a real SYSTEM-REC column
-#       (`RUN-DAT int(8) unsigned`), and it reaches the EVIDENCE by four independent
-#       routes: SYSTEM-REC is itself one of the 22 dumped tables, so the column is
-#       compared by value; every date column the cycle stamps in the other tables derives
-#       from it (`GLBATCH-REC.POSTED` [general/gl072.cbl:L376], `GLPOSTING-REC.POST-DAT`,
-#       `PSIRSPOST-REC.IRS-POST-DAT`); both runners read the column back after the run
-#       and refuse a value other than the pin; and both fingerprint SYSTEM-REC before
-#       and after. A drifting clock therefore cannot pass unseen.
+#  1. THE TEXT DATE, `to-day pic x(10)` in DD/MM/CCYY form. It is the 3rd
+#  parameter of the General-Ledger linkage shape and the 4th of the
+#  Sales/Purchase shape. The IRS shape takes NEITHER `to-day` NOR the
+#  calling-data block: [irs/irs030.cbl:L552-L554] is
+#  `using IRS-System-Params, WS-System-Record, File-Defs`.
+#  2. THE BINARY RUN DATE, declared `05  Run-Date        binary-long.` at
+#  [copybooks/wssystem.cob:L67]. It is a real SYSTEM-REC column
+#  (`RUN-DAT int(8) unsigned`), and it reaches the EVIDENCE by four independent
+#  routes: SYSTEM-REC is itself one of the 22 dumped tables, so the column is
+#  compared by value; every date column the cycle stamps in the other tables derives
+#  from it (`GLBATCH-REC.POSTED` [general/gl072.cbl:L376], `GLPOSTING-REC.POST-DAT`,
+#  `PSIRSPOST-REC.IRS-POST-DAT`); both runners read the column back after the run
+#  and refuse a value other than the pin; and both fingerprint SYSTEM-REC before
+#  and after. A drifting clock therefore cannot pass unseen.
 #
 #  NOTHING MORE IS BUILT. There is no Clock protocol, no ABC, no
 #  production-versus-test pair, no monkeypatch hook, no global singleton and no
@@ -785,7 +781,7 @@ def pinned_clock_from(run_date_text: str) -> acas_clock.PinnedRunDate:
     TOUCHING its output field [common/maps04.cbl:L146, L154], and the documented
     "Date errors returned as A-Bin equal zero" contract at
     [common/maps04.cbl:L163] holds only because callers pre-zero the field at
-    [copybooks/Proc-ACAS-Mapser-RDB.cob:L78]. That is ANOMALY #16, and
+    [copybooks/Proc-ACAS-Mapser-RDB.cob:L78]. That is ANOMALY A-16, and
     acas_posting/clock.py reproduces its masking mechanism, so a rejected date
     arrives here as `run_date == 0`. This helper does NOT "helpfully" raise on one:
     a test that wants the behaviour asserts `pin.run_date == 0` (rule R-4).
@@ -863,10 +859,10 @@ def assert_pin_matches_project_default(pin: acas_clock.PinnedRunDate) -> None:
 #  THE LAYOUT IS NOT INVENTED HERE. It is the one all three harness Python modules
 #  and the committed Compose recipe already compose:
 #
-#      $ACAS_OUT/<scenario>/<side>/<TABLE>.json                side: cobol | python
-#      $ACAS_OUT/<scenario>/<side>.normalized/<TABLE>.json
-#      $ACAS_OUT/<scenario>/diff.txt
-#      $ACAS_OUT/run-logs/<scenario>/{cobol.log,python.log,...}
+#  $ACAS_OUT/<scenario>/<side>/<TABLE>.json                side: cobol | python
+#  $ACAS_OUT/<scenario>/<side>.normalized/<TABLE>.json
+#  $ACAS_OUT/<scenario>/diff.txt
+#  $ACAS_OUT/run-logs/<scenario>/{cobol.log,python.log,...}
 #
 #  <TABLE> is the schema name EXACTLY, hyphens included - `GLPOSTING-REC.json`.
 #  Run logs live OUTSIDE the compared tree by design: a transcript written into
@@ -905,7 +901,7 @@ RUN_LOG_SUBDIR: Final[str] = "run-logs"
 #
 # ONE LINE PER AFFECTED TABLE, IN THE SCENARIO'S DECLARED ORDER, AND THREE FIELDS:
 #
-#     <TABLE>\t<row count>\t<sha256 of the canonical dump>
+#  <TABLE>\t<row count>\t<sha256 of the canonical dump>
 #
 # THE DIGEST IS THE THIRD FIELD AND IT IS WHAT MAKES THE RECORD MEAN ANYTHING. A row
 # count alone cannot tell two different seeds apart: swap one balance, alter one
@@ -924,7 +920,7 @@ RUN_LOG_SUBDIR: Final[str] = "run-logs"
 # determinism or an empty-batch claim (`assert_tables_unchanged_by_run`).
 SEED_FINGERPRINT_PYTHON: Final[str] = "python.seed-fingerprint"
 SEED_FINGERPRINT_COBOL: Final[str] = "cobol.seed-fingerprint"
-#  ⭐ THE MENU-PERSISTED PARAMETER ROW. `overrewrite' rewrites SYSTEM-REC key 1 on
+#  THE MENU-PERSISTED PARAMETER ROW. `overrewrite' rewrites SYSTEM-REC key 1 on
 #  all four subsystems - [general/general.cbl:L656-L672], [sales/sales.cbl:L628-L641],
 #  [purchase/purchase.cbl:L621-L634], [irs/irs.cbl:L759-L774] - and the migrated
 #  command line REPRODUCES that paragraph [acas_posting/cli/args.py]. Both cycles
@@ -1179,7 +1175,7 @@ ORACLE_HANDLER_MODULES: Final[tuple[str, ...]] = (
 )
 
 #: The compatibility include supplying the copybook the frozen archive does not carry,
-#: as it is named INSIDE THE BUILD COPY. It is not a repository file: finding M-03 made
+#: as it is named INSIDE THE BUILD COPY. It is not a repository file:
 #: `harness/build_oracle.sh` GENERATE it at build time into `$ACAS_BUILD/copybooks`,
 #: because a committed copy is a file a reader can mistake for archive material and
 #: writing the member into `copybooks/` would be a fabricated frozen source (R-3, R-4,
@@ -1286,7 +1282,7 @@ def _probe_compiled_oracle(
             f"starts and then fails at its first table read"
         )
 
-    # ⭐ THERE IS NO SHIM FILE TO PROBE, AND THAT IS THE POINT (finding M-03).
+    # THERE IS NO SHIM FILE TO PROBE, AND THAT IS THE POINT.
     # `harness/build_oracle.sh` generates the comment-only compatibility include into
     # $ACAS_BUILD/copybooks/ACAS-SQLstate-error-list.cob at build time, so it cannot be
     # missing from a build that ran, and it is not a repository file that could be
@@ -1488,10 +1484,10 @@ def _probe_stack() -> StackStatus:
     detail: list[str] = []
 
     # 1. The harness scripts. Cheapest of all, and the one failure a fresh checkout
-    #    is most likely to hit: harness/run_python_scenario.sh is a planned
-    #    deliverable (Agent Action Plan section 0.4.1.7) that arrives with the
-    #    Python cycle it drives, and harness/docker-compose.yml says so in the
-    #    canonical recipe itself.
+    #  is most likely to hit: harness/run_python_scenario.sh is a planned
+    #  deliverable (Agent Action Plan section 0.4.1.7) that arrives with the
+    #  Python cycle it drives, and harness/docker-compose.yml says so in the
+    #  canonical recipe itself.
     for script in (
         SEED_SCRIPT,
         RESET_SCRIPT,
@@ -1528,18 +1524,18 @@ def _probe_stack() -> StackStatus:
             detail.append(f"  {ENV_OUT} names {root}, which is not writable")
 
     # 4. The non-database environment the compiled load programs and menus need.
-    #    ACAS_LEDGERS and ACAS_BIN must be NON-BLANK or every one of them displays a
-    #    message, waits on an ACCEPT and stops
-    #    [copybooks/Proc-Get-Env-Set-Files.cob:L20-L28] - operator trap 3, which
-    #    looks exactly like a hung harness.
+    #  ACAS_LEDGERS and ACAS_BIN must be NON-BLANK or every one of them displays a
+    #  message, waits on an ACCEPT and stops
+    #  [copybooks/Proc-Get-Env-Set-Files.cob:L20-L28] - operator trap 3, which
+    #  looks exactly like a hung harness.
     for name in (ENV_REPO, ENV_DATA, ENV_BIN, ENV_LEDGERS):
         if not (os.environ.get(name) or "").strip():
             missing.append(f"env:{name}")
             detail.append(f"  {name} is unset or blank")
 
     # 5. harness/reset_db.sh's three destructive gates. NOT FABRICATED HERE - see
-    #    ENV_RESET_CONSENT. The expected token is quoted in the message so the
-    #    operator can copy it, which is the whole point of a target-scoped gate.
+    #  ENV_RESET_CONSENT. The expected token is quoted in the message so the
+    #  operator can copy it, which is the whole point of a target-scoped gate.
     for name in (ENV_DB_ADMIN_USER, ENV_DB_ADMIN_PASSWORD):
         if not (os.environ.get(name) or "").strip():
             missing.append(f"env:{name}")
@@ -1550,18 +1546,18 @@ def _probe_stack() -> StackStatus:
 
     # 6. The database environment, resolved by the single authority.
     #
-    #    ⭐ ONLY THE ENUMERATED EXTERNAL-UNAVAILABILITY CONDITIONS ARE SKIPS, and the
-    #    narrowing is the whole point. A blanket `except Exception` here turned every
-    #    repository defect into a skip: a signature change in
-    #    `connection_settings`, a `TypeError` from a renamed keyword, an `ImportError`
-    #    from a broken harness module, a parser defect - each one made the WHOLE R-6
-    #    tier green-with-skips, which is indistinguishable from a bare host and is the
-    #    most expensive failure mode a test suite has. So `dump_tables`'s own
-    #    `ConnectionConfigError` - which is what an absent or malformed `ACAS_DB_*`
-    #    environment raises, and which carries the authoritative message - is a skip,
-    #    an absent script is a skip, and EVERYTHING ELSE PROPAGATES. Raised out of
-    #    `_probe_stack` it surfaces as a pytest ERROR from the fixture, which is what
-    #    a defect in this repository must look like.
+    #  ONLY THE ENUMERATED EXTERNAL-UNAVAILABILITY CONDITIONS ARE SKIPS, and the
+    #  narrowing is the whole point. A blanket `except Exception` here turned every
+    #  repository defect into a skip: a signature change in
+    #  `connection_settings`, a `TypeError` from a renamed keyword, an `ImportError`
+    #  from a broken harness module, a parser defect - each one made the WHOLE R-6
+    #  tier green-with-skips, which is indistinguishable from a bare host and is the
+    #  most expensive failure mode a test suite has. So `dump_tables`'s own
+    #  `ConnectionConfigError` - which is what an absent or malformed `ACAS_DB_*`
+    #  environment raises, and which carries the authoritative message - is a skip,
+    #  an absent script is a skip, and EVERYTHING ELSE PROPAGATES. Raised out of
+    #  `_probe_stack` it surfaces as a pytest ERROR from the fixture, which is what
+    #  a defect in this repository must look like.
     settings = None
     dump_tables_module = None
     try:
@@ -1594,18 +1590,18 @@ def _probe_stack() -> StackStatus:
             )
 
         # 7. The server itself, and the RUNTIME autocommit mode - ON, per the
-        #    settled half of docs/migration/ambiguity-resolutions.md#q-10; the
-        #    OFF window belongs to harness/seed.sh and to nothing else. One
-        #    connection, opened once per session (rule R-3: no pool, no thread).
+        #  settled half of docs/migration/ambiguity-resolutions.md#q-10; the
+        #  OFF window belongs to harness/seed.sh and to nothing else. One
+        #  connection, opened once per session (rule R-3: no pool, no thread).
         #
-        #    ⭐ AGAIN ENUMERATED, AND FOR THE SAME REASON. The four conditions below
-        #    are the ways an EXTERNAL server can be unavailable to this process, and
-        #    each is a legitimate skip. `AssertionError` is deliberately NOT among
-        #    them: `assert_runtime_autocommit_on` failing means the server is
-        #    reachable but configured in a way the protocol cannot use, which is a
-        #    stack DEFECT rather than a stack absence, and it must be seen. Anything
-        #    unlisted - a TypeError from a changed signature, an AttributeError from a
-        #    renamed constant - propagates and becomes a pytest ERROR.
+        #  AGAIN ENUMERATED, AND FOR THE SAME REASON. The four conditions below
+        #  are the ways an EXTERNAL server can be unavailable to this process, and
+        #  each is a legitimate skip. `AssertionError` is deliberately NOT among
+        #  them: `assert_runtime_autocommit_on` failing means the server is
+        #  reachable but configured in a way the protocol cannot use, which is a
+        #  stack DEFECT rather than a stack absence, and it must be seen. Anything
+        #  unlisted - a TypeError from a changed signature, an AttributeError from a
+        #  renamed constant - propagates and becomes a pytest ERROR.
         try:
             with dump_tables_module.connect(settings) as connection:
                 assert_runtime_autocommit_on(connection)
@@ -1620,22 +1616,22 @@ def _probe_stack() -> StackStatus:
             missing.append("database")
             detail.append(f"  {type(exc).__name__}: {exc}")
 
-    # 8. THE COMPILED ORACLE ITSELF (finding F-38).
+    # 8. THE COMPILED ORACLE ITSELF.
     #
-    #    THE DEFECT THIS CLOSES. Everything above establishes that the harness can
-    #    REACH its inputs; none of it established that the thing being compared
-    #    against exists. Against a checkout whose oracle had never been built, every
-    #    check above passed, the tier declared itself available, and the failure
-    #    surfaced as harness/run_cobol_scenario.sh exiting 74 in the middle of a test
-    #    that had already reset and re-seeded the database. That is the worst place to
-    #    discover it: the diagnosis is buried in a subprocess transcript and the
-    #    database has been destroyed for nothing. A missing oracle is a precondition,
-    #    so it is reported as one - with the command that builds it.
+    #  THE DEFECT THIS CLOSES. Everything above establishes that the harness can
+    #  REACH its inputs; none of it established that the thing being compared
+    #  against exists. Against a checkout whose oracle had never been built, every
+    #  check above passed, the tier declared itself available, and the failure
+    #  surfaced as harness/run_cobol_scenario.sh exiting 74 in the middle of a test
+    #  that had already reset and re-seeded the database. That is the worst place to
+    #  discover it: the diagnosis is buried in a subprocess transcript and the
+    #  database has been destroyed for nothing. A missing oracle is a precondition,
+    #  so it is reported as one - with the command that builds it.
     _probe_compiled_oracle(missing, detail)
 
     # 9. THE BUILT FIXTURES. Same argument: stages 1 and 5 pass --seed-dir into the
-    #    reset script, and a fixture root that was never built makes the FIRST
-    #    destructive stage fail. Checked here, before anything is dropped.
+    #  reset script, and a fixture root that was never built makes the FIRST
+    #  destructive stage fail. Checked here, before anything is dropped.
     _probe_built_fixtures(missing, detail)
 
     if not missing:
@@ -1686,7 +1682,7 @@ def requires_stack() -> None:
     GnuCOBOL, which is the direct test of the three-tier design. The reason names
     every missing precondition, so an operator is not told one thing at a time.
 
-    ⭐ AND AN ACCEPTANCE MODE, because "green with 63 skips" and "green having
+    AND AN ACCEPTANCE MODE, because "green with 63 skips" and "green having
     proved the parity claim" must not look alike to whoever reads the run. With
     `ACAS_REQUIRE_ORACLE` set, an unusable stack FAILS with the same reason text, so
     a run that was supposed to exercise the oracle cannot silently decline to. The
@@ -1750,11 +1746,10 @@ def reset_consent_token(settings: Any) -> str:
 # meaningful way to construct an unbalanced sales batch". There is deliberately no
 # SL or PL variant, and no helper here implies one is possible.
 #
-# ⭐ THERE WAS A NINTH, `end_of_cycle_gl`, AND IT HAS BEEN REMOVED (findings M-09 and
-# M-17). It drove `gl080` through the real `gl_end_of_cycle` route and was measured end
-# to end, but the Agent Action Plan's inventory names eight scenario definitions and
-# eight scenario tests, and this project's tree is held to that inventory. What the
-# removal costs is stated rather than glossed: `gl080` no longer has a TABLE-STATE
+# THERE IS NO NINTH SCENARIO, AND `gl080` HAS NO SCENARIO OF ITS OWN. The Agent Action
+# Plan's inventory names eight scenario definitions and eight scenario tests, and this
+# tree is held to that inventory, so no committed scenario drives `gl080` through the
+# real `gl_end_of_cycle` route. What that costs is stated rather than glossed: `gl080` no longer has a TABLE-STATE
 # comparison behind it, so posting deletion, batch stamping, the nominal-ledger quarter
 # rollover and the cycle advance are covered at unit level only. What it does not cost:
 # anomaly A-2 (the unbounded quarter subscript) and anomaly A-3 (the second, independent
@@ -1821,9 +1816,9 @@ OPERATION_MODULES: Final[Mapping[str, str]] = {
 
 # EXIT STATUSES ARE BEHAVIOURAL DATA, NOT PLUMBING NOISE. Only THREE in-scope
 # programs ever set `WS-Term-Code`:
-#     gl070 -> 5   [general/gl070.cbl:L289]     an open batch aborts the cycle
-#     sl055 -> 8   [sales/sl055.cbl:L344]       the extract file is missing
-#     pl055 -> 8   [purchase/pl055.cbl:L286]    the same, on the Purchase side
+#  gl070 -> 5   [general/gl070.cbl:L289]     an open batch aborts the cycle
+#  sl055 -> 8   [sales/sl055.cbl:L344]       the extract file is missing
+#  pl055 -> 8   [purchase/pl055.cbl:L286]    the same, on the Purchase side
 # and `acas_posting/cli/args.py`'s `exit_status_for(term_code)` returns 0 for 0 and
 # THE TERM CODE ITSELF otherwise. So a GL open-batch abort surfaces as exit 5 and
 # an SL or PL missing-extract-file abort as exit 8. `irs_post` has no
@@ -1831,13 +1826,13 @@ OPERATION_MODULES: Final[Mapping[str, str]] = {
 #
 # The abort GATES that consume those codes are three different shapes, and the
 # asymmetry is the specification, not an oversight to harmonise:
-#     General   `if ws-term-code = 5 / go to display-menu`
-#               [general/general.cbl:L810-L811]      - gl071 and gl072 never run
-#     Sales     `if ws-term-code not = zero`, TWICE
-#               [sales/sales.cbl:L761-L762, L765-L766]
-#     Purchase  NONE - the gate is commented out
-#               [purchase/purchase.cbl:L755-L758]
-#     IRS       NONE, and no dispatch wrapper at all  [irs/irs.cbl:L666-L672]
+#  General   `if ws-term-code = 5 / go to display-menu`
+#  [general/general.cbl:L810-L811]      - gl071 and gl072 never run
+#  Sales     `if ws-term-code not = zero`, TWICE
+#  [sales/sales.cbl:L761-L762, L765-L766]
+#  Purchase  NONE - the gate is commented out
+#  [purchase/purchase.cbl:L755-L758]
+#  IRS       NONE, and no dispatch wrapper at all  [irs/irs.cbl:L666-L672]
 TERM_CODES: Final[Mapping[str, tuple[int, ...]]] = {
     "gl_post_cycle": (5,),
     "gl_end_of_cycle": (),
@@ -1880,7 +1875,7 @@ RUN_COBOL_FAULT_CODES: Final[frozenset[int]] = frozenset(
 # missing module, an unusable database, an option a module does not publish, a seed
 # fingerprint disagreement - and is never a term code.
 #
-# 69 IS DELIBERATELY NOT IN THIS SET (finding F-14).
+# 69 IS DELIBERATELY NOT IN THIS SET.
 #
 # harness/run_python_scenario.sh declares 69 as `EX_BEHAVIOUR`: the runner drove the
 # cycle to completion and found that an operation's OBSERVED disposition contradicted
@@ -1892,7 +1887,7 @@ RUN_COBOL_FAULT_CODES: Final[frozenset[int]] = frozenset(
 # variable. 69 now classifies as `DISPOSITION_BEHAVIOURAL` and reaches the test body,
 # where it FAILS.
 #
-# ⭐ AND 69 MEANS A TERM CODE, BECAUSE THE PRODUCER SAYS SO (finding MJ-01). Admitting
+# AND 69 MEANS A TERM CODE, BECAUSE THE PRODUCER SAYS SO. Admitting
 # 69 as data is only sound while the runner cannot mint it from a fault. It could:
 # every child status other than 2 became 69, so an uncaught exception, an import
 # failure, a signal or an arbitrary tool exit was attested as a completed semantic
@@ -1942,22 +1937,22 @@ LOADER_STRICT_LOADERS: Final[tuple[str, ...]] = ("dfltLD",)
 # validation rule R-3 forbids, and it is why harness/seed.sh accepts a scenario file
 # without parsing anything but its seed-file list.
 #
-#   run_date_text         the pinned date, exactly as typed, e.g. 21/09/2025
-#   run_date_binary       the expected SYSTEM-REC.RUN-DAT after Date Entry
-#   date_form             1 UK dd/mm/yyyy, 2 USA mm/dd/yyyy, 3 yyyy/mm/dd
-#   irs_instead           the three-state fan-out switch - see IRS_INSTEAD_* below
-#   operation             one of the seven; `subsystem` is derived from it
-#   affected_tables       the list that BOUNDS the comparison
-#   seed_files            the flat files harness/seed.sh stages; system.dat MUST be
-#                         among them, because the frozen order seeds the system
-#                         block first and unconditionally
-#                         [common/masterLD.sh:L50-L88] and it is what carries
-#                         Run-Date [copybooks/wssystem.cob:L67] and the fan-out
-#                         switch [copybooks/wssystem.cob:L179-L181]
-#   irs_clear_postings    "Y" or "N"; REQUIRED for irs_post - see below
-#   gl080_proceed         "Y" proceeds, "A" aborts; default "Y"
-#   payment_post_confirm  "YES" or "NO"; required for sl_cash_post and
-#                         pl_payment_post, neither of whose prompts has a default
+#  run_date_text         the pinned date, exactly as typed, e.g. 21/09/2025
+#  run_date_binary       the expected SYSTEM-REC.RUN-DAT after Date Entry
+#  date_form             1 UK dd/mm/yyyy, 2 USA mm/dd/yyyy, 3 yyyy/mm/dd
+#  irs_instead           the three-state fan-out switch - see IRS_INSTEAD_* below
+#  operation             one of the seven; `subsystem` is derived from it
+#  affected_tables       the list that BOUNDS the comparison
+#  seed_files            the flat files harness/seed.sh stages; system.dat MUST be
+#  among them, because the frozen order seeds the system
+#  block first and unconditionally
+#  [common/masterLD.sh:L50-L88] and it is what carries
+#  Run-Date [copybooks/wssystem.cob:L67] and the fan-out
+#  switch [copybooks/wssystem.cob:L179-L181]
+#  irs_clear_postings    "Y" or "N"; REQUIRED for irs_post - see below
+#  gl080_proceed         "Y" proceeds, "A" aborts; default "Y"
+#  payment_post_confirm  "YES" or "NO"; required for sl_cash_post and
+#  pl_payment_post, neither of whose prompts has a default
 SCENARIO_KEY_RUN_DATE_TEXT: Final[str] = "run_date_text"
 SCENARIO_KEY_RUN_DATE_BINARY: Final[str] = "run_date_binary"
 SCENARIO_KEY_DATE_FORM: Final[str] = "date_form"
@@ -1975,9 +1970,9 @@ SCENARIO_KEY_AFFECTED_TABLES: Final[tuple[str, str]] = (
 )
 
 # THE IRS FAN-OUT SWITCH, [copybooks/wssystem.cob:L179-L181] verbatim:
-#     179       05  IRS-Instead     pic x.
-#     180           88  IRS-Used                   value "Y".
-#     181           88  IRS-Both-Used              value "B".   *> 26/11/16
+#  179       05  IRS-Instead     pic x.
+#  180           88  IRS-Used                   value "Y".
+#  181           88  IRS-Both-Used              value "B".   *> 26/11/16
 # Column `IRS-INSTEAD char(1)`. THREE states, and the third has NO CONDITION NAME AT
 # ALL - both predicates are simply False for a space, which is General Ledger only.
 # Agent Action Plan section 0.6.4: "leaving it at a default would make the
@@ -2140,7 +2135,7 @@ def scenario_staged_data_dir(scenario: str) -> Path:
 #: The administrative pair. Only `harness/reset_db.sh` and the `harness/seed.sh` it
 #: delegates to hold any reference to either name - a census across the whole harness
 #: finds none in the cycle runners, the oracle build, the dump, the normalisation or
-#: the comparison. So every other child runs without them (finding SEC-04).
+#: the comparison. So every other child runs without them.
 _ADMIN_ENV_NAMES: Final[tuple[str, ...]] = (ENV_DB_ADMIN_USER, ENV_DB_ADMIN_PASSWORD)
 
 
@@ -2173,7 +2168,7 @@ def scenario_runtime_environment(scenario: str) -> dict[str, str]:
 
     Copied from `os.environ`, so a run id bound by `bound_run_id` reaches both
     runners without either helper having to know about it - MINUS the administrative
-    credential, which neither run stage uses and neither should be able to (SEC-04).
+    credential, which neither run stage uses and neither should be able to.
     """
     staged = str(scenario_staged_data_dir(scenario))
     environment = without_admin_credentials(os.environ)
@@ -2202,7 +2197,7 @@ def bound_run_id(run_id: str | None = None) -> Iterator[str]:
     THE STAGES ARE SEPARATE PROCESSES, and each of them derives its own identity when
     none is supplied. That is correct for a hand invocation and wrong for a protocol:
     the two sides must be provably two halves of ONE attempt before a verdict may be
-    rendered on them (findings F-22, F-37, F-45). A hand-driven run achieves this by
+    rendered on them. A hand-driven run achieves this by
     exporting `ACAS_PARITY_RUN_ID` once before stage 1 (README section 8); this does the
     same for the protocol
     composed in this module, and every stage helper inherits `os.environ`, so no helper
@@ -2245,7 +2240,7 @@ def scenario_definition(scenario: str) -> Mapping[str, Any]:
     Read through `harness/normalize.py`'s duplicate-rejecting loader, which is a
     `yaml.SafeLoader` subclass - so the loader still cannot construct arbitrary Python
     objects from a data file, AND a repeated mapping key is a hard parse failure rather
-    than PyYAML's silent last-one-wins (finding MJ-17). Every consumer of a scenario
+    than PyYAML's silent last-one-wins. Every consumer of a scenario
     definition in this project uses that one loader, and none of them falls back to
     PyYAML's own safe loader entry point.
 
@@ -2268,7 +2263,7 @@ def scenario_definition(scenario: str) -> Mapping[str, Any]:
     #  Both lazy, so the arithmetic tier imports this module without PyYAML present.
     #  `normalize` is loaded by explicit file path for the same reason the other two
     #  harness modules are: harness/ is deliberately not a Python package (rule R-1),
-    #  and adding an __init__.py is not the fix. It OWNS the parser (finding M-05).
+    #  and adding an __init__.py is not the fix. It OWNS the parser.
     import yaml  # noqa: PLC0415, F401 - re-exported exception type
 
     parser_module = _load_harness_module("normalize")
@@ -2394,12 +2389,12 @@ def scenario_affected_tables(scenario: str) -> tuple[str, ...]:
 #  Agent Action Plan section 0.2.1 designates common/masterLD.sh and the
 #  common/*LD.cbl loaders as the SPECIFICATION for seeding. Two independent facts
 #  keep the script itself out of the protocol:
-#    1. Its own header says so - [common/masterLD.sh:L4-L5]: "THIS SCRIPT HAS NOT
-#       YET BEEN TESTED".
-#    2. It cannot execute at all. All 24 loader lines
-#       [common/masterLD.sh:L93-L116] omit the `;` before `fi`, so `bash -n` rejects
-#       it at line 124. It is FROZEN and is NOT fixed (Agent Action Plan section
-#       0.8.1, rules R-3 and R-4).
+#  1. Its own header says so - [common/masterLD.sh:L4-L5]: "THIS SCRIPT HAS NOT
+#  YET BEEN TESTED".
+#  2. It cannot execute at all. All 24 loader lines
+#  [common/masterLD.sh:L93-L116] omit the `;` before `fi`, so `bash -n` rejects
+#  it at line 124. It is FROZEN and is NOT fixed (Agent Action Plan section
+#  0.8.1, rules R-3 and R-4).
 #  harness/seed.sh reproduces its documented per-file contract instead
 #  [common/masterLD.sh:L44-L115]. It also carries no `less`: the frozen script pages
 #  SYS-DISPLAY.log through it [common/masterLD.sh:L119-L123], which would block a
@@ -2423,7 +2418,7 @@ STAGE_TIMEOUT_RUN: Final[int] = 3600
 # The protocol stage names, used in every `StageResult` and every failure message so
 # a reader can place a finding in the sequence at a glance.
 #
-# THE NUMBERING IS THE CANONICAL ONE (findings F-16 and M-08). The protocol has TEN
+# THE NUMBERING IS THE CANONICAL ONE. The protocol has TEN
 # stages, defined once in `PARITY_STAGES` in harness/normalize.py and published by
 # `harness/normalize.py --print-stages`. These names previously numbered the second
 # normalisation `7b` and the comparison `8`, which described an EIGHT-stage protocol
@@ -2463,7 +2458,7 @@ _STAGE_REGISTRY: list[tuple[int, str]] | None = None
 def parity_stage_registry() -> tuple[tuple[int, str], ...]:
     """Return the canonical stage registry, `(number, label)` in protocol order.
 
-    THE ONE PLACE THE PROTOCOL'S SHAPE IS DEFINED (findings F-16 and M-08) is
+    THE ONE PLACE THE PROTOCOL'S SHAPE IS DEFINED is
     `PARITY_STAGES` in harness/normalize.py, and `harness/normalize.py --print-stages`
     is how it is published. Reading it here rather than restating it is what stops this
     module's prose drifting from the protocol it composes - which is exactly what had
@@ -2492,7 +2487,7 @@ def parity_stage_registry() -> tuple[tuple[int, str], ...]:
                 check=False,
                 cwd=REPO_ROOT,
                 # A read-only listing of the stage registry: no credential of any kind
-                # is needed, so the administrative pair is not handed over (SEC-04).
+                # is needed, so the administrative pair is not handed over.
                 env=without_admin_credentials(os.environ),
             )
         except (OSError, subprocess.SubprocessError):
@@ -2698,7 +2693,7 @@ def _run_script(
             administrative credential, below.
         administrative: Whether this stage performs schema administration and therefore
             needs `ACAS_DB_ADMIN_USER` / `ACAS_DB_ADMIN_PASSWORD`. FALSE BY DEFAULT, and
-            the default is the point (finding SEC-04): the database superuser password
+            the default is the point: the database superuser password
             is removed from the child's environment unless the stage is one of the two
             that drops and re-applies the schema. Exactly three call sites pass True -
             the seed and the two resets - and every other child, including both cycle
@@ -2767,13 +2762,12 @@ def _requested_operations(
     """Resolve the operations one run-stage invocation drives.
 
     BOTH runners drive the whole ordered `operations` list in ONE invocation, and both
-    take a REPEATABLE `--operation` (finding MJ-04). Each run stage is therefore a single
+    take a REPEATABLE `--operation`. Each run stage is therefore a single
     argv carrying one `--operation` per declared operation, in the
-    declared order, and each runner publishes one disposition record per operation. An
-    earlier revision of this docstring said the oracle runner drove "one menu operation
-    per invocation, using the scalar `operation` key", which described the runner before
-    it learned the list; `harness/run_cobol_scenario.sh --help` states the current
-    contract as "REPEATABLE, and driven in the order given".
+    declared order, and each runner publishes one disposition record per operation. THE
+    ORACLE RUNNER DOES NOT DRIVE "one menu operation per invocation, using the scalar
+    `operation` key" - `harness/run_cobol_scenario.sh --help` states the contract as
+    "REPEATABLE, and driven in the order given".
 
     An explicit override still narrows either side to exactly one operation.
     """
@@ -2793,7 +2787,7 @@ def _requested_operations(
 
 #: The per-operation status artifact each runner publishes beside its transcript,
 #: named `<side>.operation-status`. THE AUTHORITY for what each driven operation
-#: actually did (finding F-13): the transcript line is a diagnostic that a `--quiet`
+#: actually did: the transcript line is a diagnostic that a `--quiet`
 #: mode or a redirected stream can lose, whereas this file is published atomically at
 #: mode 0600 and carries the run id, so it can be attributed to an attempt.
 OPERATION_STATUS_SUFFIX: Final[str] = ".operation-status"
@@ -2821,7 +2815,7 @@ def read_operation_status_artifact(
         operations<TAB><count>
         operation<TAB><index><TAB><name><TAB><status>     x count
 
-    ⭐ THE STATUS FIELD IS A NUMBER *OR* THE SENTINEL `not-run`. Both runners declare
+    THE STATUS FIELD IS A NUMBER *OR* THE SENTINEL `not-run`. Both runners declare
     `not-run` for an operation they never reached - `ACAS_PY_OP_NOT_RUN` and
     `ACAS_RUN_OP_NOT_RUN` - deliberately, because zero is a real term code and a slot
     defaulting to zero would attest a clean disposition for work that never happened.
@@ -2938,18 +2932,18 @@ def _attach_operation_statuses(
 ) -> StageResult:
     """Attach machine-readable child-operation statuses to a run stage.
 
-    THE STRUCTURED ARTIFACT IS THE AUTHORITY (finding F-13). Each runner publishes
+    THE STRUCTURED ARTIFACT IS THE AUTHORITY. Each runner publishes
     `<side>.operation-status` carrying one row per declared operation; the transcript
     also carries an `OPERATION_STATUS<TAB>operation<TAB>status` line per operation, and
     when both are present they must AGREE - a disagreement means one of the two was
     written by a different run and is a fault, not something to pick a winner from.
 
-    A NON-ZERO WRAPPER NO LONGER SKIPS THIS (finding F-14). It used to return
-    immediately, on the reasoning that the wrapper's own status was the diagnosis. But
-    the one status where that is most wrong is `EX_BEHAVIOUR` (69): the wrapper is
-    saying an operation's observed disposition contradicted its declared one, and the
-    per-operation statuses are precisely what identify WHICH operation and WHAT it did.
-    Returning early discarded them at the only moment they mattered.
+    A NON-ZERO WRAPPER MUST NOT SKIP THIS. Returning immediately, on the reasoning that
+    the wrapper's own status is the diagnosis, is most wrong at exactly the status where
+    the detail matters most - `EX_BEHAVIOUR` (69), where the wrapper is saying an
+    operation's observed disposition contradicted its declared one and the per-operation
+    statuses are precisely what identify WHICH operation and WHAT it did. An early return
+    would discard them at the only moment they mattered.
 
     Args:
         result: The run stage's result.
@@ -3183,10 +3177,10 @@ def reset(
 def _transformed_oracle_waiver() -> list[str]:
     """`--accept-transformed-oracle` when, and only when, the operator asked for it.
 
-    ⭐ THE TWO ACKNOWLEDGEMENTS ARE ONE DECISION AND MUST BE PASSED TOGETHER. Finding
-    M-06 folded the ten-stage driver away and moved its oracle-provenance gate into
+    THE TWO ACKNOWLEDGEMENTS ARE ONE DECISION AND MUST BE PASSED TOGETHER. There is no
+    ten-stage driver; the oracle-provenance gate lives in
     `harness/reset_db.sh`, where it fires before the first `DROP` - which is a
-    strictly better place for it, because it now guards a hand-driven stage 1 as well
+    strictly better place for it, because it guards a hand-driven stage 1 as well
     as a protocol-bound one. The consequence, MEASURED rather than reasoned, is that
     this module's own diagnostic switch stopped being sufficient on its own: setting
     `ACAS_ACCEPT_TRANSFORMED_ORACLE=1` un-skipped the stack-bound tiers and every one
@@ -3270,12 +3264,12 @@ def run_cobol(
     Raises:
         ValueError: `operation` is given and is not one of the seven.
     """
-    # ⭐ BOTH SIDES DRIVE THE SAME ORDERED LIST (finding F-12). `all_declared=True`
-    # here is the whole fix: the oracle runner used to be asked for ONE operation
-    # while the Python runner was asked for every operation the scenario declares, so
-    # `period_end_totals` drove four operations on one side and one on the other and
-    # the comparison was between two different amounts of work. The runner now accepts
-    # a repeated `--operation` and drives them in order in a single invocation, so the
+    # BOTH SIDES DRIVE THE SAME ORDERED LIST, which `all_declared=True` is what secures:
+    # asking the oracle runner for ONE operation while asking the Python runner for every
+    # operation the scenario declares would drive four operations on one side of
+    # `period_end_totals` and one on the other, comparing two different amounts of work.
+    # The runner accepts a repeated `--operation` and drives them in order in a single
+    # invocation, so the
     # list is simply passed through.
     requested = _requested_operations(
         scenario, operation, all_declared=operation is None
@@ -3306,7 +3300,7 @@ def run_cobol(
     )
 
 
-# `run_cobol_sequence` WAS HERE, AND IS GONE (finding F-12).
+# `run_cobol_sequence` WAS HERE, AND IS GONE.
 #
 # It existed because harness/run_cobol_scenario.sh read only the SINGULAR `operation:`
 # key, so a scenario declaring several - `period_end_totals` spans Sales and Purchase
@@ -3418,7 +3412,7 @@ def classify_run(result: StageResult, *, operation: str) -> str:
         # A bad command line is THIS MODULE'S fault and never behavioural data.
         if wrapper_code == ARGPARSE_USAGE_EXIT:
             return DISPOSITION_HARNESS_FAULT
-        # ⭐ EX_BEHAVIOUR IS A BEHAVIOURAL FINDING, NOT A BROKEN RIG (finding F-14).
+        # EX_BEHAVIOUR IS A BEHAVIOURAL FINDING, NOT A BROKEN RIG.
         # The wrapper ran the cycle and measured a contradiction; that is data. It is
         # classified before the fault bands so a future edit to those bands cannot
         # silently reabsorb it.
@@ -3445,7 +3439,7 @@ def classify_run(result: StageResult, *, operation: str) -> str:
 def assert_wrapper_completed(result: StageResult, *, label: str | None = None) -> None:
     """Assert a run stage's WRAPPER completed, and diagnose 69 as behavioural.
 
-    ⭐ WHY THIS IS NOT `assert result.returncode == 0` WITH A MESSAGE (finding F-14).
+    WHY THIS IS NOT `assert result.returncode == 0` WITH A MESSAGE.
     Every non-zero wrapper status means the runner did not finish its drive and its
     self-checks, so a test that needs a complete run must refuse them all. But they do
     not all mean the same thing, and exactly one of them is the most valuable finding
@@ -3457,7 +3451,7 @@ def assert_wrapper_completed(result: StageResult, *, label: str | None = None) -
     So the refusal is the same and the DIAGNOSIS differs, and it differs by reading
     :func:`classify_run` rather than by a second transcription of the bands.
 
-    ⛔ 69 STILL FAILS HERE, and must. This helper is called from test BODIES, so the
+    69 STILL FAILS HERE, and must. This helper is called from test BODIES, so the
     behavioural difference is reported as a pytest FAILURE attributable to the cycle -
     which is the whole point of keeping 69 out of `RUN_PYTHON_FAULT_CODES` and out of
     the fixtures' `raise_for_status` path.
@@ -3535,33 +3529,33 @@ def assert_wrapper_completed(result: StageResult, *, label: str | None = None) -
 #  canonicalisation or a comparison; the argv is composed, `main` is called and the
 #  result is captured. In particular:
 #
-#    * NORMALISATION DOES EXACTLY THREE THINGS AND THERE IS NO FOURTH, and none of
-#      them is reproduced here: trailing spaces in fixed-character columns
-#      (`rstrip(" ")`, TRAILING ONLY, because a COBOL alphanumeric MOVE is
-#      left-justified so LEADING spaces are content); decimal scale rendering to the
-#      column's DECLARED scale, which is NOT uniformly 2 and where a value implying
-#      more places RAISES rather than rounds, because rounding there would hide a
-#      real finding; and the two- versus four-digit date text forms, under an
-#      explicit five-column allow-list. `normalize_dump` is a PURE function and this
-#      wrapper keeps it that way - no logging inside it, no timestamp, no
-#      environment read.
-#    * THE DIFF IS EXACT: `==` after a type check, and nothing else. There is no
-#      tolerance, no epsilon, no closeness helper from the standard library, no
-#      approximate-equality helper from the test runner, no case- or
-#      whitespace-insensitive comparison and no numeric coercion - a type mismatch,
-#      `1` against `"1"`, IS a difference. Rows are aligned by primary-key VALUE,
-#      never by position, and the two labels are `cobol` and `python`, never left
-#      and right.
-#    * THERE IS NO IGNORE-LIST, NO TOLERANCE-LIST AND NO "KNOWN DIFFERENCE"
-#      ALLOWANCE anywhere below. Bounding is done by the 22 in-scope tables, which is
-#      the protocol; a scenario's affected-table list is its DECLARED EFFECT, asserted
-#      against separately, and is never a way to overlook a difference.
-#    * NOTHING HERE CORRECTS OBSERVED BEHAVIOUR (rule R-4). No null is coalesced, no
-#      missing row is defaulted, no row or column is re-ordered for legibility, and
-#      nothing is trimmed beyond harness/normalize.py's own job 1. A helper that
-#      tidied a result would be a defect, not a kindness: the whole value of this
-#      migration is that the Python cycle can replace the COBOL cycle without changing
-#      a single posted figure, and a tidied comparison cannot demonstrate that.
+#  * NORMALISATION DOES EXACTLY THREE THINGS AND THERE IS NO FOURTH, and none of
+#  them is reproduced here: trailing spaces in fixed-character columns
+#  (`rstrip(" ")`, TRAILING ONLY, because a COBOL alphanumeric MOVE is
+#  left-justified so LEADING spaces are content); decimal scale rendering to the
+#  column's DECLARED scale, which is NOT uniformly 2 and where a value implying
+#  more places RAISES rather than rounds, because rounding there would hide a
+#  real finding; and the two- versus four-digit date text forms, under an
+#  explicit five-column allow-list. `normalize_dump` is a PURE function and this
+#  wrapper keeps it that way - no logging inside it, no timestamp, no
+#  environment read.
+#  * THE DIFF IS EXACT: `==` after a type check, and nothing else. There is no
+#  tolerance, no epsilon, no closeness helper from the standard library, no
+#  approximate-equality helper from the test runner, no case- or
+#  whitespace-insensitive comparison and no numeric coercion - a type mismatch,
+#  `1` against `"1"`, IS a difference. Rows are aligned by primary-key VALUE,
+#  never by position, and the two labels are `cobol` and `python`, never left
+#  and right.
+#  * THERE IS NO IGNORE-LIST, NO TOLERANCE-LIST AND NO "KNOWN DIFFERENCE"
+#  ALLOWANCE anywhere below. Bounding is done by the 22 in-scope tables, which is
+#  the protocol; a scenario's affected-table list is its DECLARED EFFECT, asserted
+#  against separately, and is never a way to overlook a difference.
+#  * NOTHING HERE CORRECTS OBSERVED BEHAVIOUR (rule R-4). No null is coalesced, no
+#  missing row is defaulted, no row or column is re-ordered for legibility, and
+#  nothing is trimmed beyond harness/normalize.py's own job 1. A helper that
+#  tidied a result would be a defect, not a kindness: the whole value of this
+#  migration is that the Python cycle can replace the COBOL cycle without changing
+#  a single posted figure, and a tidied comparison cannot demonstrate that.
 # ---------------------------------------------------------------------------
 
 
@@ -3707,11 +3701,11 @@ def verify_published(
     `harness/normalize.py` writes its manifest LAST, so the manifest's presence is what
     says the stage finished; `harness/diff_states.py`'s `verify_trees` additionally
     requires the two manifests to agree on scenario, on side, on run identity and on
-    the exact seeded bytes (findings F-22, F-45).
+    the exact seeded bytes.
 
     Performed here as its own recorded stage rather than left implicit inside the
     comparison, so a test can see that it ran and a failure names stage 9 rather than
-    arriving as a comparison error (finding F-16). A hand-driven run gets the same
+    arriving as a comparison error. A hand-driven run gets the same
     guarantee from stage 10 itself: `harness/diff_states.py` calls this same
     `verify_trees` before it compares a single row and exits 2 rather than 0, so the
     check is never skipped - only reported differently.
@@ -3807,15 +3801,15 @@ def normalize(
 
 
 # ---------------------------------------------------------------------------
-#  THE VALUE-FREE DIAGNOSTIC ROUTE (finding SEC-05)
+#  THE VALUE-FREE DIAGNOSTIC ROUTE
 #
 #  A scenario test compares two database states. When it fails, the useful question is
 #  WHICH table and WHICH column disagreed - not what the figures were. The two are
 #  easily conflated because `harness/diff_states.py` ships both renderers:
 #
-#    render(tree)     every differing value AND every primary key. Its purpose is the
-#                     on-disk report, where that detail belongs.
-#    summarise(tree)  table, column name and ordinal, and counts. No value, no key.
+#  render(tree)     every differing value AND every primary key. Its purpose is the
+#  on-disk report, where that detail belongs.
+#  summarise(tree)  table, column name and ordinal, and counts. No value, no key.
 #
 #  The tier used to interpolate `render` into assertion messages, which put real ledger
 #  balances, VAT amounts and account identifiers into pytest output. The figures are not
@@ -3872,7 +3866,7 @@ def _withheld(value: Any, *, column: str | None = None, artifact: Any = None) ->
 
     The stand-in for interpolating a dumped row, a row collection or one column's
     value. What a failure needs is that something differed, how much of it, and where
-    the detail is; what it does not need is the figure itself (finding SEC-05).
+    the detail is; what it does not need is the figure itself.
 
     Args:
         value: Whatever would have been interpolated - a scalar, a sequence of rows, a
@@ -4265,7 +4259,7 @@ def assert_diff_exit_contract(
     normalize_module = harness.normalize
     diff_states = harness.diff_states
 
-    #  ⭐ ALL 22 IN-SCOPE TABLES, because that is the bound the diff stage is GIVEN:
+    #  ALL 22 IN-SCOPE TABLES, because that is the bound the diff stage is GIVEN:
     #  `vocabulary.diff` drives `harness/diff_states.py --all-in-scope`. Fabricating
     #  only the scenario's declared effect would make the two synthetic captures and the
     #  comparison disagree about their scope, and the comparison REFUSES that with exit
@@ -4293,7 +4287,7 @@ def assert_diff_exit_contract(
         certify parity having compared nothing. Written through the tool's own path
         helper rather than a hand-built path, so the two cannot drift.
 
-        ⭐ EVERY REQUIRED KEY IS WRITTEN, and the set is asserted against
+        EVERY REQUIRED KEY IS WRITTEN, and the set is asserted against
         `harness/dump_tables.py`'s own `RUN_STATUS_REQUIRED_KEYS` rather than
         transcribed: the record must carry the run identity, the wrapper's own status,
         both seed digests and one `operation_status` row per declared operation, or the
@@ -4387,7 +4381,7 @@ def assert_diff_exit_contract(
             side=side,
             selector=dump_tables.SELECTOR_ALL_IN_SCOPE,
             #  THE RUN IDENTITY REACHES THE MANIFEST, or the comparison refuses the pair
-            #  for want of one (finding F-37): a verdict that cannot state which attempt
+            #  for want of one: a verdict that cannot state which attempt
             #  it is about is a verdict about an unidentified pair of captures. The id is
             #  the one `attest` wrote, so the record and the manifest agree.
             provenance=dump_tables.build_provenance(
@@ -4439,8 +4433,8 @@ def assert_diff_exit_contract(
     )
 
     # ---- EXIT 2: A RUN NOBODY MAY CONCLUDE FROM IS NOT A RUN --------------
-    #  ⭐ THE STATUS HERE IS A HARNESS FAULT, NOT MERELY NON-ZERO, and the distinction
-    #  is the whole of finding F-13. `BEHAVIOURAL_RUN_STATUS` - 69 - is a REPRODUCED
+    #  THE STATUS HERE IS A HARNESS FAULT, NOT MERELY NON-ZERO, and the distinction
+    #  is the whole of it. `BEHAVIOURAL_RUN_STATUS` - 69 - is a REPRODUCED
     #  abort, which is comparable BY DESIGN: the term-code-5 chain is correct compiled
     #  behaviour and the state it leaves is exactly what must be diffed. So a case built
     #  on 69 would assert the opposite of the contract. What is refused is a status the
@@ -4481,7 +4475,7 @@ def assert_diff_exit_contract(
         f"the refusal must name the capture it refused, so an operator is not left "
         f"guessing which side failed. stderr was {failed_run_streams.err!r}."
     )
-    #  ⭐ AND THE STATUS IS RECORDED VERBATIM IN THE CAPTURE, which is the substantive
+    #  AND THE STATUS IS RECORDED VERBATIM IN THE CAPTURE, which is the substantive
     #  half of this case: the run stage's own number survives into the manifest, so the
     #  refusal is traceable to what actually happened rather than to a generic fault.
     #  Asserted on the manifest rather than on the refusal's wording, because a
@@ -4745,21 +4739,21 @@ def assert_autogen_tables_empty(connection: Any) -> None:
 #  THE TEN STAGES, IN THE EXACT ORDER. The order and the numbering are NOT restated
 #  here as fact - they are DEFINED in `PARITY_STAGES` in harness/normalize.py and published
 #  by `harness/normalize.py --print-stages`, which `parity_stage_registry` reads and a
-#  test asserts these constants against (finding F-16). Each side is normalised as its
-#  own stage; the second normalisation used to be numbered `7b` so that the protocol
-#  could be called eight-stage, which made a stage number in a test message name a
-#  different stage from the same number in a driver transcript:
+#  test asserts these constants against. Each side is normalised as its
+#  own stage, and the second normalisation is NOT numbered `7b` to keep the protocol
+#  eight-stage: that would make a stage number in a test message name a different stage
+#  from the same number in a driver transcript:
 #
-#       1  harness/reset_db.sh             "$S"  (schema + seed)
-#       2  harness/run_cobol_scenario.sh   "$S"  (every declared operation, in order)
-#       3  harness/dump_tables.py  --scenario N --side cobol  --scenario-file "$S"
-#       4  harness/normalize.py    --scenario N --side cobol
-#       5  harness/reset_db.sh             "$S"  (the SAME fixture bytes)
-#       6  harness/run_python_scenario.sh  "$S"
-#       7  harness/dump_tables.py  --scenario N --side python --scenario-file "$S"
-#       8  harness/normalize.py    --scenario N --side python
-#       9  both captures declare themselves complete   (an in-driver check)
-#      10  harness/diff_states.py  --scenario N --scenario-file "$S"
+#  1  harness/reset_db.sh             "$S"  (schema + seed)
+#  2  harness/run_cobol_scenario.sh   "$S"  (every declared operation, in order)
+#  3  harness/dump_tables.py  --scenario N --side cobol  --scenario-file "$S"
+#  4  harness/normalize.py    --scenario N --side cobol
+#  5  harness/reset_db.sh             "$S"  (the SAME fixture bytes)
+#  6  harness/run_python_scenario.sh  "$S"
+#  7  harness/dump_tables.py  --scenario N --side python --scenario-file "$S"
+#  8  harness/normalize.py    --scenario N --side python
+#  9  both captures declare themselves complete   (an in-driver check)
+#  10  harness/diff_states.py  --scenario N --scenario-file "$S"
 #
 #  The Agent Action Plan's EIGHT logical stages (section 0.3.2) become these ten by
 #  numbering both normalisations and the publication check instead of folding them in,
@@ -4779,31 +4773,31 @@ def assert_autogen_tables_empty(connection: Any) -> None:
 #  `control_total_mismatch` and `mixed_accepted_rejected`. Every OTHER stage's
 #  failure does destroy the evidence, so those raise.
 #
-#  ⭐ ONE MULTI-OPERATION PROTOCOL, SYMMETRIC ON BOTH SIDES. Stages 2 and 6 drive the
+#  ONE MULTI-OPERATION PROTOCOL, SYMMETRIC ON BOTH SIDES. Stages 2 and 6 drive the
 #  scenario's OWN ordered `operations` list - not its scalar `operation` key - so the
 #  two sides do the same work in the same order. `period_end_totals` is the one
 #  committed example, with four operations:
 #
-#    * NO RESET BETWEEN OPERATIONS. The claim is cumulative: operation 2 rewrites the
-#      ledger rows operation 1 created, and re-seeding in between would measure four
-#      unrelated runs instead of one journey.
-#    * ONE STATUS PER OPERATION. Each side emits an `OPERATION_STATUS` record per
-#      operation and `_attach_operation_statuses` refuses a wrapper that exits zero
-#      without the complete ordered set, so no capture can be attributed to an
-#      operation whose disposition was never established.
-#    * ONE DUMP PER SIDE, after the last operation. Stages 3 and 7 run once.
-#    * THE ORACLE SIDE SPANS SEVERAL MENU PROCESSES because one compiled menu drives
-#      one subsystem, and `period_end_totals` reaches two of them. That is handled
-#      INSIDE one runner invocation, not by invoking the runner once per operation:
-#      `harness/run_cobol_scenario.sh` takes a repeatable `--operation`, selects the
-#      menu for each in turn, and publishes one disposition per operation (finding
-#      F-12). The earlier arrangement - one invocation per operation, with operation
-#      one's records copied back over the last one's - left operations 2..n with no
-#      attested disposition at all, and it is gone; the pre-run fingerprint is taken
-#      ONCE before operation one and the post-run fingerprint ONCE after the last,
-#      which is exactly the span the journey covers.
-#    * AND THE SYMMETRY IS ASSERTED, not assumed: after stage 6 the two recorded
-#      operation lists are compared, and a disagreement is a harness fault.
+#  * NO RESET BETWEEN OPERATIONS. The claim is cumulative: operation 2 rewrites the
+#  ledger rows operation 1 created, and re-seeding in between would measure four
+#  unrelated runs instead of one journey.
+#  * ONE STATUS PER OPERATION. Each side emits an `OPERATION_STATUS` record per
+#  operation and `_attach_operation_statuses` refuses a wrapper that exits zero
+#  without the complete ordered set, so no capture can be attributed to an
+#  operation whose disposition was never established.
+#  * ONE DUMP PER SIDE, after the last operation. Stages 3 and 7 run once.
+#  * THE ORACLE SIDE SPANS SEVERAL MENU PROCESSES because one compiled menu drives
+#  one subsystem, and `period_end_totals` reaches two of them. That is handled
+#  INSIDE one runner invocation, not by invoking the runner once per operation:
+#  `harness/run_cobol_scenario.sh` takes a repeatable `--operation`, selects the
+#  menu for each in turn, and publishes one disposition per operation. The
+#  alternative - one invocation per operation, with operation one's records copied
+#  back over the last one's - would leave operations 2..n with no attested
+#  disposition at all; the pre-run fingerprint is taken
+#  ONCE before operation one and the post-run fingerprint ONCE after the last,
+#  which is exactly the span the journey covers.
+#  * AND THE SYMMETRY IS ASSERTED, not assumed: after stage 6 the two recorded
+#  operation lists are compared, and a disagreement is a harness fault.
 # ---------------------------------------------------------------------------
 
 
@@ -4824,7 +4818,7 @@ class ParityRun:
         python_run: The migrated cycle's run result.
         outcome: The stage-10 verdict.
         paths: Where every artifact of this run lives.
-        run_id: The one id bound through all ten stages (finding F-37). Every artifact
+        run_id: The one id bound through all ten stages. Every artifact
             this run published records it, and stage 10 refused the pair unless both
             captures carried this exact value - so it is the handle a reader uses to
             find this run's evidence and to prove the two captures are one attempt.
@@ -4870,7 +4864,7 @@ class ParityRun:
     def diagnose(self) -> str:
         """What differed, WITHOUT any differing value. For a failure message.
 
-        THE VALUE-FREE ROUTE (finding SEC-05). Use this and never
+        THE VALUE-FREE ROUTE. Use this and never
         `harness/diff_states.py`'s `render`: `render` exists to write the on-disk
         report and it prints every differing value AND every primary key, so
         interpolating it into an assertion message copies real accounting figures and
@@ -4950,7 +4944,7 @@ def run_scenario_parity(
         scenario, operation, all_declared=operation is None
     )
 
-    # ⭐ ONE RUN PER DISTINCT REQUEST, FOR THE WHOLE SESSION. Keyed on every argument
+    # ONE RUN PER DISTINCT REQUEST, FOR THE WHOLE SESSION. Keyed on every argument
     # that changes what the protocol does, so two callers asking different questions
     # still get their own runs and two callers asking the SAME question get the SAME
     # answer. `out_dir` is normalised to a string because a caller may pass either a
@@ -4965,7 +4959,7 @@ def run_scenario_parity(
     # quiet incoherence rather than nine independent confirmations - and if two of
     # those runs ever disagreed, the file would still be green. Sharing one run is what
     # makes the file's own narrative true. Most of the scenario modules already
-    # memoised in module-level state to get this; doing it HERE means all nine get it,
+    # memoised in module-level state to get this; doing it HERE means all eight get it,
     # and no future module has to remember.
     #
     # NOTHING READS THE LIVE DATABASE THROUGH A CACHED RUN. Every artifact of a
@@ -4997,7 +4991,7 @@ def run_scenario_parity(
     paths = scenario_paths(scenario, out_root=out_dir)
     stages: list[StageResult] = []
 
-    # ⭐ ONE RUN ID, BOUND BEFORE STAGE 1 AND HELD TO STAGE 10 (finding F-37).
+    # ONE RUN ID, BOUND BEFORE STAGE 1 AND HELD TO STAGE 10.
     #
     # This is what makes the composed protocol the SAME protocol as the driven one.
     # Without it every stage is a separate process that mints its own identity, the
@@ -5006,7 +5000,7 @@ def run_scenario_parity(
     # between two captures of different runs says nothing about the migration. It is
     # bound around stage 1 rather than stage 2 because `harness/reset_db.sh` publishes
     # the seed identity under this id and `acas_read_seed_identity` DISCARDS a record
-    # staged by a different attempt, which would strand the seed marker that F-22
+    # staged by a different attempt, which would strand the seed marker that the
     # requires to be present and equal on both sides.
     with bound_run_id() as run_id:
         return _run_scenario_parity_stages(
@@ -5075,7 +5069,7 @@ def _run_scenario_parity_stages(
 
     # STAGE 2. THE STATUS IS RECORDED, NOT ENFORCED - see the section comment.
     #
-    # ONE INVOCATION, WHATEVER THE COUNT (finding F-12). `operation` is passed through
+    # ONE INVOCATION, WHATEVER THE COUNT. `operation` is passed through
     # unchanged - None means "every operation the scenario declares" - and the runner
     # resolves the ordered list itself. `period_end_totals` spans two menu executables
     # and the runner drives all four of its operations one at a time against one
@@ -5096,7 +5090,7 @@ def _run_scenario_parity_stages(
     python_run = run_python(scenario, operation=operation, out_dir=out_dir)
     stages.append(python_run)
 
-    # ⭐ THE TWO SIDES MUST HAVE DRIVEN THE SAME WORK, IN THE SAME ORDER - asserted
+    # THE TWO SIDES MUST HAVE DRIVEN THE SAME WORK, IN THE SAME ORDER - asserted
     # from what each run stage RECORDED rather than from what this function asked for.
     # The one multi-operation scenario is driven as one Python invocation over its
     # declared list and as a series of oracle invocations over the same list, and the
@@ -5134,7 +5128,7 @@ def _run_scenario_parity_stages(
 
     # STAGE 9. BOTH CAPTURES MUST DECLARE THEMSELVES COMPLETE before a single row is
     # compared, which the driver performs as an in-script check and this helper
-    # performs in process (finding F-16: the composed protocol has the same ten stages
+    # performs in process (the composed protocol has the same ten stages
     # as the driven one, or a stage number here means something else than it does
     # there). It is recorded as its own stage so that a test can see it ran.
     stages.append(verify_published(scenario, out_dir=out_dir).raise_for_status())
@@ -5164,16 +5158,16 @@ def _run_scenario_parity_stages(
 #  (rule R-6). Three conditions make an empty verdict worthless, and none of them is
 #  visible in the verdict itself:
 #
-#    1. NOTHING WAS THERE TO COMPARE. Two dumps of zero rows are identical, so a seed
-#       that never landed, a `system.file_system_used` of zero sending every handler
-#       to the COBOL indexed-file path [copybooks/wssystem.cob:L112-L114], or a
-#       loader returning 16 under the frozen `-gt 63` tolerance
-#       [common/masterLD.sh:L56] all produce a clean, meaningless pass.
-#    2. THE TWO SIDES STARTED FROM DIFFERENT STATE. Then the differences - or their
-#       absence - belong to the seed and not to the cycles.
-#    3. A RUN DID NOT REACH ITS DECLARED DISPOSITION. A runner that refused a
-#       precondition, or aborted where the scenario expected success, leaves both
-#       sides equally unwritten and the diff equally empty.
+#  1. NOTHING WAS THERE TO COMPARE. Two dumps of zero rows are identical, so a seed
+#  that never landed, a `system.file_system_used` of zero sending every handler
+#  to the COBOL indexed-file path [copybooks/wssystem.cob:L112-L114], or a
+#  loader returning 16 under the frozen `-gt 63` tolerance
+#  [common/masterLD.sh:L56] all produce a clean, meaningless pass.
+#  2. THE TWO SIDES STARTED FROM DIFFERENT STATE. Then the differences - or their
+#  absence - belong to the seed and not to the cycles.
+#  3. A RUN DID NOT REACH ITS DECLARED DISPOSITION. A runner that refused a
+#  precondition, or aborted where the scenario expected success, leaves both
+#  sides equally unwritten and the diff equally empty.
 #
 #  tests/determinism/test_two_runs_byte_identical.py already defends the first with
 #  its layer 2 (`assert first.total_rows > 0`) and the second with its layer 4
@@ -5854,15 +5848,15 @@ def assert_operations_driven(
 ) -> None:
     """Assert BOTH sides drove exactly these operations, in exactly this order.
 
-    ⭐ THE TWO-SIDED CLAIM, ASSERTED WHERE A READER LOOKS FOR IT (finding F-12). The
+    THE TWO-SIDED CLAIM, ASSERTED WHERE A READER LOOKS FOR IT. The
     protocol compares one COBOL run against one Python run, and that comparison means
     nothing unless the two runs drove THE SAME ORDERED LIST. One scenario -
-    `period_end_totals` - declares four operations spanning two menu executables, and
-    the oracle side used to be driven one operation at a time by a separate helper while
-    the Python side ran all four. The diff was then between a one-operation state and a
-    four-operation state, and its verdict was meaningless in either direction.
+    `period_end_totals` - declares four operations spanning two menu executables, so
+    driving the oracle side one operation at a time while the Python side runs all four
+    would diff a one-operation state against a four-operation state, and the verdict would
+    be meaningless in either direction.
 
-    Both runners now resolve the ordered list from the scenario itself and publish one
+    Both runners resolve the ordered list from the scenario itself and publish one
     status row per operation, in order, so the claim is CHECKABLE - and this asserts it
     rather than leaving it to be implied by `StageResult.operation_status` raising deep
     inside another helper.
@@ -6170,7 +6164,7 @@ def run_determinism_pair(
 
     # The scenario's own declared run date, so the pin returned is the pin the runs
     # actually used. `pinned_clock_from` does not validate the text - `maps04` alone
-    # judges it - and a rejected date arrives as run_date 0 (anomaly #16).
+    # judges it - and a rejected date arrives as run_date 0 (anomaly A-16).
     declared_text = definition.get(SCENARIO_KEY_RUN_DATE_TEXT)
     pin = pinned_clock_from(
         PINNED_RUN_DATE_TEXT if declared_text is None else str(declared_text)
@@ -6183,7 +6177,7 @@ def run_determinism_pair(
     stages: list[StageResult] = []
     runs: list[StageResult] = []
     for side_root in (first_root, second_root):
-        # ⭐ THE SAME COMMAND BEFORE BOTH LEGS (finding F-21), AND BEFORE THE FIRST.
+        # THE SAME COMMAND BEFORE BOTH LEGS, AND BEFORE THE FIRST.
         # This used to `seed` the first leg and `reset` the second, and the two are NOT
         # the same starting state: a bare seed leaves behind whatever the previously
         # executed scenario wrote and relies on duplicate-key rewrites, while a reset
@@ -6206,7 +6200,7 @@ def run_determinism_pair(
         # keeps this sequential, so there is no concurrent writer to guard against).
         stages.append(reset(scenario).raise_for_status())
 
-        # ⭐ EVERY ARTIFACT OF THIS LEG LIVES IN THIS LEG'S ROOT (finding F-21). The
+        # EVERY ARTIFACT OF THIS LEG LIVES IN THIS LEG'S ROOT. The
         # dump and the normalisation were already per-leg, but the RUN published its
         # transcript, its run-status record and its per-operation statuses into the
         # canonical run-logs root - so leg two overwrote leg one's attestation, and the
@@ -6230,7 +6224,7 @@ def run_determinism_pair(
         scenario, out_root=second_root
     ).python_normalized
 
-    # ⭐ NEITHER LEG MAY BE UNATTESTED (finding F-21). `diff_trees_directly` compares
+    # NEITHER LEG MAY BE UNATTESTED. `diff_trees_directly` compares
     # two directories and asks nothing of them, which is right for its own purpose and
     # wrong here: two captures taken after runs that never happened are trivially
     # equal, and equality is what this helper reports as determinism. So each leg's
@@ -6352,7 +6346,7 @@ class Vocabulary:
         classify_run: A run stage's disposition. Pure - it reads a captured result.
         assert_wrapper_completed: A run stage's WRAPPER health, asserted with the
             diagnosis its status earns - 69 reads as a behavioural difference and not
-            as a broken rig (finding F-14).
+            as a broken rig.
         normalize: STAGE 4, which is a FILE-TO-FILE transformation driven in process
             and needs no database, no COBOL and no Docker. It is published here as
             well as on `Protocol` for exactly one purpose: a test that publishes
@@ -6474,7 +6468,7 @@ class Protocol:
         classify_run: Success, behavioural difference or harness fault.
         assert_wrapper_completed: A run stage's wrapper health, asserted from a
             test BODY so that an `EX_BEHAVIOUR` wrapper reads as a behavioural
-            FAILURE rather than as a broken rig (finding F-14).
+            FAILURE rather than as a broken rig.
         paths: The canonical layout for one scenario.
         affected_tables: The list a comparison is bounded by.
         definition: One scenario's parsed YAML.
@@ -6504,7 +6498,7 @@ class Protocol:
             `reference_only=True`, so a mis-set-up scenario is a pytest ERROR.
         assert_operations_driven: Both run stages drove the SAME ORDERED operation
             list, which is what makes their comparison mean anything at all
-            (finding F-12). Called in a FIXTURE: a short or reordered list means the
+. Called in a FIXTURE: a short or reordered list means the
             runner drove something other than the scenario, a pytest ERROR.
         assert_python_reproduced_disposition: The BEHAVIOURAL half of the same
             question, for a test BODY: the migrated cycle reached the disposition the
@@ -6615,7 +6609,7 @@ def pinned_clock_factory() -> Callable[[str], acas_clock.PinnedRunDate]:
     """A factory for a second pinned clock, from caller-supplied `to-day` text.
 
     For tests/determinism/ and any scenario overriding the YAML date. A REJECTED DATE
-    DOES NOT RAISE - it arrives as `run_date == 0`, which is anomaly #16 reproduced,
+    DOES NOT RAISE - it arrives as `run_date == 0`, which is anomaly A-16 reproduced,
     not an error to be improved on (rule R-4).
 
     Returns:
@@ -6713,7 +6707,7 @@ def db_connection() -> Iterator[Any]:
     before yielding, so a test never reads a database through a connection whose
     mode says a seeding window is still open (ambiguity-resolutions.md#q-10).
 
-    ⭐ WHAT THIS IS NOT FOR, AND WHY NO TEST CURRENTLY USES IT. This reads the LIVE
+    WHAT THIS IS NOT FOR, AND WHY NO TEST CURRENTLY USES IT. This reads the LIVE
     SHARED database AT THE MOMENT THE TEST RUNS. It is therefore NOT evidence about a
     completed run: `run_scenario_parity` is CACHED, its stage 5 drops, re-applies the
     frozen schema and re-seeds BETWEEN the two sides, and every scenario in the suite
@@ -6854,7 +6848,7 @@ def vocabulary() -> Vocabulary:
 
 @pytest.fixture(scope="session")
 def scenario_loader() -> Callable[[str], Mapping[str, Any]]:
-    """A loader for one scenario definition, duplicate-rejecting (finding MJ-17).
+    """A loader for one scenario definition, duplicate-rejecting.
 
     Needs no stack: a scenario definition is a file on disk. Parsing goes through
     `harness/normalize.py`, so a repeated mapping key is a hard parse failure

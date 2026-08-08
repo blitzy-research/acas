@@ -130,7 +130,7 @@ class WsPostingRecord:
 
     Attributes:
         ws_post_rrn: Relative-record replacement, and the table's primary key. See its
-            comment for A-1, the anomaly this module records.
+            comment for the never-loaded host variable the dictionary records against it.
         ws_post_key: The batch and post number, as a group.
         post_code: Posting type code.
         post_date: Posting date, as eight characters of text.
@@ -147,15 +147,20 @@ class WsPostingRecord:
     """
 
     # WS-Post-rrn pic 9(5) DISPLAY, unsigned, scale 0 [copybooks/wspost.cob:L13] -> key
-    # GLPOSTING-REC.POST-RRN. The mixed case is the COBOL's own. A-8.
+    # GLPOSTING-REC.POST-RRN. The mixed case is the COBOL's own. Its host variable
+    # HV-POST-RRN is declared and fetched but never loaded from the record
+    # [common/glpostingMT.cbl:L282], which the dictionary entry records with its own
+    # ambiguity reference rather than repairing.
     ws_post_rrn: int = 0
 
     # WS-Post-Key group, no picture, no storage of its own, no offset
-    # [copybooks/wspost.cob:L14] -> key GLPOSTING-REC.POST-KEY A-2.
+    # [copybooks/wspost.cob:L14] -> key GLPOSTING-REC.POST-KEY.
     ws_post_key: WsPostKey = field(default_factory=WsPostKey)
 
     # Post-Code pic xx alphanumeric, 2 characters *> 12 [copybooks/wspost.cob:L17] ->
-    # key GLPOSTING-REC.POST-CODE A-21, one of the two colliding names.
+    # key GLPOSTING-REC.POST-CODE. One of the names that collide across the three posting
+    # copybooks; the qualified references that collision forces are anomaly A-21, and they
+    # are in the programs [general/gl070.cbl:L497] rather than here.
     post_code: str = _spaces("Post-Code")
 
     # Post-Date pic x(8) alphanumeric, 8 characters *> 20 [copybooks/wspost.cob:L18] ->
@@ -184,14 +189,16 @@ class WsPostingRecord:
     vat_pc: int = 0
 
     # Post-Vat-Side pic xx alphanumeric, 2 characters *> 86 [copybooks/wspost.cob:L27]
-    # -> key GLPOSTING-REC.POST-VAT-SIDE A-6.
+    # -> key GLPOSTING-REC.POST-VAT-SIDE.
     post_vat_side: str = _spaces("Post-Vat-Side")
 
     # Vat-Amount pic s9(8)v99 DISPLAY zoned, signed, *> 96 sign TRAILING and INCLUDED,
     # 10 digits, scale 2, 10 bytes [copybooks/wspost.cob:L28] -> key GLPOSTING-REC.VAT-
     # AMOUNT The record's last field, and the offset that closes the copybook's own
     # arithmetic at 96 while the declared pictures reach 98 without `WS-Post-rrn` and
-    # 103 with it (A-3).
+    # 103 with it. That disagreement is this copybook's own, recorded at
+    # [copybooks/wspost.cob:L6-L7]; the registered length anomaly A-15 is `wsbatch.cob`'s,
+    # not this one.
     vat_amount: decimal.Decimal = _MONEY_ZERO
 
     # Declaration order, L13 through L28, as a tuple (R-6). Fourteen descriptors for

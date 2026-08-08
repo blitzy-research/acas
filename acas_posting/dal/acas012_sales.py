@@ -529,8 +529,8 @@ class BridgeSession:
             installed with
             :func:`acas_posting.dal.connection.set_connection_policy`.
         allow_frozen_placeholder_credentials: Passed through to the open.
-            ``copybooks/wssystem.cob:L138-L139`` still ships ``"ACAS-User"`` and
-            ``"PaSsWoRd"``; ``None`` defers to that same policy, which reports
+            ``copybooks/wssystem.cob:L138-L139`` still ships its placeholder user and
+            password; ``None`` defers to that same policy, which reports
             the exposure and connects exactly as the compiled program does.
         open_access_type: The ``Access-Type`` the last successful open used, kept
             for diagnostics only. It changes no status and no statement.
@@ -556,8 +556,8 @@ class BridgeSession:
 
         The bridge has no equivalent test: it calls ``MySQL_query`` on whatever the
         global connection id holds, and a closed one fails inside the C interface, which
-        ``Mysql-1100-Db-Error`` then reports as ``(99, 911)`` [copybooks/mysql-
-        procedures.cpy:L127-L128].
+        ``Mysql-1100-Db-Error`` then reports as ``(99, 911)``
+        [copybooks/mysql-procedures.cpy:L127-L128].
 
         Returns:
             The live connection.
@@ -1706,9 +1706,9 @@ def _fetch_one_row(cursor: DatabaseCursor) -> Mapping[str, object] | None:
 def _store_result(cursor: DatabaseCursor) -> tuple[Mapping[str, object], ...]:
     """``PERFORM MYSQL-1220-STORE-RESULT THRU MYSQL-1239-EXIT``.
 
-    ``mysql_store_result`` pulls every qualifying row to the client [copybooks/mysql-
-    procedures.cpy:L187-L192] before ``MySQL_num_rows`` counts it, which is why ``WS-
-    MYSQL-Count-Rows`` is meaningful the instant the ``SELECT`` returns and why a
+    ``mysql_store_result`` pulls every qualifying row to the client
+    [copybooks/mysql-procedures.cpy:L187-L192] before ``MySQL_num_rows`` counts it, which is why
+    ``WS- MYSQL-Count-Rows`` is meaningful the instant the ``SELECT`` returns and why a
     subsequent statement on the same connection cannot disturb the walk.
 
     Args:
@@ -1764,8 +1764,8 @@ def ca_process_logs(
         dal_common: The block carrying the testing switches and the counter.
     """
     logging_data = file_access.logging_data
-    #  THE ONE ADAPTER, and three fields fewer than this record used to carry -
-    #  none of them redacted or even escaped before. `WS-File-Key` is the
+    #  THE ONE ADAPTER, carrying three fields where the frozen record carries six,
+    #  and every one of them redacted and escaped. `WS-File-Key` is the
     #  SALES-KEY of the customer row, `WS-Log-Where` is the `WHERE` clause built
     #  around it, and `SQL-Msg` is the driver's free text, which can name the
     #  account and can carry a carriage return that forges a second record
@@ -1791,8 +1791,8 @@ def ca_process_logs(
     # JOB and is done exactly once, inside it, immediately before the record is
     # emitted. It was done a SECOND time here, so one record advanced the counter by
     # two and every downstream reading of `Log-File-Rec-Written` was wrong by the
-    # number of records written - which is precisely the incoherence OBS-010 names.
-    # The field is `pic 9(6)` [copybooks/Test-Data-Flags.cob:L20], so the adapter
+    # number of records written - which is precisely that incoherence.
+    # The field is `pic 9(6)` [copybooks/Test-Data-Flags.cob:L18], so the adapter
     # wraps it at a million.
 
 

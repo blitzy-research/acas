@@ -1,1031 +1,221 @@
 """`gl080` - the General Ledger End Of Cycle Processing  [general/gl080.cbl].
 
-The migration of `general/gl080.cbl` in its entirety. Boundary: THE WHOLE
-PROGRAM. Agent Action Plan section 0.2.1.1 lists this file with migration
-boundary "Whole program", and only two of the twelve in-scope programs are
-partial - `gl051` and `irs030`. `gl080` is not one of them. So the archiving
-path `gl080b`/`arc-process`, the interactive `disk-change`, and `compress-post`
-are all migrated, not carved out. The plan's prose describes the file as
-"Phase 3 transaction deletion and Phase 5 end-of-period processing", which is a
-description of the emphasis and NOT a narrowing of the boundary.
-
-Eight sections, THIRTY-EIGHT labels, THIRTY-SIX `GO TO` sites, six paragraphs
-named `loop.`, seven named `main-exit.` and three named `end-run.` - the most
-structurally complex program in the twelve, and the reason every function below
-is section-qualified.
-
-FIVE PHASE LABELS, TWO OF WHICH COLLIDE WITH OTHER PROGRAMS
-`gl080` displays five phase labels of its own, MEASURED at these lines:
-
-    L306   "Phase - 1.  Batch Check"
-    L316   "Phase - 2.  Transaction Archiving"
-    L319   "Phase - 3.  Transaction Deletion"
-    L637   "Phase - 4.  Posting Contraction "
-    L336   "Phase - 5.  End of Period Processing"
-
-Two of them collide with a DIFFERENT program's phase of the same number:
-
-    Phase 1  is "Batch Check" here [general/gl080.cbl:L306] AND "Batch Check"
-             in `gl070` [general/gl070.cbl:L284] - same number, same name, two
-             different programs and two different detector predicates. See
-             THE DETECTOR IS NOT `gl070`'S below.
-    Phase 2  is "Transaction Archiving" here [general/gl080.cbl:L316] but
-             "Transaction Pre-process" in `gl070` [general/gl070.cbl:L292].
-    Phase 4  is "Posting Contraction " here [general/gl080.cbl:L637] - note the
-             literal's trailing space - but "Transaction Update" in `gl072`
-             [general/gl072.cbl:L274].
-
-AND THE NUMBERING IS NOT THE EXECUTION ORDER. Across the General Ledger family
-the order in which the labelled phases actually run is:
-
-    `gl070`  phase 1  batch check                 [general/gl070.cbl:L284]
-    `gl070`  phase 2  transaction pre-process     [general/gl070.cbl:L292]
-    `gl071`  unlabelled sort                      [general/gl071.cbl:L172-L178]
-    `gl072`  phase 4  transaction update          [general/gl072.cbl:L274]
-    `gl080`  phase 1  batch check       AGAIN     [general/gl080.cbl:L306]
-    `gl080`  phase 2  archiving   OR   phase 3 deletion - never both
-                                                  [general/gl080.cbl:L315-L320]
-    `gl080`  phase 4  posting contraction AGAIN   [general/gl080.cbl:L637]
-    `gl080`  phase 5  end of period               [general/gl080.cbl:L336]
-
-So phase 3 is labelled before phase 4 and runs before it; phase 4 runs twice
-across the family under two different names; phase 1 runs twice under the same
-name. Agent Action Plan section 0.6.4 asks for the labels to be preserved
-"so a maintainer is not misled", and this block is that preservation. Nothing
-below infers an ordering from a phase number.
-
-THE PHASE DRIVER, VERBATIM  [general/gl080.cbl:L306-L337]
-    306      display  "Phase - 1.  Batch Check" ...
-    307      perform  gl080a.
-    308      if       a = 1
-    313               go to  main-end.
-    315      if       archiving
-    316               display "Phase - 2.  Transaction Archiving" ...
-    317               perform gl080b
-    318      else
-    319               display "Phase - 3.  Transaction Deletion" ...
-    320               perform gl080c.
-    322      perform  compress-post.
-    324      if       a = 9
-    325           or  scycle <  period
-    326               go to  main-end.
-    328      divide   scycle by period giving a rounded.
-    329      multiply a  by  period  giving  y.
-    331      if       scycle not = y
-    332               go to  main-end.
-    334      add      1  to scycle.
-    336      display  "Phase - 5.  End of Period Processing" ...
-    337      perform  GL-Nominal-Open.
-
-`archiving` is the `88`-level over `Arch pic x` [copybooks/wssystem.cob:L164-
-L165], so archiving and deletion are mutually exclusive - one `perform` or the
-other, never both, and never neither.
-
-`gl080b` AND `gl080c` HAVE IDENTICAL DATABASE EFFECTS
-This is the key insight for reading a table dump of this program, and it is
-easy to miss because the two sections look nothing alike. Both walk the batch
-file filtered on the accounting cycle, delete EVERY posting belonging to the
-batch, then stamp and rewrite the batch header with the SAME three moves:
-
-    archiving  [general/gl080.cbl:L430-L433]    deletion  [general/gl080.cbl:L585-L589]
-      move 2        to cleared-status               move 2        to cleared-status
-      move run-date to stored                       move run-date to stored
-      move zero     to batch-start                  move zero     to batch-start
-      perform GL-Batch-Rewrite                      perform GL-Batch-Rewrite
-
-Byte for byte the same stamping, and both inner sections delete through
-`GL-Posting-Delete` - [general/gl080.cbl:L513] in `arc-process`,
-[general/gl080.cbl:L622] in `del-process`. The ONLY difference is that
-`arc-process` additionally writes three rows per posting to a FLAT ARCHIVE FILE
-[general/gl080.cbl:L481], [general/gl080.cbl:L495], [general/gl080.cbl:L508],
-and that file is not a schema table. IN AN ORDERING-NORMALIZED TABLE-STATE DIFF
-THE TWO PATHS ARE INDISTINGUISHABLE. A scenario that means to exercise the
-archiving path must therefore pin `Arch` explicitly and assert on something
-other than the tables, or it is silently testing the deletion path.
-
-Compare `gl072`'s parallel stamping [general/gl072.cbl:L375-L377]: same shape,
-but it moves 1 (`Processed`) not 2 (`Archived`), writes `posted` not `stored`,
-and does NOT zero `batch-start`. Three differences in three lines, all
-preserved.
-
-THE TABLE EFFECT IS NARROWER THAN THE PROGRAM IS LARGE
-Only three things in this whole program reach a table:
-
-    1. `GL-Posting-Delete`, once per posting, in BOTH the archive path
-       [general/gl080.cbl:L513] and the delete path [general/gl080.cbl:L622].
-       `gl080` is the ONLY in-scope program that performs this verb.
-    2. The batch stamping plus `GL-Batch-Rewrite`, once per batch in the cycle
-       [general/gl080.cbl:L430-L433], [general/gl080.cbl:L585-L589].
-    3. Phase 5's `GL-Nominal-Rewrite` [general/gl080.cbl:L348], performed for
-       EVERY nominal account the sequential walk reaches - a full-table update
-       of `GLLEDGER-REC`.
-
-`compress-post` reaches a table only in the Cobol-files configuration, and see
-below for why it never gets that far in the frozen source. Everything else -
-five sections' worth of screen handling, path building and diagnostics - has no
-database effect at all.
-
-Q-23  `compress-post` CANNOT REACH ITS OWN LOOPS IN THE FROZEN SOURCE
-Two independent gates stand in front of `loop1` [general/gl080.cbl:L654], and
-in the frozen source EVERY configuration is stopped by one of them.
-
-THE FIRST GATE, the configuration test [general/gl080.cbl:L633-L635]:
-
-    633      if       not FS-Cobol-Files-Used
-    634               go to main-exit
-    635      end-if.
-
-`88 FS-Cobol-Files-Used value zero.` [copybooks/wssystem.cob:L113] and
-`88 FS-RDBMS-Used value 1.` [copybooks/wssystem.cob:L116] are two condition
-names over one `pic 9`. Running against MySQL the flag is 1, so
-`not FS-Cobol-Files-Used` is TRUE and the section returns immediately. The body
-below it is unreachable in that configuration - and IT IS NOT DELETED, because
-the gate is a runtime test of a value that arrives in the system record, not a
-compile-time constant. Rule R-3 forbids removing it and rule R-4 forbids
-tidying it.
-
-THE SECOND GATE, the record-size test [general/gl080.cbl:L643-L649]:
-
-    643      if       function length (WS-Posting-Record) not =
-    644               function length (work-file-record)
-    645-647           display GL082 / GL083 / GL012
-    648               accept Keyed-Reply at 1227
-    649               stop run.
-
-MEASURED, and the two lengths ARE NOT EQUAL:
-
-    function length (WS-Posting-Record)  = 103   summed from the descriptors
-    function length (work-file-record)   = 101   `pic x(101)` [general/gl080.cbl:L172]
-
-`WS-Posting-Record` [copybooks/wspost.cob:L12-L28] sums to 103 bytes over its
-fifteen elementary items, every one of them DISPLAY: 5 + 5 + 5 + 2 + 8 + 6 + 2
-+ 6 + 2 + 10 + 32 + 6 + 2 + 2 + 10. Two independent parts of this package
-already record the derivation and its provenance - `acas_posting/cobol/usage.py`
-question Q-5.2 reports a compiled measurement under GnuCOBOL 3.2.0 establishing
-that a zoned DISPLAY item is `digits` bytes wide, that the "96 bytes"
-[copybooks/wspost.cob:L7] in that copybook's header is the maintainer's
-arithmetic slip, and that the record corrects to 98 bytes without `WS-Post-rrn`;
-and `acas_posting/records/gl_posting.py` records the three figures 96, 98 and
-103 side by side. Adding `WS-Post-rrn pic 9(5)` [copybooks/wspost.cob:L13]
-carries the layout to 103.
-
-The maintainer's own note on the work record [general/gl080.cbl:L172] reads
-"Was 96 added 5 for WS-Post-rrn (9(5)" - he took the slipped 96 from that
-header and added 5 to reach 101. The record is 103, so the work file is TWO
-BYTES SHORT and the test at L643 is TRUE.
-
-CONSEQUENCE: in the Cobol-files configuration `compress-post` executes
-`stop run` [general/gl080.cbl:L649] and terminates the run unit. In the RDBMS
-configuration it returns at L634. `loop1`, `loop1-end`, `loop2`, `file-error`
-and `loop2-end` are therefore unreachable in BOTH configurations of the frozen
-source. Every one of them is nonetheless reproduced in full below, and the two
-lengths are COMPUTED FROM THE DESCRIPTORS rather than written as literals, so
-that if the compiled oracle reports something else the code follows the
-dictionary and not this note. Logged as question Q-23.
-
-THE FALL-THROUGH IN `compress-post`, AND WHY IT MATTERS
-`file-error.` [general/gl080.cbl:L688] ends at [general/gl080.cbl:L697] with a
-`display` and NO transfer of control, so it FALLS STRAIGHT THROUGH into
-`loop2-end.` [general/gl080.cbl:L699]:
-
-    688  file-error.
-    691-695  display GL081 / fs-reply / perform evaluate-message / ... / GL012
-    696      accept   Keyed-Reply at 1627.
-    697      display  " " at 1601 with erase eol.
-                                                     <-- no GO TO here
-    699  loop2-end.
-    702      close    work-file.
-    703      perform  GL-Posting-Close.
-
-Four `go to file-error` sites reach it - [general/gl080.cbl:L661] and
-[general/gl080.cbl:L664] from `loop1`, [general/gl080.cbl:L681] and
-[general/gl080.cbl:L685] from `loop2`. So a write or read failure inside
-`loop1` prints, then closes through `loop2-end`, SKIPPING `loop1-end`'s own
-closes at [general/gl080.cbl:L670-L671] entirely - it never reopens the work
-file for input and never performs `GL-Posting-Open-Output`. The requirement
-that "`PERFORM THRU` and fall-through becom[e] explicit function composition
-that preserves execution order" makes each of the four sites an explicit
-two-call sequence, and each carries its own equivalence proof below.
-
-TWO INTERACTIVE PROMPTS GATE DATABASE WRITES
-Agent Action Plan section 0.3.4, verbatim: "Accept prompts that gate a database
-write become explicit CLI parameters with the COBOL default preserved." Two of
-this program's five `accept` statements do exactly that.
-
-    [general/gl080.cbl:L299-L302]  THE RUN CONFIRM.
-
-        299      accept   keyed-reply at 1065 with update auto.
-        300      if       cob-crt-status = cob-scr-esc
-        301          or   keyed-reply = "A" or "a"
-        302               goback.
-
-    Answering A, a, or Escape returns from the program BEFORE ANY WRITE OF ANY
-    KIND. Promoted to `run_confirmed`, defaulting to True - the COBOL's
-    proceed answer, which is any reply that is not one of those three.
-
-    [general/gl080.cbl:L545-L547]  THE `disk-change` OPTION.
-
-        545      accept   a at 1369.
-        546      if       a = 9
-        547               go to  main-exit.
-
-    This is the clearest database-gating prompt in the General Ledger folder.
-    Answering 9 leaves `a = 9`, which [general/gl080.cbl:L408-L409] then tests
-    to skip the whole of the archiving walk, AND which
-    [general/gl080.cbl:L324-L326] tests to skip the whole of phase 5. One
-    keystroke suppresses the batch stamping, every posting delete, the
-    ledger-quarter rollover and the cycle increment. Promoted to
-    `disk_change_option`, defaulting to 0 - the COBOL's proceed answer.
-
-    [general/gl080.cbl:L555]  THE ARCHIVE PATH EDIT.
-
-        555      accept   file-2  at 1501 with ... update.
-
-    Gates WHERE THE FLAT ARCHIVE FILE IS WRITTEN, not what any table holds.
-    Promoted to `archive_path_override`, defaulting to None, which keeps the
-    value `disk-change` itself computes. It has NO table effect.
-
-The other two - [general/gl080.cbl:L311-L312] and [general/gl080.cbl:L648] and
-[general/gl080.cbl:L696] - are acknowledgement pauses whose only effect is to
-block a terminal. They are DROPPED, and the control transfers around them are
-PRESERVED: `go to main-end` [general/gl080.cbl:L313], `stop run`
-[general/gl080.cbl:L649], and the fall-through at [general/gl080.cbl:L697].
-
-ONE VARIABLE, THREE UNRELATED PURPOSES
-`77 a pic 99 value zero.` [general/gl080.cbl:L183] is used for three things
-that have nothing to do with each other, and the sharing is OBSERVABLE:
-
-    1. THE BATCH-CHECK DETECTOR. Zeroed [general/gl080.cbl:L290], set to 1 by
-       `gl080a` [general/gl080.cbl:L386], tested [general/gl080.cbl:L308].
-    2. THE `disk-change` ABORT CODE. Accepted [general/gl080.cbl:L545], tested
-       [general/gl080.cbl:L408] and again [general/gl080.cbl:L324].
-    3. THE QUARTER SUBSCRIPT. Computed [general/gl080.cbl:L328], used as a
-       table subscript [general/gl080.cbl:L345].
-
-`divide scycle by period giving a rounded` [general/gl080.cbl:L328] OVERWRITES
-whatever `a` held, including the 9 that [general/gl080.cbl:L324] has just
-tested. Trace both values through: a `disk-change` abort of 9 reaches L324,
-satisfies it and returns before L328 can clobber it; a detector value of 1
-reaches L324, fails both of its conditions, and IS clobbered at L328. So the
-sharing changes nothing in the first case and everything in the second, and it
-is therefore modelled as ONE field rather than split into three well-named
-locals. Splitting it would be a behaviour change disguised as a readability
-improvement.
-
-`77 y pic 99 value zero.` [general/gl080.cbl:L182] is the round-trip product,
-used only at [general/gl080.cbl:L329] and [general/gl080.cbl:L331].
-
-THE DETECTOR IS NOT `gl070`'S
-    `gl070`  [general/gl070.cbl:L314-L315]   if status-open
-                                                move 1 to a.
-    `gl080a` [general/gl080.cbl:L384-L386]   if not status-closed
-                                              and not processed
-                                                move 1 to a.
-
-Different predicate over different fields - `Batch-Status`
-[copybooks/wsbatch.cob:L25-L27] versus `Cleared-Status`
-[copybooks/wsbatch.cob:L29-L32] - and NOT interchangeable. `not status-closed`
-is true for any `Batch-Status` other than 1, which includes but is not limited
-to `status-open`; `not processed` is true for any `Cleared-Status` other than 1,
-which includes `waiting` and `archived` alike. And unlike `gl070`, which raises
-`move 5 to ws-term-code` [general/gl070.cbl:L289] so the menu skips the rest of
-the cycle, `gl080` sets NO term code at all - it simply displays and returns
-[general/gl080.cbl:L313], [general/gl080.cbl:L366].
-
-THE ABORT CHAIN DOES NOT REACH THIS PROGRAM
-The menu dispatches `gl080` from `load09.` [general/general.cbl:L817-L820],
-which moves the program name and then `go to load00.` - a transfer, not a
-`perform`. `load00.` [general/general.cbl:L711-L722] zeroes `ws-term-code`
-before the `CALL` [general/general.cbl:L714], issues the four-parameter call
-[general/general.cbl:L715-L718], and tests `if ws-term-code > 7` afterwards
-[general/general.cbl:L720-L721]. What `load08.` adds and `load09.` lacks is the
-`gl070`-specific `if ws-term-code = 5` test [general/general.cbl:L810-L811],
-and it is absent here because `gl080` never sets a term code. This program's
-own aborts are all local: `goback` [general/gl080.cbl:L302], three `go to
-main-end` transfers [general/gl080.cbl:L313], [general/gl080.cbl:L326],
-[general/gl080.cbl:L332], and one `stop run` [general/gl080.cbl:L649].
-
-TWO FLAT FILES THAT ARE NOT SCHEMA TABLES AND NOT THE CYCLE'S WORK FILES
-    138  select  archive    assign  file-2   access sequential  status fs-reply
-                            organization line sequential.
-    143  select  work-file  assign  file-21  access sequential
-                            organization sequential  status fs-reply.
-
-Neither reaches the database, so neither appears in a table dump. See
-STRUCTURAL NOTES in the traceability footer for why both are declared
-module-privately here rather than added to the package's work-file layer, and
-for the three facts that decision rests on: `arc-trans-record` is a TEN-field
-78-byte layout whose field order differs from the cycle's work records,
-`work-file-record` is one unstructured `pic x(101)`, and the package's
-sequential work-file type cannot express `open extend`
-[general/gl080.cbl:L411].
-
-`work-file` is assigned `file-21`, which is `work.tmp` [copybooks/file21.cob:L1]
-- THE SAME FILE NAME `gl071` ASSIGNS TO ITS SORT WORK FILE
-[general/gl071.cbl:L102]. A genuine collision between two programs' scratch
-files. It is harmless because the two never run at the same time, and rule R-3
-forbids concurrency in any case, but it is exactly the kind of fact
-traceability exists to surface.
-
-BOTH FLAT FILES DECLARE `fs-reply` AS THEIR FILE STATUS, and `fs-reply` is
-`Fs-Reply pic 99` [copybooks/wsfnctn.cob:L25] - the very field the facade and
-its handlers write. So a flat-file open, read or write and a facade verb SHARE
-ONE STATUS FIELD, and each overwrites the other's reply. `open extend archive`
-[general/gl080.cbl:L411] sets it and `perform GL-Batch-Open`
-[general/gl080.cbl:L415] immediately overwrites it; `write work-file-record`
-[general/gl080.cbl:L662] sets it and [general/gl080.cbl:L663] tests it. The
-sequences below therefore store their status INTO the shared `File-Access`
-record, which is what a FILE STATUS clause does.
-
-RULES THIS MODULE IS HELD TO
-There is NO user rules document for this project - `review_rules` reports "No
-user rules provided", verified this session. The six binding rules live in the
-Agent Action Plan section 0.7.2 and are answered here one by one; where the
-plan is silent, enterprise-standard best practice applies and no rule has been
-invented to fill a gap.
-
-R-1, NO COBOL AT RUNTIME. Nothing here starts a process, loads a foreign
-library, or reaches the compiled-oracle tree. There is NO
-`call "SYSTEM" using Print-Report` anywhere in `general/gl080.cbl` - checked,
-the string `SYSTEM` appears only as `system-record` and `Op-System` - and no
-print file, so unlike `gl072` there is no report spool-out path to omit. The
-`STRING` statement in `disk-change` [general/gl080.cbl:L531-L536] builds a FILE
-PATH STRING and nothing else; it is not turned into a command line.
-
-R-2, ZERO BINARY FLOATING POINT. Every value is `decimal.Decimal` or `int`,
-carried under the field descriptor of the item that receives it. And per Agent
-Action Plan section 0.3.1 - "`cobol/` contains no business logic and
-`programs/` contains no numeric primitives" - there is no hand-written scale
-alignment, truncation, packed or zoned encoding, picture parse, `MOVE`
-truncation, `88`-level test, `STRING` implementation, reference-modification
-implementation or comparator anywhere below. Every one of those delegates.
-
-    `gl080` OWNS EXACTLY ONE OF THE FIVE `ROUNDED` SITES IN THE WHOLE
-    MIGRATION - [general/gl080.cbl:L328] - and its un-`ROUNDED` companion sits
-    on the very next line. The complete arithmetic census for this program:
-
-        L328  divide   scycle by period giving a rounded    <-- THE ONLY ONE
-        L329  multiply a by period giving y                     truncates
-        L334  add      1 to scycle                              truncates
-        L355  add      1 to current-quarter                     truncates
-        L477  add      post-amount vat-amount giving arc-amount truncates
-        L489  add      post-amount vat-amount giving arc-amount truncates
-        L493  multiply arc-amount by -1 giving arc-amount        truncates
-        L506  multiply arc-amount by -1 giving arc-amount        truncates
-        L643  function length (...) twice, an integer count, no store
-
-    Every store other than L328 TRUNCATES TOWARD ZERO, which is the COBOL
-    default when `ROUNDED` is not written. Getting that backwards would
-    corrupt essentially every posted figure. There is no `ON SIZE ERROR` and
-    no `REMAINDER` phrase anywhere in this program.
-
-R-3, NOTHING ADDED. No conditional statement below tests anything the frozen
-source does not test. In particular: NO bounds check on the quarter subscript,
-which IS anomaly A-2; NO guard on `GL-Posting-Open-Output`; NO check of the
-archive write beyond the one test [general/gl080.cbl:L412] the source has; NO
-check that `period` is non-zero before the L328 divide. No transaction
-wrapper and no undo or partial-undo marker around the delete-then-stamp pairs -
-the COBOL commits per statement, and adding atomicity would change what a
-mid-run failure leaves behind. No DDL, no ORM entity layer, no migration tool.
-No threads, no event loop, no process pool, no connection pool: execution is
-strictly sequential, and Agent Action Plan section 0.8.4 puts performance work
-"out of scope by construction, not merely unrequested". `compress-post` in
-particular looks like a hand-rolled table rebuild begging to be replaced by one
-SQL statement. It is not replaced.
-
-R-4, ANOMALIES REPRODUCED. Five reproduction sites, each annotated inline with
-its locator: A-2 the unbounded quarter subscript, A-3 the two disagreeing
-notions of "current quarter", A-21 three qualified references, and the two
-archive sign flips at [general/gl080.cbl:L493] and [general/gl080.cbl:L506].
-The full treatment is at each site and in the footer.
-
-R-5, FULL TRACEABILITY. A named function for every one of the 38 labels, a
-`GO TO class` annotation at every one of the 36 transfer sites, per-site
-equivalence proofs for the five class-4 sites, and a footer mapping every
-construct and every deliberate omission to its frozen locator.
-
-R-6, COMPILED BEHAVIOUR IS THE TIE-BREAKER. No clock is read. `general/gl080.cbl`
-contains ZERO clock reads; the date arrives as the `to-day` linkage parameter
-and as `Run-Date binary-long` [copybooks/wssystem.cob:L67] inside the system
-record. `move run-date to stored` [general/gl080.cbl:L431] and
-[general/gl080.cbl:L586] write that controlled-clock observable straight into
-`GLBATCH-REC`, which is a value the migration's byte-identical-reruns test
-depends on being pinned, so both read it from the system record and nothing
-below reaches for an ambient time source. Six questions are logged for
-arbitration against the compiled program; see AMBIGUITIES.
-
-WHAT THIS MODULE MAY IMPORT
-`gl080` carries TWELVE `COPY` statements. Their translation, in file order:
-
-    envdiv.cob                 L131   omitted, representation only
-    wsledger.cob               L188   records/gl_ledger
-    wsbatch.cob                L189   records/gl_batch
-    wspost.cob                 L190   records/gl_posting   <-- `gl072` does NOT
-                                      copy this one; `gl080` does
-    Test-Data-Flags.cob        L216   records/test_data_flags
-    screenio.cpy               L219   omitted, presentation only
-    wsfnctn.cob                L258   records/file_access AND dal/status
-    wscall.cob                 L263   records/calling_data
-    wssystem.cob               L264   records/system_record
-    wsnames.cob                L265   records/file_defs
-    FileStat-Msgs.cpy          L713   a message table, see `_evaluate_message`
-    Proc-ACAS-FH-Calls.cob     L749   dal/facade
-
-BECAUSE THE FILE COPIES `Proc-ACAS-FH-Calls.cob` AND NOT
-`Proc-ZZ100-ACAS-IRS-Calls.cob`, THIS PROGRAM USES THE ENTITY-NAMED FACADE
-VOCABULARY AND TESTS THE REPLY INLINE. That copybook has no error-check
-paragraph of any kind, so every `fs-reply` test below is the caller's own, and
-none of the handler-named aliases is called. Sixteen distinct verbs are
-performed, the largest set of the twelve programs.
-
-MUST NOT be imported, and none is: the CLI layer, any handler module directly,
-the connection module, the cursor-state module, the controlled-clock module
-`acas_posting/clock.py`, the dictionary generator, the compiled-oracle tree, or
-any sibling program module. `acas_posting/workfiles.py` is NOT imported either -
-`gl080` shares no work file with `gl070`, `gl071` or `gl072`, and its two flat
-files cannot be expressed by that layer; see STRUCTURAL NOTES.
-
-`gl080` has NO `zz050-Validate-Date` section, NO `zz060-Convert-Date` section
-and NO wrapper section around the shared binary date program. Its only date
-section is `zz070-Convert-Date` [general/gl080.cbl:L719]. Anomaly A-22 - a
-wrapper section named after the interface copybook whose exit label is named
-after the called program - therefore DOES NOT OCCUR in this module, and no date
-validation or binary conversion is called from here.
-
-AMBIGUITIES, FOR ARBITRATION AGAINST COMPILED BEHAVIOUR  (rule R-6)
-Six questions cannot be settled by reading the source. Each is annotated
-`AMBIGUITY Q-nn` at the site that raises it, and each takes the next free
-number in the migration's shared register, which stood at Q-17.
-
-    Q-18  WHETHER `move 1 to File-Key-No` [general/gl080.cbl:L288] HAS ANY
-          OBSERVABLE EFFECT. The facade's own dispatch paragraphs move 1 into
-          `File-Key-No` before every call - [copybooks/Proc-ACAS-FH-Calls.cob]
-          `acas005.`, `acas006.` and `acas007.` each do so, and the Python
-          facade pins the same value - so the program's own move is either
-          redundant or it matters to a verb that does not re-pin it. Reproduced
-          regardless.
-    Q-19  WHAT THE COMPILED PROGRAM WRITES WHEN THE QUARTER SUBSCRIPT RUNS PAST
-          THE RECORD - ANSWERED ON THE ORACLE (rule R-6). See anomaly A-2 at
-          `_gl080_main_loop`. The subscript is EMULATED by byte offset rather than
-          validated, so `a = 1..4` reach the two `Quarters` views, `a = 5..12`
-          reach the trailing `filler pic x(50)` [copybooks/wsledger.cob:L37] which
-          carries no column, and `a = 0`/`-1` reach the two packed items declared
-          before `Quarters`. For `a >= 13` the store runs beyond the 126th byte,
-          and GnuCOBOL 3.2.0 was driven with the record transcribed and a sentinel
-          item declared immediately after it: `move 999.99 to ledger-q (13)` put
-          the six packed bytes at offsets 125 through 130 - two in the filler, four
-          in the sentinel - left every quarter field and `Ledger-Last` UNCHANGED,
-          printed no diagnostic and exited 0. An overrunning run therefore moves
-          NONE of the 22 compared tables, so storing the in-record part and logging
-          the remainder is the whole behaviour. No guard is added and nothing is
-          clamped.
-    Q-20  WHETHER `GL-Posting-Open-Output` [general/gl080.cbl:L673] TRUNCATES
-          `GLPOSTING-REC`. `Open-Output` on the transfer-file handler means
-          "delete every row" [common/acas008.cbl:L313-L319], and if `acas006`
-          shares that reading then this statement empties the posting table
-          before `loop2` rewrites it from the work file. Q-23 says the
-          statement is unreachable in the frozen source; that does not settle
-          what it would do. No guard is added.
-    Q-21  WHETHER THIS PROGRAM'S FIVE SYSTEM-RECORD MUTATIONS ARE PERSISTED.
-          `add 1 to scycle` [general/gl080.cbl:L334], `add 1 to
-          current-quarter` [general/gl080.cbl:L355], `move 1 to current-quarter`
-          [general/gl080.cbl:L357] and the two cycle wraps
-          [general/gl080.cbl:L360], [general/gl080.cbl:L363] - plus `move 1 to
-          Date-Form` [general/gl080.cbl:L730] - all write into the system
-          record. `gl080` PERFORMS NO `System-*` FACADE VERB AT ALL, so whether
-          any of them reaches `SYSTEM-REC` depends entirely on what the caller
-          does with the by-reference linkage parameter afterwards. All six are
-          reproduced in memory; none is written to a table from here.
-    Q-22  WHAT PATH THE `disk-change` `STRING` ACTUALLY BUILDS. The maintainer
-          flagged it himself, inline: `*> this lot looks wrong !!!!!`
-          [general/gl080.cbl:L530]. Measured against the package's own record
-          defaults the result is "archives archive.dat" - a SPACE where a
-          directory separator belongs, because `file-24` defaults to 532 spaces
-          so `DELIMITED BY SPACE` contributes nothing from it, and
-          `File-Defs-os-Delimiter` defaults to a space. Reproduced exactly as
-          written; see `_disk_change` for the measured widths, which also
-          correct a claim that the following `MOVE` truncates.
-    Q-23  WHETHER `compress-post` ABORTS THE RUN IN THE COBOL-FILES
-          CONFIGURATION. See the section of that name above: the two record
-          lengths measure 103 and 101, so `stop run` [general/gl080.cbl:L649]
-          fires. The comparison is computed from the descriptors, never from a
-          literal, so the code follows the dictionary.
-===========================================================
-`gl080` displays five phase labels of its own, MEASURED at these lines:
-
-    L306   "Phase - 1.  Batch Check"
-    L316   "Phase - 2.  Transaction Archiving"
-    L319   "Phase - 3.  Transaction Deletion"
-    L637   "Phase - 4.  Posting Contraction "
-    L336   "Phase - 5.  End of Period Processing"
-
-Two of them collide with a DIFFERENT program's phase of the same number:
-
-    Phase 1  is "Batch Check" here [general/gl080.cbl:L306] AND "Batch Check"
-             in `gl070` [general/gl070.cbl:L284] - same number, same name, two
-             different programs and two different detector predicates. See
-             THE DETECTOR IS NOT `gl070`'S below.
-    Phase 2  is "Transaction Archiving" here [general/gl080.cbl:L316] but
-             "Transaction Pre-process" in `gl070` [general/gl070.cbl:L292].
-    Phase 4  is "Posting Contraction " here [general/gl080.cbl:L637] - note the
-             literal's trailing space - but "Transaction Update" in `gl072`
-             [general/gl072.cbl:L274].
-
-AND THE NUMBERING IS NOT THE EXECUTION ORDER. Across the General Ledger family
-the order in which the labelled phases actually run is:
-
-    `gl070`  phase 1  batch check                 [general/gl070.cbl:L284]
-    `gl070`  phase 2  transaction pre-process     [general/gl070.cbl:L292]
-    `gl071`  unlabelled sort                      [general/gl071.cbl:L172-L178]
-    `gl072`  phase 4  transaction update          [general/gl072.cbl:L274]
-    `gl080`  phase 1  batch check       AGAIN     [general/gl080.cbl:L306]
-    `gl080`  phase 2  archiving   OR   phase 3 deletion - never both
-                                                  [general/gl080.cbl:L315-L320]
-    `gl080`  phase 4  posting contraction AGAIN   [general/gl080.cbl:L637]
-    `gl080`  phase 5  end of period               [general/gl080.cbl:L336]
-
-So phase 3 is labelled before phase 4 and runs before it; phase 4 runs twice
-across the family under two different names; phase 1 runs twice under the same
-name. Agent Action Plan section 0.6.4 asks for the labels to be preserved
-"so a maintainer is not misled", and this block is that preservation. Nothing
-below infers an ordering from a phase number.
-
-THE PHASE DRIVER, VERBATIM  [general/gl080.cbl:L306-L337]
-=========================================================
-    306      display  "Phase - 1.  Batch Check" ...
-    307      perform  gl080a.
-    308      if       a = 1
-    313               go to  main-end.
-    315      if       archiving
-    316               display "Phase - 2.  Transaction Archiving" ...
-    317               perform gl080b
-    318      else
-    319               display "Phase - 3.  Transaction Deletion" ...
-    320               perform gl080c.
-    322      perform  compress-post.
-    324      if       a = 9
-    325           or  scycle <  period
-    326               go to  main-end.
-    328      divide   scycle by period giving a rounded.
-    329      multiply a  by  period  giving  y.
-    331      if       scycle not = y
-    332               go to  main-end.
-    334      add      1  to scycle.
-    336      display  "Phase - 5.  End of Period Processing" ...
-    337      perform  GL-Nominal-Open.
-
-`archiving` is the `88`-level over `Arch pic x` [copybooks/wssystem.cob:L164-
-L165], so archiving and deletion are mutually exclusive - one `perform` or the
-other, never both, and never neither.
+The whole program, per Agent Action Plan section 0.2.1.1 - only `gl051` and
+`irs030` are partial. So the archiving path `gl080b`/`arc-process`, the
+interactive `disk-change` and `compress-post` are all migrated. Eight sections,
+38 labels and 36 `GO TO` sites, six paragraphs named `loop.`, seven named
+`main-exit.` and three named `end-run.`, which is why every function below is
+section-qualified.
+
+Entry point: `run(ws_calling_data, system_record, to_day, file_defs, ...)`, the
+four-parameter General Ledger linkage shape.
+
+PHASE LABELS, AND WHY THEY MISLEAD
+==================================
+    L306  "Phase - 1.  Batch Check"            L319  "Phase - 3.  Transaction Deletion"
+    L316  "Phase - 2.  Transaction Archiving"  L637  "Phase - 4.  Posting Contraction "
+    L336  "Phase - 5.  End of Period Processing"
+
+Phase 1 and phase 4 each occur in a second program under the same number -
+"Batch Check" in `gl070` [general/gl070.cbl:L284] over a DIFFERENT predicate,
+and "Transaction Update" in `gl072` [general/gl072.cbl:L274]. Phase 3 is
+labelled before phase 4 and runs before it. The labels are preserved because
+Agent Action Plan section 0.6.4 asks for them "so a maintainer is not misled";
+NOTHING below infers an ordering from a phase number. `archiving` is the
+`88`-level over `Arch pic x` [copybooks/wssystem.cob:L164-L165], so archiving
+and deletion are mutually exclusive - one `perform` or the other, never both.
 
 `gl080b` AND `gl080c` HAVE IDENTICAL DATABASE EFFECTS
 =====================================================
-This is the key insight for reading a table dump of this program, and it is
-easy to miss because the two sections look nothing alike. Both walk the batch
-file filtered on the accounting cycle, delete EVERY posting belonging to the
-batch, then stamp and rewrite the batch header with the SAME three moves:
+The key fact for reading a table dump of this program. Both walk the batch file
+filtered on the cycle, delete every posting of the batch through
+`GL-Posting-Delete` - [general/gl080.cbl:L513] archiving,
+[general/gl080.cbl:L622] deletion - then stamp the header with the same three
+moves, `move 2 to cleared-status` / `move run-date to stored` /
+`move zero to batch-start`, and rewrite it [general/gl080.cbl:L430-L433],
+[general/gl080.cbl:L585-L589]. The only difference is three rows per posting
+written to a FLAT ARCHIVE FILE [general/gl080.cbl:L481], [general/gl080.cbl:L495],
+[general/gl080.cbl:L508], which is not a schema table. IN AN
+ORDERING-NORMALIZED TABLE-STATE DIFF THE TWO PATHS ARE INDISTINGUISHABLE, so a
+scenario meaning to exercise archiving must pin `Arch` and assert on something
+other than the tables. `gl072`'s parallel stamping [general/gl072.cbl:L375-L377]
+differs in all three moves - 1 not 2, `posted` not `stored`, and `batch-start`
+left alone - and that difference is preserved.
 
-    archiving  [general/gl080.cbl:L430-L433]    deletion  [general/gl080.cbl:L585-L589]
-      move 2        to cleared-status               move 2        to cleared-status
-      move run-date to stored                       move run-date to stored
-      move zero     to batch-start                  move zero     to batch-start
-      perform GL-Batch-Rewrite                      perform GL-Batch-Rewrite
+ONLY THREE THINGS REACH A TABLE
+===============================
+    1. `GL-Posting-Delete`, once per posting, on both paths. `gl080` is the only
+       in-scope program that performs this verb.
+    2. The batch stamping plus `GL-Batch-Rewrite`, once per batch in the cycle.
+    3. Phase 5's `GL-Nominal-Rewrite` [general/gl080.cbl:L348], for EVERY
+       nominal account the sequential walk reaches - a full-table update of
+       `GLLEDGER-REC`.
 
-Byte for byte the same stamping, and both inner sections delete through
-`GL-Posting-Delete` - [general/gl080.cbl:L513] in `arc-process`,
-[general/gl080.cbl:L622] in `del-process`. The ONLY difference is that
-`arc-process` additionally writes three rows per posting to a FLAT ARCHIVE FILE
-[general/gl080.cbl:L481], [general/gl080.cbl:L495], [general/gl080.cbl:L508],
-and that file is not a schema table. IN AN ORDERING-NORMALIZED TABLE-STATE DIFF
-THE TWO PATHS ARE INDISTINGUISHABLE. A scenario that means to exercise the
-archiving path must therefore pin `Arch` explicitly and assert on something
-other than the tables, or it is silently testing the deletion path.
+Everything else - five sections of screen handling, path building and
+diagnostics - has no database effect.
 
-Compare `gl072`'s parallel stamping [general/gl072.cbl:L375-L377]: same shape,
-but it moves 1 (`Processed`) not 2 (`Archived`), writes `posted` not `stored`,
-and does NOT zero `batch-start`. Three differences in three lines, all
-preserved.
+`compress-post` IS UNREACHABLE IN BOTH CONFIGURATIONS  (question Q-23)
+======================================================================
+Two gates stand in front of `loop1` [general/gl080.cbl:L654]. Against MySQL,
+`not FS-Cobol-Files-Used` [general/gl080.cbl:L633-L635] is true - two `88`s over
+one `pic 9` [copybooks/wssystem.cob:L113], [copybooks/wssystem.cob:L116] - so
+the section returns at L634. In the Cobol-files configuration the record-size
+test [general/gl080.cbl:L643-L649] is TRUE and `stop run` fires, because the two
+lengths MEASURE 103 and 101: `WS-Posting-Record` [copybooks/wspost.cob:L12-L28]
+sums to 103 over fifteen DISPLAY items, while `work-file-record` is
+`pic x(101)` [general/gl080.cbl:L172] - the maintainer took the slipped "96
+bytes" [copybooks/wspost.cob:L7] and added 5 for `WS-Post-rrn`, leaving the work
+file two bytes short. `loop1`, `loop1-end`, `loop2`, `file-error` and `loop2-end`
+are therefore unreachable either way. All are reproduced in full, and the two
+lengths are COMPUTED FROM THE DESCRIPTORS rather than written as literals, so if
+the oracle reports otherwise the code follows the dictionary. R-3 forbids
+removing the gate and R-4 forbids tidying it.
 
-THE TABLE EFFECT IS NARROWER THAN THE PROGRAM IS LARGE
-======================================================
-Only three things in this whole program reach a table:
+`file-error.` [general/gl080.cbl:L688-L697] ends with a `display` and NO
+transfer, so it FALLS THROUGH into `loop2-end.` [general/gl080.cbl:L699],
+skipping `loop1-end`'s own closes [general/gl080.cbl:L670-L671] - it never
+reopens the work file for input and never performs `GL-Posting-Open-Output`.
+Each of the four `go to file-error` sites [general/gl080.cbl:L661],
+[general/gl080.cbl:L664], [general/gl080.cbl:L681], [general/gl080.cbl:L685]
+becomes an explicit two-call sequence carrying its own equivalence proof.
 
-    1. `GL-Posting-Delete`, once per posting, in BOTH the archive path
-       [general/gl080.cbl:L513] and the delete path [general/gl080.cbl:L622].
-       `gl080` is the ONLY in-scope program that performs this verb.
-    2. The batch stamping plus `GL-Batch-Rewrite`, once per batch in the cycle
-       [general/gl080.cbl:L430-L433], [general/gl080.cbl:L585-L589].
-    3. Phase 5's `GL-Nominal-Rewrite` [general/gl080.cbl:L348], performed for
-       EVERY nominal account the sequential walk reaches - a full-table update
-       of `GLLEDGER-REC`.
+THREE PROMPTS PROMOTED TO CLI PARAMETERS  (Agent Action Plan section 0.3.4)
+==========================================================================
+    `run_confirmed`, default True - the run confirm [general/gl080.cbl:L299-L302].
+        A, a or Escape returns BEFORE ANY WRITE OF ANY KIND.
+    `disk_change_option`, default 0 - the `disk-change` option
+        [general/gl080.cbl:L545-L547]. The clearest database-gating prompt in the
+        folder: answering 9 leaves `a = 9`, which [general/gl080.cbl:L408-L409]
+        tests to skip the whole archiving walk and [general/gl080.cbl:L324-L326]
+        tests to skip the whole of phase 5. One keystroke suppresses the batch
+        stamping, every posting delete, the quarter rollover and the cycle
+        increment.
+    `archive_path_override`, default None - the archive path edit
+        [general/gl080.cbl:L555]. Gates WHERE the flat archive file is written,
+        so it has no table effect.
 
-`compress-post` reaches a table only in the Cobol-files configuration, and see
-below for why it never gets that far in the frozen source. Everything else -
-five sections' worth of screen handling, path building and diagnostics - has no
-database effect at all.
-
-Q-23  `compress-post` CANNOT REACH ITS OWN LOOPS IN THE FROZEN SOURCE
-=====================================================================
-Two independent gates stand in front of `loop1` [general/gl080.cbl:L654], and
-in the frozen source EVERY configuration is stopped by one of them.
-
-THE FIRST GATE, the configuration test [general/gl080.cbl:L633-L635]:
-
-    633      if       not FS-Cobol-Files-Used
-    634               go to main-exit
-    635      end-if.
-
-`88 FS-Cobol-Files-Used value zero.` [copybooks/wssystem.cob:L113] and
-`88 FS-RDBMS-Used value 1.` [copybooks/wssystem.cob:L116] are two condition
-names over one `pic 9`. Running against MySQL the flag is 1, so
-`not FS-Cobol-Files-Used` is TRUE and the section returns immediately. The body
-below it is unreachable in that configuration - and IT IS NOT DELETED, because
-the gate is a runtime test of a value that arrives in the system record, not a
-compile-time constant. Rule R-3 forbids removing it and rule R-4 forbids
-tidying it.
-
-THE SECOND GATE, the record-size test [general/gl080.cbl:L643-L649]:
-
-    643      if       function length (WS-Posting-Record) not =
-    644               function length (work-file-record)
-    645-647           display GL082 / GL083 / GL012
-    648               accept Keyed-Reply at 1227
-    649               stop run.
-
-MEASURED, and the two lengths ARE NOT EQUAL:
-
-    function length (WS-Posting-Record)  = 103   summed from the descriptors
-    function length (work-file-record)   = 101   `pic x(101)` [general/gl080.cbl:L172]
-
-`WS-Posting-Record` [copybooks/wspost.cob:L12-L28] sums to 103 bytes over its
-fifteen elementary items, every one of them DISPLAY: 5 + 5 + 5 + 2 + 8 + 6 + 2
-+ 6 + 2 + 10 + 32 + 6 + 2 + 2 + 10. Two independent parts of this package
-already record the derivation and its provenance - `acas_posting/cobol/usage.py`
-question Q-5.2 reports a compiled measurement under GnuCOBOL 3.2.0 establishing
-that a zoned DISPLAY item is `digits` bytes wide, that the "96 bytes"
-[copybooks/wspost.cob:L7] in that copybook's header is the maintainer's
-arithmetic slip, and that the record corrects to 98 bytes without `WS-Post-rrn`;
-and `acas_posting/records/gl_posting.py` records the three figures 96, 98 and
-103 side by side. Adding `WS-Post-rrn pic 9(5)` [copybooks/wspost.cob:L13]
-carries the layout to 103.
-
-The maintainer's own note on the work record [general/gl080.cbl:L172] reads
-"Was 96 added 5 for WS-Post-rrn (9(5)" - he took the slipped 96 from that
-header and added 5 to reach 101. The record is 103, so the work file is TWO
-BYTES SHORT and the test at L643 is TRUE.
-
-CONSEQUENCE: in the Cobol-files configuration `compress-post` executes
-`stop run` [general/gl080.cbl:L649] and terminates the run unit. In the RDBMS
-configuration it returns at L634. `loop1`, `loop1-end`, `loop2`, `file-error`
-and `loop2-end` are therefore unreachable in BOTH configurations of the frozen
-source. Every one of them is nonetheless reproduced in full below, and the two
-lengths are COMPUTED FROM THE DESCRIPTORS rather than written as literals, so
-that if the compiled oracle reports something else the code follows the
-dictionary and not this note. Logged as question Q-23.
-
-THE FALL-THROUGH IN `compress-post`, AND WHY IT MATTERS
-=======================================================
-`file-error.` [general/gl080.cbl:L688] ends at [general/gl080.cbl:L697] with a
-`display` and NO transfer of control, so it FALLS STRAIGHT THROUGH into
-`loop2-end.` [general/gl080.cbl:L699]:
-
-    688  file-error.
-    691-695  display GL081 / fs-reply / perform evaluate-message / ... / GL012
-    696      accept   Keyed-Reply at 1627.
-    697      display  " " at 1601 with erase eol.
-                                                     <-- no GO TO here
-    699  loop2-end.
-    702      close    work-file.
-    703      perform  GL-Posting-Close.
-
-Four `go to file-error` sites reach it - [general/gl080.cbl:L661] and
-[general/gl080.cbl:L664] from `loop1`, [general/gl080.cbl:L681] and
-[general/gl080.cbl:L685] from `loop2`. So a write or read failure inside
-`loop1` prints, then closes through `loop2-end`, SKIPPING `loop1-end`'s own
-closes at [general/gl080.cbl:L670-L671] entirely - it never reopens the work
-file for input and never performs `GL-Posting-Open-Output`. The requirement
-that "`PERFORM THRU` and fall-through becom[e] explicit function composition
-that preserves execution order" makes each of the four sites an explicit
-two-call sequence, and each carries its own equivalence proof below.
-
-TWO INTERACTIVE PROMPTS GATE DATABASE WRITES
-============================================
-Agent Action Plan section 0.3.4, verbatim: "Accept prompts that gate a database
-write become explicit CLI parameters with the COBOL default preserved." Two of
-this program's five `accept` statements do exactly that.
-
-    [general/gl080.cbl:L299-L302]  THE RUN CONFIRM.
-
-        299      accept   keyed-reply at 1065 with update auto.
-        300      if       cob-crt-status = cob-scr-esc
-        301          or   keyed-reply = "A" or "a"
-        302               goback.
-
-    Answering A, a, or Escape returns from the program BEFORE ANY WRITE OF ANY
-    KIND. Promoted to `run_confirmed`, defaulting to True - the COBOL's
-    proceed answer, which is any reply that is not one of those three.
-
-    [general/gl080.cbl:L545-L547]  THE `disk-change` OPTION.
-
-        545      accept   a at 1369.
-        546      if       a = 9
-        547               go to  main-exit.
-
-    This is the clearest database-gating prompt in the General Ledger folder.
-    Answering 9 leaves `a = 9`, which [general/gl080.cbl:L408-L409] then tests
-    to skip the whole of the archiving walk, AND which
-    [general/gl080.cbl:L324-L326] tests to skip the whole of phase 5. One
-    keystroke suppresses the batch stamping, every posting delete, the
-    ledger-quarter rollover and the cycle increment. Promoted to
-    `disk_change_option`, defaulting to 0 - the COBOL's proceed answer.
-
-    [general/gl080.cbl:L555]  THE ARCHIVE PATH EDIT.
-
-        555      accept   file-2  at 1501 with ... update.
-
-    Gates WHERE THE FLAT ARCHIVE FILE IS WRITTEN, not what any table holds.
-    Promoted to `archive_path_override`, defaulting to None, which keeps the
-    value `disk-change` itself computes. It has NO table effect.
-
-The other two - [general/gl080.cbl:L311-L312] and [general/gl080.cbl:L648] and
-[general/gl080.cbl:L696] - are acknowledgement pauses whose only effect is to
-block a terminal. They are DROPPED, and the control transfers around them are
-PRESERVED: `go to main-end` [general/gl080.cbl:L313], `stop run`
-[general/gl080.cbl:L649], and the fall-through at [general/gl080.cbl:L697].
+The other two `accept`s [general/gl080.cbl:L311-L312], [general/gl080.cbl:L648],
+[general/gl080.cbl:L696] only block a terminal and are DROPPED; the control
+transfers around them are PRESERVED.
 
 ONE VARIABLE, THREE UNRELATED PURPOSES
 ======================================
-`77 a pic 99 value zero.` [general/gl080.cbl:L183] is used for three things
-that have nothing to do with each other, and the sharing is OBSERVABLE:
+`77 a pic 99` [general/gl080.cbl:L183] is the batch-check detector (zeroed L290,
+set L386, tested L308), the `disk-change` abort code (accepted L545, tested L408
+and L324) and the quarter subscript (computed L328, subscripted L345). `divide
+scycle by period giving a rounded` [general/gl080.cbl:L328] OVERWRITES whatever
+`a` held, including the 9 L324 has just tested. An abort of 9 returns at L324
+before the clobber; a detector value of 1 fails L324 and IS clobbered. So it is
+modelled as ONE field - splitting it into three well-named locals would be a
+behaviour change disguised as a readability improvement. `77 y`
+[general/gl080.cbl:L182] is the round-trip product, used at L329 and L331 only.
 
-    1. THE BATCH-CHECK DETECTOR. Zeroed [general/gl080.cbl:L290], set to 1 by
-       `gl080a` [general/gl080.cbl:L386], tested [general/gl080.cbl:L308].
-    2. THE `disk-change` ABORT CODE. Accepted [general/gl080.cbl:L545], tested
-       [general/gl080.cbl:L408] and again [general/gl080.cbl:L324].
-    3. THE QUARTER SUBSCRIPT. Computed [general/gl080.cbl:L328], used as a
-       table subscript [general/gl080.cbl:L345].
+THE DETECTOR IS NOT `gl070`'S, AND NO TERM CODE IS SET
+=====================================================
+`gl080a` tests `if not status-closed and not processed` [general/gl080.cbl:L384-
+L386] over `Cleared-Status` [copybooks/wsbatch.cob:L29-L32]; `gl070` tests
+`if status-open` [general/gl070.cbl:L314-L315] over `Batch-Status`
+[copybooks/wsbatch.cob:L25-L27]. Different fields, different predicates, not
+interchangeable. And `gl080` sets NO term code - it displays and returns
+[general/gl080.cbl:L313], [general/gl080.cbl:L366] - which is why the menu's
+`load09.` [general/general.cbl:L817-L821] carries no `ws-term-code = 5` test
+where `load08.` does [general/general.cbl:L810-L811]. Its aborts are all local:
+`goback` L302, three `go to main-end` L313/L326/L332, one `stop run` L649.
 
-`divide scycle by period giving a rounded` [general/gl080.cbl:L328] OVERWRITES
-whatever `a` held, including the 9 that [general/gl080.cbl:L324] has just
-tested. Trace both values through: a `disk-change` abort of 9 reaches L324,
-satisfies it and returns before L328 can clobber it; a detector value of 1
-reaches L324, fails both of its conditions, and IS clobbered at L328. So the
-sharing changes nothing in the first case and everything in the second, and it
-is therefore modelled as ONE field rather than split into three well-named
-locals. Splitting it would be a behaviour change disguised as a readability
-improvement.
+TWO FLAT FILES, NEITHER A SCHEMA TABLE NOR A CYCLE WORK FILE
+============================================================
+`archive` on `file-2` [general/gl080.cbl:L138] and `work-file` on `file-21`
+[general/gl080.cbl:L143]. Neither reaches the database, so neither appears in a
+table dump; both are declared module-privately rather than added to the
+package's work-file layer, for the three reasons in STRUCTURAL NOTES below -
+`arc-trans-record` is a ten-field 78-byte layout in a different field order,
+`work-file-record` is one unstructured `pic x(101)`, and that layer cannot
+express `open extend` [general/gl080.cbl:L411]. `file-21` is `work.tmp`
+[copybooks/file21.cob:L1], THE SAME NAME `gl071` GIVES ITS SORT WORK FILE
+[general/gl071.cbl:L102] - a genuine collision, harmless only because the two
+never run together and R-3 forbids concurrency. Both files declare `fs-reply`
+[copybooks/wsfnctn.cob:L25] as their FILE STATUS, the very field the facade and
+its handlers write, so a flat-file operation and a facade verb SHARE ONE STATUS
+FIELD and each overwrites the other's reply. The sequences below therefore store
+their status into the shared `File-Access` record, which is what a FILE STATUS
+clause does.
 
-`77 y pic 99 value zero.` [general/gl080.cbl:L182] is the round-trip product,
-used only at [general/gl080.cbl:L329] and [general/gl080.cbl:L331].
+ARITHMETIC, AND THE ONE `ROUNDED` SITE
+======================================
+`gl080` owns exactly one of the five `ROUNDED` sites in the whole migration, and
+its un-`ROUNDED` companion is on the very next line:
 
-THE DETECTOR IS NOT `gl070`'S
-=============================
-    `gl070`  [general/gl070.cbl:L314-L315]   if status-open
-                                                move 1 to a.
-    `gl080a` [general/gl080.cbl:L384-L386]   if not status-closed
-                                              and not processed
-                                                move 1 to a.
+    L328  divide   scycle by period giving a rounded    <-- THE ONLY ONE
+    L329  multiply a by period giving y                     truncates
+    L334  add      1 to scycle                              truncates
+    L355  add      1 to current-quarter                     truncates
+    L477  add      post-amount vat-amount giving arc-amount truncates
+    L489  add      post-amount vat-amount giving arc-amount truncates
+    L493  multiply arc-amount by -1 giving arc-amount       truncates
+    L506  multiply arc-amount by -1 giving arc-amount       truncates
+    L643  function length (...) twice - an integer count, no store
 
-Different predicate over different fields - `Batch-Status`
-[copybooks/wsbatch.cob:L25-L27] versus `Cleared-Status`
-[copybooks/wsbatch.cob:L29-L32] - and NOT interchangeable. `not status-closed`
-is true for any `Batch-Status` other than 1, which includes but is not limited
-to `status-open`; `not processed` is true for any `Cleared-Status` other than 1,
-which includes `waiting` and `archived` alike. And unlike `gl070`, which raises
-`move 5 to ws-term-code` [general/gl070.cbl:L289] so the menu skips the rest of
-the cycle, `gl080` sets NO term code at all - it simply displays and returns
-[general/gl080.cbl:L313], [general/gl080.cbl:L366].
+Every store other than L328 truncates toward zero, the COBOL default when
+`ROUNDED` is absent. No `ON SIZE ERROR` and no `REMAINDER` phrase anywhere.
+Every value is `Decimal` or `int` under the receiving item's descriptor, and per
+Agent Action Plan section 0.3.1 no numeric primitive is hand-written here: scale
+alignment, truncation, encoding, picture parsing, `MOVE` truncation, `88` tests,
+`STRING`, reference modification and comparison all delegate to `cobol/`.
 
-THE ABORT CHAIN DOES NOT REACH THIS PROGRAM
-===========================================
-The menu dispatches `gl080` from `load09.` [general/general.cbl:L817-L820],
-which moves the program name and then `go to load00.` - a transfer, not a
-`perform`. `load00.` [general/general.cbl:L711-L722] zeroes `ws-term-code`
-before the `CALL` [general/general.cbl:L714], issues the four-parameter call
-[general/general.cbl:L715-L718], and tests `if ws-term-code > 7` afterwards
-[general/general.cbl:L720-L721]. What `load08.` adds and `load09.` lacks is the
-`gl070`-specific `if ws-term-code = 5` test [general/general.cbl:L810-L811],
-and it is absent here because `gl080` never sets a term code. This program's
-own aborts are all local: `goback` [general/gl080.cbl:L302], three `go to
-main-end` transfers [general/gl080.cbl:L313], [general/gl080.cbl:L326],
-[general/gl080.cbl:L332], and one `stop run` [general/gl080.cbl:L649].
+Anomalies reproduced, each annotated at its site: A-2 the unbounded quarter
+subscript, A-3 the disagreeing notions of "current quarter", A-21 three
+qualified references, and the two archive sign flips [general/gl080.cbl:L493],
+[general/gl080.cbl:L506]. NOTHING is added that the frozen source does not do -
+no bounds check on the subscript, no guard on `GL-Posting-Open-Output`, no
+non-zero test before the L328 divide, no transaction wrapper around the
+delete-then-stamp pairs. `compress-post` in particular looks like a hand-rolled
+table rebuild begging for one SQL statement; it is not replaced.
 
-TWO FLAT FILES THAT ARE NOT SCHEMA TABLES AND NOT THE CYCLE'S WORK FILES
-========================================================================
-    138  select  archive    assign  file-2   access sequential  status fs-reply
-                            organization line sequential.
-    143  select  work-file  assign  file-21  access sequential
-                            organization sequential  status fs-reply.
-
-Neither reaches the database, so neither appears in a table dump. See
-STRUCTURAL NOTES in the traceability footer for why both are declared
-module-privately here rather than added to the package's work-file layer, and
-for the three facts that decision rests on: `arc-trans-record` is a TEN-field
-78-byte layout whose field order differs from the cycle's work records,
-`work-file-record` is one unstructured `pic x(101)`, and the package's
-sequential work-file type cannot express `open extend`
-[general/gl080.cbl:L411].
-
-`work-file` is assigned `file-21`, which is `work.tmp` [copybooks/file21.cob:L1]
-- THE SAME FILE NAME `gl071` ASSIGNS TO ITS SORT WORK FILE
-[general/gl071.cbl:L102]. A genuine collision between two programs' scratch
-files. It is harmless because the two never run at the same time, and rule R-3
-forbids concurrency in any case, but it is exactly the kind of fact
-traceability exists to surface.
-
-BOTH FLAT FILES DECLARE `fs-reply` AS THEIR FILE STATUS, and `fs-reply` is
-`Fs-Reply pic 99` [copybooks/wsfnctn.cob:L25] - the very field the facade and
-its handlers write. So a flat-file open, read or write and a facade verb SHARE
-ONE STATUS FIELD, and each overwrites the other's reply. `open extend archive`
-[general/gl080.cbl:L411] sets it and `perform GL-Batch-Open`
-[general/gl080.cbl:L415] immediately overwrites it; `write work-file-record`
-[general/gl080.cbl:L662] sets it and [general/gl080.cbl:L663] tests it. The
-sequences below therefore store their status INTO the shared `File-Access`
-record, which is what a FILE STATUS clause does.
-
-RULES THIS MODULE IS HELD TO
-============================
-There is NO user rules document for this project - `review_rules` reports "No
-user rules provided", verified this session. The six binding rules live in the
-Agent Action Plan section 0.7.2 and are answered here one by one; where the
-plan is silent, enterprise-standard best practice applies and no rule has been
-invented to fill a gap.
-
-R-1, NO COBOL AT RUNTIME. Nothing here starts a process, loads a foreign
-library, or reaches the compiled-oracle tree. There is NO
-`call "SYSTEM" using Print-Report` anywhere in `general/gl080.cbl` - checked,
-the string `SYSTEM` appears only as `system-record` and `Op-System` - and no
-print file, so unlike `gl072` there is no report spool-out path to omit. The
-`STRING` statement in `disk-change` [general/gl080.cbl:L531-L536] builds a FILE
-PATH STRING and nothing else; it is not turned into a command line.
-
-R-2, ZERO BINARY FLOATING POINT. Every value is `decimal.Decimal` or `int`,
-carried under the field descriptor of the item that receives it. And per Agent
-Action Plan section 0.3.1 - "`cobol/` contains no business logic and
-`programs/` contains no numeric primitives" - there is no hand-written scale
-alignment, truncation, packed or zoned encoding, picture parse, `MOVE`
-truncation, `88`-level test, `STRING` implementation, reference-modification
-implementation or comparator anywhere below. Every one of those delegates.
-
-    `gl080` OWNS EXACTLY ONE OF THE FIVE `ROUNDED` SITES IN THE WHOLE
-    MIGRATION - [general/gl080.cbl:L328] - and its un-`ROUNDED` companion sits
-    on the very next line. The complete arithmetic census for this program:
-
-        L328  divide   scycle by period giving a rounded    <-- THE ONLY ONE
-        L329  multiply a by period giving y                     truncates
-        L334  add      1 to scycle                              truncates
-        L355  add      1 to current-quarter                     truncates
-        L477  add      post-amount vat-amount giving arc-amount truncates
-        L489  add      post-amount vat-amount giving arc-amount truncates
-        L493  multiply arc-amount by -1 giving arc-amount        truncates
-        L506  multiply arc-amount by -1 giving arc-amount        truncates
-        L643  function length (...) twice, an integer count, no store
-
-    Every store other than L328 TRUNCATES TOWARD ZERO, which is the COBOL
-    default when `ROUNDED` is not written. Getting that backwards would
-    corrupt essentially every posted figure. There is no `ON SIZE ERROR` and
-    no `REMAINDER` phrase anywhere in this program.
-
-R-3, NOTHING ADDED. No conditional statement below tests anything the frozen
-source does not test. In particular: NO bounds check on the quarter subscript,
-which IS anomaly A-2; NO guard on `GL-Posting-Open-Output`; NO check of the
-archive write beyond the one test [general/gl080.cbl:L412] the source has; NO
-check that `period` is non-zero before the L328 divide. No transaction
-wrapper and no undo or partial-undo marker around the delete-then-stamp pairs -
-the COBOL commits per statement, and adding atomicity would change what a
-mid-run failure leaves behind. No DDL, no ORM entity layer, no migration tool.
-No threads, no event loop, no process pool, no connection pool: execution is
-strictly sequential, and Agent Action Plan section 0.8.4 puts performance work
-"out of scope by construction, not merely unrequested". `compress-post` in
-particular looks like a hand-rolled table rebuild begging to be replaced by one
-SQL statement. It is not replaced.
-
-R-4, ANOMALIES REPRODUCED. Five reproduction sites, each annotated inline with
-its locator: A-2 the unbounded quarter subscript, A-3 the two disagreeing
-notions of "current quarter", A-21 three qualified references, and the two
-archive sign flips at [general/gl080.cbl:L493] and [general/gl080.cbl:L506].
-The full treatment is at each site and in the footer.
-
-R-5, FULL TRACEABILITY. A named function for every one of the 38 labels, a
-`GO TO class` annotation at every one of the 36 transfer sites, per-site
-equivalence proofs for the five class-4 sites, and a footer mapping every
-construct and every deliberate omission to its frozen locator.
-
-R-6, COMPILED BEHAVIOUR IS THE TIE-BREAKER. No clock is read. `general/gl080.cbl`
-contains ZERO clock reads; the date arrives as the `to-day` linkage parameter
-and as `Run-Date binary-long` [copybooks/wssystem.cob:L67] inside the system
-record. `move run-date to stored` [general/gl080.cbl:L431] and
-[general/gl080.cbl:L586] write that controlled-clock observable straight into
-`GLBATCH-REC`, which is a value the migration's byte-identical-reruns test
-depends on being pinned, so both read it from the system record and nothing
-below reaches for an ambient time source. Six questions are logged for
-arbitration against the compiled program; see AMBIGUITIES.
-
-WHAT THIS MODULE MAY IMPORT
-===========================
-`gl080` carries TWELVE `COPY` statements. Their translation, in file order:
-
-    envdiv.cob                 L131   omitted, representation only
-    wsledger.cob               L188   records/gl_ledger
-    wsbatch.cob                L189   records/gl_batch
-    wspost.cob                 L190   records/gl_posting   <-- `gl072` does NOT
-                                      copy this one; `gl080` does
-    Test-Data-Flags.cob        L216   records/test_data_flags
-    screenio.cpy               L219   omitted, presentation only
-    wsfnctn.cob                L258   records/file_access AND dal/status
-    wscall.cob                 L263   records/calling_data
-    wssystem.cob               L264   records/system_record
-    wsnames.cob                L265   records/file_defs
-    FileStat-Msgs.cpy          L713   a message table, see `_evaluate_message`
-    Proc-ACAS-FH-Calls.cob     L749   dal/facade
-
-BECAUSE THE FILE COPIES `Proc-ACAS-FH-Calls.cob` AND NOT
+IMPORTS AND WHAT IS ABSENT
+==========================
+Twelve `COPY` statements translate to `records/gl_ledger`, `records/gl_batch`,
+`records/gl_posting` (which `gl072` does NOT copy), `records/test_data_flags`,
+`records/file_access` plus `dal/status`, `records/calling_data`,
+`records/system_record`, `records/file_defs` and `dal/facade`; `envdiv.cob` and
+`screenio.cpy` are representation-only omissions and `FileStat-Msgs.cpy` becomes
+`_evaluate_message`. Because the file copies `Proc-ACAS-FH-Calls.cob` and not
 `Proc-ZZ100-ACAS-IRS-Calls.cob`, THIS PROGRAM USES THE ENTITY-NAMED FACADE
-VOCABULARY AND TESTS THE REPLY INLINE. That copybook has no error-check
-paragraph of any kind, so every `fs-reply` test below is the caller's own, and
-none of the handler-named aliases is called. Sixteen distinct verbs are
-performed, the largest set of the twelve programs.
+VOCABULARY AND TESTS THE REPLY INLINE - that copybook has no error-check
+paragraph, so every `fs-reply` test below is the caller's own. Sixteen distinct
+verbs are performed, the largest set of the twelve programs.
+`acas_posting/workfiles.py` is NOT imported: `gl080` shares no work file with
+`gl070`, `gl071` or `gl072`. No clock is read - `general/gl080.cbl` contains zero
+clock reads, and `move run-date to stored` [general/gl080.cbl:L431],
+[general/gl080.cbl:L586] writes the pinned `Run-Date binary-long`
+[copybooks/wssystem.cob:L67] straight from the system record. There is no
+`call "SYSTEM" using Print-Report` and no print file, so unlike `gl072` there is
+no spool-out path to omit; the `STRING` in `disk-change`
+[general/gl080.cbl:L531-L536] builds a file path and is never a command line.
+`gl080` has no `zz050-Validate-Date` and no `zz060-Convert-Date` section, only
+`zz070-Convert-Date` [general/gl080.cbl:L719], so anomaly A-22 does not occur
+here.
 
-MUST NOT be imported, and none is: the CLI layer, any handler module directly,
-the connection module, the cursor-state module, the controlled-clock module
-`acas_posting/clock.py`, the dictionary generator, the compiled-oracle tree, or
-any sibling program module. `acas_posting/workfiles.py` is NOT imported either -
-`gl080` shares no work file with `gl070`, `gl071` or `gl072`, and its two flat
-files cannot be expressed by that layer; see STRUCTURAL NOTES.
+AMBIGUITIES  (rule R-6)
+=======================
+Six questions, each annotated `AMBIGUITY Q-nn` at the site that raises it and
+recorded in full in `docs/migration/ambiguity-resolutions.md`:
 
-`gl080` has NO `zz050-Validate-Date` section, NO `zz060-Convert-Date` section
-and NO wrapper section around the shared binary date program. Its only date
-section is `zz070-Convert-Date` [general/gl080.cbl:L719]. Anomaly A-22 - a
-wrapper section named after the interface copybook whose exit label is named
-after the called program - therefore DOES NOT OCCUR in this module, and no date
-validation or binary conversion is called from here.
-
-AMBIGUITIES, FOR ARBITRATION AGAINST COMPILED BEHAVIOUR  (rule R-6)
-===================================================================
-Six questions cannot be settled by reading the source. Each is annotated
-`AMBIGUITY Q-nn` at the site that raises it, and each takes the next free
-number in the migration's shared register, which stood at Q-17.
-
-    Q-18  WHETHER `move 1 to File-Key-No` [general/gl080.cbl:L288] HAS ANY
-          OBSERVABLE EFFECT. The facade's own dispatch paragraphs move 1 into
-          `File-Key-No` before every call - [copybooks/Proc-ACAS-FH-Calls.cob]
-          `acas005.`, `acas006.` and `acas007.` each do so, and the Python
-          facade pins the same value - so the program's own move is either
-          redundant or it matters to a verb that does not re-pin it. Reproduced
-          regardless.
-    Q-19  WHAT THE COMPILED PROGRAM WRITES WHEN THE QUARTER SUBSCRIPT RUNS PAST
-          THE RECORD - ANSWERED ON THE ORACLE (rule R-6). See anomaly A-2 at
-          `_gl080_main_loop`. The subscript is EMULATED by byte offset rather than
-          validated, so `a = 1..4` reach the two `Quarters` views, `a = 5..12`
-          reach the trailing `filler pic x(50)` [copybooks/wsledger.cob:L37] which
-          carries no column, and `a = 0`/`-1` reach the two packed items declared
-          before `Quarters`. For `a >= 13` the store runs beyond the 126th byte,
-          and GnuCOBOL 3.2.0 was driven with the record transcribed and a sentinel
-          item declared immediately after it: `move 999.99 to ledger-q (13)` put
-          the six packed bytes at offsets 125 through 130 - two in the filler, four
-          in the sentinel - left every quarter field and `Ledger-Last` UNCHANGED,
-          printed no diagnostic and exited 0. An overrunning run therefore moves
-          NONE of the 22 compared tables, so storing the in-record part and logging
-          the remainder is the whole behaviour. No guard is added and nothing is
-          clamped.
-    Q-20  WHETHER `GL-Posting-Open-Output` [general/gl080.cbl:L673] TRUNCATES
-          `GLPOSTING-REC`. `Open-Output` on the transfer-file handler means
-          "delete every row" [common/acas008.cbl:L313-L319], and if `acas006`
-          shares that reading then this statement empties the posting table
-          before `loop2` rewrites it from the work file. Q-23 says the
-          statement is unreachable in the frozen source; that does not settle
-          what it would do. No guard is added.
-    Q-21  WHETHER THIS PROGRAM'S FIVE SYSTEM-RECORD MUTATIONS ARE PERSISTED.
-          `add 1 to scycle` [general/gl080.cbl:L334], `add 1 to
-          current-quarter` [general/gl080.cbl:L355], `move 1 to current-quarter`
-          [general/gl080.cbl:L357] and the two cycle wraps
-          [general/gl080.cbl:L360], [general/gl080.cbl:L363] - plus `move 1 to
-          Date-Form` [general/gl080.cbl:L730] - all write into the system
-          record. `gl080` PERFORMS NO `System-*` FACADE VERB AT ALL, so whether
-          any of them reaches `SYSTEM-REC` depends entirely on what the caller
-          does with the by-reference linkage parameter afterwards. All six are
-          reproduced in memory; none is written to a table from here - and that
-          remains true. WHAT THE CALLER DOES IS NOW SETTLED, though: the frozen
-          menu shell rewrites the record in `overrewrite.`
-          [general/general.cbl:L656-L692], reached from `load00.` on the
-          serious-error arm [general/general.cbl:L720-L721], and
-          `acas_posting.cli.args.overrewrite` reproduces it. Nothing
-          about this program changes: the write belongs to the boundary, not here
-          (rule R-3).
-    Q-22  WHAT PATH THE `disk-change` `STRING` ACTUALLY BUILDS. The maintainer
-          flagged it himself, inline: `*> this lot looks wrong !!!!!`
-          [general/gl080.cbl:L530]. Measured against the package's own record
-          defaults the result is "archives archive.dat" - a SPACE where a
-          directory separator belongs, because `file-24` defaults to 532 spaces
-          so `DELIMITED BY SPACE` contributes nothing from it, and
-          `File-Defs-os-Delimiter` defaults to a space. Reproduced exactly as
-          written; see `_disk_change` for the measured widths, which also
-          correct a claim that the following `MOVE` truncates.
-    Q-23  WHETHER `compress-post` ABORTS THE RUN IN THE COBOL-FILES
-          CONFIGURATION. See the section of that name above: the two record
-          lengths measure 103 and 101, so `stop run` [general/gl080.cbl:L649]
-          fires. The comparison is computed from the descriptors, never from a
-          literal, so the code follows the dictionary.
+    Q-18  whether `move 1 to File-Key-No` [general/gl080.cbl:L288] has any
+          observable effect, given the facade re-pins it. Reproduced regardless.
+    Q-19  what the compiled program writes when the quarter subscript runs past
+          the record - ANSWERED ON THE ORACLE; see A-2 at `_gl080_main_loop`.
+    Q-20  whether `GL-Posting-Open-Output` [general/gl080.cbl:L673] truncates
+          `GLPOSTING-REC` - SETTLED BY CONSTRUCTION, yes on both stores.
+    Q-21  whether this program's six system-record mutations are persisted - the
+          caller's side is settled: the menu shell rewrites the record in
+          `overrewrite.` [general/general.cbl:L656-L692]. All six are reproduced
+          in memory; none is written to a table from here (R-3).
+    Q-22  what path the `disk-change` `STRING` builds. The maintainer flagged it
+          himself: `*> this lot looks wrong !!!!!` [general/gl080.cbl:L530].
+          Measured against the package's record defaults it is
+          "archives archive.dat" - a space where a separator belongs.
+    Q-23  whether `compress-post` aborts the run in the Cobol-files
+          configuration - yes, per the section above.
 """
 
 from __future__ import annotations
@@ -1059,7 +249,7 @@ from acas_posting.cobol import arithmetic, condition_names, move, picture
 from acas_posting.cobol.field import FieldDescriptor, descriptors_for_copybook_record
 
 # copy "wscall.cob". [general/gl080.cbl:L263] `01 WS-Calling-Data`
-# [copybooks/wscall.cob:L6-L13] - the first linkage parameter. `gl080` never reads or
+# [copybooks/wscall.cob:L7-L14] - the first linkage parameter. `gl080` never reads or
 # writes a field of it; see Q-21 and the OMISSIONS list.
 from acas_posting.records.calling_data import WsCallingData
 
@@ -1425,8 +615,8 @@ class DiskChangeOptionNotAcceptable(ValueError):
     Agent Action Plan section 0.4.2 places interactive retry targets outside the
     migrated surface - and of the two remaining dispositions, proceeding would let
     a value legacy execution can never carry here drive five tables' worth of
-    end-of-period work (finding CLI-07). Refusing is the one that keeps the
-    database effect inside the set the frozen program can produce.
+    end-of-period work. Refusing is the one that keeps the database effect inside
+    the set the frozen program can produce.
 
     NOT A VALIDATION ADDED TO THE CYCLE (rule R-3): nothing is checked that the
     frozen source does not check, and the check is the frozen source's own
@@ -1647,7 +837,7 @@ class _Gl080Storage:
     five of them.
 
     Attributes:
-        ws_calling_data: `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L13]. Accepted
+        ws_calling_data: `01 WS-Calling-Data` [copybooks/wscall.cob:L7-L14]. Accepted
             and never read - `gl080` sets no term code.
         system: `SYSTEM-REC`. Read for `Scycle`, `Period`, `Arch`, `Current-Quarter`,
             `Date-Form`, `Run-Date`, `Usera` and `File-System-Used`; MUTATED at six
@@ -2046,74 +1236,35 @@ def _ledger_record_values(ledger: WsLedgerRecord) -> dict[str, object]:
 def _move_ledger_balance_to_quarter(st: _Gl080Storage) -> None:
     """`move ledger-balance to ledger-q (a).`  [general/gl080.cbl:L345].
 
-    One COBOL statement, and it needs its own function for a reason that has
-    nothing to do with the statement and everything to do with the target: in
-    COBOL `Ledger-Q (a)` and `Ledger-Q1` through `Ledger-Q4` ARE THE SAME BYTES
-    [copybooks/wsledger.cob:L31-L36], and in Python they are two separate
-    attributes that do not alias.
+    One COBOL statement with its own function, because of the target rather than
+    the statement. In COBOL `Ledger-Q (a)` and `Ledger-Q1` through `Ledger-Q4` ARE
+    THE SAME BYTES [copybooks/wsledger.cob:L31-L36]; in Python they are separate
+    attributes that do not alias, and `acas_posting/records/gl_ledger.py`
+    deliberately declines to synchronise them because keeping a redefines in step
+    would be behaviour in a record layout (rule R-3). The consequence is concrete
+    and silent: the `acas005` handler binds its columns from the FOUR NAMED
+    FIELDS, so a value written into the `occurs` view alone would never reach
+    `GLLEDGER-REC` and phase 5's entire table effect would vanish with no
+    diagnostic. The COBOL names the `occurs` view, so BOTH views are written.
 
-    WHY BOTH VIEWS MUST BE WRITTEN. `acas_posting/records/gl_ledger.py` declares
-    the two views and deliberately declines to synchronise them, because keeping
-    a redefines in step would be behaviour in a record layout (rule R-3), and it
-    records that the unbounded subscript "is reproduced in the `gl080` program
-    module, which is where it belongs". The consequence is concrete and silent:
-    the `acas005` handler binds its columns from the FOUR NAMED FIELDS, and its
-    own view-alignment step refreshes the `occurs` view FROM those names and only
-    on the read path. So a value written into the `occurs` view alone would never
-    reach `GLLEDGER-REC` - phase 5's entire table effect would vanish with no
-    error and no diagnostic. The COBOL statement names the `occurs` view, so this
-    function writes the `occurs` view AND the named field the same bytes carry.
+    For an in-range subscript the move's own semantics are unchanged: the value is
+    stored into `Ledger-Q`'s picture, truncating toward zero because L345 carries
+    no `ROUNDED`.
 
-    ⭐ ANOMALY A-2, REPRODUCED FROM A MEASUREMENT AND NOT FROM A GUESS
-    (rules R-4, R-6). `a` is computed by a `ROUNDED` divide at
-    [general/gl080.cbl:L328] and used here with NO bounds test, and the values it
-    can hold are not confined to 1..4: the guard at
-    [general/gl080.cbl:L326-L327] only excludes `a = 9` and a cycle below the
-    period, and [general/gl080.cbl:L332-L333] only requires `a * period` to equal
-    the cycle exactly - so period 3 with cycle 15 gives `a = 5`, cycle 18 gives
-    `a = 6`, and `77 a pic 99` [general/gl080.cbl:L183] admits both.
-
-    WHAT THE COMPILED PROGRAM DOES, measured on GnuCOBOL 3.2.0 against this exact
-    copybook with a variable subscript:
-
-        a = 0  ->  LEDGER-LAST receives the value. It is a TABLE COLUMN, so this
-                   subscript has a real, diff-visible effect on `GLLEDGER-REC`.
-        a = 5  ->  bytes 1 to 6 of the trailing `03 filler pic x(50)`
-                   [copybooks/wsledger.cob:L37]. No column, so no table effect.
-        a = 6  ->  bytes 7 to 12 of that same filler.
-
-    In every case the store is plain linear byte addressing: no bounds test, no
-    diagnostic, no status, no abort, and the run continues. ⛔ NOTHING IS
-    VALIDATED OR CLAMPED HERE, and in particular a Python `[a - 1]` is NOT used:
-    that would make `a = 0` accumulate into the LAST occurrence, which
-    corresponds to nothing the compiled program does. The reproduction goes
-    through `move.subscripted_store`, whose own header records the measurements.
-
-    THE MOVE'S OWN SEMANTICS ARE UNCHANGED for an in-range subscript: the value
-    is stored into `Ledger-Q`'s picture, truncating toward zero because
-    [general/gl080.cbl:L345] carries no `ROUNDED`.
-
-    ⛔ THE SUBSCRIPT IS NOT BOUNDS-CHECKED, AND MUST NOT BE (anomaly A-2, rule
-    R-3). An earlier draft of this function raised `ValueError` for any `a`
-    outside 1..4. That is a validation the frozen program does not perform, and
-    raising turns a silent legacy store into an abort that ends the phase-5 loop -
-    which changes the disposition of every ledger row after the first out-of-range
-    one. It is therefore replaced by STORAGE EMULATION: the subscript resolves to
-    a byte offset, and the value is stored into whichever DECLARED ITEM those
-    bytes belong to, exactly as the compiled program stores it. Control flow
-    continues in every case.
-
-    WHY `a` GOES OUT OF RANGE AT ALL, and it is reachable rather than theoretical.
-    `77 a pic 99 value zero` [general/gl080.cbl:L183] holds 0..99, and phase 5
-    computes it as `divide scycle by period giving a rounded`
-    [general/gl080.cbl:L328] guarded only by `if a = 9 or scycle < period go to
-    main-end` [general/gl080.cbl:L324-L326] and by the exact-multiple test
-    `multiply a by period giving y` / `if scycle not = y go to main-end`
-    [general/gl080.cbl:L329-L332]. So `a` is the exact quotient `scycle / period`.
-    `scycle` is reset only for `period = 3` and `period = 13`
-    [general/gl080.cbl:L358-L363] - so for those two the quotient stays within
-    1..4 - but for any other `period`, `period = 1` above all, NOTHING resets
-    `scycle` and the quotient climbs through the whole `pic 99` domain.
+    ANOMALY A-2 - THE SUBSCRIPT IS NOT BOUNDS-CHECKED, AND MUST NOT BE
+    (rules R-3, R-4). `a` is the `ROUNDED` quotient from
+    [general/gl080.cbl:L328], guarded only by `if a = 9 or scycle < period`
+    [general/gl080.cbl:L324-L326] and the exact-multiple test
+    [general/gl080.cbl:L329-L332], and `77 a pic 99` [general/gl080.cbl:L183]
+    admits 0..99. `scycle` is reset only for `period = 3` and `period = 13`
+    [general/gl080.cbl:L358-L363]; for any other period - `period = 1` above all -
+    nothing resets it and the quotient climbs through the whole domain. So the
+    out-of-range case is REACHABLE, not theoretical. Raising would turn a silent
+    legacy store into an abort that ends the phase-5 loop and changes the
+    disposition of every ledger row after the first overrun. Instead the store is
+    EMULATED BY BYTE ADDRESS, and control flow continues in every case. A Python
+    `[a - 1]` is NOT used: that would make `a = 0` accumulate into the LAST
+    occurrence, which corresponds to nothing the compiled program does.
 
     THE DESTINATION, BY BYTE OFFSET. `Ledger-Q` is `pic s9(8)v99 comp-3`, six
     bytes, `occurs 4` [copybooks/wsledger.cob:L36], redefining the 24 bytes of
@@ -2121,226 +1272,58 @@ def _move_ledger_balance_to_quarter(st: _Gl080Storage) -> None:
     settle where an out-of-range occurrence lands
     [copybooks/wsledger.cob:L28-L37]::
 
-        offset from            declaration                          reached by
-        Quarters start
+        offset from Quarters   declaration                          reached by
         -12                    03  Ledger-Balance  s9(8)v99 comp-3  a = -1
          -6                    03  Ledger-Last     s9(8)v99 comp-3  a =  0
           0 .. 23              03  Quarters  (Ledger-Q1 .. Q4)      a = 1..4
          24 .. 73              03  filler    pic x(50)              a = 5..12
          74 and beyond         past the 126-byte record             a = 13..99
 
-    So `a = 5` through `a = 12` write WHOLLY INSIDE the trailing fifty-byte
-    FILLER, which carries NO MySQL COLUMN - `mysql/ACASDB.sql` gives
-    `GLLEDGER-REC` eleven columns and none of them is that filler - so those
-    stores have NO DATABASE-VISIBLE EFFECT while still not being errors. `a = 13`
-    straddles the record end: its first two bytes land in the filler and its last
-    four run past byte 126. `a >= 14` lands wholly outside the record. `a = 0` and
-    `a = -1` are unreachable here, because the guard at
-    [general/gl080.cbl:L325] forbids `scycle < period`, but they are resolved
-    rather than special-cased so that the emulation carries no bound of its own.
+    `GLLEDGER-REC` has eleven columns and binds NONE of the trailing filler, so
+    the four bands differ in observability:
 
-    ⭐ AMBIGUITY Q-19, ANSWERED ON THE ORACLE (rule R-6). What the compiled
-    program writes past the end of the record is not defined by the record layout:
-    GnuCOBOL compiled without bounds checking - and no compile line in this
-    repository passes any such flag - stores into whatever WORKING-STORAGE follows.
-    That was measured rather than left open. The 126-byte record was transcribed
-    with a `pic x(20)` sentinel declared immediately after it inside one enclosing
-    `01`, `move 999.99 to ledger-q (13)` was executed, and every byte was read back
-    through `function ord`: the six packed bytes `00 00 00 99 99 9C` landed at
-    1-based offsets 125 through 130 - two in the trailing filler, FOUR in the
-    sentinel past the record's last byte - `Ledger-Q1` through `Ledger-Q4` and
-    `Ledger-Last` were UNCHANGED, no diagnostic was printed, and the program exited
-    0. Subscript 14 landed six bytes further on, so the addressing stays linear
-    rather than wrapping or clamping.
+        a = 1..4   the four quarter fields.      OBSERVABLE - LEDGER-Q1..Q4.
+        a = 0      `Ledger-Last`, one field earlier in the record. OBSERVABLE -
+                   LEDGER-LAST. Unreachable here because L325 forbids
+                   `scycle < period`, but resolved rather than special-cased so
+                   the emulation carries no bound of its own.
+        a = 5..12  wholly inside the fifty-byte filler. NOT OBSERVABLE - all
+                   eleven columns unchanged, and the row is still rewritten by
+                   [general/gl080.cbl:L348]. This is the band A-2 actually
+                   reaches: with `Period = 1` the guard passes for any `Scycle`,
+                   L328 gives `a = Scycle` and L331 agrees, so `a` walks 5, 6, 7,
+                   8, 10, 11, 12 as the cycles advance - `a = 9` alone is
+                   unreachable because the guard tests it.
+        a >= 13    at or past the record end. All eleven columns unchanged.
 
-    The consequence for this function is that its reproduction is COMPLETE for
-    every observable: an overrunning run changes NONE of the 22 compared tables,
-    so writing the in-record bytes and reporting the overrun as a log line is the
-    whole of the behaviour. What is still undecidable from the frozen source is
-    only WHICH `01` item receives the overrun bytes in the real program, because
-    that is the compiler's allocation and it reaches no table either way.
-
-    ⭐ AN OUT-OF-RANGE SUBSCRIPT DOES NOT RAISE. IT STORES SOMEWHERE, AND WHERE IS
-    DERIVABLE. This function previously refused the store with a `ValueError`,
-    which FIXED anomaly A-2 - and rule R-4 makes a defect fixed a failure. There
-    is no bounds test in the frozen statement and none may be added, so the
-    subscript is resolved the way the compiled program resolves it: BY BYTE
-    ADDRESS within the 126-byte record.
-
-    `move.subscripted_store` computes that address from the record's own declared
-    field widths - never from a transcribed number - and returns every elementary
-    item of the window decoded afterwards, so the declared field the six bytes
-    land in is visible by name. The four outcomes and their observability
-    against `GLLEDGER-REC`, which has exactly eleven columns and binds NONE of the
-    trailing filler:
-
-        a = 1..4    the four quarter fields.       OBSERVABLE - LEDGER-Q1..Q4.
-        a = 0       bytes 47-52 = `Ledger-Last`.   OBSERVABLE - LEDGER-LAST. The
-                    quarter store lands on the YEAR-END field, one field earlier
-                    in the record. Exact, and derived from the layout alone.
-        a = 5..12   bytes 77-124, wholly inside
-                    `filler pic x(50)`
-                    [copybooks/wsledger.cob:L37].  NOT OBSERVABLE - no column
-                    binds those bytes, so all eleven columns are unchanged and the
-                    row is still rewritten by [general/gl080.cbl:L348]. This is
-                    the band anomaly A-2 actually reaches: with `Period = 1` the
-                    guard at [general/gl080.cbl:L324-L326] passes for any
-                    `Scycle`, [general/gl080.cbl:L328] gives `a = Scycle`, and
-                    [general/gl080.cbl:L331] then agrees, so `a` walks 5, 6, 7, 8,
-                    10, 11, 12 as the cycles advance. `a = 9` alone is unreachable
-                    because the guard tests it.
-        a >= 13     bytes 125 onward, at or past the record's end. MEASURED on
-                    the oracle: the store happens, the program continues and
-                    exits 0 with no diagnostic, and NO quarter field and no
-                    `Ledger-Last` changes - so all eleven columns are left
-                    unchanged, which is exactly what this function does. The one
-                    thing still not derivable from the source is which `01` item
-                    the overrun bytes belong to, and no column binds them either
-                    way. AMBIGUITY Q-19, answered; see the note below.
-
-    WHY BOTH VIEWS ARE WRITTEN for the in-record cases. In COBOL `Ledger-Q (a)`
-    and `Ledger-Q1` through `Ledger-Q4` ARE THE SAME BYTES
-    [copybooks/wsledger.cob:L31-L36]; in Python they are separate attributes that
-    do not alias. `acas_posting/records/gl_ledger.py` declares both views and
-    deliberately declines to synchronise them, because keeping a redefines in step
-    would be behaviour in a record layout (rule R-3). The consequence is concrete
-    and silent: the `acas005` handler binds its columns from the FOUR NAMED
-    FIELDS, so a value written into the `occurs` view alone would never reach
-    `GLLEDGER-REC` and phase 5's entire table effect would vanish with no
-    diagnostic. So both are written.
+    AMBIGUITY Q-19, ANSWERED ON THE ORACLE (rule R-6). What the compiled
+    program writes past the record end is not defined by the layout: GnuCOBOL
+    compiled without bounds checking - and no compile line in this repository
+    passes such a flag - stores into whatever WORKING-STORAGE follows. Measured
+    against this copybook with a `pic x(20)` sentinel declared immediately after
+    the record, `move 999.99 to ledger-q (13)` put the six packed bytes
+    `00 00 00 99 99 9C` at 1-based offsets 125 through 130 - two in the filler,
+    four in the sentinel - left `Ledger-Q1` through `Ledger-Q4` and `Ledger-Last`
+    UNCHANGED, printed no diagnostic and exited 0; subscript 14 landed six bytes
+    further on, so addressing stays linear rather than wrapping or clamping. An
+    overrunning run therefore moves NONE of the 22 compared tables, which makes
+    storing the in-record bytes and logging the remainder the whole behaviour.
+    The one thing still not derivable is which `01` item receives the overrun
+    bytes, and no column binds them either way.
 
     The occurrence count, the element width and the record's total width all come
-    from the record layer's own descriptors, so neither the bound, the stride nor
-    the record length is typed as a literal here.
-
-    ⭐ AN OUT-OF-RANGE SUBSCRIPT DOES NOT RAISE. IT STORES SOMEWHERE, AND WHERE IS
-    DERIVABLE. This function previously refused the store with a `ValueError`,
-    which FIXED anomaly A-2 - and rule R-4 makes a defect fixed a failure. There
-    is no bounds test in the frozen statement and none may be added, so the
-    subscript is resolved the way the compiled program resolves it: BY BYTE
-    ADDRESS within the 126-byte record.
-
-    `move.subscripted_store` computes that address from the record's own declared
-    field widths - never from a transcribed number - and names the declared field,
-    if any, that the six bytes land in. The four outcomes and their observability
-    against `GLLEDGER-REC`, which has exactly eleven columns and binds NONE of the
-    trailing filler:
-
-        a = 1..4    the four quarter fields.       OBSERVABLE - LEDGER-Q1..Q4.
-        a = 0       bytes 47-52 = `Ledger-Last`.   OBSERVABLE - LEDGER-LAST. The
-                    quarter store lands on the YEAR-END field, one field earlier
-                    in the record. Exact, and derived from the layout alone.
-        a = 5..12   bytes 77-124, wholly inside
-                    `filler pic x(50)`
-                    [copybooks/wsledger.cob:L37].  NOT OBSERVABLE - no column
-                    binds those bytes, so all eleven columns are unchanged and the
-                    row is still rewritten by [general/gl080.cbl:L348]. This is
-                    the band anomaly A-2 actually reaches: with `Period = 1` the
-                    guard at [general/gl080.cbl:L324-L326] passes for any
-                    `Scycle`, [general/gl080.cbl:L328] gives `a = Scycle`, and
-                    [general/gl080.cbl:L331] then agrees, so `a` walks 5, 6, 7, 8,
-                    10, 11, 12 as the cycles advance. `a = 9` alone is unreachable
-                    because the guard tests it.
-        a >= 13     bytes 125 onward, at or past the record's end. MEASURED on
-                    the oracle: the store happens, the program continues and
-                    exits 0 with no diagnostic, and NO quarter field and no
-                    `Ledger-Last` changes - so all eleven columns are left
-                    unchanged, which is exactly what this function does. The one
-                    thing still not derivable from the source is which `01` item
-                    the overrun bytes belong to, and no column binds them either
-                    way. AMBIGUITY Q-19, answered; see the note below.
-
-    WHY BOTH VIEWS ARE WRITTEN for the in-record cases. In COBOL `Ledger-Q (a)`
-    and `Ledger-Q1` through `Ledger-Q4` ARE THE SAME BYTES
-    [copybooks/wsledger.cob:L31-L36]; in Python they are separate attributes that
-    do not alias. `acas_posting/records/gl_ledger.py` declares both views and
-    deliberately declines to synchronise them, because keeping a redefines in step
-    would be behaviour in a record layout (rule R-3). The consequence is concrete
-    and silent: the `acas005` handler binds its columns from the FOUR NAMED
-    FIELDS, so a value written into the `occurs` view alone would never reach
-    `GLLEDGER-REC` and phase 5's entire table effect would vanish with no
-    diagnostic. So both are written.
-
-    The occurrence count, the element width and the record's total width all come
-    from the record layer's own descriptors, so neither the bound, the stride nor
-    the record length is typed as a literal here.
-
-    ⛔ THE SUBSCRIPT IS NOT BOUNDS-CHECKED, AND MUST NOT BE (anomaly A-2, rule
-    R-3). An earlier draft of this function raised `ValueError` for any `a`
-    outside 1..4. That is a validation the frozen program does not perform, and
-    raising turns a silent legacy store into an abort that ends the phase-5 loop -
-    which changes the disposition of every ledger row after the first out-of-range
-    one. It is therefore replaced by STORAGE EMULATION: the subscript resolves to
-    a byte offset, and the value is stored into whichever DECLARED ITEM those
-    bytes belong to, exactly as the compiled program stores it. Control flow
-    continues in every case.
-
-    WHY `a` GOES OUT OF RANGE AT ALL, and it is reachable rather than theoretical.
-    `77 a pic 99 value zero` [general/gl080.cbl:L183] holds 0..99, and phase 5
-    computes it as `divide scycle by period giving a rounded`
-    [general/gl080.cbl:L328] guarded only by `if a = 9 or scycle < period go to
-    main-end` [general/gl080.cbl:L324-L326] and by the exact-multiple test
-    `multiply a by period giving y` / `if scycle not = y go to main-end`
-    [general/gl080.cbl:L329-L332]. So `a` is the exact quotient `scycle / period`.
-    `scycle` is reset only for `period = 3` and `period = 13`
-    [general/gl080.cbl:L358-L363] - so for those two the quotient stays within
-    1..4 - but for any other `period`, `period = 1` above all, NOTHING resets
-    `scycle` and the quotient climbs through the whole `pic 99` domain.
-
-    THE DESTINATION, BY BYTE OFFSET. `Ledger-Q` is `pic s9(8)v99 comp-3`, six
-    bytes, `occurs 4` [copybooks/wsledger.cob:L36], redefining the 24 bytes of
-    `Quarters` [copybooks/wsledger.cob:L30-L34]. The neighbouring declarations
-    settle where an out-of-range occurrence lands
-    [copybooks/wsledger.cob:L28-L37]::
-
-        offset from            declaration                          reached by
-        Quarters start
-        -12                    03  Ledger-Balance  s9(8)v99 comp-3  a = -1
-         -6                    03  Ledger-Last     s9(8)v99 comp-3  a =  0
-          0 .. 23              03  Quarters  (Ledger-Q1 .. Q4)      a = 1..4
-         24 .. 73              03  filler    pic x(50)              a = 5..12
-         74 and beyond         past the 126-byte record             a = 13..99
-
-    So `a = 5` through `a = 12` write WHOLLY INSIDE the trailing fifty-byte
-    FILLER, which carries NO MySQL COLUMN - `mysql/ACASDB.sql` gives
-    `GLLEDGER-REC` eleven columns and none of them is that filler - so those
-    stores have NO DATABASE-VISIBLE EFFECT while still not being errors. `a = 13`
-    straddles the record end: its first two bytes land in the filler and its last
-    four run past byte 126. `a >= 14` lands wholly outside the record. `a = 0` and
-    `a = -1` are unreachable here, because the guard at
-    [general/gl080.cbl:L325] forbids `scycle < period`, but they are resolved
-    rather than special-cased so that the emulation carries no bound of its own.
-
-    ⭐ AMBIGUITY Q-19, ANSWERED ON THE ORACLE (rule R-6). What the compiled
-    program writes past the end of the record is not defined by the record layout:
-    GnuCOBOL compiled without bounds checking - and no compile line in this
-    repository passes any such flag - stores into whatever WORKING-STORAGE follows.
-    That was measured rather than left open. The 126-byte record was transcribed
-    with a `pic x(20)` sentinel declared immediately after it inside one enclosing
-    `01`, `move 999.99 to ledger-q (13)` was executed, and every byte was read back
-    through `function ord`: the six packed bytes `00 00 00 99 99 9C` landed at
-    1-based offsets 125 through 130 - two in the trailing filler, FOUR in the
-    sentinel past the record's last byte - `Ledger-Q1` through `Ledger-Q4` and
-    `Ledger-Last` were UNCHANGED, no diagnostic was printed, and the program exited
-    0. Subscript 14 landed six bytes further on, so the addressing stays linear
-    rather than wrapping or clamping.
-
-    The consequence for this function is that its reproduction is COMPLETE for
-    every observable: an overrunning run changes NONE of the 22 compared tables,
-    so writing the in-record bytes and reporting the overrun as a log line is the
-    whole of the behaviour. What is still undecidable from the frozen source is
-    only WHICH `01` item receives the overrun bytes in the real program, because
-    that is the compiler's allocation and it reaches no table either way.
+    from the record layer's descriptors, so neither the bound, the stride nor the
+    record length is a literal here.
 
     Args:
         st: The program's storage. `st.a` is the subscript and
             `st.ledger.ledger_balance` the sending field.
     """
     #  345  move     ledger-balance  to  ledger-q (a).
-    #       The store is performed over the record's BYTES, because that is what
-    #       the generated code addresses; `subscripted_store` returns every
-    #       elementary item decoded afterwards, so whichever field shared the
-    #       window is visible here exactly as the compiled program left it.
+    #  The store is performed over the record's BYTES, because that is what
+    #  the generated code addresses; `subscripted_store` returns every
+    #  elementary item decoded afterwards, so whichever field shared the
+    #  window is visible here exactly as the compiled program left it.
     after = move.subscripted_store(
         _LEDGER_RECORD_GROUP,
         _ledger_record_values(st.ledger),
@@ -2427,7 +1410,7 @@ def _main_end(st: _Gl080Storage) -> None:
     # this site - so the record was invented (R-4). Progress and completion traces
     # of internal phase boundaries are not events the compiled program produces.
     # It also named the cycle and the current quarter - the latter being anomaly
-    # 3's own field, which is documented in `docs/migration/anomaly-log.md`.
+    # A-3's own field, which is documented in `docs/migration/anomaly-log.md`.
     return
 
 
@@ -2908,7 +1891,7 @@ def _disk_change(st: _Gl080Storage) -> None:
 
     # Fall-through into `accept-option.` [general/gl080.cbl:L542].
     #
-    # ⭐ THE THIRD ANSWER NEVER GETS BACK HERE. `accept-option.`
+    # THE THIRD ANSWER NEVER GETS BACK HERE. `accept-option.`
     # [general/gl080.cbl:L548-L549] sends any value that is neither 9 nor zero
     # straight back to its own prompt, so the frozen paragraph cannot reach
     # `main-exit` [general/gl080.cbl:L559] on it and NOTHING after `perform
@@ -2917,7 +1900,7 @@ def _disk_change(st: _Gl080Storage) -> None:
     # `compress-post` at L322 and not phase 5. `_disk_change_accept_option`
     # reproduces that by raising `DiskChangeOptionNotAcceptable` at the point the
     # frozen paragraph refuses to leave, which is why only the two answers the
-    # frozen program can proceed on are returned here (M-04, CWE-636).
+    # frozen program can proceed on are returned here (CWE-636).
     declined = _disk_change_accept_option(st)
 
     if declined:
@@ -2965,10 +1948,10 @@ def _disk_change_accept_option(st: _Gl080Storage) -> bool:
     Promoted to `archive_path_override`, defaulting to None, which keeps the
     path [general/gl080.cbl:L537] computed.
 
-    ⭐⭐ THERE ARE EXACTLY TWO WAYS OUT OF THIS PARAGRAPH, AND EVERY OTHER ANSWER
-    LEAVES CONTROL INSIDE IT FOREVER. That is the finding M-04 is about, and it is
-    the whole reason this function returns a THREE-STATE disposition rather than a
-    boolean. Reading the transfers as a graph:
+    THERE ARE EXACTLY TWO WAYS OUT OF THIS PARAGRAPH, AND EVERY OTHER ANSWER
+    LEAVES CONTROL INSIDE IT FOREVER, which is why this function returns a
+    THREE-STATE disposition rather than a boolean. Reading the transfers as a
+    graph:
 
         L546-L547   a = 9                              -> main-exit    DECLINED
         L548-L549   a not = zero                       -> accept-option (loop)
@@ -2981,8 +1964,8 @@ def _disk_change_accept_option(st: _Gl080Storage) -> bool:
     `main-exit` ON EITHER OF THOSE ANSWERS, so it cannot reach anything after
     `perform disk-change.` [general/gl080.cbl:L406] either - not the archive open,
     not the batch walk, not `compress-post` [general/gl080.cbl:L322] and not phase
-    5. Warning and then continuing with the computed path - what this function
-    used to do - reaches a state the frozen program has no path to, which is a
+    5. Warning and then continuing with the computed path reaches a state the frozen
+    program has no path to, which is a
     behaviour change and, at CWE-636, a fail-open one: the answer the operator was
     never allowed to give would have authorised a full-table archive, a posting
     delete and the period rollover.
@@ -3046,11 +2029,11 @@ def _disk_change_accept_option(st: _Gl080Storage) -> bool:
     # prompt; what it guaranteed - THAT CONTROL LEAVES THIS PARAGRAPH ONLY WHEN
     # THE OPTION IS 9 OR ZERO - is preserved by FAILING CLOSED on any other value.
     #
-    # FAILING CLOSED, NOT WARNING AND PROCEEDING (finding CLI-07). An earlier
-    # draft logged a warning here and fell through, which let a third value carry
-    # on into the archiving walk and the whole of end-of-period processing - every
-    # batch stamp, every posting delete, the ledger-quarter rollover and the cycle
-    # increment. THE FROZEN PROGRAM CANNOT REACH THAT STATE: L548-L549 sends any
+    # FAILING CLOSED RATHER THAN WARNING AND PROCEEDING. Logging a warning and
+    # falling through would let a third value carry on into the archiving walk and
+    # the whole of end-of-period processing - every batch stamp, every posting
+    # delete, the ledger-quarter rollover and the cycle increment.
+    # THE FROZEN PROGRAM CANNOT REACH THAT STATE: L548-L549 sends any
     # value that is neither 9 nor zero straight back to L542, so the code below
     # this paragraph only ever runs with `a` at zero. Proceeding on a third value
     # was therefore not permissiveness but ADDED BEHAVIOUR, and behaviour that
@@ -3085,7 +2068,7 @@ def _disk_change_accept_option(st: _Gl080Storage) -> bool:
     # ACCEPTED and not UNRESOLVED. `archive_path_override is None` is that
     # operator.
     #
-    # ⭐ AN OVERRIDE OVERWRITES IN PLACE; IT DOES NOT REPLACE THE FIELD. Question
+    # AN OVERRIDE OVERWRITES IN PLACE; IT DOES NOT REPLACE THE FIELD. Question
     # `Q-GL084-ACCEPT-SEMANTICS` asked whether typed text REPLACES the presented
     # content or is INSERTED into it, and the compiled answer is NEITHER: it
     # overwrites from position 1 and leaves everything beyond what was typed
@@ -3503,10 +2486,12 @@ def _compress_post_loop1(st: _Gl080Storage) -> bool:
 def _compress_post_loop1_end(st: _Gl080Storage) -> None:
     """`loop1-end.` - turn both files around [general/gl080.cbl:L667-L673].
 
-    AMBIGUITY Q-20 - THE DANGEROUS LINE IN THIS PROGRAM. L673 performs `GL-Posting-Open-
-    Output` [copybooks/Proc-ACAS-FH-Calls.cob:L364], and on a relational store an open-
-    for-output can mean DELETE EVERY ROW - which is exactly what the transfer-file
-    handler does for the same verb [common/acas008.cbl:L313-L319].
+    AMBIGUITY Q-20, SETTLED - THE DANGEROUS LINE IN THIS PROGRAM. L673 performs
+    `GL-Posting-Open-Output` [copybooks/Proc-ACAS-FH-Calls.cob:L364], and on a relational
+    store an open-for-output DOES mean DELETE EVERY ROW: `acas006` forces `fn-Delete-All`
+    after the dispatch [common/acas006.cbl:L637-L644], exactly as the transfer-file
+    handler does for the same verb [common/acas008.cbl:L313-L319]. Q-23 keeps the
+    statement unreachable, so this is what it would do rather than what it does.
 
     Args:
         st: The program's storage.
@@ -3802,7 +2787,7 @@ def run(
     reordered within it.
 
     ITS CALLER, AND WHAT THAT CALLER DOES NOT DO. `general.cbl` dispatches this
-    program from `load09.` [general/general.cbl:L817-L820], which moves the
+    program from `load09.` [general/general.cbl:L817-L821], which moves the
     program name and transfers to the shared `load00.` block
     [general/general.cbl:L711-L722]. That block zeroes the term code, issues the
     `CALL` with these four arguments, and tests `if ws-term-code > 7`. UNLIKE
@@ -3829,7 +2814,7 @@ def run(
         zero go to accept-option` [general/gl080.cbl:L548-L549] returns every
         other value to the prompt, so no other value can reach the statements
         below it. Any other value raises `DiskChangeOptionNotAcceptable` rather
-        than proceeding (finding CLI-07).
+        than proceeding.
     `archive_path_override`  from [general/gl080.cbl:L555]. Edits where the flat
         archive rows are written. NO TABLE EFFECT - the archive is not a schema
         table. Default None, meaning keep the path `disk-change` computes at
@@ -3859,7 +2844,7 @@ def run(
     rows.
 
     Args:
-        ws_calling_data: `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L13].
+        ws_calling_data: `01 WS-Calling-Data` [copybooks/wscall.cob:L7-L14].
         system_record: `01 System-Record` [copybooks/wssystem.cob]. READ AND MUTATED -
             `Scycle` at [general/gl080.cbl:L334], [general/gl080.cbl:L360] and
             [general/gl080.cbl:L363], `Current-Quarter` at [general/gl080.cbl:L355] and

@@ -8,10 +8,10 @@
 # keeps the required name and pairs one closed-and-waiting batch with one
 # already-processed batch that must remain unchanged.
 #
-# ⭐ WHAT THIS FILE MEASURED, AND WHY THE WORD "ACCEPTED" NO LONGER APPEARS AS A
-# CLAIM ABOUT THIS RUN. An earlier revision of this header asserted that the
-# waiting batch's one stored posting "is accepted" and that the run "moves the
-# nominal balances and stamps their batch". BOTH ARE FALSE, and the measurement
+# WHAT THIS FILE MEASURED, AND WHY "ACCEPTED" IS NOT A CLAIM ABOUT THIS RUN.
+# It would be wrong to assert that the waiting batch's one stored
+# posting "is accepted" or that the run "moves the nominal balances and stamps their
+# batch". BOTH ARE FALSE, and the measurement
 # that refutes them is recorded under ANOMALY N-KEY in the description below and
 # reproduced by test_no_work_record_is_emitted_so_nothing_can_post. In one
 # sentence: the POST-KEY the frozen bridge stores cannot be decoded back into the
@@ -59,7 +59,7 @@
 # warning, counter, log line or rejection report may be added to make them
 # visible (Agent Action Plan section 0.6.5).
 #
-# KEYS APPEAR IN A FIXED ORDER, identically in all nine scenario files, and
+# KEYS APPEAR IN A FIXED ORDER, identically in all eight scenario files, and
 # the file is UTF-8, ASCII-only, LF-terminated, two-space indented and free of
 # tabs. It carries no wall-clock reading, no host identity, no process id, no
 # random value and no absolute host path, so two captures of one scenario are
@@ -84,7 +84,7 @@ description: |
   double-entry explosion and the ledger accumulation therefore remain
   source/arithmetic obligations rather than a fabricated scenario claim.
 
-  ⭐ ANOMALY N-KEY -- MEASURED, AND IT GOVERNS EVERYTHING BELOW
+  ANOMALY N-KEY -- MEASURED, AND IT GOVERNS EVERYTHING BELOW
   THE GENERAL LEDGER POSTING CYCLE CANNOT POST A SEEDED POSTING ROW AT ALL. Not
   "does not here" -- CANNOT, for a frozen-code reason, on either side. The chain
   was measured end to end on GnuCOBOL 3.2 against MariaDB 10.11.7:
@@ -326,7 +326,7 @@ description: |
 
   THE PARAGRAPH ORDER AND THE STAMPING THAT MAKES THE DIFF VISIBLE
   gl072 opens the batch file for i-o [general/gl072.cbl:L276], the nominal
-  ledger [general/gl072.cbl:L277] and the work file
+  ledger [general/gl072.cbl:L274] and the work file
   [general/gl072.cbl:L278] -- the last of these being a LINE SEQUENTIAL file
   [general/gl072.cbl:L95-L98] rather than anything in the database -- and then
   loops from [general/gl072.cbl:L283].
@@ -437,16 +437,12 @@ description: |
   ADJUSTED TO MAKE A RUN LOOK NEATER.
 
   THE PHASE LABELS, AND WHY THEIR NUMBERING IS NOT EXECUTION ORDER
-  The programs label their own phases on screen:
-    [general/gl070.cbl:L284]  Phase - 1.  Batch Check
-    [general/gl070.cbl:L292]  Phase - 2.  Transaction Pre-process
-    [general/gl072.cbl:L274]  Phase - 4.  Transaction Update
-  gl071 displays only a wait message [general/gl071.cbl:L170] and is unnumbered.
-  Phase three is transaction DELETION and lives in gl080, which executes AFTER
-  phase four and which this scenario does not drive. The numbering is preserved
-  as found and is not renumbered.
-
-
+  The programs label their own phases on screen -- phase one and phase two at
+  [general/gl070.cbl:L284] and [general/gl070.cbl:L292], phase four at
+  [general/gl072.cbl:L274] -- while gl071 shows only a wait message
+  [general/gl071.cbl:L170] and is unnumbered. Phase THREE is transaction
+  deletion, lives in gl080 and executes AFTER phase four. The numbering is
+  preserved as found and is not renumbered.
   WHY EXACTLY THESE THREE TABLES -- A MEASURED VERB CENSUS, NOT AN INFERENCE
   Counting every facade verb the three programs issue:
     gl070 issues twelve, and every one is READ-ONLY: GL-Batch-Open-Input at
@@ -459,7 +455,7 @@ description: |
       [general/gl070.cbl:L486]; GL-Posting-Close at [general/gl070.cbl:L466].
     gl071 issues NONE. It is a pure SORT.
     gl072 issues exactly eight: GL-Batch-Open [general/gl072.cbl:L276],
-      GL-Nominal-Open [general/gl072.cbl:L277], GL-Batch-Rewrite
+      GL-Nominal-Open [general/gl072.cbl:L274], GL-Batch-Rewrite
       [general/gl072.cbl:L377], GL-Nominal-Rewrite [general/gl072.cbl:L382],
       GL-Nominal-Read-Next [general/gl072.cbl:L408], GL-Batch-Close
       [general/gl072.cbl:L441], GL-Nominal-Close [general/gl072.cbl:L442] and
@@ -508,13 +504,13 @@ description: |
   regardless inside the bound.
 
   TWO CELLS OF SYSTEM-REC ARE WITHHELD FROM THE CAPTURE, AND ONLY TWO.
-  `RDBMS-Passwd pic x(12)' [copybooks/wssystem.cob:L139] and the frozen schema's
-  shorter PASS-WORD column are the database's own password as seeded, and a dump
-  is SELECT *, so harness/dump_tables.py's REDACTED_COLUMNS replaces exactly
-  those two cells, on BOTH sides, with one fixed marker -- which is why this file
-  declares neither field. The row is still dumped and still diffed, every other
-  column byte for byte, so this is not an ignore-list, and withholding a secret
-  symmetrically cannot conceal a difference in anything the cycle computes.
+  `RDBMS-Passwd' [copybooks/wssystem.cob:L139] and the frozen schema's shorter
+  PASS-WORD column are the seeded database password, and a dump is SELECT *, so
+  harness/dump_tables.py's REDACTED_COLUMNS replaces those two cells, on BOTH
+  sides, with one fixed marker -- which is why this file declares neither field.
+  The row is still dumped and still diffed, every other column byte for byte, so
+  this is not an ignore-list, and an ignore-list in the diff stage remains
+  forbidden outright.
   THE ROW IS ALSO FINGERPRINTED, ON EVERY SCENARIO AND ON BOTH SIDES:
   acas_resolve_fingerprint_tables appends it when a scenario has not declared it,
   and tests/conftest.py's `assert_system_record_parity' compares the two sides'
@@ -570,7 +566,7 @@ description: |
        the two spellings converge [harness/run_cobol_scenario.sh acas_resolve_pinned_values],
        [harness/run_python_scenario.sh acas_py_resolve_pinned_values].
   The remaining four are INERT on this General Ledger route and are present only
-  so that all nine scenario files share one system block and so the seeded
+  so that all eight scenario files share one system block and so the seeded
   system record is fully determined: period, the cycles-per-quarter divisor used
   only by gl080 [copybooks/wssystem.cob:L64]; sl_autogen and pl_autogen, pinned
   to a space so the Sales side's pre-pass program is a provable no-op; and
@@ -716,39 +712,24 @@ description: |
     rather than assume success.
 
   THE GENERAL LEDGER CAVEAT -- WHY EXPECTED VALUES COME ONLY FROM THE ORACLE
-  The maintainer records that he has not worked with General at all since it was
-  migrated to the current compiler [README.TXT:L50-L53], while the same passage
-  reports the other ledgers as tested. THAT WARNING APPLIES WITH FULL FORCE HERE,
-  because this scenario deliberately provokes an error path in the least
-  exercised ledger in the system. No expected value for it may be derived from
-  documentation or from reasoning about intended behaviour: if the compiled cycle
-  behaves surprisingly -- if a batch is stamped that a reader would not expect,
-  or a balance moves that one would not -- THE SURPRISE IS THE SPECIFICATION
-  (rule R-6), it is reproduced rather than corrected (rule R-4), and the
-  arbitration is recorded in docs/migration/ambiguity-resolutions.md.
-
+  The maintainer reports the other ledgers as tested but records no work on
+  General since it was migrated to the current compiler [README.TXT:L50-L53],
+  and General contributes most of the in-scope programs.
+  So no expected value for this scenario is derived from documentation or from
+  reasoning about intent: if the compiled cycle behaves surprisingly, THE
+  SURPRISE IS THE SPECIFICATION (rule R-6), and the arbitration is recorded in
+  docs/migration/ambiguity-resolutions.md.
   THE ACCEPTANCE PROTOCOL, AND WHAT AN EMPTY DIFF PROVES HERE
-  TEN stages, in this order, one scenario at a time and nothing
-  alongside it. harness/normalize.py is the single registry and
-  `harness/normalize.py --print-stages' prints it, so this list is a restatement
-  and never the authority:
-    1 reset the schema and seed the scenario
-    2 run the compiled COBOL cycle
-    3 dump the COBOL state
-    4 normalise the COBOL dump
-    5 reset the schema and RE-SEED THE SAME SCENARIO -- the same fixture bytes, so
-      the Python cycle starts from the state the COBOL cycle started from and not
-      the state it left
-    6 run the migrated Python cycle
-    7 dump the Python state
-    8 normalise the Python dump
-    9 verify both captures are published -- BEFORE a single row is compared,
-      because two PARTIAL captures can produce an empty diff and so pass a
-      comparison that compared nothing
-    10 diff the two normalised trees
-  harness/build_oracle.sh and harness/seed.sh --build-fixtures come before stage 1 and are
-  not stages: the first runs once per image, the second once per change to a
-  scenario's seed records.
+  TEN stages, one scenario at a time and nothing alongside it.
+  `harness/normalize.py --print-stages' is the registry and the authority. The
+  two stages a reader would not guess are stage 5, which re-seeds THE SAME
+  FIXTURE BYTES so the Python cycle starts from the state the COBOL cycle
+  started from rather than the state it left, and stage 9, which verifies both
+  captures are published BEFORE a single row is compared, because two PARTIAL
+  captures produce an empty diff and so pass a comparison that compared nothing.
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures precede stage 1
+  and are not stages: the first runs once per image, the second once per change
+  to a scenario's seed records.
   The canonical command sequence is spelled out at
   [harness/docker-compose.yml "STAGES."]. AN EMPTY NORMALISED DIFF IS THE ONLY PASS
   CONDITION [harness/docker-compose.yml "AN EMPTY DIFF FROM THAT LAST COMMAND IS THE PASS CONDITION"],
@@ -768,14 +749,13 @@ description: |
   in fixed-character columns, decimal scale rendering and the date text forms
   [harness/normalize.py normalize_dump]; the differ requires both trees to be normalised
   before it will compare them [harness/diff_states.py NORMALIZED_SUFFIXES].
-  This file's consumers are all present in the checkout:
-  the four documents under docs/migration/, the eight modules under
-  tests/scenarios/ (one per scenario), and harness/run_python_scenario.sh.
-  The seed FLAT FILES are deliberately not in the
-  checkout: the records are declared above under seed_records and
-  harness/seed.sh --build-fixtures builds the files from them inside the image, because
-  fifteen of the seventeen frozen loaders read ORGANIZATION INDEXED or RELATIVE
-  files whose on-disk form belongs to the Berkeley DB version that image carries.
+  This file's consumers are all in the checkout: the four documents under
+  docs/migration/, the eight modules under tests/scenarios/ and
+  harness/run_python_scenario.sh. Its seed FLAT FILES are not: the records are
+  declared above under seed_records and harness/seed.sh --build-fixtures builds
+  the files inside the image, because fifteen of the seventeen frozen loaders
+  read ORGANIZATION INDEXED or RELATIVE files whose on-disk form belongs to the
+  Berkeley DB version that image carries.
 
 
   THE CONSUMER CONTRACT -- WHY SOME VALUES APPEAR UNDER TWO KEYS
@@ -839,34 +819,17 @@ description: |
   by construction: name equals mixed_accepted_rejected equals the file stem.
 
   LOCATOR PROVENANCE
-  Every line number cited above was read directly out of the frozen source and
-  out of the harness scripts in this checkout rather than copied from a plan, and
-  several planning citations were found to be off by one or misattributed. The
-  corrections worth knowing when cross-reading, all of them recorded in
-  docs/migration/ambiguity-resolutions.md:
-    gl070 -- the phase labels are at [general/gl070.cbl:L284] and
-      [general/gl070.cbl:L292]; the terminate-code raise is at
-      [general/gl070.cbl:L289] and not the line above it, which is a display
-      paragraph; the two cycle filters are at [general/gl070.cbl:L312-L313] and
-      [general/gl070.cbl:L457-L458], with the extra status conditions at
-      [general/gl070.cbl:L460-L463]; the qualified references are at
-      [general/gl070.cbl:L497], [general/gl070.cbl:L521] and
-      [general/gl070.cbl:L525].
-    gl071 -- the sort spans [general/gl071.cbl:L172-L178] with its first key at
-      [general/gl071.cbl:L173].
-    gl072 -- the phase-four label is at [general/gl072.cbl:L274]; the two silent
-      skips are at [general/gl072.cbl:L291-L292] and
-      [general/gl072.cbl:L306-L307]; the batch fetch sets the sentinel at
-      [general/gl072.cbl:L459] inside the test at [general/gl072.cbl:L458]; and
-      the sequential nominal read is a single statement at
-      [general/gl072.cbl:L408].
-    wsbatch -- the record carries no actual-debit or actual-credit field, so the
-      four money fields at [copybooks/wsbatch.cob:L41-L44] are the whole of its
-      monetary content.
+  Every line number cited above was read out of the frozen source and out of the
+  harness scripts in this checkout; docs/migration/traceability.md carries the
+  corrected-locator record and docs/migration/ambiguity-resolutions.md carries the
+  arbitration behind it. Two facts are cited only here: the gl072 batch fetch sets
+  its sentinel at [general/gl072.cbl:L459] inside the test at
+  [general/gl072.cbl:L458], and the batch record carries no actual-debit or
+  actual-credit field, so the four money fields at [copybooks/wsbatch.cob:L41-L44]
+  are the whole of its monetary content.
   THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common, copybooks,
   general, sales, purchase, irs, stock or mysql is a defect in the migration
   however harmless it looks.
-
 subsystem: general
 
 # Read by [harness/run_cobol_scenario.sh acas_resolve_operations] as the default for its
@@ -880,7 +843,7 @@ clock:
   run_date: 155127
 
 # Flat mirrors of the clock block, required by
-# [harness/run_cobol_scenario.sh acas_resolve_pinned_values] and [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
+# [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
 # The pair is not two independent facts: the menu computes the text FROM the
 # binary [general/general.cbl:L465-L467] through maps04, whose epoch the
 # maintainer records as 31/12/1600 [common/maps04.cbl:L39-L41], and under that
@@ -902,7 +865,7 @@ system:
   p_flag_p: 2
 
 # Flat mirrors of the two system values the COBOL runner reads directly:
-# [harness/run_cobol_scenario.sh acas_resolve_pinned_values] and [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
+# [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
 date_form: 1
 irs_instead: " "
 
@@ -957,8 +920,8 @@ operations:
 # `if WS-Post-Key = zero / go to loop.', skips it. The work file is therefore empty,
 # gl072 reads nothing, the end-batch rewrite is unreachable, and the run is a no-op
 # over all three tables. That measured limit is also why this fixture carries TWO
-# batches and ONE posting rather than the three-batch, three-posting-kind fixture an
-# earlier draft described: the store can address only one posting primary key, and a
+# batches and ONE posting rather than a three-batch, three-posting-kind fixture: the
+# store can address only one posting primary key, and a
 # fixture invented to exhibit a path the store cannot reach would be evidence of
 # nothing. docs/migration/scenario-diff-evidence.md section 10.5 records both facts.
 #
@@ -1266,7 +1229,7 @@ seed_records:
   # exercising the sequential nominal cursor without inventing a second SQL row.
   posting.dat:
     - WS-Post-rrn: "1"
-      # ⭐ THIS ROW IS UNMATCHABLE AFTER AN SQL ROUND TRIP, AND THE SKIP IT CAUSES
+      # THIS ROW IS UNMATCHABLE AFTER AN SQL ROUND TRIP, AND THE SKIP IT CAUSES
       # IS gl070'S, NOT gl072'S. Declared batch 1 / post 1 becomes the ten bytes
       # "0000100001"; the frozen group move stores the first eight of them as
       # 472328296244457520 [common/glpostingMT.cbl:L1054], and reading back yields

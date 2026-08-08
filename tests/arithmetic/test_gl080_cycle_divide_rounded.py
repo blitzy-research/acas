@@ -95,9 +95,8 @@ THE DIVISION BY ZERO IS REACHABLE. The only guard on the divisor is
 non-negative `scycle` when `period` is zero, so L328 is reached with a zero
 divisor. Nothing here guards it, converts it to a sentinel or skips it.
 
-RULES. There is NO user rules document for this project - `review_rules` reports
-that none was provided - so the binding rules are the six the Technical
-Specification carries in section 0.7.2, and this file honours them as follows.
+RULES. The binding rules are the six the Technical Specification carries in
+section 0.7.2, and this file honours them as follows.
 
   R-1  No COBOL at runtime. This file imports `acas_posting.cobol`,
        `acas_posting.dictionary`, `pytest` and the standard library, and nothing
@@ -134,9 +133,9 @@ THE AMBIGUITY REGISTER IDS CITED HERE, none of them invented by this file:
         rounds half away from zero, and the shipped layer does. The NUMBER OF
         INTERMEDIATE DIGITS is a property of the compiler build and was settled by
         a focused probe, so `Q-2` is `RESOLVED BY ORACLE` (2026-08-07) - extended
-        precision throughout, quantized ONCE at the store. The register records
-        that this entry was previously wrong in BOTH directions and keeps the
-        rejected readings as evidence. No figure in this file turns on the digit
+        precision throughout, quantized ONCE at the store. The register keeps the two
+        rejected readings - one wrong in each direction - as evidence of what the
+        measurement excluded. No figure in this file turns on the digit
         count regardless: every quotient here lands in a two-digit receiver, so
         sixty working digits and the measured default agree.
   Q-3   a signed copybook item narrowed to an unsigned host variable and an
@@ -166,8 +165,8 @@ THE AMBIGUITY REGISTER IDS CITED HERE, none of them invented by this file:
         and recorded on
         `acas_posting.cobol.move.UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE`.
 
-WHAT THIS FILE DOES NOT TOUCH. `MOVE` semantics belong to `acas_posting/cobol/
-move.py` and to the `MOVE`-truncation test file, so the three `move` statements
+WHAT THIS FILE DOES NOT TOUCH. `MOVE` semantics belong to
+`acas_posting/cobol/move.py` and to the `MOVE`-truncation test file, so the three `move` statements
 in the block - L345, L347 and the two `move 1` resets - are modelled by
 recording WHICH field is written and with what value, which is the observable
 A-2 and A-3 are about. The frozen COBOL, the bridges, the copybooks and
@@ -288,8 +287,8 @@ def _entry(
     """Return the dictionary entry for `key`, searching by name if it moved.
 
     The exact key is tried first, because that is the key this file cites and the
-    one a reader can grep for. If the artifact has since keyed the same field
-    differently - the table-and-column form rather than the record-and-field
+    one a reader can grep for. If the artifact keys the same field differently -
+    the table-and-column form rather than the record-and-field
     form, or a different declaration-line suffix - the field name is matched
     against the entries of the table and of the copybook record, case-folded,
     so that a rename of the KEY cannot silently pass as a missing FIELD.
@@ -648,7 +647,7 @@ def _end_of_period(
     the loop uses it as a subscript. Reorder any two of those and the program
     means something else.
 
-    ⛔ `incoming_a` IS A PARAMETER AND IS NEVER INITIALISED HERE, because the slice
+    `incoming_a` IS A PARAMETER AND IS NEVER INITIALISED HERE, because the slice
     this function transcribes begins at L324 and `a` is READ there before L328
     writes it. Setting `a` to zero inside this function would make
     [general/gl080.cbl:L324] dead code and would delete the only observable the
@@ -676,8 +675,8 @@ def _end_of_period(
     shipped program for the state it CAN present, so the two cannot drift.
 
     The three `move` statements are recorded rather than performed, for the
-    reason the module docstring gives: `MOVE` semantics are `acas_posting/cobol/
-    move.py`'s subject, and what A-2 and A-3 are about is WHICH field a store
+    reason the module docstring gives: `MOVE` semantics are
+    `acas_posting/cobol/move.py`'s subject, and what A-2 and A-3 are about is WHICH field a store
     reaches, not how a picture truncates. `move 1 to ...` is put on the
     receiver's own carrier with `store`, since 1 lies inside every one of these
     receivers' domains and so cannot differ between the two spellings.
@@ -765,7 +764,7 @@ def _end_of_period(
     #  the class-1 loop-back at L349 becomes the next iteration.
     for balance in balances:
         #  345  move     ledger-balance  to  ledger-q (a).
-        #  ⭐ ANOMALY A-2 [general/gl080.cbl:L328], [general/gl080.cbl:L345] and
+        #  ANOMALY A-2 [general/gl080.cbl:L328], [general/gl080.cbl:L345] and
         #  `occurs 4` [copybooks/wsledger.cob:L36]. `a` is the ROUNDED quotient
         #  and is used here with NO BOUNDS TEST. The subscript is RECORDED
         #  EXACTLY AS COMPUTED - not clamped, not checked, not warned about, and
@@ -776,7 +775,7 @@ def _end_of_period(
 
         #  346  if       current-quarter = 4
         #  347           move  ledger-balance  to  ledger-last.
-        #  ⭐ ANOMALY A-3 [general/gl080.cbl:L345-L357]. ONE LINE after the
+        #  ANOMALY A-3 [general/gl080.cbl:L345-L357]. ONE LINE after the
         #  subscripted store, the program consults a COMPLETELY DIFFERENT notion
         #  of "which quarter": `Current-Quarter` [copybooks/wssystem.cob:L110],
         #  advanced by its own counter at [general/gl080.cbl:L355-L357] and never
@@ -855,11 +854,10 @@ def test_scycle_cyclea_and_period_are_signed_one_byte_binary_items(
 
     Provenance: `binary-char` [copybooks/wssystem.cob:L62-L64] with no UNSIGNED
     keyword, so the width is one byte and the domain is a signed byte's. The
-    default `binary-size` and `binary-truncate` policy behind those two figures is
-    the DOCUMENTED GnuCOBOL default, transcribed into
-    `acas_posting/cobol/usage.py` rather than observed - the register keeps it
-    pending as question Q-5.1 and names the provisional values so that the oracle
-    can confirm or overturn a stated figure.
+    default `binary-size` and `binary-truncate` policy behind those two figures was
+    measured, not transcribed: `Q-5.1` is `RESOLVED BY ORACLE` - two rules, not one,
+    a pictured item reducing on digits and a pictureless one wrapping at capacity -
+    and `acas_posting/cobol/usage.py` carries the measured policy.
     """
     assert descriptor.dictionary_key is not None
     assert descriptor.source_locator == locator
@@ -995,7 +993,7 @@ def test_the_binary_char_declaration_governs_and_nothing_is_adjudicated() -> Non
         assert drift.usage is True
         assert any("Signedness disagrees" in detail for detail in drift.details)
         assert descriptor.anomaly_refs() == ("A-11",)
-        # Q-3 RESOLVED (finding F-19), so the tuple is now empty: the measurement
+        # Q-3 RESOLVED, so the tuple is now empty: the measurement
         # is carried in the entry notes and A-11 remains in anomaly_refs.
         assert descriptor.ambiguity_refs() == ()
         assert any("MEASURED against GnuCOBOL" in note
@@ -1199,9 +1197,9 @@ def test_one_statement_pair_spans_three_storage_classes() -> None:
 # ---------------------------------------------------------------------------
 #  THE SELF-CANCELLING ROUND-TRIP GATE
 #
-#      a = ROUND_HALF_UP(scycle / period)     L328,  rounded=True
-#      y = a * period                         L329,  rounded=False
-#      if scycle not = y: go to main-end      L331-L332   <-- THE GATE
+#  a = ROUND_HALF_UP(scycle / period)     L328,  rounded=True
+#  y = a * period                         L329,  rounded=False
+#  if scycle not = y: go to main-end      L331-L332   <-- THE GATE
 # ---------------------------------------------------------------------------
 
 
@@ -1393,7 +1391,7 @@ def test_rounding_moves_a_even_where_it_cannot_move_the_gate(
 
 
 def test_the_rounding_direction_flips_the_next_invocation() -> None:
-    """⭐ WHERE THE `ROUNDED` KEYWORD ACTUALLY DECIDES A PHASE.
+    """WHERE THE `ROUNDED` KEYWORD ACTUALLY DECIDES A PHASE.
 
     `a` is READ at [general/gl080.cbl:L324] and WRITTEN at
     [general/gl080.cbl:L328], in that order, and `77 a pic 99 value zero.`
@@ -1416,7 +1414,7 @@ def test_the_rounding_direction_flips_the_next_invocation() -> None:
     spellings differ over whether the phase runs at all, not merely over which
     slot it would have written.
 
-    ⛔ This is why `_end_of_period` takes `incoming_a` and never initialises it.
+    This is why `_end_of_period` takes `incoming_a` and never initialises it.
     """
     first_as_written = _end_of_period(
         incoming_a=_A_NOT_ARMED, scycle=17, period=2, rounded=True
@@ -1601,9 +1599,9 @@ def test_the_half_way_quotient_rounds_away_from_zero() -> None:
 
 # ---------------------------------------------------------------------------
 #  ANOMALY A-2  -  THE UNBOUNDED QUARTER SUBSCRIPT
-#      move     ledger-balance  to  ledger-q (a).      [general/gl080.cbl:L345]
-#      05  Ledger-Q  pic s9(8)v99  comp-3  occurs  4.  [copybooks/wsledger.cob:L36]
-#  ⛔ NOTHING BELOW BOUNDS-CHECKS `a`, AND NOTHING MAY (R-3, R-4).
+#  move     ledger-balance  to  ledger-q (a).      [general/gl080.cbl:L345]
+#  05  Ledger-Q  pic s9(8)v99  comp-3  occurs  4.  [copybooks/wsledger.cob:L36]
+#  NOTHING BELOW BOUNDS-CHECKS `a`, AND NOTHING MAY (R-3, R-4).
 # ---------------------------------------------------------------------------
 
 
@@ -1674,7 +1672,7 @@ def test_a2_the_out_of_range_band_is_reachable_on_a_passing_gate(
     INCLUDED - the guard at [general/gl080.cbl:L324] cannot exclude nine here,
     because it read `a` before the divide wrote it.
 
-    ⛔ Nothing is clamped, nothing raises and nothing is logged as a warning. The
+    Nothing is clamped, nothing raises and nothing is logged as a warning. The
     subscripts come back exactly as computed.
     """
     balances = (Decimal("11.11"), Decimal("-22.22"))
@@ -1756,7 +1754,7 @@ def test_a2_subscript_zero_needs_a_negative_period(census: _Census) -> None:
     assert period_entry.bridge_host_variable.signed is False
     assert period_entry.column is not None
     assert period_entry.column.unsigned is True
-    # Q-3 RESOLVED (finding F-19); the measurement is in the notes and the anomaly
+    # Q-3 RESOLVED; the measurement is in the notes and the anomaly
     # reference is unchanged.
     assert period_entry.ambiguity_refs == ()
     assert any("MEASURED against GnuCOBOL" in note for note in period_entry.notes)
@@ -1830,7 +1828,7 @@ def test_a2_an_out_of_record_subscript_stores_past_the_record_and_moves_no_colum
     no compile line in this repository enables bounds checking - so that half was
     measured on the oracle (rule R-6).
 
-    THE MEASUREMENT (finding F-19). GnuCOBOL 3.2.0, `cobc -x -free`, default
+    THE MEASUREMENT. GnuCOBOL 3.2.0, `cobc -x -free`, default
     flags - no dialect selection, no `>>SET ARITHMETIC`, no bounds-checking flag,
     matching every compile line in this repository. `WS-Ledger-Record` was
     transcribed field for field with a `pic x(20)` sentinel declared IMMEDIATELY
@@ -1865,7 +1863,7 @@ def test_a2_an_out_of_record_subscript_stores_past_the_record_and_moves_no_colum
     part, logs the overrun, and does NOT raise - and the log record is licensed by
     section 0.3.4's rule for a diagnostic with no database effect.
 
-    ⛔ NO BOUND IS ADDED HERE OR ANYWHERE (rules R-3, R-4). The former
+    NO BOUND IS ADDED HERE OR ANYWHERE (rules R-3, R-4). The former
     `xfail(strict=True)` asserted the opposite of the reading below - that the
     store still lands inside the record - which the layout arithmetic refutes
     outright and which `test_a2_the_subscript_bands` already asserts the negation
@@ -1940,9 +1938,9 @@ def test_a2_an_out_of_record_subscript_stores_past_the_record_and_moves_no_colum
 # ---------------------------------------------------------------------------
 #  ANOMALY A-3  -  TWO DISAGREEING NOTIONS OF "CURRENT QUARTER",
 #  DECLARED ONE LINE APART
-#      move     ledger-balance  to  ledger-q (a).   [general/gl080.cbl:L345]
-#      if       current-quarter = 4                 [general/gl080.cbl:L346]
-#  ⛔ THE TWO ARE NOT RECONCILED, AND MUST NOT BE (R-3, R-4).
+#  move     ledger-balance  to  ledger-q (a).   [general/gl080.cbl:L345]
+#  if       current-quarter = 4                 [general/gl080.cbl:L346]
+#  THE TWO ARE NOT RECONCILED, AND MUST NOT BE (R-3, R-4).
 # ---------------------------------------------------------------------------
 
 
@@ -2020,7 +2018,7 @@ def test_a3_the_two_notions_of_quarter_can_disagree() -> None:
         quarter slot and `Ledger-Last` is NOT written, even though the fourth
         quarter is exactly what was just stored.
 
-    ⛔ The two are NOT reconciled, not cross-checked and not warned about. A
+    The two are NOT reconciled, not cross-checked and not warned about. A
     migration that made `current-quarter` follow `a` would post `Ledger-Last`
     on different rows from the compiled program, which is a table-visible
     difference (R-3, R-4).
@@ -2070,9 +2068,9 @@ def test_a3_the_two_notions_of_quarter_can_disagree() -> None:
 
 # ---------------------------------------------------------------------------
 #  THE REACHABLE DIVISION BY ZERO
-#      if       a = 9  or  scycle <  period  ->  go to main-end. [L324-L326]
-#      divide   scycle by period giving a rounded.               [L328]
-#  ⛔ NO GUARD IS ADDED HERE. THE OUTCOME IS ASSERTED (R-3).
+#  if       a = 9  or  scycle <  period  ->  go to main-end. [L324-L326]
+#  divide   scycle by period giving a rounded.               [L328]
+#  NO GUARD IS ADDED HERE. THE OUTCOME IS ASSERTED (R-3).
 # ---------------------------------------------------------------------------
 
 
@@ -2096,7 +2094,7 @@ def test_the_zero_divisor_is_reachable_and_stores_nothing() -> None:
     undefined division, whose signal class is not a `ZeroDivisionError` at all -
     and the layer brings them to the SAME outcome, as COBOL does.
 
-    ⛔ Nothing here guards, skips, or substitutes a sentinel. The one thing that is
+    Nothing here guards, skips, or substitutes a sentinel. The one thing that is
     asserted unconditionally is that no value is silently produced.
 
     The connection to ANOMALY A-2: the statement that meets the zero divisor is
@@ -2177,7 +2175,7 @@ def test_the_l324_guard_can_pre_empt_the_zero_divisor() -> None:
 #
 #  There is NO `ON SIZE ERROR` phrase and NO `REMAINDER` phrase anywhere in the
 #  twelve in-scope programs, so an oversized or negative result into a two-digit
-#  unsigned field is reshaped in silence. ⛔ Nothing raises, clamps or warns.
+#  unsigned field is reshaped in silence. Nothing raises, clamps or warns.
 # ---------------------------------------------------------------------------
 
 
@@ -2199,8 +2197,8 @@ def test_silent_overflow_at_l328_changes_the_phase_disposition() -> None:
 
     Provenance for the two stored values: the store policy for a zoned item -
     low-order digits kept, sign dropped, nothing reported - was measured on
-    GnuCOBOL 3.2.0 and is recorded as question Q-5 in `acas_posting/cobol/
-    usage.py`. Reproduced, not repaired (R-4).
+    GnuCOBOL 3.2.0 and is recorded as question Q-5 in
+    `acas_posting/cobol/usage.py`. Reproduced, not repaired (R-4).
 
     ANOMALY A-2 [general/gl080.cbl:L345] is present in the first case too: 27 is
     far outside `occurs 4` [copybooks/wsledger.cob:L36], so had the gate let this
@@ -2309,8 +2307,8 @@ def test_add_one_to_scycle_is_an_unrounded_store_that_wraps_silently() -> None:
     `Scycle ... binary-char` [copybooks/wssystem.cob:L63], so the increment is an
     integer store into one signed byte and the top of the domain wraps to the
     bottom in silence. Provenance for the wrap: the default `binary-size` and
-    `binary-truncate` policy, transcribed from the documented GnuCOBOL default into
-    `acas_posting/cobol/usage.py` and pending measurement as question Q-5.1.
+    `binary-truncate` policy measured under question `Q-5.1`, now
+    `RESOLVED BY ORACLE` and carried by `acas_posting/cobol/usage.py`.
 
     Reproduced, not repaired: raising here would abort a phase the compiled program
     completes (R-3, R-4).
@@ -2461,7 +2459,7 @@ def test_the_ambient_decimal_context_cannot_change_the_result() -> None:
 # ===========================================================================
 # GROUP N - THE CONFORMANCE LOCK: `_end_of_period` AGAINST THE SHIPPED PROGRAM
 #
-# ⭐ WHY THIS SECTION EXISTS. Every assertion above consumes `_end_of_period`, which
+# WHY THIS SECTION EXISTS. Every assertion above consumes `_end_of_period`, which
 # executes [general/gl080.cbl:L324-L363] as its own sequence over the production
 # primitives. That is a SECOND SOURCE for the end-of-period logic: the shipped
 # `acas_posting/programs/gl080_end_of_cycle.py` runs the same statements, and nothing
@@ -2481,15 +2479,15 @@ def test_the_ambient_decimal_context_cannot_change_the_result() -> None:
 # WHAT THE PRODUCTION PATH CANNOT PRESENT, stated so the transcription's remaining role
 # is honest rather than assumed:
 #
-#   - `a = 9` at the gate is UNREACHABLE. `move zero to a` [general/gl080.cbl:L290] runs
-#     on every entry, and the only other writer before the gate is
-#     `move 1 to a` [general/gl080.cbl:L386] inside `gl080a`. So `a` is 0 or 1 there and
-#     never 9. The frozen program still tests `if a = 9` [general/gl080.cbl:L324], so the
-#     branch is reproduced (R-4) and `_end_of_period` is how it is exercised - but it is
-#     exercised as a SOURCE-LEVEL branch, not as a reachable state.
-#   - `a = 1` at the gate ABORTS BEFORE IT. `gl080a` setting `a` to 1 means batches are
-#     outstanding, and [general/gl080.cbl:L307-L313] leaves through `main-end` on that
-#     alone. So the gate only ever sees `a = 0`.
+#  - `a = 9` at the gate is UNREACHABLE. `move zero to a` [general/gl080.cbl:L290] runs
+#  on every entry, and the only other writer before the gate is
+#  `move 1 to a` [general/gl080.cbl:L386] inside `gl080a`. So `a` is 0 or 1 there and
+#  never 9. The frozen program still tests `if a = 9` [general/gl080.cbl:L324], so the
+#  branch is reproduced (R-4) and `_end_of_period` is how it is exercised - but it is
+#  exercised as a SOURCE-LEVEL branch, not as a reachable state.
+#  - `a = 1` at the gate ABORTS BEFORE IT. `gl080a` setting `a` to 1 means batches are
+#  outstanding, and [general/gl080.cbl:L307-L313] leaves through `main-end` on that
+#  alone. So the gate only ever sees `a = 0`.
 #
 # Those two facts also correct something this file used to assert. `_end_of_period`'s
 # docstring said `a` "is initialised ONCE, when the module is loaded, and gl080 leaves
@@ -2727,15 +2725,15 @@ def test_the_transcription_agrees_with_the_shipped_program(
 #  part that reaches a table. Measured on the compiled oracle 2026-08-07, the
 #  chain runs on past the divide:
 #
-#    L290  move zero to a                     a is 0 on every entry
-#    L324  if a = 9 or scycle < period        0 = 9 false; 0 < 0 false -> NOT taken
-#    L328  divide scycle by period giving a   SIZE ERROR, NO STORE, a stays 0,
-#          rounded                            and the RUN CONTINUES (exit 0)
-#    L329  multiply a by period giving y      0 * 0 -> y = 0
-#    L331  if scycle not = y go to main-end   0 not= 0 is FALSE -> NOT taken
-#    L334  add 1 to scycle
-#    L345  move ledger-balance to             subscript 0, on every ledger row
-#          ledger-q (a)
+#  L290  move zero to a                     a is 0 on every entry
+#  L324  if a = 9 or scycle < period        0 = 9 false; 0 < 0 false -> NOT taken
+#  L328  divide scycle by period giving a   SIZE ERROR, NO STORE, a stays 0,
+#  rounded                            and the RUN CONTINUES (exit 0)
+#  L329  multiply a by period giving y      0 * 0 -> y = 0
+#  L331  if scycle not = y go to main-end   0 not= 0 is FALSE -> NOT taken
+#  L334  add 1 to scycle
+#  L345  move ledger-balance to             subscript 0, on every ledger row
+#  ledger-q (a)
 #
 #  So `period = 0` with `scycle = 0` does not merely fail to store a quotient - it
 #  walks into phase 5 carrying subscript ZERO, and subscript zero is not harmless.
@@ -2745,14 +2743,14 @@ def test_the_transcription_agrees_with_the_shipped_program(
 #  `LEDGER-BALANCE`, gets NO quarter column updated at all, and is then persisted
 #  by `GL-Nominal-Rewrite`.
 #
-#  ⭐ WHY IT IS PARTICULARLY HARD TO SPOT, and the reason it is worth a section of
+#  WHY IT IS PARTICULARLY HARD TO SPOT, and the reason it is worth a section of
 #  its own: [general/gl080.cbl:L346-L347] contains a LEGITIMATE
 #  `move ledger-balance to ledger-last`, taken when `current-quarter = 4`. The
 #  corrupting store writes THE SAME VALUE INTO THE SAME COLUMN. On a quarter-4 run
 #  it is invisible; on quarters 1 to 3 it produces a `LEDGER-LAST` that looks
 #  entirely plausible and is a quarter early. No diagnostic, no status, no abort.
 #
-#  ⛔ NOTHING IS GUARDED. `scycle = 5` escapes through the L331 gate and
+#  NOTHING IS GUARDED. `scycle = 5` escapes through the L331 gate and
 #  `scycle = 0` does not, and both outcomes are asserted rather than prevented.
 # ---------------------------------------------------------------------------
 
@@ -2827,7 +2825,7 @@ def test_subscript_zero_writes_a_real_ledger_column() -> None:
     control, landing in the trailing `03 filler pic x(50)`
     [copybooks/wsledger.cob:L37], which carries no column.
 
-    ⛔ A Python `[a - 1]` would make subscript 0 the LAST occurrence, which
+    A Python `[a - 1]` would make subscript 0 the LAST occurrence, which
     corresponds to nothing the compiled program does; `Ledger-Q4` staying at
     66.66 in the first row below is what rules that out.
     """
@@ -2876,13 +2874,6 @@ def test_subscript_zero_writes_a_real_ledger_column() -> None:
 
 
 # ==========================================================================
-#  MERGED GROUP - was tests/arithmetic/test_gl080_shipped_end_of_cycle.py
-#
-#  Relocated verbatim so that this directory holds exactly the fourteen test
-#  modules the Agent Action Plan section 0.3.1 inventory names. Nothing was
-#  rewritten: the group's own preamble follows, as its author wrote it, and
-#  every test below is the test that ran under the old file name.
-# ==========================================================================
 #
 #  The SHIPPED `gl080` end-of-cycle program, driven paragraph by paragraph.
 #
@@ -2894,8 +2885,8 @@ def test_subscript_zero_writes_a_real_ledger_column() -> None:
 #  `acas_posting/programs/gl080_end_of_cycle.py` - the module the CLI actually dispatches -
 #  still does any of it. Its brief forbids it from importing `acas_posting.programs`:
 #
-#      Must NOT import: `acas_posting.dal.*`, `cli`, `programs`, `clock`, `dates`,
-#      `workfiles`, `harness`, `sqlalchemy`, `mysql.connector`, `numpy`, `pandas` ...
+#  Must NOT import: `acas_posting.dal.*`, `cli`, `programs`, `clock`, `dates`,
+#  `workfiles`, `harness`, `sqlalchemy`, `mysql.connector`, `numpy`, `pandas` ...
 #
 #  So the model and the shipped module could drift apart in either direction and every test
 #  in that file would stay green. Deleting `rounded=True` from
@@ -2910,7 +2901,7 @@ def test_subscript_zero_writes_a_real_ledger_column() -> None:
 #  assert the same figure they are meant to, and a divergence between them is exactly the
 #  signal both exist to raise.
 #
-#  ⭐ WHAT IS NOT CLOSED HERE, AND WHY. `gl080` is reached by no scenario in
+#  WHAT IS NOT CLOSED HERE, AND WHY. `gl080` is reached by no scenario in
 #  `harness/scenarios/`, so no end-to-end diff covers it; that declination is recorded in
 #  `docs/migration/ambiguity-resolutions.md` section 16.1 and it is bounded by the Agent
 #  Action Plan rather than by preference. Section 0.3.1 fixes the scenario set at EIGHT
@@ -2923,18 +2914,18 @@ def test_subscript_zero_writes_a_real_ledger_column() -> None:
 #  HOW THE MODULE IS DRIVEN. Two seams, both already in the shipped code and neither added
 #  for the tests:
 #
-#    (1) `run(...)` [acas_posting/programs/gl080_end_of_cycle.py] takes the frozen
-#        `PROCEDURE DIVISION USING` list - `ws-calling-data`, `system-record`, `to-day`,
-#        `file-defs` [general/gl080.cbl:L269-L272] - plus the three promoted interactive
-#        answers Agent Action Plan section 0.3.4 turns into parameters. Every test that
-#        cares about the ROUTE enters here, because entering anywhere else would prove
-#        the route by assuming it.
-#    (2) `_Gl080Storage` is the program's working storage as one object, and the module
-#        reaches every handler through the MODULE-GLOBAL name `facade`. A test that needs
-#        to see `st.a`, `st.y` or the flat archive file after the run builds the storage
-#        itself and calls the section function, exactly as the COBOL `perform` does.
+#  (1) `run(...)` [acas_posting/programs/gl080_end_of_cycle.py] takes the frozen
+#  `PROCEDURE DIVISION USING` list - `ws-calling-data`, `system-record`, `to-day`,
+#  `file-defs` [general/gl080.cbl:L269-L272] - plus the three promoted interactive
+#  answers Agent Action Plan section 0.3.4 turns into parameters. Every test that
+#  cares about the ROUTE enters here, because entering anywhere else would prove
+#  the route by assuming it.
+#  (2) `_Gl080Storage` is the program's working storage as one object, and the module
+#  reaches every handler through the MODULE-GLOBAL name `facade`. A test that needs
+#  to see `st.a`, `st.y` or the flat archive file after the run builds the storage
+#  itself and calls the section function, exactly as the COBOL `perform` does.
 #
-#  ⛔ NO DATABASE, NO COBOL, NO SUBPROCESS (R-1). The handlers are replaced by
+#  NO DATABASE, NO COBOL, NO SUBPROCESS (R-1). The handlers are replaced by
 #  `_GlFacadeDouble`, which serves rows out of a list and records what it was asked to do.
 #  The two flat files the program declares - `fd archive` [general/gl080.cbl:L156] and
 #  `fd work-file` [general/gl080.cbl:L170] - are already in-process objects in the shipped
@@ -2947,25 +2938,25 @@ def test_subscript_zero_writes_a_real_ledger_column() -> None:
 #
 #  THE RULES, AS THEY BIND THIS FILE (Agent Action Plan section 0.7.2):
 #
-#    R-1  No COBOL at runtime. See above. No `harness` import, no subprocess, no FFI.
-#    R-2  Zero binary floating point. Every money figure below is a `Decimal` built from a
-#         string and every counter is an `int`. ⛔ no `float(`, no `pytest.approx`, no
-#         `math.isclose`, no tolerance.
-#    R-3  No new validations. ⭐⭐ THE QUARTER SUBSCRIPT STAYS UNBOUNDED and the two
-#         notions of quarter stay unreconciled. A test that asserted an `IndexError`,
-#         a clamp or a warning would be asserting a validation the frozen program does not
-#         perform.
-#    R-4  Anomalies reproduced, never fixed. This file locks ANOMALY A-2 (the unbounded
-#         subscript at [general/gl080.cbl:L328] and [general/gl080.cbl:L345]) and
-#         ANOMALY A-3 (two disagreeing notions of "current quarter",
-#         [general/gl080.cbl:L346] against [general/gl080.cbl:L355-L357]) IN THE SHIPPED
-#         MODULE, so that a future well-intentioned correction fails the suite.
-#    R-5  Traceability. Every test names the `[general/gl080.cbl:Lnnn]` it drives and the
-#         shipped function that reproduces it.
-#    R-6  Compiled behaviour is the tie-breaker. Where the compiled disposition is not
-#         settled the question is named - Q-19 for what an overrunning subscript writes
-#         past the record, Q-23 for the record-length stop - and the test asserts the
-#         SHIPPED behaviour without claiming the oracle has spoken.
+#  R-1  No COBOL at runtime. See above. No `harness` import, no subprocess, no FFI.
+#  R-2  Zero binary floating point. Every money figure below is a `Decimal` built from a
+#  string and every counter is an `int`. no `float(`, no `pytest.approx`, no
+#  `math.isclose`, no tolerance.
+#  R-3  No new validations. THE QUARTER SUBSCRIPT STAYS UNBOUNDED and the two
+#  notions of quarter stay unreconciled. A test that asserted an `IndexError`,
+#  a clamp or a warning would be asserting a validation the frozen program does not
+#  perform.
+#  R-4  Anomalies reproduced, never fixed. This file locks ANOMALY A-2 (the unbounded
+#  subscript at [general/gl080.cbl:L328] and [general/gl080.cbl:L345]) and
+#  ANOMALY A-3 (two disagreeing notions of "current quarter",
+#  [general/gl080.cbl:L346] against [general/gl080.cbl:L355-L357]) IN THE SHIPPED
+#  MODULE, so that a future well-intentioned correction fails the suite.
+#  R-5  Traceability. Every test names the `[general/gl080.cbl:Lnnn]` it drives and the
+#  shipped function that reproduces it.
+#  R-6  Compiled behaviour is the tie-breaker. Where the compiled disposition is not
+#  settled the question is named - Q-19 for what an overrunning subscript writes
+#  past the record, Q-23 for the record-length stop - and the test asserts the
+#  SHIPPED behaviour without claiming the oracle has spoken.
 #
 #  Also binding - Agent Action Plan section 0.8.4: no timing assertion and no performance
 #  measurement appears anywhere in this file. And section 0.8.1: the frozen COBOL, the
@@ -2975,55 +2966,51 @@ def test_subscript_zero_writes_a_real_ledger_column() -> None:
 #  THE FROZEN BLOCK THIS FILE DRIVES, verbatim from the checkout, so that a reader can
 #  check every assertion below against the source without leaving the file::
 #
-#       283  display  prog-name  at 0101 ...
-#       288  move     1  to  File-Key-No.
-#       289  move     zero  to  a.
-#       299  accept   keyed-reply  at 1065  with update auto.
-#       302  goback.                                  *> run NOT confirmed
-#       304  display  "Phase - 1.  Batch Check" ...
-#       305  perform  gl080a.
-#       308  if       a = 1
-#       313           go to  main-end.                *> batches outstanding
-#       315  if       archiving
-#       317           perform  gl080b               *> Phase 2, Transaction Archiving
-#       318  else
-#       320           perform  gl080c.              *> Phase 3, Transaction Deletion
-#       322  perform  compress-post.                *> Phase 4, Posting Contraction
-#       324  if       a = 9
-#       325      or   scycle <  period
-#       326           go to  main-end.
-#       328  divide   scycle by period giving a rounded.
-#       329  multiply a  by  period  giving  y.
-#       331  if       scycle not = y
-#       332           go to  main-end.
-#       334  add      1  to scycle.
-#       337  perform  GL-Nominal-Open.
-#       339  loop.
-#       342  perform  GL-Nominal-Read-Next.
-#       343  if       fs-reply = 10
-#       344           go to  loop-end.
-#       345  move     ledger-balance  to  ledger-q (a).
-#       346  if       current-quarter = 4
-#       347           move  ledger-balance  to  ledger-last.
-#       348  perform  GL-Nominal-Rewrite.
-#       349  go       to loop.
-#       351  loop-end.
-#       354  perform  GL-Nominal-Close.
-#       355  add      1  to  current-quarter.
-#       356  if       current-quarter = 5
-#       357           move  1  to  current-quarter.
-#       358  if       period = 3
-#       359      and  scycle > 12
-#       360           move 1 to scycle.
-#       361  if       period = 13
-#       362      and  scycle > 52
-#       363           move 1 to scycle.
-#       365  main-end.
-#       366  goback.
-#
-#  ⚠ PROVENANCE OF RULES. There is no user rules document - `review_rules` returns exactly
-#  `No user rules provided.` The six rules above are the Technical Specification's, section
-#  0.7.2, and nothing has been invented to fill the gap.
+#  283  display  prog-name  at 0101 ...
+#  288  move     1  to  File-Key-No.
+#  289  move     zero  to  a.
+#  299  accept   keyed-reply  at 1065  with update auto.
+#  302  goback.                                  *> run NOT confirmed
+#  304  display  "Phase - 1.  Batch Check" ...
+#  305  perform  gl080a.
+#  308  if       a = 1
+#  313           go to  main-end.                *> batches outstanding
+#  315  if       archiving
+#  317           perform  gl080b               *> Phase 2, Transaction Archiving
+#  318  else
+#  320           perform  gl080c.              *> Phase 3, Transaction Deletion
+#  322  perform  compress-post.                *> Phase 4, Posting Contraction
+#  324  if       a = 9
+#  325      or   scycle <  period
+#  326           go to  main-end.
+#  328  divide   scycle by period giving a rounded.
+#  329  multiply a  by  period  giving  y.
+#  331  if       scycle not = y
+#  332           go to  main-end.
+#  334  add      1  to scycle.
+#  337  perform  GL-Nominal-Open.
+#  339  loop.
+#  342  perform  GL-Nominal-Read-Next.
+#  343  if       fs-reply = 10
+#  344           go to  loop-end.
+#  345  move     ledger-balance  to  ledger-q (a).
+#  346  if       current-quarter = 4
+#  347           move  ledger-balance  to  ledger-last.
+#  348  perform  GL-Nominal-Rewrite.
+#  349  go       to loop.
+#  351  loop-end.
+#  354  perform  GL-Nominal-Close.
+#  355  add      1  to  current-quarter.
+#  356  if       current-quarter = 5
+#  357           move  1  to  current-quarter.
+#  358  if       period = 3
+#  359      and  scycle > 12
+#  360           move 1 to scycle.
+#  361  if       period = 13
+#  362      and  scycle > 52
+#  363           move 1 to scycle.
+#  365  main-end.
+#  366  goback.
 #
 # ==========================================================================
 
@@ -3113,7 +3100,7 @@ def _is_tier_isolated_name(name: str) -> bool:
 def _shipped_gl080() -> Iterator[types.ModuleType]:
     """Import the shipped `gl080` module for one test, leaving `sys.modules` as found.
 
-    ⭐ THE IMPORT IS NOT OPTIONAL AND IT IS NOT MEMOISED, for the reasons the sibling
+    THE IMPORT IS NOT OPTIONAL AND IT IS NOT MEMOISED, for the reasons the sibling
     loaders in this directory record: `pytest.importorskip` turns the one failure this
     file exists to catch - a shipped module that cannot be imported at all - into a
     PASS, and a memoised module is already resident, so the purge on the way out would
@@ -3185,26 +3172,26 @@ def _shipped_gl080() -> Iterator[types.ModuleType]:
 # ---------------------------------------------------------------------------
 #  2.  THE HANDLER DOUBLE
 #
-#      The program reaches sixteen facade verbs across three entities, and every one
-#      of them goes through the module-global name `facade`. Replacing that name is
-#      the whole of the substitution: nothing is patched inside the program, no
-#      function is wrapped, and the program cannot tell the difference because the
-#      COBOL cannot either - a `CALL "acas005"` resolves at run time.
+#  The program reaches sixteen facade verbs across three entities, and every one
+#  of them goes through the module-global name `facade`. Replacing that name is
+#  the whole of the substitution: nothing is patched inside the program, no
+#  function is wrapped, and the program cannot tell the difference because the
+#  COBOL cannot either - a `CALL "acas005"` resolves at run time.
 #
-#      WHY THE VERBS ARE SPELLED OUT ONE BY ONE rather than answered by a catch-all.
-#      A catch-all would keep working after a verb was renamed or dropped in the
-#      shipped module, which is precisely a change this file should fail on. Defining
-#      the sixteen explicitly makes the verb vocabulary a CHECKED FACT: an unexpected
-#      attribute raises `AttributeError` out of the double and the test fails.
+#  WHY THE VERBS ARE SPELLED OUT ONE BY ONE rather than answered by a catch-all.
+#  A catch-all would keep working after a verb was renamed or dropped in the
+#  shipped module, which is precisely a change this file should fail on. Defining
+#  the sixteen explicitly makes the verb vocabulary a CHECKED FACT: an unexpected
+#  attribute raises `AttributeError` out of the double and the test fails.
 #
-#      WHAT A REAL HANDLER DOES, and therefore what the double does. It MUTATES THE
-#      CALLER'S RECORD IN PLACE - the bridge's unload paragraph moves host variables
-#      into the `01` the caller passed [common/glpostingMT.cbl:L992-L998] - and it
-#      writes its status into `Fs-Reply` on the shared `File-Access` block
-#      [copybooks/wsfnctn.cob:L25]. It does NOT hand the record back as a return
-#      value, and the shipped program reads no return value either, so the double
-#      returns None: a program that started depending on a returned status would fail
-#      here rather than pass quietly.
+#  WHAT A REAL HANDLER DOES, and therefore what the double does. It MUTATES THE
+#  CALLER'S RECORD IN PLACE - the bridge's unload paragraph moves host variables
+#  into the `01` the caller passed [common/glpostingMT.cbl:L992-L998] - and it
+#  writes its status into `Fs-Reply` on the shared `File-Access` block
+#  [copybooks/wsfnctn.cob:L25]. It does NOT hand the record back as a return
+#  value, and the shipped program reads no return value either, so the double
+#  returns None: a program that started depending on a returned status would fail
+#  here rather than pass quietly.
 # ---------------------------------------------------------------------------
 
 
@@ -3500,7 +3487,7 @@ def _storage(
 ) -> Any:
     """Build `_Gl080Storage` the way `run` builds it, so a test can watch the fields.
 
-    ⭐ `a` AND `y` ARE PARAMETERS, not initialised constants. `[general/gl080.cbl:L324]`
+    `a` AND `y` ARE PARAMETERS, not initialised constants. `[general/gl080.cbl:L324]`
     reads `a` BEFORE `[general/gl080.cbl:L328]` writes it, and `77 a pic 99 value zero.`
     [general/gl080.cbl:L183] means its incoming value is whatever the program left there -
     so a test unit that initialised it internally could not express the read-before-write
@@ -3724,9 +3711,9 @@ def caplog_free() -> Iterator[list[logging.LogRecord]]:
 # ---------------------------------------------------------------------------
 #  3.  THE SEAM ITSELF
 #
-#      Before any behaviour is asserted, the substitution has to be shown to be the
-#      real one. If the program reached its handlers some other way, every test below
-#      would be observing a double nobody consulted.
+#  Before any behaviour is asserted, the substitution has to be shown to be the
+#  real one. If the program reached its handlers some other way, every test below
+#  would be observing a double nobody consulted.
 # ---------------------------------------------------------------------------
 
 
@@ -3797,11 +3784,11 @@ def test_the_double_answers_exactly_the_verbs_the_program_names() -> None:
 # ---------------------------------------------------------------------------
 #  4.  THE ROUTE - THE PHASE ORDER, DRIVEN THROUGH `run`
 #
-#      Agent Action Plan section 0.8.1 requires posting order and batch sequencing be
-#      preserved exactly, and section 0.6.4 records that `gl080` labels its own phases
-#      on screen in an order that is NOT the order of the numbers: deletion is
-#      "Phase - 3" but runs after "Phase - 4"'s neighbour and before "Phase - 5". The
-#      only way to lock a route is to assert the ordered call log of a real run.
+#  Agent Action Plan section 0.8.1 requires posting order and batch sequencing be
+#  preserved exactly, and section 0.6.4 records that `gl080` labels its own phases
+#  on screen in an order that is NOT the order of the numbers: deletion is
+#  "Phase - 3" but runs after "Phase - 4"'s neighbour and before "Phase - 5". The
+#  only way to lock a route is to assert the ordered call log of a real run.
 # ---------------------------------------------------------------------------
 
 
@@ -3835,13 +3822,13 @@ def test_the_phases_run_in_the_frozen_order_on_the_deletion_route() -> None:
         gl_nominal_read_next  342  at end
         gl_nominal_close      354  loop-end
 
-    ⭐ THE TWO OPENS OF THE BATCH FILE ARE BOTH REQUIRED AND ARE NOT THE SAME VERB.
+    THE TWO OPENS OF THE BATCH FILE ARE BOTH REQUIRED AND ARE NOT THE SAME VERB.
     Phase 1 opens INPUT [general/gl080.cbl:L376] and phase 3 opens I-O
     [general/gl080.cbl:L574]; collapsing them into one open would let phase 1 rewrite,
     and dropping phase 1's close [general/gl080.cbl:L391] would leave the file open
     across a walk that reopens it.
 
-    ⭐ `gl_posting_close` COMES AFTER THE DELETE WALK AND BEFORE THE BATCH REWRITE
+    `gl_posting_close` COMES AFTER THE DELETE WALK AND BEFORE THE BATCH REWRITE
     [general/gl080.cbl:L580-L588], which is the account-before-batch ordering Agent
     Action Plan section 0.6.4 names: the batch is stamped only once its postings are
     dealt with.
@@ -3937,10 +3924,10 @@ def test_the_archiving_route_replaces_the_deletion_route() -> None:
 # ---------------------------------------------------------------------------
 #  5.  THE ONE `ROUNDED` SITE, IN THE SHIPPED MODULE
 #
-#      [general/gl080.cbl:L328] is one of only FIVE `ROUNDED` sites in the whole
-#      in-scope cycle (Agent Action Plan section 0.6.1), and the sibling file proves
-#      what the statement means. What follows proves the shipped module still spells it
-#      that way, by reading `a` out of the program's own storage after the call.
+#  [general/gl080.cbl:L328] is one of only FIVE `ROUNDED` sites in the whole
+#  in-scope cycle (Agent Action Plan section 0.6.1), and the sibling file proves
+#  what the statement means. What follows proves the shipped module still spells it
+#  that way, by reading `a` out of the program's own storage after the call.
 # ---------------------------------------------------------------------------
 
 
@@ -3964,7 +3951,7 @@ def test_the_shipped_divide_stores_the_rounded_quotient_into_a(
 ) -> None:
     """`divide scycle by period giving a rounded.` [general/gl080.cbl:L328], observed.
 
-    ⭐ WHY `a` IS READ OUT OF THE STORAGE RATHER THAN INFERRED FROM THE ROUTE. On every
+    WHY `a` IS READ OUT OF THE STORAGE RATHER THAN INFERRED FROM THE ROUTE. On every
     row in the table the round-trip gate at [general/gl080.cbl:L331-L332] REJECTS, and
     it would reject under truncation too - the gate is an exact-divisibility test, so no
     inexact quotient can pass it whichever way it was rounded. The DISPOSITION therefore
@@ -4055,7 +4042,7 @@ def test_the_zero_divisor_reaches_the_shipped_divide_and_stores_nothing() -> Non
     Q-7, and the sibling file locks the semantics layer's half of it against
     `arithmetic.SizeErrorNoStore`.
 
-    ⭐ WHAT THIS TEST ADDS is the half that file cannot reach: THE SHIPPED PROGRAM
+    WHAT THIS TEST ADDS is the half that file cannot reach: THE SHIPPED PROGRAM
     SURVIVES IT. `gl080_end_of_cycle` hands the verb the receiving field's previous value
     - `receiver_value=st.a` - which is what turns the condition into a no-store rather
     than into an exception, so the run continues to `main-end` and returns normally. A
@@ -4063,7 +4050,7 @@ def test_the_zero_divisor_reaches_the_shipped_divide_and_stores_nothing() -> Non
     here, and an operator would see a traceback where the compiled program prints
     nothing.
 
-    ⛔ NOTHING IS GUARDED, CLAMPED OR SUBSTITUTED (R-3): the zero period is not
+    NOTHING IS GUARDED, CLAMPED OR SUBSTITUTED (R-3): the zero period is not
     validated on the way in, and the no-store leaves `a` holding the value the program
     itself put there at [general/gl080.cbl:L289].
     """
@@ -4095,27 +4082,27 @@ def test_the_zero_divisor_reaches_the_shipped_divide_and_stores_nothing() -> Non
 # ---------------------------------------------------------------------------
 #  6.  ANOMALY A-2 - THE UNBOUNDED QUARTER SUBSCRIPT, IN THE SHIPPED MODULE
 #
-#      `move ledger-balance to ledger-q (a).` [general/gl080.cbl:L345] against
-#      `05 Ledger-Q pic s9(8)v99 comp-3 occurs 4.` [copybooks/wsledger.cob:L36].
-#      `a` is the ROUNDED quotient and is NEVER bounds-checked, so an accounting cycle
-#      that is not a small multiple of the period length indexes past a four-element
-#      table.
+#  `move ledger-balance to ledger-q (a).` [general/gl080.cbl:L345] against
+#  `05 Ledger-Q pic s9(8)v99 comp-3 occurs 4.` [copybooks/wsledger.cob:L36].
+#  `a` is the ROUNDED quotient and is NEVER bounds-checked, so an accounting cycle
+#  that is not a small multiple of the period length indexes past a four-element
+#  table.
 #
-#      ⛔⛔ DO NOT BOUNDS-CHECK, DO NOT CLAMP, DO NOT WARN (R-3, R-4). Every test in
-#      this section asserts that the store HAPPENED and that the walk CONTINUED. The
-#      shipped module resolves the subscript to a byte offset and stores into whichever
-#      declared item those bytes belong to, which is what the compiled program does; a
-#      Python `[a - 1]` would make `a = 0` write the LAST occurrence, a third behaviour
-#      belonging to neither language.
+#  DO NOT BOUNDS-CHECK, DO NOT CLAMP, DO NOT WARN (R-3, R-4). Every test in
+#  this section asserts that the store HAPPENED and that the walk CONTINUED. The
+#  shipped module resolves the subscript to a byte offset and stores into whichever
+#  declared item those bytes belong to, which is what the compiled program does; a
+#  Python `[a - 1]` would make `a = 0` write the LAST occurrence, a third behaviour
+#  belonging to neither language.
 #
-#      THE DESTINATIONS, from [copybooks/wsledger.cob:L28-L37], and every one of them
-#      is exercised below by a `(scycle, period)` pair that reaches it through the real
-#      gate rather than by setting `a` directly:
+#  THE DESTINATIONS, from [copybooks/wsledger.cob:L28-L37], and every one of them
+#  is exercised below by a `(scycle, period)` pair that reaches it through the real
+#  gate rather than by setting `a` directly:
 #
-#        a = 0        Ledger-Last, A REAL COLUMN      scycle 0, period -1
-#        a = 1..4     the four quarters               scycle 12, period 3  -> 4
-#        a = 5..12    the trailing filler, no column  scycle 5,  period 1  -> 5
-#        a = 13..99   past the 126-byte record        scycle 99, period 1  -> 99
+#  a = 0        Ledger-Last, A REAL COLUMN      scycle 0, period -1
+#  a = 1..4     the four quarters               scycle 12, period 3  -> 4
+#  a = 5..12    the trailing filler, no column  scycle 5,  period 1  -> 5
+#  a = 13..99   past the 126-byte record        scycle 99, period 1  -> 99
 # ---------------------------------------------------------------------------
 
 
@@ -4127,7 +4114,7 @@ def test_an_in_range_subscript_writes_both_views_of_the_same_bytes() -> None:
     alias, and the record layer deliberately declines to synchronise them because
     keeping a redefines in step would be behaviour in a record layout (R-3).
 
-    ⭐ WHY THIS MATTERS RATHER THAN BEING A CURIOSITY. The `acas005` handler binds its
+    WHY THIS MATTERS RATHER THAN BEING A CURIOSITY. The `acas005` handler binds its
     columns from the FOUR NAMED FIELDS. A value written into the `occurs` view alone
     would never reach `GLLEDGER-REC` - phase 5's entire table effect would vanish with no
     error and no diagnostic. So the assertion is not "both views agree" for tidiness; it
@@ -4175,12 +4162,12 @@ def test_subscript_five_lands_in_the_trailing_filler_and_moves_no_column() -> No
     nothing resets the cycle for it [general/gl080.cbl:L358-L363], so the quotient
     climbs through the whole `pic 99` domain.
 
-    ⭐ THE STORE IS DATABASE-INVISIBLE, WHICH IS WHY IT IS SILENT. `mysql/ACASDB.sql`
+    THE STORE IS DATABASE-INVISIBLE, WHICH IS WHY IT IS SILENT. `mysql/ACASDB.sql`
     gives `GLLEDGER-REC` eleven columns and none of them is that filler, so an
     out-of-range quarter store changes the record in memory, is rewritten, and moves NO
     COLUMN. That is exactly the shape of defect a state diff cannot see and a test must.
 
-    ⛔ No `IndexError`, no clamp into 1..4, no warning, and the walk goes on to the next
+    No `IndexError`, no clamp into 1..4, no warning, and the walk goes on to the next
     account - all four asserted.
     """
     with _shipped_gl080() as gl080:
@@ -4236,7 +4223,7 @@ def test_subscript_zero_overwrites_ledger_last_which_is_a_real_column() -> None:
     zero after the sign drop into `77 y pic 99`, and a gate that PASSES because zero
     equals zero.
 
-    ⭐ THE DISCRIMINATOR: `current-quarter` is ONE here, so [general/gl080.cbl:L346-L347]
+    THE DISCRIMINATOR: `current-quarter` is ONE here, so [general/gl080.cbl:L346-L347]
     did not fire. `Ledger-Last` therefore holds the balance for one reason only - the
     subscript-zero store. Were the shipped module to clamp the subscript into 1..4, the
     seeded 9.99 would survive and this test would fail, which is the point.
@@ -4270,7 +4257,7 @@ def test_an_out_of_record_subscript_records_the_overrun_and_keeps_walking(
 ) -> None:
     """`a = 99` writes wholly past the 126-byte record, and the phase runs to the end.
 
-    ANOMALY A-2 at its far end, and ⚠ AMBIGUITY Q-19: from occurrence thirteen the store
+    ANOMALY A-2 at its far end, and AMBIGUITY Q-19: from occurrence thirteen the store
     runs beyond the record into WORKING-STORAGE that belongs to no table, and what the
     compiled program overwrites there is not defined by the record layout. GnuCOBOL
     compiled without bounds checking - and no compile line in this repository passes any
@@ -4286,7 +4273,7 @@ def test_an_out_of_record_subscript_records_the_overrun_and_keeps_walking(
     HOW 99 IS REACHED: cycle 99 with period 1 divides exactly, so the gate passes.
     `77 a pic 99` [general/gl080.cbl:L183] holds it without overflow.
 
-    ⚠ WHAT IS NOT CLAIMED. This test does not say the compiled program leaves the record
+    WHAT IS NOT CLAIMED. This test does not say the compiled program leaves the record
     unchanged; it says the SHIPPED module does, and names Q-19 as the question that
     settles whether an overrunning run moves any of the twenty-two compared tables
     (R-6).
@@ -4362,12 +4349,12 @@ def test_the_in_range_store_records_nothing() -> None:
 # ---------------------------------------------------------------------------
 #  7.  ANOMALY A-3 - TWO DISAGREEING NOTIONS OF "CURRENT QUARTER"
 #
-#      [general/gl080.cbl:L345] indexes the quarter table with `a`, the computed
-#      quotient. THE VERY NEXT LINE [general/gl080.cbl:L346] tests `current-quarter`,
-#      a completely different value maintained by an independent rotating counter at
-#      [general/gl080.cbl:L355-L357]. Nothing keeps them in step.
+#  [general/gl080.cbl:L345] indexes the quarter table with `a`, the computed
+#  quotient. THE VERY NEXT LINE [general/gl080.cbl:L346] tests `current-quarter`,
+#  a completely different value maintained by an independent rotating counter at
+#  [general/gl080.cbl:L355-L357]. Nothing keeps them in step.
 #
-#      ⛔ DO NOT RECONCILE THEM (R-3, R-4).
+#  DO NOT RECONCILE THEM (R-3, R-4).
 # ---------------------------------------------------------------------------
 
 
@@ -4414,7 +4401,7 @@ def test_the_two_notions_of_quarter_can_disagree_in_both_directions() -> None:
     Reached with cycle 3 and period 3: 3 / 3 = 1 exactly, so the gate passes with a
     subscript of one.
 
-    ⛔ NOT RECONCILED (R-4): no test here asserts that the two agree, and no code is
+    NOT RECONCILED (R-4): no test here asserts that the two agree, and no code is
     changed to make them.
     """
     with _shipped_gl080() as gl080:
@@ -4465,7 +4452,7 @@ def test_the_two_notions_of_quarter_can_disagree_in_both_directions() -> None:
         #  Weekly accounting mid-year: 39 / 13 = 3, the increment gives 40, which is not
         #  above 52.
         (13, 39, 1, 2, 40),
-        #  ⭐ ANY OTHER PERIOD NEVER RESETS. Period 1, cycle 6: the cycle climbs to 7 and
+        #  ANY OTHER PERIOD NEVER RESETS. Period 1, cycle 6: the cycle climbs to 7 and
         #  keeps climbing on later runs, which is how `a` reaches the out-of-range band
         #  at all. THE TWO RESET RULES ARE THE ONLY TWO, and they are conjunctions.
         (1, 6, 3, 4, 7),
@@ -4513,12 +4500,12 @@ def test_the_counter_and_the_cycle_wrap_by_their_own_separate_rules(
 # ---------------------------------------------------------------------------
 #  8.  PHASE 1 - THE OUTSTANDING-BATCH GATE
 #
-#      `gl080a` [general/gl080.cbl:L368-L395] walks the batch file and sets `a` to one
-#      if it finds a batch in this cycle that is neither closed nor processed;
-#      [general/gl080.cbl:L308-L313] then stops the whole run. THE DETECTOR PREDICATE
-#      IS NOT `gl070`'S: `gl070` tests one condition name [general/gl070.cbl:L314],
-#      this program tests the conjunction of two negations
-#      [general/gl080.cbl:L384-L386].
+#  `gl080a` [general/gl080.cbl:L368-L395] walks the batch file and sets `a` to one
+#  if it finds a batch in this cycle that is neither closed nor processed;
+#  [general/gl080.cbl:L308-L313] then stops the whole run. THE DETECTOR PREDICATE
+#  IS NOT `gl070`'S: `gl070` tests one condition name [general/gl070.cbl:L314],
+#  this program tests the conjunction of two negations
+#  [general/gl080.cbl:L384-L386].
 # ---------------------------------------------------------------------------
 
 
@@ -4531,7 +4518,7 @@ def test_an_outstanding_batch_stops_the_run_before_any_write() -> None:
     `load00.` block has no `= 5` gate the way `load08` does
     [general/general.cbl:L711-L722].
 
-    ⭐ EVERY LATER PHASE IS ABSENT, and that is the whole assertion: no batch rewrite,
+    EVERY LATER PHASE IS ABSENT, and that is the whole assertion: no batch rewrite,
     no posting delete, no archive row, no ledger verb and no cycle increment. A run that
     stopped later - after phase 3 had already deleted the postings, say - would leave the
     database in a state the compiled program never produces.
@@ -4647,17 +4634,17 @@ def test_the_detector_ignores_a_batch_from_another_cycle() -> None:
 # ---------------------------------------------------------------------------
 #  9.  PHASE 2 - THE ARCHIVING WALK
 #
-#      `arc-process` [general/gl080.cbl:L445-L516] explodes every posting of the batch
-#      into TWO OR THREE flat archive rows and then deletes the posting. The three legs
-#      and their signs are the frozen source's, verbatim:
+#  `arc-process` [general/gl080.cbl:L445-L516] explodes every posting of the batch
+#  into TWO OR THREE flat archive rows and then deletes the posting. The three legs
+#  and their signs are the frozen source's, verbatim:
 #
-#        leg 1  DR side  arc-ac <- post-dr, arc-c-ac <- post-cr, amount POSITIVE,
-#                        plus the VAT when `post-vat-side = "CR"`
-#                        [general/gl080.cbl:L468-L479]
-#        leg 2  CR side  the two accounts SWAPPED, plus the VAT when the side is "DR",
-#                        then `multiply arc-amount by -1` [general/gl080.cbl:L481-L493]
-#        leg 3  VAT      only when both `vat-ac` and `vat-amount` are non-zero, negated
-#                        when the side is "CR" [general/gl080.cbl:L497-L508]
+#  leg 1  DR side  arc-ac <- post-dr, arc-c-ac <- post-cr, amount POSITIVE,
+#  plus the VAT when `post-vat-side = "CR"`
+#  [general/gl080.cbl:L468-L479]
+#  leg 2  CR side  the two accounts SWAPPED, plus the VAT when the side is "DR",
+#  then `multiply arc-amount by -1` [general/gl080.cbl:L481-L493]
+#  leg 3  VAT      only when both `vat-ac` and `vat-amount` are non-zero, negated
+#  when the side is "CR" [general/gl080.cbl:L497-L508]
 # ---------------------------------------------------------------------------
 
 
@@ -4676,7 +4663,7 @@ def test_the_archive_walk_writes_the_double_entry_and_the_vat_leg() -> None:
     is then negated unconditionally [general/gl080.cbl:L493]; leg 3 is negated for the
     same "CR" reason [general/gl080.cbl:L505-L506].
 
-    ⭐ LEG 3'S CONTRA ACCOUNT IS LEG 2'S, AND THAT IS NOT AN OVERSIGHT IN THIS TEST.
+    LEG 3'S CONTRA ACCOUNT IS LEG 2'S, AND THAT IS NOT AN OVERSIGHT IN THIS TEST.
     [general/gl080.cbl:L501-L503] moves only `arc-ac`, `arc-pc` and `arc-amount` before
     the third `write`, so `arc-c-ac` and `arc-c-pc` still hold what leg 2 put there. The
     compiled program writes the record it has, fields and all, and so does the shipped
@@ -4800,7 +4787,7 @@ def test_the_archive_walk_skips_the_zero_key_and_a_foreign_batch() -> None:
     Asserted with three seeded postings of which exactly ONE belongs to the batch: the
     archive gets that one's rows and the deletes name that one only.
 
-    ⭐ THE ZERO KEY IS THE WHOLE GROUP, not the batch alone: `WS-Post-Key` spans both
+    THE ZERO KEY IS THE WHOLE GROUP, not the batch alone: `WS-Post-Key` spans both
     `Batch` and `Post-Number` [copybooks/wspost.cob:L12-L14], so a row with batch zero
     and a NON-zero post number does not match the first disjunct - it is caught by the
     second instead, because zero is not this batch. Both shapes are seeded so that the
@@ -4954,7 +4941,7 @@ def test_the_deletion_walk_deletes_the_batchs_postings_and_writes_no_archive_row
 def test_both_walks_stamp_the_batch_the_same_way() -> None:
     """[general/gl080.cbl:L428-L433] and [general/gl080.cbl:L583-L588], side by side.
 
-    ⭐ `Cleared-Status` BECOMES 2, WHICH IS `88 Archived`
+    `Cleared-Status` BECOMES 2, WHICH IS `88 Archived`
     [copybooks/wsbatch.cob:L32] - EVEN ON THE DELETION ROUTE, where nothing was archived
     at all. The name is wrong for what the deletion walk did, and the value is what the
     compiled program stores; both routes are asserted to store it so that a "fix" giving
@@ -4989,15 +4976,15 @@ def test_both_walks_stamp_the_batch_the_same_way() -> None:
 # ---------------------------------------------------------------------------
 #  11.  `disk-change` - THE PROMOTED OPTION, AND `a`'S SECOND ROLE
 #
-#      [general/gl080.cbl:L519-L559]. Agent Action Plan section 0.3.4 makes the accept
-#      at [general/gl080.cbl:L545-L547] a parameter because its answer decides whether
-#      the database is written: nine suppresses the archiving walk AND, through the
-#      shared `a`, the whole of end-of-period processing.
+#  [general/gl080.cbl:L519-L559]. Agent Action Plan section 0.3.4 makes the accept
+#  at [general/gl080.cbl:L545-L547] a parameter because its answer decides whether
+#  the database is written: nine suppresses the archiving walk AND, through the
+#  shared `a`, the whole of end-of-period processing.
 # ---------------------------------------------------------------------------
 
 
 def test_the_disk_change_abort_suppresses_archiving_and_end_of_period() -> None:
-    """⭐ `a` CARRIES THE ABORT CODE ACROSS TWO PHASES - one field, two purposes.
+    """`a` CARRIES THE ABORT CODE ACROSS TWO PHASES - one field, two purposes.
 
     `accept-option` stores the answer into `a` [general/gl080.cbl:L545]. `gl080b` tests
     it immediately and leaves [general/gl080.cbl:L408-L409]; then
@@ -5066,7 +5053,7 @@ def test_a_disk_change_option_outside_zero_and_nine_is_refused_before_any_write(
     get the "proceed" arm, which is the one answer the compiled program certainly does
     not give.
 
-    ⛔ THIS IS NOT AN ADDED VALIDATION (R-3). The refusal replaces an unreachable state
+    THIS IS NOT AN ADDED VALIDATION (R-3). The refusal replaces an unreachable state
     with an error at the boundary; it does not reject an input the compiled program
     accepts, because the compiled program never accepts one - it loops.
 
@@ -5113,7 +5100,7 @@ def test_the_archive_path_is_composed_and_a_blank_override_is_ignored() -> None:
     pressed Enter and the composed path stands. Both arms asserted, because a module that
     dropped the guard would replace a working path with a blank one.
 
-    ⭐ THE OVERRIDE OVERWRITES IN PLACE, WHICH IS MEASURED AND NOT ASSUMED. `accept
+    THE OVERRIDE OVERWRITES IN PLACE, WHICH IS MEASURED AND NOT ASSUMED. `accept
     file-2 ... with update` [general/gl080.cbl:L555] presents the field holding the
     composed path, and question `Q-GL084-ACCEPT-SEMANTICS` asked whether typed text
     replaces that content or is inserted into it. MEASURED (2026-08-08) on the harness
@@ -5126,7 +5113,7 @@ def test_the_archive_path_is_composed_and_a_blank_override_is_ignored() -> None:
     replacement, which this test used to assert, is a reading no probe could make the
     compiled accept produce (rules R-6 and R-3).
 
-    ⛔ NO TABLE EFFECT EITHER WAY. The archive is a flat file, not a schema table, so
+    NO TABLE EFFECT EITHER WAY. The archive is a flat file, not a schema table, so
     nothing here reaches the comparison - which is precisely why it needs a test of its
     own.
     """
@@ -5198,10 +5185,10 @@ def test_the_archive_path_is_composed_and_a_blank_override_is_ignored() -> None:
 # ---------------------------------------------------------------------------
 #  12.  PHASE 4 - POSTING CONTRACTION, AND THE RECORD-LENGTH STOP
 #
-#      `compress-post` [general/gl080.cbl:L628-L708] copies every posting out to a work
-#      file, re-creates the posting store and copies them back - a physical compaction
-#      that only makes sense for indexed files. Its first statement is a configuration
-#      test, and its second is a length comparison that STOPS THE RUN.
+#  `compress-post` [general/gl080.cbl:L628-L708] copies every posting out to a work
+#  file, re-creates the posting store and copies them back - a physical compaction
+#  that only makes sense for indexed files. Its first statement is a configuration
+#  test, and its second is a length comparison that STOPS THE RUN.
 # ---------------------------------------------------------------------------
 
 
@@ -5236,7 +5223,7 @@ def test_phase_four_does_not_run_in_the_rdbms_configuration() -> None:
 def test_phase_four_stops_the_run_on_the_record_length_disagreement() -> None:
     """`stop run.` [general/gl080.cbl:L643-L649] - and it fires on EVERY Cobol-files run.
 
-    ⚠ AMBIGUITY Q-23, and this test is what makes it visible rather than theoretical.
+    AMBIGUITY Q-23, and this test is what makes it visible rather than theoretical.
     The frozen guard is
 
         if function length (WS-Posting-Record) not =
@@ -5247,12 +5234,12 @@ def test_phase_four_stops_the_run_on_the_record_length_disagreement() -> None:
     configuration `compress-post` reaches the comparison, finds a mismatch and ENDS THE
     RUN UNIT - phase 4 cannot complete, and neither can anything after it.
 
-    ⛔ THE MISMATCH IS NOT REPAIRED (R-4). Padding the work record to 103, or comparing
+    THE MISMATCH IS NOT REPAIRED (R-4). Padding the work record to 103, or comparing
     something else, would make a stop the compiled program performs disappear. What the
     shipped module does instead is raise its own `_StopRun`, whose message carries both
     lengths and the locator, so an operator sees the same halt with a reason attached.
 
-    ⭐ WHY THE TWO FIGURES ARE ASSERTED. Q-23 asks when this can happen; the answer this
+    WHY THE TWO FIGURES ARE ASSERTED. Q-23 asks when this can happen; the answer this
     test records is "whenever the run uses Cobol files", and it can only record that by
     naming the lengths. Were either declaration to change, this test would fail and the
     register entry would need revisiting - which is the correct outcome, not a nuisance.
@@ -5368,14 +5355,14 @@ def test_an_unconfirmed_run_writes_nothing_at_all() -> None:
 def test_the_run_fills_date_form_when_it_is_zero_and_leaves_a_set_value_alone() -> None:
     """`zz070-Convert-Date` [general/gl080.cbl:L719-L747] MUTATES the system record.
 
-    ⭐ THE DISPLAY IS DROPPED AND THE STATEMENT IS NOT. [general/gl080.cbl:L285] performs
+    THE DISPLAY IS DROPPED AND THE STATEMENT IS NOT. [general/gl080.cbl:L285] performs
     the date conversion only so that [general/gl080.cbl:L286] can display the result, and
     presentation is out of scope (Agent Action Plan section 0.3.4) - but the section also
     writes `Date-Form` when that field is zero [general/gl080.cbl:L729-L730], and
     `Date-Form` IS A COLUMN of `SYSTEM-REC` [copybooks/wssystem.cob:L127]. Dropping the
     performed section with the display it fed would have removed a database effect.
 
-    ⭐⭐ AND THIS IS WHY `SYSTEM-REC` IS FINGERPRINTED RATHER THAN LEFT UNWATCHED. The
+    AND THIS IS WHY `SYSTEM-REC` IS FINGERPRINTED RATHER THAN LEFT UNWATCHED. The
     scenario harness records a digest of `SYSTEM-REC` on both sides precisely because
     routes like this one move it without meaning to; `tests/conftest.py`'s
     `PARAMETER_TABLE` carries the reasoning.

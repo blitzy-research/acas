@@ -847,7 +847,7 @@ def _derive_date_components(post_date: str) -> tuple[int, int, int]:
         #  (CWE-532) - and the guard's failure is fully identified by the table and
         #  the column it left at zero. The raw text is still STORED, because the
         #  frozen bridge stores it, so the row is exactly as inconsistent as it is in
-        #  the compiled program (anomaly 7, R-4).
+        #  the compiled program (anomaly A-7, R-4).
         _LOG.debug(
             "%s: the guard on %s did not hold, so the column stays zero while "
             "POST4-DAT keeps the raw text - the maintainer expected this never "
@@ -1278,8 +1278,8 @@ def open_(
 
 
 def open_input(system: SystemRecord, file_access: FileAccess) -> tuple[int, int]:
-    """``fn-open`` with ``fn-input`` - published by the facade at [copybooks/Proc-
-    ZZ100-ACAS-IRS-Calls.cob:L261].
+    """``fn-open`` with ``fn-input`` - published by the facade at
+    [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L261].
     """
     return open_(system, file_access, access_type=int(AccessType.INPUT))
 
@@ -1835,7 +1835,7 @@ def dispatch(
     if refusal is not None:
         # ONE ERROR, through the shared reporter. `File-Function` and `File-Key-No`
         # are operation codes from the frozen vocabulary
-        # [copybooks/wsfnctn.cob:L88-L118], not business data.
+        # [copybooks/wsfnctn.cob:L88-L116], not business data.
         log_handler_failure(
             _LOG,
             program=TABLE,

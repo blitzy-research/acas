@@ -150,7 +150,7 @@ class FacadeContext:
     ``dispatch``; an empty mapping forwards nothing. It carries no accounting
     value and nothing here reads it.
 
-    ⭐ IT IS ALSO THE ONE CHANNEL BY WHICH A SECURITY POLICY REACHES A HANDLER,
+    IT IS ALSO THE ONE CHANNEL BY WHICH A SECURITY POLICY REACHES A HANDLER,
     and that makes an empty mapping a decision rather than an absence. Every
     handler that opens a connection declares ``transport: TransportSecurity |
     None = None`` and forwards it to ``connection.mysql_1000_open``, whose
@@ -165,10 +165,10 @@ class FacadeContext:
     ``options={"transport": TransportSecurity(...)}`` - and this context carries
     it to whichever handler the verb dispatches to.
 
-    That uniformity is the point. It was previously possible for ONE handler to
-    default itself permissive while the other nineteen took the process policy,
-    which made the policy depend on which entity a program happened to touch
-    rather than on what the operator had declared (CWE-319, CWE-295). Nothing here inspects or
+    That uniformity is the point. Were ONE handler to default itself permissive
+    while the other nineteen took the process policy, the policy would depend on
+    which entity a program happened to touch rather than on what the operator had
+    declared (CWE-319, CWE-295). Nothing here inspects or
     rewrites the mapping: the enforcement lives in ``dal/connection.py`` and the
     declaration lives with the caller, and this field is only the wire between
     them. Forwarding is by keyword, so a handler that does not accept a given key
@@ -265,7 +265,7 @@ def _forward(
 ) -> Mapping[str, object]:
     """The keyword-only extras to forward to ``target``, projected from ``options``.
 
-    ⭐ WHY THIS PROJECTS RATHER THAN FORWARDING WHOLESALE. ``options`` is the one
+    WHY THIS PROJECTS RATHER THAN FORWARDING WHOLESALE. ``options`` is the one
     channel by which a caller's transport-security policy reaches a handler, and
     a caller states that policy ONCE for a whole run - it cannot reasonably know
     which of the seventeen handlers a given verb dispatches to, nor which of them
@@ -5306,8 +5306,8 @@ def acasirsub3(ctx: FacadeContext) -> StatusPair:
 
     The bare form is NOT the same operation as ``acasirsub3-Read-Next``, and the
     difference is load-bearing rather than cosmetic. The verb paragraph moves ``zero to
-    Access-Type`` before it dispatches [copybooks/Proc-ZZ100-ACAS-IRS-
-    Calls.cob:L240-L243].
+    Access-Type`` before it dispatches
+    [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L240-L243].
     """
     _dispatch_acasirsub3(ctx)
     return StatusPair(ctx.file_access.fs_reply, ctx.file_access.we_error)

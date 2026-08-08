@@ -6,7 +6,7 @@ fixed-width name fields that is the last parameter of all three linkage shapes,
 so every program receives its file names rather than deciding them.
 
 Two of the names are the General Ledger work files, `pretrans.tmp` and
-`postrans.tmp` [copybooks/wsnames.cob:L14-L17], which the maintainer annotates as
+`postrans.tmp` [copybooks/wsnames.cob:L15-L16], which the maintainer annotates as
 belonging to `gl071`. They are transient scratch files, not part of the schema,
 and `acas_posting.workfiles` models them.
 

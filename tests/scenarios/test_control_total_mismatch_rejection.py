@@ -12,11 +12,9 @@ check; this one cannot, because unchanged tables ARE what success looks like.
 0. THE TWO STANDING FACTS
 -------------------------------------------------------------------------------
 
-THERE IS NO USER RULES DOCUMENT. `review_rules` returns exactly "No user rules
-provided.", so no rules file exists to consult and none should be looked for. The
-binding constraints are the Agent Action Plan's own numbered rules R-1 to R-6 (Plan
+THE BINDING CONSTRAINTS are the Agent Action Plan's own numbered rules R-1 to R-6 (Plan
 section 0.7.2), whose exact wording lives in the requirements themselves. Where the Plan
-is silent, enterprise-standard best practice applies and nothing is invented.
+is silent, enterprise-standard best practice applies.
 
 THE PREMISE IS INVERTED. Plan section 0.8.2, verbatim:
 
@@ -267,8 +265,8 @@ LINK 4 - THE MENU RETURNS [general/general.cbl:L805-L815]:
 SO `gl071` AND `gl072` NEVER RUN AT ALL, and neither does Phase 2 (`gl071b`), because
 L290 leaves the mainline before L293 is reached. Three separate consequences follow:
 
-  * The gate is a HARD stop between phases and never a warning. `acas_posting/cli/
-    gl_post_cycle.py` reproduces it at its own L510-L511 against
+  * The gate is a HARD stop between phases and never a warning.
+    `acas_posting/cli/gl_post_cycle.py` reproduces it at its own L510-L511 against
     `args.GL_ABORT_TERM_CODE`.
   * `5` IS NOT `> 7`, so `load00`'s route to the system-record persistence path -
     `if ws-term-code > 7 / go to overrewrite.` [general/general.cbl:L720-L721] - is NOT
@@ -675,10 +673,9 @@ EMPTY_BY_CONSTRUCTION_TABLES = ("SYSDEFLT-REC",)
 
 #: Every bounded table, in the DECLARED order, which is load-bearing: the seed
 #: fingerprint is written in it and the diff report uses it as the table order. Declared
-#: as a constant because the tuple was previously written as a literal inside an
-#: assertion, and when the list grew from three to five that literal was missed - a
-#: divergence only the containerised run could see, because this tier skips without the
-#: Compose stack.
+#: as a constant because a tuple written as a literal inside an assertion is missed when
+#: the list grows - three to five, say - and that divergence is one only the containerised
+#: run can see, because this tier skips without the Compose stack.
 BOUNDED_TABLES = (
     "GLBATCH-REC",
     "GLLEDGER-REC",
@@ -794,7 +791,7 @@ def parity_run(protocol):
     #  the seeded batch was not the unbalanced one and there is nothing to compare - a
     #  setup ERROR. A Python side that does not abort where the oracle did is a
     #  behavioural regression in the migrated gate, and must read as a FAILURE.
-    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST (finding F-12). The
+    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST. The
     #  comparison below is between one COBOL run and one Python run, and it means
     #  nothing unless the two drove the same work in the same order - an empty diff
     #  between a short run and a full one being the most dangerous false pass this tier
@@ -815,7 +812,7 @@ def parity_run(protocol):
     #  open and unstamped" and "there was no batch at all" the same observation, and the
     #  second proves nothing.
     #
-    #  ⭐ AND SYSDEFLT-REC MUST COME BACK EMPTY, WHICH IS MEASURED RATHER THAN TOLERATED.
+    #  AND SYSDEFLT-REC MUST COME BACK EMPTY, WHICH IS MEASURED RATHER THAN TOLERATED.
     #  This call used to pass `run.tables`, i.e. "every bounded table must have rows",
     #  and that was correct while the bound was three tables. When SYSTEM-REC and
     #  SYSDEFLT-REC were added - because the General menu exit persists both
@@ -923,6 +920,9 @@ def test_scenario_definition_preconditions(
         scenario_loader: Conftest's `yaml.safe_load` reader.
         in_scope_table_names: The 22 in-scope names, read from the harness (R-4).
         pinned_clock: The project-wide pinned run date, both observables.
+        vocabulary: The shared stack-free vocabulary bundle - the operation names both
+            runners accept, the term codes, the scenario keys and the pinned clock pair
+            - so this test reaches them without an `import conftest`.
     """
     IRS_INSTEAD_GL_ONLY = vocabulary.irs_instead_states[0]
     OPERATIONS = vocabulary.operations
@@ -1142,6 +1142,9 @@ def test_scenario_is_general_ledger_only(scenario_loader, vocabulary) -> None:
 
     Args:
         scenario_loader: Conftest's definition reader.
+        vocabulary: The shared stack-free vocabulary bundle - the operation names both
+            runners accept, the term codes, the scenario keys and the pinned clock pair
+            - so this test reaches them without an `import conftest`.
     """
     OPERATIONS = vocabulary.operations
 
@@ -1194,6 +1197,9 @@ def test_expected_term_code_is_five(scenario_loader, vocabulary) -> None:
 
     Args:
         scenario_loader: Conftest's definition reader.
+        vocabulary: The shared stack-free vocabulary bundle - the operation names both
+            runners accept, the term codes, the scenario keys and the pinned clock pair
+            - so this test reaches them without an `import conftest`.
     """
     TERM_CODES = vocabulary.term_codes
 
@@ -1240,6 +1246,9 @@ def test_affected_tables_are_in_scope_and_alphabetical(
         scenario_loader: Conftest's definition reader.
         in_scope_table_names: The 22 in-scope names, ascending.
         harness: The three explicitly-loaded harness modules.
+        vocabulary: The shared stack-free vocabulary bundle - the operation names both
+            runners accept, the term codes, the scenario keys and the pinned clock pair
+            - so this test reaches them without an `import conftest`.
     """
     definition = scenario_loader(SCENARIO)
     tables = vocabulary.affected_tables(SCENARIO)
@@ -1288,7 +1297,7 @@ def test_vat_is_added_before_the_comparison_is_documented(repo_root) -> None:
     arithmetic out of `arithmetic.compare` and `arithmetic.store`, which covers the
     boundaries far more thoroughly but could not detect a mis-ordered fold on its own.
 
-    ⭐ SO THE ORDER CLAIM IS SPLIT DELIBERATELY, AND BOTH HALVES ARE REAL. This test
+    SO THE ORDER CLAIM IS SPLIT DELIBERATELY, AND BOTH HALVES ARE REAL. This test
     asserts that the frozen SOURCE still reads as every citation in this file says it
     reads. The arithmetic tier asserts that the ORDER CHANGES THE VERDICT, by driving the
     shipped `_end_batch` with entered gross 1200.00, entered VAT 200.00, accumulated
@@ -1401,7 +1410,7 @@ def test_vat_is_added_before_the_comparison_is_documented(repo_root) -> None:
     assert at(1119) == "move 1 to batch-status"
     assert at(1121) == "move 0 to batch-status."
 
-    # ⭐ THE ORDER IS ESTABLISHED BY THE TWO LINE-CONTENT ASSERTIONS ABOVE, AND BY
+    # THE ORDER IS ESTABLISHED BY THE TWO LINE-CONTENT ASSERTIONS ABOVE, AND BY
     # NOTHING ELSE HERE. An earlier form of this test added `assert 1109 < 1117`, which
     # is a comparison of two integer literals: it is true in every possible checkout,
     # including one where the frozen file had been rewritten so that the addition came
@@ -1590,6 +1599,9 @@ def test_abort_is_reproduced_as_term_code_five(parity_run, vocabulary) -> None:
 
     Args:
         parity_run: The completed ten-stage run.
+        vocabulary: The shared stack-free vocabulary bundle - the operation names both
+            runners accept, the term codes, the scenario keys and the pinned clock pair
+            - so this test reaches them without an `import conftest`.
     """
     ARGPARSE_USAGE_EXIT = vocabulary.argparse_usage_exit
     DISPOSITION_BEHAVIOURAL = vocabulary.disposition_behavioural
@@ -1613,7 +1625,7 @@ def test_abort_is_reproduced_as_term_code_five(parity_run, vocabulary) -> None:
                 f"code 2 and no harness script uses exit 2, so nothing about the "
                 f"posting cycle was measured.\n{result.describe()}"
             )
-        #  WRAPPER HEALTH, DIAGNOSED BY CATEGORY (finding F-14). Every non-zero status
+        #  WRAPPER HEALTH, DIAGNOSED BY CATEGORY. Every non-zero status
         #  is refused here, because a wrapper that did not finish its self-checks has
         #  no trustworthy per-operation record - but 69 is `EX_BEHAVIOUR` and means the
         #  cycle RAN and contradicted its scenario, which is a behavioural FAILURE of
@@ -1704,6 +1716,9 @@ def test_gl071_and_gl072_never_ran(
         parity_run: The completed ten-stage run.
         seed_baseline: The pristine seeded state, captured after it.
         harness: The three harness modules, for the report renderer.
+        vocabulary: The shared stack-free vocabulary bundle - the operation names both
+            runners accept, the term codes, the scenario keys and the pinned clock pair
+            - so this test reaches them without an `import conftest`.
     """
     diff_trees_directly = vocabulary.diff_trees_directly
 
@@ -1790,6 +1805,9 @@ def test_batch_remains_open_and_unstamped(
         parity_run: The completed ten-stage run.
         seed_baseline: The pristine seeded state.
         harness: The three harness modules, for `load_dump` and the table map.
+        vocabulary: The shared stack-free vocabulary bundle - the operation names both
+            runners accept, the term codes, the scenario keys and the pinned clock pair
+            - so this test reaches them without an `import conftest`.
     """
     assert_dump_wellformed = vocabulary.assert_dump_wellformed
 
@@ -1890,6 +1908,9 @@ def test_diagnostic_display_has_no_database_effect(
         parity_run: The completed ten-stage run.
         seed_baseline: The pristine seeded state.
         harness: The three harness modules.
+        vocabulary: The shared stack-free vocabulary bundle - the operation names both
+            runners accept, the term codes, the scenario keys and the pinned clock pair
+            - so this test reaches them without an `import conftest`.
     """
     diff_trees_directly = vocabulary.diff_trees_directly
 
@@ -1962,7 +1983,7 @@ def test_diff_exit_contract_is_honoured(
     AVAILABLE IN THIS TREE, so the mapping is exercised rather than trusted. Rule R-6
     makes an empty diff the pass condition ONLY when a comparison actually happened.
 
-    ⭐ DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
+    DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
     `tests/conftest.py`'s `assert_diff_exit_contract` publishes two synthetic sides with
     `harness/dump_tables.py`'s own writer, canonicalises them with `harness/normalize.py`
     and compares them with `harness/diff_states.py` - once for each of the four cases.
@@ -2055,6 +2076,9 @@ def test_dump_is_wellformed_on_both_sides(
         parity_run: The completed ten-stage run.
         harness: The three harness modules.
         frozen_schema: `mysql/ACASDB.sql` parsed into the column-type map, read only.
+        vocabulary: The shared stack-free vocabulary bundle - the operation names both
+            runners accept, the term codes, the scenario keys and the pinned clock pair
+            - so this test reaches them without an `import conftest`.
     """
     assert_dump_wellformed = vocabulary.assert_dump_wellformed
     read_dump = vocabulary.read_dump
@@ -2093,9 +2117,8 @@ def test_dump_is_wellformed_on_both_sides(
 def test_system_record_parity_by_digest_as_well_as_by_dump(parity_run: object, protocol: object) -> None:
     """THE PARAMETER ROW IS BOUNDED TWICE - by the dump, and by a digest of it.
 
-    WHAT THIS CLOSES. An earlier draft kept `SYSTEM-REC` off every scenario's
-    `affected_tables` and justified that by claiming no side writes it. That claim is
-    FALSE:
+    WHAT THIS CLOSES. The tempting shortcut is to keep `SYSTEM-REC` off every scenario's
+    `affected_tables` on the ground that no side writes it. THAT GROUND IS FALSE:
     `acas_posting/cli/args.py`'s `overrewrite` reproduces
     [general/general.cbl:L656-L672] and every one of the seven routes calls it, so the
     parameter row is written on BOTH sides of every scenario. Until this assertion
@@ -2140,11 +2163,10 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity_run: object, p
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
-    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
-    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
-    counter -- that scenario has since been removed (findings M-09 and M-17), and the
-    observation is recorded because it is what established that half.
+    over the eight committed scenarios, which is all four `unchanged` ones. THE `changed`
+    HALF IS NOT COVERED BY ANY COMMITTED SCENARIO: it was established on a definition that
+    declared `changed` and moved the row by construction, its Phase 5 advancing the cycle
+    and rotating the quarter counter, and no scenario in `harness/scenarios/` does that.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 

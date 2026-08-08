@@ -9,16 +9,14 @@ File 2 of 14 in the arithmetic parity tier. What it locks:
   * the `encode` / `decode` ROUND TRIP, exactly, with no tolerance of any kind;
   * `COMP-3` INHERITED FROM A GROUP header, which the copybooks use for 24 in-scope
     fields and which no picture clause on the field itself reveals;
-  * ⭐ ANOMALY A-8, TRUNCATION #1: the ZERO-SCALE packed accumulator `work-2`
+  * ANOMALY A-8, TRUNCATION #1: the ZERO-SCALE packed accumulator `work-2`
     [sales/sl060.cbl:L206] that discards the pence of every `work-goods`
     [sales/sl060.cbl:L218] added into it [sales/sl060.cbl:L826];
   * SILENT high-order overflow and SILENT sign loss, because the frozen sources
     contain no `ON SIZE ERROR` to reproduce.
 
-THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports that none
-was provided, so there is no on-disk rules file to consult and no reader should look
-for one. The six binding rules live in the Agent Action Plan itself, section 0.7.2,
-and bind this file as follows.
+THE SIX BINDING RULES live in Agent Action Plan section 0.7.2, and bind this file as
+follows.
 
 R-1, no COBOL at runtime. `tests/arithmetic/*` touch neither COBOL nor a database.
     Nothing here spawns a process, opens a connection, loads a shared library or
@@ -1131,7 +1129,7 @@ def test_total_group_carries_comp3_down_to_its_two_subordinates() -> None:
         assert descriptor.quantum == Decimal("0.01")
 
 
-#  GROUP 5  -  ⭐ ANOMALY A-8, TRUNCATION #1:  THE ZERO-SCALE PACKED ACCUMULATOR
+#  GROUP 5  -  ANOMALY A-8, TRUNCATION #1:  THE ZERO-SCALE PACKED ACCUMULATOR
 #
 #  REPRODUCTION SITE (rule R-4, and Agent Action Plan section 0.7.4 C-3, which
 #  requires a comment at each reproduction site citing the COBOL locator).

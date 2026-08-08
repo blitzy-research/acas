@@ -7,10 +7,10 @@ again - and the diff MUST BE EMPTY."
 
 This is the ONLY scenario that drives FOUR operations in sequence, and therefore the
 only one whose dump carries the CUMULATIVE effect of the period-total writes across
-both ledgers. ⚠️ NARROWED: this previously also called it "the ONLY one for which
-`SYSTOT-REC` is genuinely in scope", which is FALSE - measured over the nine scenario
-files, three declare that table: `clean_batch_sl`, `clean_batch_pl` and this one. What
-is unique here is REACH, not the table. Agent Action Plan section
+both ledgers. IT IS NOT the only one for which `SYSTOT-REC` is in scope: measured over
+the eight scenario files, three declare that table -- `clean_batch_sl`,
+`clean_batch_pl` and this one. What is unique here is REACH, not the table. Agent
+Action Plan section
 0.6.4 is what makes it verifiable at all: the nine period-total write sites are "all
 inside the Sales and Purchase programs, and all in scope ... the sole writers of the
 totals record, which makes the period-end-totals scenario verifiable by inspecting
@@ -27,12 +27,10 @@ Every totals assertion is an assertion of AGREEMENT BETWEEN THE TWO SIDES, arbit
 by the compiled run (R-6). Recomputation is arithmetic-tier work and lives in
 `tests/arithmetic/`.
 
-THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports that none
-was provided, so there is no on-disk rules file and no reader should look for one.
-The six binding rules R-1 to R-6 live in the Agent Action Plan itself, section 0.7.2,
-and their exact wording is retrievable from the requirements via `review_prompt`. Each
-is named below at the site that honours it, and where the plan is silent this file
-holds to enterprise-standard best practice and invents nothing.
+THE SIX BINDING RULES R-1 to R-6 live in Agent Action Plan section 0.7.2, and their
+exact wording is retrievable from the requirements via `review_prompt`. Each is named
+below at the site that honours it, and where the plan is silent this file holds to
+enterprise-standard best practice.
 
 ===========================================================================
 THE SCENARIO
@@ -94,14 +92,12 @@ read back by a LATER operation [purchase/pl100.cbl:L564]. All four run inside a
 SINGLE stage 2 and a single stage 6, one at a time (R-3), with NO dump between them,
 so the diff proves the CUMULATIVE effect of the sequence.
 
-`gl_end_of_cycle` (gl080) IS DELIBERATELY NOT DRIVEN BY THIS SCENARIO, and is now
-driven by no committed scenario at all. ⚠️ TWICE CORRECTED, both times by fact: this
-read "here or in any other scenario file", which became false when
-`harness/scenarios/end_of_cycle_gl.yaml` was added with its own affected-table list and
-its own suite; findings M-09 and M-17 then removed that definition, because the Agent
-Action Plan's inventory names EIGHT scenario definitions and eight scenario tests. So
-the original sentence is true again -- for a different reason, which is why the history
-is kept rather than the wording simply reverted. gl080's own effects are covered in the
+`gl_end_of_cycle` (gl080) IS DELIBERATELY NOT DRIVEN BY THIS SCENARIO, nor by any other
+committed scenario file: the Agent Action Plan's inventory names eight scenario
+definitions and eight scenario tests, and none of them is an end-of-cycle definition
+with its own affected-table list. The
+claim holds because of that inventory and not because the operation is uninteresting, so
+adding a ninth definition would falsify it. gl080's own effects are covered in the
 arithmetic tier; see the A-2/A-3 note below. gl080 is Phase 3 (Transaction Deletion)
 plus Phase 5 (End of Period
 Processing), it promotes THREE interactive answers, and driving it would make the
@@ -432,8 +428,8 @@ declared order and a disagreement is a harness fault:
 
 `SYSTOT-REC` IS GENUINELY IN SCOPE HERE, and it is never blanket-excluded. Its
 inclusion is what makes the nine write sites verifiable "by inspecting one table".
-⚠️ NARROWED: this previously read "AND ON NO OTHER SCENARIO'S LIST", which is false -
-`clean_batch_sl` and `clean_batch_pl` declare it too. What is unique to this scenario
+ IT IS NOT UNIQUE TO THIS SCENARIO'S LIST: `clean_batch_sl` and `clean_batch_pl`
+declare it too, so a claim of exclusivity would be false. What IS unique to this scenario
 is REACH rather than the table: driving all four posting operations is what lets ONE
 dump carry all nine write sites, where `clean_batch_sl` (sl055 then sl060) reaches four
 of them and `clean_batch_pl` (pl055 then pl060) three.
@@ -473,12 +469,14 @@ these rows, they are COMPARABLE, and the comparison is bounded by all 22 in-scop
 tables rather than by this scenario's declared effect.
 
 A SECOND, RELATED QUESTION IS SPECIFIC TO THIS SCENARIO.
-Q-CLI-OVERREWRITE-SECOND-LEG is still open: the omitted half of the COBOL paragraph
-zeroes `File-System-Used` and never restores it, which under a literal reading would
-put a SECOND dispatch in the same session on the indexed leg. This is the only
-scenario that is two dispatches per menu - operations 1 and 2 on Sales, 3 and 4 on
-Purchase - so it is the run that measures which leg the oracle's second dispatch
-takes.
+Q-CLI-OVERREWRITE-SECOND-LEG is CLOSED ON SCOPE for the reproduction and open only for
+the oracle observation: the omitted half of the COBOL paragraph zeroes
+`File-System-Used` and never restores it, which under a literal reading would put a
+SECOND dispatch in the same session on the indexed leg. The migration has no indexed
+leg to select, by design rather than by omission, so there is nothing to reproduce.
+This is the only scenario that is two dispatches per menu - operations 1 and 2 on
+Sales, 3 and 4 on Purchase - so it is the run that would measure which leg the
+oracle's second dispatch takes.
 
 NEITHER QUESTION IS RESOLVED BY AN IGNORE-LIST, A TOLERANCE OR AN ALLOWANCE. A
 divergence on `SYSTOT-REC` is a REAL SIGNAL: the test FAILS, and its message names the
@@ -914,16 +912,16 @@ DATE_FORM_UK: Final[int] = 1
 FILE_SYSTEM_USED_MYSQL: Final[int] = 1
 
 # THE FAN-OUT SWITCH, [copybooks/wssystem.cob:L179-L181] verbatim:
-#     179       05  IRS-Instead     pic x.
-#     180           88  IRS-Used                   value "Y".
-#     181           88  IRS-Both-Used              value "B".   *> 26/11/16
+#  179       05  IRS-Instead     pic x.
+#  180           88  IRS-Used                   value "Y".
+#  181           88  IRS-Both-Used              value "B".   *> 26/11/16
 # THREE states, and the third has NO CONDITION NAME AT ALL - both predicates are simply
 # False for a space, which is General Ledger only. Agent Action Plan section 0.6.4:
 # "leaving it at a default would make the affected-table list ambiguous", so it is
 # pinned explicitly. THE PIN IS LOAD-BEARING FOR THE AFFECTED-TABLE LIST: in pure
 # General Ledger mode `GLBATCH-REC` and `GLPOSTING-REC` are written and
 # `PSIRSPOST-REC` is only opened and closed, whereas under "Y" or "B" the fan-out
-# would change which tables move. It is tested at three sites in each of the four
+# would change which tables move. It is tested at 27 sites across the four
 # Sales and Purchase posting programs - for example [sales/sl060.cbl:L1039],
 # [sales/sl060.cbl:L1126] and [sales/sl060.cbl:L1175]. A YAML space reaches the CLI
 # as the LITERAL SPACE `--irs-instead ' '` - no `N` token exists - so the column
@@ -1255,7 +1253,7 @@ def _block(definition: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     block = definition.get(key)
     assert isinstance(block, Mapping), (
         f"{SCENARIO}: the `{key}:` block is absent or is not a mapping "
-        f"(got {type(block).__name__}). The nine scenario definitions publish "
+        f"(got {type(block).__name__}). The eight scenario definitions publish "
         f"`clock:`, `system:` and `seed:` as mappings, with flat mirrors of the values "
         f"the oracle-side runner reads, because that runner accepts TOP-LEVEL KEYS "
         f"ONLY."
@@ -1382,7 +1380,7 @@ def _latches_from(
     status non-zero, an ABSENT marker is a harness fault the `parity` fixture has
     already raised on rather than a silent gap here.
 
-    ⭐ THE TWO SIDES EMIT A DIFFERENT NUMBER OF MARKERS, AND THAT IS THE PROTOCOL.
+    THE TWO SIDES EMIT A DIFFERENT NUMBER OF MARKERS, AND THAT IS THE PROTOCOL.
     This is the one multi-operation scenario, and it spans TWO menu executables, so
     `tests/conftest.py` drives the oracle as a SEQUENCE of separate
     `run_cobol_scenario.sh` invocations over the declared list while driving Python as
@@ -1565,7 +1563,7 @@ def _verdict(run: Any, *, bearing: str = "") -> str:
     Args:
         run: The `ParityRun`. Its `diagnose()` is the VALUE-FREE summary - table,
             column and counts, naming the report and its digest rather than quoting any
-            figure (finding SEC-05). It returns THE EMPTY STRING when the two trees are
+            figure. It returns THE EMPTY STRING when the two trees are
             identical, which is the same zero-byte report a passing stage 10 writes, so
             the harness modules are no longer needed here at all.
         bearing: What the finding bears on - normally one or more register identifiers -
@@ -1739,7 +1737,7 @@ def parity(
         f"covered."
     )
     # GUARD 2b - BOTH SIDES DROVE THE SAME FOUR OPERATIONS, IN THE SAME ORDER
-    # (finding F-12). This scenario is the reason the guard exists: it declares four
+    #. This scenario is the reason the guard exists: it declares four
     # operations spanning TWO menu executables, and the oracle side was once driven one
     # operation at a time while the Python side ran all four - so the diff compared a
     # one-operation state against a four-operation state and its verdict meant nothing.
@@ -1833,12 +1831,10 @@ def test_scenario_definition_preconditions(
       `period == 1`  INERT ON THIS SCENARIO, and asserted only so that its inertness
         is recorded rather than assumed: the sole in-scope divide by it is
         [general/gl080.cbl:L328], which belongs to `gl_end_of_cycle` - an operation
-        none of THIS file's four routes dispatches. ⚠️ NARROWED: this previously said
-        `gl_end_of_cycle` "is driven by no scenario at all", which is false.
-        a dedicated `end_of_cycle_gl` scenario drove it, and the divide is emphatically
-        NOT inert in gl080 - it is what selects the quarter. That scenario was removed by
-        findings M-09 and M-17, so the divide is now exercised only in the arithmetic
-        tier, which is where the out-of-range subscript has to stay anyway.
+        none of THIS file's four routes dispatches. The divide is emphatically NOT inert
+        in gl080 - it is what selects the quarter - but no committed scenario drives
+        gl080, so the divide is exercised only in the arithmetic tier, which is where the
+        out-of-range subscript has to stay anyway.
       `date_form == 1`  UK dd/mm/yyyy, matching the pinned text, whose digits are never
         reordered to match the form.
       THE CLOCK  both observables, against the `pinned_clock` fixture and against this
@@ -1885,7 +1881,7 @@ def test_scenario_definition_preconditions(
         f"name the first of the four, {OPERATION_ORDER[0]!r} "
         f"({OPERATION_MENU_PARAGRAPHS[OPERATION_ORDER[0]]}). Neither runner reads "
         f"this key while `operations:` is present; it is kept so the key set stays "
-        f"identical across all nine scenario files, and it must stay consistent "
+        f"identical across all eight scenario files, and it must stay consistent "
         f"with the list rather than name some other operation."
     )
 
@@ -2305,10 +2301,10 @@ def test_affected_tables_are_in_scope_and_alphabetical(
     what is off it is not compared at all - BOUNDING, NEVER IGNORING.
 
     `SYSTOT-REC` IS DELIBERATELY INCLUDED HERE, and it is never blanket-excluded.
-    ⚠️ NARROWED: this previously added "AND ON NO OTHER SCENARIO'S LIST", which is
-    false - `clean_batch_sl` and `clean_batch_pl` declare it too, reaching four and
-    three of the nine write sites respectively. This scenario's claim rests on REACH,
-    not exclusivity: all four operations, so all nine sites, in one dump.
+    It is NOT on this scenario's list alone: `clean_batch_sl` and `clean_batch_pl`
+    declare it too, reaching four and three of the nine write sites respectively.
+    This scenario's claim rests on REACH, not exclusivity: all four operations, so
+    all nine sites, in one dump.
     Agent Action Plan section 0.6.4 names the nine
     period-total write sites as "the sole writers of the totals record, which makes the
     period-end-totals scenario verifiable by inspecting one table", and that is exactly
@@ -2544,7 +2540,7 @@ def test_both_flag_p_latches_are_cleared_by_the_run(
     print `ONE-SHOT-LATCH <column> = <value>` into their own captured stream. This test
     reads BOTH captures.
 
-    ⭐ AND IT READS THE LAST PAIR ON EACH SIDE, NOT THE ONLY PAIR. This is the one
+    AND IT READS THE LAST PAIR ON EACH SIDE, NOT THE ONLY PAIR. This is the one
     multi-operation scenario and it spans two menu executables, so the oracle is driven
     as a SEQUENCE of invocations while Python is driven as one; each oracle invocation
     runs its own post-run stage, so the oracle capture carries FOUR pairs and the Python
@@ -2566,6 +2562,8 @@ def test_both_flag_p_latches_are_cleared_by_the_run(
             the observation is bound to the runs themselves rather than to when pytest
             happened to execute this test.
         protocol: The protocol bundle, for the scenario's own seeded latch values.
+        withheld: The value-free stand-in for a dumped cell, so a failure message can
+            name a column without reproducing an accounting figure.
 
     Raises:
         Skipped: The Compose stack is unusable.
@@ -2681,6 +2679,7 @@ def test_systot_rec_reflects_the_nine_write_sites(
 
     Args:
         parity: The completed ten-stage run.
+        protocol: The protocol bundle, for the dump reader and the side labels.
         harness: The three harness Python modules, for the deterministic renderer.
     """
     #  THE NINE OBSERVABLES, READ BEFORE THE VERDICT IS ASKED FOR. Each site
@@ -3046,7 +3045,7 @@ def test_open_items_are_rewritten_on_both_ledgers(parity: Any, harness: Any) -> 
                 f"than the computation. A-11 also bears on this table: a signed "
                 f"`binary-long` narrows to an unsigned host variable and an unsigned "
                 f"column, LOSING ITS SIGN AT THE BRIDGE and not at the database, and "
-                f"that question is open as Q-3. On {table}, note that "
+                f"which Q-3 settled by measurement. On {table}, note that "
                 f"`SALES-STATS-DATE` is the ONE column on this bound that "
                 f"normalisation's third job touches."
             ),
@@ -3279,7 +3278,7 @@ def test_diff_exit_contract_is_honoured(
     AVAILABLE IN THIS TREE, so the mapping is exercised rather than trusted. Rule R-6
     makes an empty diff the pass condition ONLY when a comparison actually happened.
 
-    ⭐ DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
+    DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
     `tests/conftest.py`'s `assert_diff_exit_contract` publishes two synthetic sides with
     `harness/dump_tables.py`'s own writer, canonicalises them with `harness/normalize.py`
     and compares them with `harness/diff_states.py` - once for each of the four cases.
@@ -3389,19 +3388,18 @@ def test_a2_a3_quarter_handling_is_not_reconciled_here(
     """A-2 and A-3 are NOT exercised by this scenario, and that is recorded not implied.
 
     DOCUMENTATION ONLY, AND IT NEEDS NO STACK. Both anomalies live in gl080, which
-    THIS scenario does not drive, so neither can be observed HERE. ⚠️ NARROWED: this
-    previously said `gl_end_of_cycle` "is driven by NO scenario file at all", which is
-    false, and the correction changes where each anomaly is locked:
+    THIS scenario does not drive, so neither can be observed HERE, and each is locked
+    where it can be:
       A-2, the unbounded quarter subscript, IS owned by
         `tests/arithmetic/test_gl080_cycle_divide_rounded.py` and is deliberately never
         driven through the compiled oracle, because an out-of-range subscript is a write
         into adjacent storage whose effect is undefined.
       A-3, the second rotating quarter counter, WAS also witnessed in TABLE STATE, by a
-        dedicated `end_of_cycle_gl` scenario that seeded the counter and the subscript to
-        disagree and observed the subscript writing Q1 while the counter wrote
-        Ledger-Last. That scenario was removed by findings M-09 and M-17, so the
-        table-state witness is gone and the arithmetic pin is what remains - stated here
-        rather than left for a reader to discover by following a dead reference.
+        scenario seeding the counter and the subscript to disagree, so that the subscript
+        could be observed writing Q1 while the counter wrote Ledger-Last. NO committed
+        scenario does that, so there is NO table-state witness for it and the arithmetic
+        pin is the whole of the coverage - stated here rather than left for a reader to
+        assume a witness exists.
     Both remain locked arithmetically in
     `tests/arithmetic/test_gl080_cycle_divide_rounded.py`.
 
@@ -3461,9 +3459,9 @@ def test_a2_a3_quarter_handling_is_not_reconciled_here(
         f'APPENDED TO THIS SCENARIO"] and belongs in '
         f"{DOC_AMBIGUITIES}. A-2 and A-3 are locked in "
         f"`tests/arithmetic/test_gl080_cycle_divide_rounded.py`, not here; the "
-        f"question that was {AMBIGUITY_QUARTER_SUBSCRIPT[0]}, also carried as "
-        f"{AMBIGUITY_QUARTER_SUBSCRIPT[1]}, has since been measured against the "
-        f"compiled oracle and is settled."
+        f"question {AMBIGUITY_QUARTER_SUBSCRIPT[0]}, also carried as "
+        f"{AMBIGUITY_QUARTER_SUBSCRIPT[1]}, is measured against the "
+        f"compiled oracle and settled."
     )
 
     system = _block(definition, KEY_SYSTEM)
@@ -3482,9 +3480,8 @@ def test_a2_a3_quarter_handling_is_not_reconciled_here(
 def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, protocol: object) -> None:
     """THE PARAMETER ROW IS BOUNDED TWICE - by the dump, and by a digest of it.
 
-    WHAT THIS CLOSES. An earlier draft kept `SYSTEM-REC` off every scenario's
-    `affected_tables` and justified that by claiming no side writes it. That claim is
-    FALSE:
+    WHAT THIS CLOSES. The tempting shortcut is to keep `SYSTEM-REC` off every scenario's
+    `affected_tables` on the ground that no side writes it. THAT GROUND IS FALSE:
     `acas_posting/cli/args.py`'s `overrewrite` reproduces
     [general/general.cbl:L656-L672] and every one of the seven routes calls it, so the
     parameter row is written on BOTH sides of every scenario. Until this assertion
@@ -3520,11 +3517,10 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
-    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
-    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
-    counter -- that scenario has since been removed (findings M-09 and M-17), and the
-    observation is recorded because it is what established that half.
+    over the eight committed scenarios, which is all four `unchanged` ones. THE `changed`
+    HALF IS NOT COVERED BY ANY COMMITTED SCENARIO: it was established on a definition that
+    declared `changed` and moved the row by construction, its Phase 5 advancing the cycle
+    and rotating the quarter counter, and no scenario in `harness/scenarios/` does that.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 

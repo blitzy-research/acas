@@ -13,8 +13,8 @@
 #     9 verify both captures published                10 diff
 #
 # That list is a CITATION, not the definition. The definition is harness/normalize.py
-# and this script sources it, because this comment previously said EIGHT stages -- a
-# protocol that had not been the one driven for some time (finding F-16). The Agent
+# and this script sources it, so that a citation here cannot drift from the definition --
+# writing EIGHT stages in this comment would name a protocol nobody drives. The Agent
 # Action Plan's eight logical stages (section 0.3.2) become these ten by making BOTH
 # normalisations and the publication check explicit rather than implied, so where older
 # prose in this repository says "stage 8" of the protocol it means today's stage 10, the
@@ -47,69 +47,51 @@
 #
 # -----------------------------------------------------------------------------
 # THE RULES THAT BIND THIS FILE
-# There is NO user rules document for this project: `review_rules' reports, in
-# full, "No user rules provided." The six binding rules R-1..R-6 come from the
-# Agent Action Plan itself, section 0.7.2. Where they are silent this script is
-# held to enterprise-standard shell practice, and nothing has been invented to
-# fill a gap.
+# R-1..R-6 are the Agent Action Plan's own rules, section 0.7.2; what each one
+# obliges of THIS file is below. Where they are silent this script is held to
+# enterprise-standard shell practice.
 #
-#   R-1  NO COBOL AT RUNTIME -- and this is the ONE file in this tree that has
-#        no sanctioned exception. It compiles nothing, translates nothing and
-#        runs no compiled artifact; it sets no `COB_'-prefixed environment
-#        variable, allocates no pseudo-terminal, requires no screen geometry and
-#        needs no terminal type, because the migrated cycle is headless. It
-#        reaches the migrated command line as a SUBPROCESS and never as an
-#        import: Agent Action Plan section 0.4.3 permits this tree "standard
-#        library, PyYAML, driver" and forbids it the package's internals, so the
-#        only Python import of the package anywhere below is the bare
-#        availability probe of the package ROOT, which reaches no internals.
-#        The mechanised proof of R-1 is that this script completes on a host
-#        with no COBOL compiler and no COBOL runtime present.
+#   R-1  NO COBOL AT RUNTIME -- and this is the ONE file in this tree with no
+#        sanctioned exception. It compiles nothing, translates nothing and runs no
+#        compiled artifact; it sets no `COB_'-prefixed variable, allocates no
+#        pseudo-terminal and needs no screen geometry or terminal type, because the
+#        migrated cycle is headless. It reaches the migrated command line as a
+#        SUBPROCESS and never as an import: Agent Action Plan section 0.4.3 permits
+#        this tree "standard library, PyYAML, driver" and forbids the package's
+#        internals, so the only Python import of the package below is the bare
+#        availability probe of the package ROOT. The mechanised proof is that this
+#        script completes on a host with no COBOL compiler and no COBOL runtime.
 #
-#        ON THE FROZEN-SOURCE CITATIONS BELOW. Rule R-5 requires every
-#        non-obvious decision to carry a [<path>:<locator>] citation, and the
-#        specification being reproduced is COBOL, so those paths name COBOL
-#        files. Every such path in this file is a CITATION and never an operand
-#        of a command: it appears in a comment, or in the operation map from
-#        which a log line is composed, or inside the text of a diagnostic or of
-#        the help. None of them is ever executed, opened, compiled, translated or
-#        passed to anything. That is the same convention every other file in this
-#        tree follows -- the oracle-side runner carries about a hundred and thirty
-#        of them outside comments and the capture tool about ten -- so the check
-#        that matters is not "does the text appear" but "is any of it a command",
-#        and none of it is. The one file this script names as an operand is the
+#        ON THE FROZEN-SOURCE CITATIONS BELOW. Every [<path>:<locator>] naming a
+#        COBOL file is a CITATION and never an operand: it appears in a comment, in
+#        the operation map a log line is composed from, or in the text of a
+#        diagnostic or of the help. None is executed, opened, compiled, translated
+#        or passed to anything. The only file this script names as an operand is the
 #        capture tool, which is Python.
 #
 #   R-2  ZERO BINARY FLOATING POINT. This script performs no arithmetic on any
-#        accounting value. The only numbers it computes with are row counts,
-#        table counts, line counts, deadlines and exit statuses, all integers,
-#        all in the shell's own integer arithmetic. It imports no data-frame or
-#        array library, runs no arbitrary-precision calculator and never formats
-#        a value as a floating-point number. A scenario key carrying a real
-#        number is REFUSED rather than rounded.
+#        accounting value. The only numbers it computes with are row counts, table
+#        counts, line counts, deadlines and exit statuses -- all integers, all in
+#        the shell's own integer arithmetic. It imports no data-frame or array
+#        library and never formats a value as a floating-point number. A scenario
+#        key carrying a real number is REFUSED rather than rounded.
 #
-#   R-3  NO NEW VALIDATIONS, NO SCHEMA CHANGE, STRICTLY SEQUENTIAL.
-#        No data-definition statement of any kind is issued: every statement
-#        this script sends is a SELECT, and the only tables it names come from
-#        the scenario's own affected-table list plus the four autogen tables it
-#        asserts are untouched. It does not seed and it does not reset -- those
-#        are stages 1 and 5, and calling them from here would destroy the stage
-#        ordering that R-6 depends on. Execution is strictly sequential: one
-#        scenario at a time behind a run lock, and the scenario's operations one
-#        after another in the order the scenario declares. There is no
-#        concurrency option; the option parser's catch-all refuses any option it
-#        does not know, which is how a request for concurrency is refused.
-#        No business validation is added. In particular the run date is NOT
-#        pre-validated, no batch is checked for existence and no account number
-#        is verified. Every check below is a HARNESS precondition about the
-#        harness's own environment, never an opinion about what the cycle
-#        computed.
+#   R-3  NO NEW VALIDATIONS, NO SCHEMA CHANGE, STRICTLY SEQUENTIAL. Every statement
+#        this script sends is a SELECT; no data-definition statement of any kind is
+#        issued, and the only tables it names are the scenario's affected-table list
+#        plus the four autogen tables it asserts are untouched. It neither seeds nor
+#        resets -- those are stages 1 and 5, and calling them from here would destroy
+#        the stage ordering R-6 depends on. One scenario at a time behind a run lock,
+#        operations in the declared order, and the option parser's catch-all refuses
+#        any option it does not know, which is how a request for concurrency is
+#        refused. No business validation is added: the run date is NOT pre-validated,
+#        no batch is checked for existence and no account number is verified. Every
+#        check below is a HARNESS precondition about the harness's own environment,
+#        never an opinion about what the cycle computed.
 #
-#   R-4  LEGACY ANOMALIES REPRODUCED, NEVER FIXED. "There is no test suite:
-#        compiled COBOL execution is the behavioral specification, defects
-#        included. A defect reproduced is correct; a defect fixed is a failure."
-#        The sharpest obligation here is the THREE DIVERGENT ABORT GATES, and
-#        the discipline is that this script does not implement any of them:
+#   R-4  LEGACY ANOMALIES REPRODUCED, NEVER FIXED. The sharpest obligation here is
+#        the THREE DIVERGENT ABORT GATES, and the discipline is that this script
+#        implements none of them:
 #          General   `if ws-term-code = 5 / go to display-menu'
 #                    [general/general.cbl:L810-L811], inside `load08.'
 #                    [general/general.cbl:L805-L815]
@@ -121,41 +103,39 @@
 #                    [purchase/purchase.cbl:L752-L762]
 #          IRS       NONE, and no dispatch wrapper at all
 #                    [irs/irs.cbl:L666-L672]
-#        Those gates live inside the migrated modules, which reproduce them. So
-#        this script ADDS NO GATE AND REMOVES NONE, and it never decides from an
-#        exit status whether to skip a later operation. It runs every operation
-#        the scenario lists, in order, unconditionally. If a scenario must not
-#        run a later operation, the scenario simply does not list it.
+#        Those gates live inside the migrated modules, which reproduce them. So this
+#        script ADDS NO GATE AND REMOVES NONE, never decides from an exit status
+#        whether to skip a later operation, and runs every operation the scenario
+#        lists, in order, unconditionally. A scenario that must not run a later
+#        operation simply does not list it.
 #        A CONSEQUENCE: A NON-ZERO EXIT STATUS IS FREQUENTLY THE SPECIFICATION.
-#        `exit_status_for' in the migrated argument layer is the identity, so a
-#        term code surfaces unchanged. Three of the twelve in-scope programs set
-#        one: `move 5 to ws-term-code' [general/gl070.cbl:L289] and `move 8 to
+#        `exit_status_for' in the migrated argument layer is the identity, so a term
+#        code surfaces unchanged; three of the twelve in-scope programs set one --
+#        `move 5 to ws-term-code' [general/gl070.cbl:L289] and `move 8 to
 #        WS-Term-Code' [sales/sl055.cbl:L344], [purchase/pl055.cbl:L286]. Agent
-#        Action Plan section 0.6.5 says why the state capture still happens:
-#        for a run-aborting rejection "the database effect is therefore THE
-#        ABSENCE of everything the later phases would have written". Absence is
-#        evidence. So the order is ALWAYS CAPTURE, THEN DECIDE THE STATUS.
-#        And this script never ends with an unconditional success exit. The
-#        frozen build scripts do -- [comp-all.sh:L45], [common/comp-common.sh:L59]
-#        -- and they are NOT fixed; their shape is simply not adopted.
+#        Action Plan section 0.6.5 says why the capture still happens: for a
+#        run-aborting rejection "the database effect is therefore THE ABSENCE of
+#        everything the later phases would have written". Absence is evidence, so the
+#        order is ALWAYS CAPTURE, THEN DECIDE THE STATUS -- and this script never ends
+#        with an unconditional success exit, though the frozen build scripts do
+#        [comp-all.sh:L45], [common/comp-common.sh:L59]. Their shape is not adopted,
+#        and they are not fixed.
 #
 #   R-5  FULL TRACEABILITY. Every non-obvious decision below carries a
-#        [<path>:<locator>] citation to the frozen source it reproduces, and
-#        every deliberate deviation is annotated AS a deviation with its reason.
-#        The deviations are D-1..D-8 below and the omissions are O-1..O-3.
+#        [<path>:<locator>] citation to the frozen source it reproduces, and every
+#        deliberate deviation is annotated AS a deviation with its reason. The
+#        deviations are D-1..D-8 below and the omissions are O-1..O-3.
 #
-#   R-6  COMPILED BEHAVIOUR IS THE TIE-BREAKER, AND THE RUN MUST BE
-#        REPRODUCIBLE. "Two runs of the same scenario under the same pinned
-#        clock produce byte-identical dumps." Therefore: this script NEVER READS
-#        THE HOST CLOCK -- there is no call to any clock utility anywhere in it
-#        -- and the run date comes from the scenario and is passed explicitly.
-#        Nothing carrying a wall-clock reading, a host name, a process id, a run
-#        id, an elapsed time or an absolute path is ever written under
-#        $ACAS_OUT/<scenario>/. Human-facing progress text goes to
-#        $ACAS_OUT/run-logs/<scenario>/python.log, which is outside every
-#        compared tree by construction, and so do both seed fingerprints and the
-#        run lock. The lock is the only place a process id is written, and it is
-#        two directory levels away from any tree stage 10 compares.
+#   R-6  COMPILED BEHAVIOUR IS THE TIE-BREAKER, AND THE RUN MUST BE REPRODUCIBLE.
+#        Two runs of one scenario under one pinned clock must produce byte-identical
+#        dumps, so this script NEVER READS THE HOST CLOCK -- there is no call to any
+#        clock utility anywhere in it -- and the run date comes from the scenario and
+#        is passed explicitly. Nothing carrying a wall-clock reading, a host name, a
+#        process id, a run id, an elapsed time or an absolute path is ever written
+#        under $ACAS_OUT/<scenario>/. Human-facing progress text, both seed
+#        fingerprints and the run lock go to $ACAS_OUT/run-logs/<scenario>/, outside
+#        every compared tree by construction. The lock is the only place a process id
+#        is written, two directory levels away from any tree stage 10 compares.
 #
 # -----------------------------------------------------------------------------
 # THE SEVEN OPERATIONS -- one migrated command-line module each, and the menu
@@ -291,9 +271,9 @@
 #        rather than harmonised. Recorded for the ambiguity register.
 #
 #   D-6  THE STATE CAPTURE OF STAGE 7 IS *NOT* PERFORMED HERE. It is the
-#        protocol's, and it has exactly one owner. An earlier revision took a
-#        full capture here as well, on the reasoning that the capture is
-#        idempotent so a duplicate costs nothing. It cost three things: every
+#        protocol's, and it has exactly one owner. Taking a full capture here as well,
+#        on the reasoning that the capture is idempotent so a duplicate costs
+#        nothing, costs three things: every
 #        affected table was read and written TWICE per scenario; the capture tree
 #        had two writers, so a stale file's provenance was ambiguous; and the
 #        capture taken here COULD NOT BE USED, because
@@ -470,26 +450,12 @@ set -Eeuo pipefail
 # a space. Every deliberate word split below is done with an explicit local IFS.
 IFS=$'\n\t'
 
-# ---------------------------------------------------------------------------
-#  DROP THE ADMINISTRATIVE CREDENTIAL BEFORE ANYTHING IS SPAWNED (finding SEC-04)
+#  DROP THE ADMINISTRATIVE CREDENTIAL BEFORE ANYTHING IS SPAWNED
 #
-#  `harness/docker-compose.yml` puts ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD in
-#  the `gnucobol` service environment because protocol stages 1 and 5 -- and only
-#  those two, both `harness/reset_db.sh` -- drop and re-apply the frozen schema and
-#  so need DDL rights. A service-wide variable is inherited by every descendant,
-#  which put the database SUPERUSER password into the environment of the GnuCOBOL
-#  compiler, the preSQL translator, every bridge and menu binary, the migrated
-#  Python cycle and pytest itself.
-#
-#  THIS SCRIPT NEVER USES THAT PAIR -- it holds no reference to either name and
-#  invokes neither reset_db.sh nor seed.sh -- so it removes them from its own
-#  environment here, before the first child exists. Least privilege by
-#  construction rather than by convention: a compile or a cycle run cannot reach
-#  the credential even by accident, because it is not there to reach.
-#
-#  Application access is unaffected: ACAS_DB_USER / ACAS_DB_PASSWORD remain, and
-#  that account holds SELECT, INSERT, UPDATE and DELETE on the one schema.
-# ---------------------------------------------------------------------------
+#  harness/docker-compose.yml supplies the administrative pair to the stages that need
+#  it, and a spawned child inherits the whole environment. This script unsets it before
+#  it spawns anything, so no compiler, menu or tool ever sees it. Full rationale:
+#  harness/build_oracle.sh, same heading.
 unset ACAS_DB_ADMIN_USER ACAS_DB_ADMIN_PASSWORD
 # `set -e' alone is NOT enough and is not relied on. A failure inside a command
 # substitution, or on the left of a pipe, is not necessarily fatal, and a
@@ -506,7 +472,7 @@ unset ACAS_DB_ADMIN_USER ACAS_DB_ADMIN_PASSWORD
 # the frozen program set? -- would take the wrong branch. It is called out here
 # because the wrong form is the one that reads naturally.
 
-# ⭐ NOTHING THIS SCRIPT WRITES IS GROUP- OR WORLD-READABLE.
+# NOTHING THIS SCRIPT WRITES IS GROUP- OR WORLD-READABLE.
 #
 # The four sibling scripts -- [harness/build_oracle.sh], [harness/seed.sh],
 # [harness/reset_db.sh] and [harness/run_cobol_scenario.sh] -- each set this at the
@@ -583,7 +549,7 @@ readonly -a ACAS_PY_REQUIRED_ENV_DECLARED=(
 # one database this cycle can legitimately be driven against.
 readonly ACAS_PY_REQUIRED_SCHEMA='ACASDB'
 # ---------------------------------------------------------------------------
-#  ⭐ MJ-18: WHAT PROVES THIS TARGET IS THROWAWAY.
+#  WHAT PROVES THIS TARGET IS THROWAWAY.
 #
 #  This side POSTS TOO. The migrated cycle reproduces the frozen writes exactly --
 #  that is the whole point (R-4) -- so it rewrites nominal balances, stamps batches
@@ -630,7 +596,7 @@ readonly -a ACAS_PY_OPERATIONS=(
 
 readonly -a ACAS_PY_SUBSYSTEMS=(general sales purchase irs)
 
-# ⭐ THE CLOSED SET OF SEMANTIC STATUSES, PER OPERATION (finding MJ-01)
+# THE CLOSED SET OF SEMANTIC STATUSES, PER OPERATION
 #
 # A status this script records as BEHAVIOURAL becomes evidence: the wrapper exits
 # EX_BEHAVIOUR=69, the protocol CONTINUES past stage 6 so
@@ -747,7 +713,7 @@ ACAS_PY_LOCK=''                 # the sequential-run lock
 ACAS_PY_LOCK_HELD=0             # only the taker may release it
 ACAS_PY_PYTHON=''               # the resolved interpreter, an absolute path
 
-# The ONE scenario parser, shared with harness/run_cobol_scenario.sh (F-32).
+# The ONE scenario parser, shared with harness/run_cobol_scenario.sh.
 # Resolved from THIS script's own location rather than from ACAS_REPO, so the
 # reader that ships beside this runner is the reader it uses -- a pair that cannot
 # be mismatched by an environment variable. The `case' is not decoration: when the
@@ -760,19 +726,19 @@ case "${BASH_SOURCE[0]}" in
 esac
 readonly ACAS_PY_SELF_DIR
 # The shared scenario reader and the shared stage registry are BOTH modes of
-# harness/normalize.py (findings M-05, M-07 and M-08): they were files of their own,
+# harness/normalize.py: they were files of their own,
 # which the Agent Action Plan section 0.3.1 harness inventory does not name.
 readonly ACAS_PY_SCENARIO_READER="$ACAS_PY_SELF_DIR/normalize.py"
 
-# THE CANONICAL STAGE REGISTRY (findings F-16 and M-08). The parity protocol's ten
+# THE CANONICAL STAGE REGISTRY. The parity protocol's ten
 # stages are defined in `PARITY_STAGES' in harness/normalize.py and nowhere else, and
 # `--print-stage-shell' publishes them as the sourceable fragment eval'd below -- the same
 # variable names, the same readonly protection, the same re-source guard and the same
 # three `acas_parity_stage_*' helpers this script has always called. So this script's
 # statement of where it sits in the protocol cannot drift from the protocol actually
-# driven. It was duplicated here as prose, and the prose had gone stale claiming EIGHT
-# stages; it was then a shell file of its own, which is not one of the harness paths the
-# Agent Action Plan section 0.3.1 inventory names.
+# driven. Duplicating the list here as prose would let it go stale; putting it in a shell
+# file of its own would add a path the Agent Action Plan section 0.3.1 harness inventory
+# does not name.
 readonly ACAS_PY_STAGE_REGISTRY="$ACAS_PY_SELF_DIR/normalize.py"
 if [[ ! -r "$ACAS_PY_STAGE_REGISTRY" ]]; then
   printf '%s: the canonical stage registry is missing: %s\n' \
@@ -837,23 +803,23 @@ ACAS_PY_HARNESS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ACAS_PY_STATUS_FILE=''                # python.run-status -- read by harness/dump_tables.py
 # python.operation-status -- ONE record per declared operation carrying that
 # operation's own observed status. Separate from the run-status record because
-# WRAPPER HEALTH and PER-OPERATION DISPOSITION are different facts (F-13).
+# WRAPPER HEALTH and PER-OPERATION DISPOSITION are different facts.
 ACAS_PY_OP_STATUS_FILE=''
 # The sentinel meaning "declared, but never invoked". Deliberately NOT zero: zero is
 # a real process status -- it IS WS-Term-Code [copybooks/wscall.cob:L10] -- so a slot
 # left at zero would attest a clean disposition for an operation that never ran.
 readonly ACAS_PY_OP_NOT_RUN='not-run'
-# One identity for one attempt, bound through every stage (F-37). Supplied by the
+# One identity for one attempt, bound through every stage. Supplied by the
 # protocol via --run-id or ACAS_PARITY_RUN_ID; derived locally when a
 # hand invocation supplies neither -- and its presence is what marks this run as a
 # protocol stage rather than a hand invocation (acas_py_assert_no_evidence_bypass).
 ACAS_PY_RUN_ID="${ACAS_PARITY_RUN_ID:-}"
 # The staged fixture marker digest this run was seeded from, read from the record
-# harness/reset_db.sh publishes. The EXACT seed identity (F-22).
+# harness/reset_db.sh publishes. The EXACT seed identity.
 ACAS_PY_SEED_IDENTITY=''
 # Where the transcript is STREAMED while the run is in progress. The canonical
 # ACAS_PY_LOG only ever holds a COMPLETE run's transcript, published from here by
-# rename at exit (finding F-24).
+# rename at exit.
 ACAS_PY_LOG_STAGING=''
 # The status a SIGNAL handler decided on. Bash runs the EXIT trap when this shell is
 # terminated by a signal, but `$?' at that moment is the status of the last command
@@ -940,7 +906,7 @@ acas_py_tee() {
     # swallowed: the log is marked closed, so the operator sees output stop
     # reaching it rather than seeing nothing at all.
     # Appends to the STAGING file, never to the canonical one: the canonical path
-    # holds a complete transcript or nothing at all (F-24).
+    # holds a complete transcript or nothing at all.
     if ! printf '%s\n' "$*" 2>/dev/null >>"$ACAS_PY_LOG_STAGING"; then
       ACAS_PY_LOG_OPEN=0
       printf 'WARNING: the run log could not be appended to and is now closed.\n' >&2
@@ -1297,7 +1263,7 @@ acas_py_release_lock() {
   fi
 }
 
-# ⭐ THE PER-SIDE RUN-STATUS RECORD, written from the EXIT trap.
+# THE PER-SIDE RUN-STATUS RECORD, written from the EXIT trap.
 #
 # [harness/dump_tables.py] records a run ATTESTATION in the dump manifest and
 # [harness/diff_states.py] refuses to compare two captures unless BOTH sides attest
@@ -1320,15 +1286,15 @@ acas_py_release_lock() {
 # best-effort and reported rather than fatal. A run-status file that cannot be
 # written simply leaves the capture unattested, which is the safe direction.
 # =============================================================================
-#  THE RUN ID -- ONE IDENTITY FOR ONE ATTEMPT (finding F-37)
+#  THE RUN ID -- ONE IDENTITY FOR ONE ATTEMPT
 #
-#  Every artifact of the parity protocol used to be written to a CANONICAL path and
-#  nothing else: run-logs/<scenario>/<side>.log, <side>.run-status,
-#  <side>.seed-fingerprint. Two attempts at one scenario therefore wrote to the same
-#  names, and the deleted driver's --from/--to made that reachable on purpose:
+#  Writing every artifact of the parity protocol to a CANONICAL path and nothing else --
+#  run-logs/<scenario>/<side>.log, <side>.run-status, <side>.seed-fingerprint -- would have
+#  two attempts at one scenario write to the same names, and a driver offering --from/--to
+#  would make that reachable on purpose:
 #  stages 1..5 of one attempt and stages 6..10 of another produce a verdict over
 #  artifacts that were never part of the same run, and nothing in the evidence says
-#  so. Resuming a protocol part-way is no longer offered at all (finding M-06), and
+#  so. Resuming a protocol part-way is not offered at all, and
 #  the run-scoped paths below are why doing it by hand cannot go unnoticed either.
 #
 #  So one identity is bound through every stage. It arrives from the driver
@@ -1337,7 +1303,7 @@ acas_py_release_lock() {
 #  is never empty and never guessed at by a reader.
 #
 #  It is deliberately NOT derived from the clock. Rule R-6 makes the run
-#  reproducible, and finding F-41 keeps wall-clock readings out of retained
+#  reproducible, and wall-clock readings are kept out of retained
 #  evidence; a timestamped identity would put one back into every record. The kernel
 #  UUID source is used when it is readable, and the process id plus one shell random
 #  otherwise -- neither of which says when the run happened.
@@ -1356,11 +1322,11 @@ acas_py_derive_run_id() {
 }
 
 acas_py_assert_run_id() {
-  #  ⭐ THE VARIABLE, NOT THE PROCESS ID (finding MJ-02 / S-1). This read
-  #  `$$ACAS_PY_RUN_ID`, which bash expands as `$$` -- this shell's PID -- followed by
-  #  the LITERAL text `ACAS_PY_RUN_ID`, so the regex was matched against something like
-  #  `4127ACAS_PY_RUN_ID`. That is always inside the closed alphabet, so the check
-  #  ALWAYS PASSED and the supplied run id was never validated. The id becomes part of
+  #  THE VARIABLE, NOT THE PROCESS ID. Writing `$$ACAS_PY_RUN_ID` here would have bash
+  #  expand `$$` -- this shell's PID -- followed by the LITERAL text `ACAS_PY_RUN_ID`, so
+  #  the regex would be matched against something like `4127ACAS_PY_RUN_ID`. That is
+  #  always inside the closed alphabet, so the check would ALWAYS PASS and the supplied
+  #  run id would never be validated. The id becomes part of
   #  a file name and is published in every evidence record (CWE-20, CWE-22, CWE-73,
   #  CWE-117).
   [[ "${ACAS_PY_RUN_ID-}" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || acas_py_die "$EX_USAGE" \
@@ -1379,7 +1345,7 @@ acas_py_assert_run_id() {
   esac
 }
 
-# ⭐ EVERY EVIDENCE LEAF IS PUBLISHED BY RENAME, NEVER BY REDIRECTION (finding F-26)
+# EVERY EVIDENCE LEAF IS PUBLISHED BY RENAME, NEVER BY REDIRECTION
 #
 # The run-status record, the per-operation dispositions, the seed fingerprint and
 # the run log were each written with a plain shell redirection into a path checked
@@ -1447,26 +1413,25 @@ acas_py_publish_atomic() {
 acas_py_write_run_status() {
   local status="$1"
 
-  # ⭐ A DRY RUN ATTESTS NOTHING, AND WRITES NOTHING -- INCLUDING NOT DELETING.
+  # A DRY RUN ATTESTS NOTHING, AND WRITES NOTHING -- INCLUDING NOT DELETING.
   # `--dry-run' resolves every option and prints the plan without invoking a single
   # operation, then exits 0, and a bare status 0 is exactly what
   # [harness/dump_tables.py] reads as "the run succeeded". So no record is written
   # here, which is the whole of what this branch has to do.
   #
-  # AN EARLIER REVISION DELETED ANY EXISTING RECORD, and the reasoning was sound as
-  # far as it went: a real record from a previous run of the same scenario survives,
-  # and would go on attesting whatever capture is taken next. But `rm' is a WRITE,
+  # DELETING ANY EXISTING RECORD HERE WOULD BE DEFENSIBLE AS FAR AS IT GOES: a real
+  # record from a previous run of the same scenario survives, and would go on attesting
+  # whatever capture is taken next. But `rm' is a WRITE,
   # and a mode whose entire contract is "contacts nothing and writes nothing" (D-7)
   # cannot keep a hidden exception -- least of all one that destroys the evidence of
   # a completed run, which is the most expensive artifact in the tree.
   #
-  # The hazard it guarded against is closed by construction now: this script no
-  # longer takes a capture at all (D-6), so a dry run cannot produce a misattested
-  # artifact by itself. What remains is an operator who dry-runs and then dumps by
-  # hand, and for that the honest answer is to SAY SO rather than to delete their
-  # last run's record behind their back. The path is resolved here rather than from
-  # $ACAS_PY_STATUS_FILE because a dry run never opens the run log, so the variable
-  # was never set.
+  # The hazard is closed by construction anyway: this script takes no capture at all
+  # (D-6), so a dry run cannot produce a misattested artifact by itself. What remains is
+  # an operator who dry-runs and then dumps by hand, and for that the honest answer is to
+  # SAY SO rather than to delete their last run's record behind their back. The path is
+  # resolved here rather than from $ACAS_PY_STATUS_FILE because a dry run never opens the
+  # run log, so that variable is unset.
   if (( ACAS_PY_DRY_RUN )); then
     local dry_target="$ACAS_PY_STATUS_FILE"
     if [[ -z "$dry_target" && -n "$ACAS_PY_SCENARIO" ]]; then
@@ -1500,7 +1465,7 @@ acas_py_write_run_status() {
     digest="$(sha256sum -- "$ACAS_PY_FINGERPRINT" 2>/dev/null | cut -d' ' -f1)" || digest=''
   fi
 
-  # ⭐ WRAPPER HEALTH IS NOT A DISPOSITION (findings F-13, F-14)
+  # WRAPPER HEALTH IS NOT A DISPOSITION
   #
   # `status' is retained under its original name because every existing reader
   # requires it, and it is now stated for what it always was: this script's own exit
@@ -1545,7 +1510,7 @@ acas_py_write_run_status() {
   return 0
 }
 
-# ⭐ THE PER-OPERATION DISPOSITIONS, AS A STRUCTURED ARTIFACT (finding F-13)
+# THE PER-OPERATION DISPOSITIONS, AS A STRUCTURED ARTIFACT
 #
 # Shape-identical to the record [harness/run_cobol_scenario.sh] publishes, so one
 # reader serves both sides:
@@ -1583,7 +1548,7 @@ acas_py_publish_operation_status() {
 
 # Publish the streamed transcript to its canonical name, atomically. Called LAST on
 # every exit path, because after the rename nothing more can be appended: the
-# canonical path is a COMPLETE transcript by construction (finding F-24).
+# canonical path is a COMPLETE transcript by construction.
 # shellcheck disable=SC2317  # reached only through the EXIT trap installed below.
 acas_py_publish_log() {
   [[ -n "$ACAS_PY_LOG_STAGING" && -n "$ACAS_PY_LOG" ]] || return 0
@@ -1635,12 +1600,12 @@ acas_py_on_exit() {
   acas_py_tee "harness/run_python_scenario.sh exiting with status $status (ran=$ACAS_PY_RAN)"
 
   # LAST on every path, success and failure: after this the canonical transcript
-  # exists and is complete, and nothing further can append to it (F-24).
+  # exists and is complete, and nothing further can append to it.
   acas_py_publish_log
 }
 trap 'acas_py_on_exit "$?"' EXIT
 
-# ⭐ SIGNALS -- AND WHY THE DEFAULT DISPOSITION WAS NOT GOOD ENOUGH.
+# SIGNALS -- AND WHY THE DEFAULT DISPOSITION WAS NOT GOOD ENOUGH.
 #
 # With no handler installed, a SIGTERM terminates this shell and bash still runs the
 # EXIT trap on the way out -- but `$?' at that moment is the status of the last
@@ -1801,7 +1766,7 @@ SCENARIO KEYS THIS STAGE READS
                            runner passes it as --run-confirmed, and the entry
                            point's require_stated gate reads an option present on
                            argv as consent explicitly given, so a default here
-                           would arrive as a decision nobody made (MJ-16).
+                           would arrive as a decision nobody made.
     disk_change_option     "0" proceeds, "9" aborts the archiving walk and the
                            whole of end-of-period processing
                            [general/gl080.cbl:L545]. REQUIRED for
@@ -1841,7 +1806,7 @@ ENVIRONMENT
                           frozen mysql/ACASDB.sql gives every ACAS installation
                           that same name -- so the target must additionally
                           declare itself disposable through @@report_host, or be
-                          acknowledged by exact name (MJ-18).
+                          acknowledged by exact name.
     ACAS_DB_USER          The credential. Both are width-limited to twelve
     ACAS_DB_PASSWORD      characters, because the frozen host-variable group is
                           `DB-UName pic x(12)' and `DB-UPass pic x(12)'
@@ -2170,11 +2135,11 @@ acas_py_resolve_interpreter() {
 acas_py_yaml_stream() {
   local reader="$ACAS_PY_SCENARIO_READER"
 
-  # ⭐ ONE PARSER, SHARED WITH THE ORACLE-SIDE RUNNER (finding F-32)
+  # ONE PARSER, SHARED WITH THE ORACLE-SIDE RUNNER
   #
-  # The reader used to be a heredoc inside this function, and the oracle-side runner
-  # had a bespoke `awk' subset of its own that recognised only unindented `key:'
-  # lines and treated PyYAML as OPTIONAL. Two readers over one document is not a
+  # A heredoc reader inside this function, with a bespoke `awk' subset in the oracle-side
+  # runner recognising only unindented `key:' lines and treating PyYAML as OPTIONAL, would
+  # put two readers over one document. That is not a
   # stylistic difference on a protocol whose entire premise is that both sides
   # receive identical inputs: an anchor, a merge key, a flow mapping, a block scalar
   # or a duplicated key is read one way by a parser and another way (or not at all)
@@ -2189,7 +2154,7 @@ acas_py_yaml_stream() {
     printf 'the shared scenario reader is missing: %s\n' "$reader" >&2
     printf 'It is harness/normalize.py --scenario-stream and it ships beside this\n' >&2
     printf 'script; both runners read every scenario through it so that one document\n' >&2
-    printf 'cannot mean two things (F-32).\n' >&2
+    printf 'cannot mean two things.\n' >&2
     return 4
   }
 
@@ -2210,7 +2175,7 @@ acas_py_read_scenario() {
     acas_py_die "$EX_SCENARIO" \
       "the scenario file could not be read (status $rc)." \
       "  file: $(acas_py_sanitise_field "$file")" \
-      'The reader printed the reason above. The nine scenario definitions live' \
+      'The reader printed the reason above. The scenario definitions live' \
       'under harness/scenarios/.'
   fi
 
@@ -2465,7 +2430,7 @@ acas_py_assert_environment() {
   acas_py_log "ACAS_OUT    = $(acas_py_sanitise_field "$ACAS_OUT")"
   acas_py_log "ACAS_DATA   = $(acas_py_sanitise_field "${ACAS_DATA:-}") (declared for symmetry; unused by the migrated cycle)"
   acas_py_log "capture at  = $(acas_py_sanitise_field "$ACAS_PY_OUT_DIR")/<scenario>/$ACAS_PY_SIDE"
-  # A CATEGORY and a FINGERPRINT, never the topology (F-39). This transcript is
+  # A CATEGORY and a FINGERPRINT, never the topology. This transcript is
   # retained evidence and its tail is replayed to the container log, so the schema,
   # host, port and ACCOUNT NAME are deliberately absent. The fingerprint is the same
   # value every other stage prints for one target, so two transcripts of one protocol
@@ -2732,11 +2697,11 @@ acas_py_open_log() {
     'the way, so the path that existed a moment ago is not necessarily the path' \
     'that exists now.'
 
-  # ⭐ ONE RUN, ONE TRANSCRIPT -- AND IT APPEARS ALL AT ONCE (finding F-24)
+  # ONE RUN, ONE TRANSCRIPT -- AND IT APPEARS ALL AT ONCE
   #
-  # This used to be `: >>"$ACAS_PY_LOG"' -- APPEND. So the retained transcript for
-  # this run began with the whole of the previous run's transcript, and a reader
-  # taking python.log as the evidence for a verdict was reading two runs concatenated
+  # Writing `: >>"$ACAS_PY_LOG"' -- APPEND -- would have the retained transcript for this
+  # run begin with the whole of the previous run's transcript, and a reader
+  # taking python.log as the evidence for a verdict would be reading two runs concatenated
   # with nothing marking the join. Worse, a reader arriving while the file was being
   # appended to saw a transcript that was neither complete nor identifiable.
   #
@@ -2750,7 +2715,7 @@ acas_py_open_log() {
   # previous run's transcript must not be sitting there answering in its place.
   ACAS_PY_LOG_STAGING="${ACAS_PY_LOG}.${ACAS_PY_RUN_ID}.part"
 
-  #  ⭐ AND THE COMPOSED PATH IS CHECKED, not merely its ingredients (finding MJ-02).
+  #  AND THE COMPOSED PATH IS CHECKED, not merely its ingredients.
   #  The run id is validated against a closed alphabet that admits no `/', so it
   #  cannot traverse -- but that argument is about the INPUT, and what is about to be
   #  created is this PATH. Asserting the staging file's directory is the same
@@ -2799,11 +2764,11 @@ acas_py_open_log() {
     ACAS_PY_OP_STATUS_FILE=''
   fi
 
-  # ⭐ INVALIDATED AT STARTUP, BEFORE ANY RUN WORK (finding F-23)
+  # INVALIDATED AT STARTUP, BEFORE ANY RUN WORK
   #
-  # Both records used to be written ONLY by the EXIT trap, and only a dry run
-  # removed a stale one. So between this point and the trap firing, a record left by
-  # an EARLIER run of the same scenario sat at both names -- and if this run was
+  # Writing both records ONLY in the EXIT trap, with only a dry run removing a stale one,
+  # would leave a record from an EARLIER run of the same scenario sitting at both names
+  # between this point and the trap firing -- and if this run were
   # killed hard enough that the trap did not fire (SIGKILL, an OOM kill, the
   # container going away), that stale record survived and went on attesting whatever
   # capture was taken next. [harness/run_cobol_scenario.sh] has always created its
@@ -3151,11 +3116,11 @@ acas_py_resolve_gating_answers() {
   fi
 
   # ---------------------------------------------------------------------------
-  #  ⭐ MJ-16 / S-2: THE END-OF-CYCLE ANSWERS ARE REQUIRED, NOT DEFAULTED.
+  #  THE END-OF-CYCLE ANSWERS ARE REQUIRED, NOT DEFAULTED.
   #
-  #  These two answers are DESTRUCTIVE, and they used to be defaulted here to the
-  #  frozen values ('Y' and '0') when a scenario omitted them. That reasoning was
-  #  sound in isolation -- defaulting to the frozen answer rather than to something
+  #  These two answers are DESTRUCTIVE, and defaulting them here to the frozen values
+  #  ('Y' and '0') when a scenario omits them is refused. That reasoning is sound in
+  #  isolation -- defaulting to the frozen answer rather than to something
   #  convenient is the right instinct -- and it produced a security defect anyway,
   #  because of what happens NEXT.
   #
@@ -3175,9 +3140,8 @@ acas_py_resolve_gating_answers() {
   #  scenario selects the end-of-cycle operation it must say what the answers are,
   #  and if it does not, the run is refused before anything connects.
   #
-  #  MEASURED: NO committed scenario selects this operation. `end_of_cycle_gl.yaml' was
-  #  the only one that did and it declared both keys; it was removed by findings M-09
-  #  and M-17, which hold the tree to the Agent Action Plan's eight. The requirement
+  #  MEASURED: NO committed scenario selects this operation, the tree being held to the
+  #  Agent Action Plan's inventory of eight. The requirement
   #  therefore refuses no scenario that exists and stands so that one added later must
   #  declare both keys rather than have them guessed. (`period_end_totals.yaml' names
   #  the operation only in a comment explaining why it is deliberately not appended.)
@@ -3222,7 +3186,7 @@ acas_py_resolve_gating_answers() {
     case "$ACAS_PY_DISK_CHANGE" in
       0) ;;
       9)
-        # ⭐ MJ-10: REFUSED HERE TOO, so that the two legs agree on what is
+        # REFUSED HERE TOO, so that the two legs agree on what is
         # drivable. This side implements 9 perfectly well -- the entry point
         # publishes --disk-change-option and the program module honours it, and a
         # 2026-08-08 measurement CONFIRMED that reading: a single keystroke 9 into
@@ -3266,7 +3230,7 @@ acas_py_resolve_gating_answers() {
     # Absent means "no override", which is the frozen default: the accept is an
     # update field already holding the computed path [general/gl080.cbl:L555].
     ACAS_PY_ARCHIVE_PATH="$(acas_py_scenario_scalar archive_path_override)"
-    # ⭐ MJ-10: and PRESENT is refused, symmetrically with the compiled leg. That
+    # and PRESENT is refused, symmetrically with the compiled leg. That
     # accept is an UPDATE field pre-loaded with the path built at
     # [general/gl080.cbl:L530-L537]. Whether typed text replaces or inserts into
     # that content was measured on 2026-08-08 and is NEITHER: it overwrites in place
@@ -3491,10 +3455,11 @@ acas_py_require_flag() {
 # part of the specification [irs/irs030.cbl:L552-L554], so an option appearing
 # there would mean the migrated side had grown a parameter the frozen linkage
 # shape does not have.
-# ⭐ A FORBIDDEN OPTION IS A REFUSAL, NOT A WARNING (finding F-33)
+# A FORBIDDEN OPTION IS A REFUSAL, NOT A WARNING
 #
-# This used to warn and carry on. What it is checking is whether the migrated module
-# publishes an option the FROZEN LINKAGE SHAPE DOES NOT HAVE -- and the IRS route is
+# Warning and carrying on would miss the point. What it is checking is whether the
+# migrated module publishes an option the FROZEN LINKAGE SHAPE DOES NOT HAVE -- and
+# the IRS route is
 # the case that matters, because its shape is materially different from the other
 # six: `using IRS-System-Params, WS-System-Record, File-Defs'
 # [irs/irs030.cbl:L552-L554], with NO calling-data block and NO to-day. If
@@ -3723,7 +3688,7 @@ acas_py_operation_argv() {
 acas_py_db() {
   # acas_py_db <mode> [table...]     mode is `probe', `system' or `counts'
   #
-  # ⭐ THERE IS NO `digests' MODE HERE, AND THAT IS DELIBERATE. The canonical
+  # THERE IS NO `digests' MODE HERE, AND THAT IS DELIBERATE. The canonical
   # per-table digest has exactly ONE producer, [harness/dump_tables.py --table-digest], which both
   # this runner and the oracle-side runner invoke through `acas_py_table_digests'.
   # A second implementation living here would be a second definition of "the state",
@@ -3752,7 +3717,7 @@ AFFIRMATIVE = frozenset({"1", "true", "yes", "on"})
 NEGATIVE = frozenset({"", "0", "false", "no", "off"})
 LOOPBACK = frozenset({"", "localhost", "localhost.localdomain", "127.0.0.1", "::1"})
 IDENTIFIER = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-# MJ-18: named ONCE in the shell (ACAS_PY_DISPOSABLE_VARIABLE) and read here, so the
+# named ONCE in the shell (ACAS_PY_DISPOSABLE_VARIABLE) and read here, so the
 # two cannot drift. Restricted to a bare identifier before it is composed into SQL
 # text -- refused rather than escaped.
 DISPOSABLE_VARIABLE = (os.environ.get("ACAS_PY_DISPOSABLE_VARIABLE") or "").strip()
@@ -3782,12 +3747,10 @@ socket_path = (os.environ.get("ACAS_DB_SOCKET") or "").strip()
 tls_ca = (os.environ.get("ACAS_DB_TLS_CA") or "").strip()
 tls_cert = (os.environ.get("ACAS_DB_TLS_CERT") or "").strip()
 tls_key = (os.environ.get("ACAS_DB_TLS_KEY") or "").strip()
-# ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED - the same contract
-# acas_posting/cli/args.read_declared_flag enforces and the same one the
-# four sibling shell scripts match on. `false' must not read as a declaration and
-# neither must `maybe'; the value governs whether a credential crosses a network
-# in the clear, so anything unrecognised stops the run instead of resolving to
-# either answer. The message never echoes the value.
+#  ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED. `1|true|yes|on' is
+#  affirmative, `|0|false|no|off' negative, matched case-insensitively; ANY other text
+#  stops the run rather than being read as a no. Full rationale:
+#  harness/build_oracle.sh, same heading.
 _plaintext = (os.environ.get("ACAS_DB_ALLOW_PLAINTEXT") or "").strip().lower()
 if _plaintext not in AFFIRMATIVE and _plaintext not in NEGATIVE:
     sys.stderr.write(
@@ -3873,7 +3836,7 @@ try:
             cursor.execute("SELECT @@autocommit")
             row = cursor.fetchone()
             sys.stdout.write("autocommit\t%s\n" % ("" if row is None else row[0]))
-            # MJ-18: the server-side disposability declaration. A server variable
+            # the server-side disposability declaration. A server variable
             # written by harness/Dockerfile.mariadb, so a client cannot fake it and a
             # session cannot set it. Read on the SAME connection the capture uses, so
             # it describes the server this run will actually post into. A read that
@@ -3956,7 +3919,7 @@ raise SystemExit(status)
 PY
 }
 
-# MJ-18: THE DESTRUCTIVE-TARGET GATE. See the DISPOSABLE vocabulary near the top for
+# THE DESTRUCTIVE-TARGET GATE. See the DISPOSABLE vocabulary near the top for
 # why the schema name alone proved nothing, and why this is the same fact
 # [harness/reset_db.sh] and [harness/run_cobol_scenario.sh] read.
 acas_py_target_label() {
@@ -3973,7 +3936,7 @@ acas_py_target_acknowledged() {
   [[ "$supplied" == "$(acas_py_target_label)" ]]
 }
 
-# ⭐ A PROTOCOL-BOUND RUN REFUSES THE ACKNOWLEDGEMENT (findings MJ-18, M-06)
+# A PROTOCOL-BOUND RUN REFUSES THE ACKNOWLEDGEMENT
 #
 # The mirror of harness/run_cobol_scenario.sh's gate, for the same reason and with the
 # same test. The acknowledgement above lets this runner post into a server that does not
@@ -3983,9 +3946,9 @@ acas_py_target_acknowledged() {
 # statement about an unknown state.
 #
 # ACAS_PARITY_RUN_ID (or --run-id) is what binds ten invocations into one protocol run,
-# so its presence IS the evidence path. The refusal used to live in the deleted
-# harness/run_parity.sh and therefore did not reach a hand-driven stage; checked here it
-# travels with the stage, before the run id is derived and before the cycle is driven.
+# so its presence IS the evidence path. A refusal placed in a ten-stage driver script
+# would not reach a hand-driven stage; checked here it travels with the stage, before
+# the run id is derived and before the cycle is driven.
 acas_py_assert_no_evidence_bypass() {
   #  Unbound means the hand-drivable tool, so nothing is refused.
   [[ -n "$ACAS_PY_RUN_ID" ]] || return 0
@@ -4087,7 +4050,7 @@ acas_py_assert_database() {
     esac
   done <<< "$out"
 
-  # MJ-18: BEFORE the table count, the silent-pass traps and every drive stage, so
+  # BEFORE the table count, the silent-pass traps and every drive stage, so
   # nothing has posted by the time this either passes or refuses.
   acas_py_assert_disposable_target "$disposable"
 
@@ -4116,7 +4079,7 @@ acas_py_assert_database() {
   acas_py_assert_file_system_used
 }
 
-# ⭐ THE SILENT-PASS TRAP THIS SIDE HAD NO GATE FOR.
+# THE SILENT-PASS TRAP THIS SIDE HAD NO GATE FOR.
 #
 # [harness/run_cobol_scenario.sh] refuses to run when SYSTEM-REC.FILE-SYSTEM-USED is
 # zero, because the RDB half of every frozen write is guarded by `if
@@ -4225,7 +4188,7 @@ acas_py_table_counts() {
 
 
 # =============================================================================
-# ⭐ SYSTEM-REC IS DECLARED, DUMPED AND FINGERPRINTED ON EVERY SCENARIO.
+# SYSTEM-REC IS DECLARED, DUMPED AND FINGERPRINTED ON EVERY SCENARIO.
 #
 # `overrewrite' persists key 1 on all four subsystems -- [general/general.cbl:L656-L672],
 # [sales/sales.cbl:L628-L641], [purchase/purchase.cbl:L621-L634],
@@ -4257,11 +4220,10 @@ acas_py_table_counts() {
 #      write back. So the objection was MEASURED rather than argued: the digest HOLDS on
 #      all four scenarios declaring `unchanged' and MOVES on every one declaring
 #      `changed'. That was measured over the eight committed scenarios, which is all
-#      four `unchanged' ones; it was also measured on a ninth, end_of_cycle_gl, which
-#      declared `changed' and moved the row by construction, its Phase 5 advancing the
-#      cycle and rotating the quarter counter -- that scenario has since been removed
-#      (findings M-09, M-17) and the observation is recorded because it established the
-#      `changed' half of the claim. Declaring the row falsifies no effect claim.
+#      four `unchanged' ones. The `changed' half is covered by NO committed scenario: it
+#      needs a definition declaring `changed' and moving the row by construction, its
+#      Phase 5 advancing the cycle and rotating the quarter counter, and none of the eight
+#      does that. Declaring the row falsifies no effect claim.
 #
 # The fingerprint is kept ANYWAY, because it gives what a dump cannot: the cross-check
 # proves both sides STARTED from the same 169-column row, the pre/post pair proves whether
@@ -4288,7 +4250,7 @@ acas_py_resolve_fingerprint_tables() {
 # Publishes "<table><TAB><count><TAB><sha256>" lines, in the order asked, in
 # ACAS_PY_SQL_OUT.
 #
-# ⭐ THE DIGEST COMES FROM harness/dump_tables.py --table-digest AND FROM NOWHERE ELSE. That
+# THE DIGEST COMES FROM harness/dump_tables.py --table-digest AND FROM NOWHERE ELSE. That
 # program is the single canonical producer, and the OTHER side of the comparison
 # invokes exactly the same one: the two records are compared byte for byte, so two
 # implementations - however carefully written - would differ on formatting alone and
@@ -4398,7 +4360,7 @@ acas_py_record_before_state() {
 # acas_py_resolve_fingerprint_tables) -- and this side refuses to proceed if the
 # other side recorded something different.
 #
-# ⭐ A ROW COUNT IS NOT A STATE, WHICH IS WHY EACH LINE CARRIES A DIGEST:
+# A ROW COUNT IS NOT A STATE, WHICH IS WHY EACH LINE CARRIES A DIGEST:
 #
 #     <table><TAB><row count><TAB><sha256 of the canonical dump>
 #
@@ -4418,7 +4380,7 @@ acas_py_record_before_state() {
 # this same format, and the pair answers a question no table diff can: did this run
 # change anything? Two runs that did nothing at all agree perfectly.
 # =============================================================================
-# ⭐ THE EXACT SEED IDENTITY, READ AND CARRIED (finding F-22)
+# THE EXACT SEED IDENTITY, READ AND CARRIED
 #
 # "Seed fingerprint" on this side is a list of TABLE ROW COUNTS, and that is not an
 # identity: two seedings with the same shape and different values compare equal, so the
@@ -4476,7 +4438,7 @@ acas_py_read_seed_identity() {
 }
 
 acas_py_seed_fingerprint() {
-  # The EXACT identity first, then the row counts (F-22).
+  # The EXACT identity first, then the row counts.
   acas_py_read_seed_identity
   ACAS_PY_CURRENT_STAGE='recording the seed fingerprint'
   acas_py_stage 'Check 6a/8: the pre-run seed fingerprint'
@@ -4508,7 +4470,7 @@ acas_py_seed_fingerprint() {
       'is not a comparison.'
   fi
 
-  # Published by rename, like every other evidence leaf (F-26).
+  # Published by rename, like every other evidence leaf.
   if ! printf '%s\n' "$ACAS_PY_SQL_OUT" \
       | acas_py_publish_atomic "$ACAS_PY_FINGERPRINT" 'the seed fingerprint'; then
     acas_py_die "$EX_PRECONDITION" \
@@ -4656,28 +4618,12 @@ acas_py_quote_argv() {
   printf '%s' "$out"
 }
 
-# How many lines the run log holds. `awk' rather than a line-count utility so the
-# answer arrives with no leading whitespace to strip.
-# ---------------------------------------------------------------------------
-#  THE TARGET, DESCRIBED WITHOUT NAMING IT (finding F-39)
+#  THE TARGET, DESCRIBED WITHOUT NAMING IT
 #
-#  This script's transcripts are retained evidence: they are read by operators,
-#  attached to reports and, on the Python side, replayed to a container log. A line
-#  reading `acas@mariadb:3306/ACASDB` puts the deployment's topology and the database
-#  ACCOUNT NAME into all of that, which is half of a credential and a map of the
-#  network for anybody who reads it (CWE-532). Nothing downstream needs the names:
-#  what a reader needs is WHICH KIND of target this was, and whether two runs used
-#  the SAME one.
-#
-#  So the transcript carries a CATEGORY and a stable FINGERPRINT. The category is
-#  derived from the host alone and is the same vocabulary
-#  `acas_posting/dal/connection.py` uses. The fingerprint is the first twelve hex
-#  digits of a SHA-256 over `host:port/schema` - never the password and never the
-#  account name, neither of which is in the digest at all - so two runs against one
-#  target print the same value and a run against a different target prints a
-#  different one, while the value itself discloses no name. The full values remain in the environment, where the tools that
-#  need them read them.
-# ---------------------------------------------------------------------------
+#  Transcripts are retained as evidence and quoted into reports, so the host, port,
+#  socket path and account are never printed. What identifies the target is a SHA-256
+#  over its connection identity, which two scripts can compare without either of them
+#  disclosing it. Full rationale: harness/build_oracle.sh, same heading.
 acas_py_target_category() {
   local host="${ACAS_DB_HOST-}" socket="${ACAS_DB_SOCKET-}"
 
@@ -4695,11 +4641,10 @@ acas_py_target_category() {
 acas_py_target_fingerprint() {
   local raw digest
 
-  # The ACCOUNT IS DELIBERATELY NOT IN THE DIGEST. Two reasons, both load-bearing.
-  # The digest identifies the TARGET, so every runner and every stage print the SAME fingerprint for the same database -- which is exactly
-  # what makes two transcripts comparable. And an account name that is never an
-  # input can never be recovered from the output, not even by a reader who can
-  # enumerate candidate names.
+  #  The ACCOUNT IS DELIBERATELY NOT IN THE DIGEST: the digest identifies the TARGET, so
+  #  two scripts connecting as different accounts must agree that they reached the same
+  #  database, and an account name is identity a transcript must not carry. Full
+  #  rationale: harness/build_oracle.sh, same heading.
   raw="${ACAS_DB_HOST-}:${ACAS_DB_PORT-}/${ACAS_DB_NAME-}"
 
   if command -v sha256sum >/dev/null 2>&1; then
@@ -4722,7 +4667,7 @@ acas_py_target_description() {
 
 # acas_assert_outside_repo <label> <path> Nothing this script writes may land
 # inside $ACAS_REPO.
-# ⭐ THE REPLAY FILTER (findings F-39, F-40)
+# THE REPLAY FILTER
 #
 # Applied to every stream this script replays to STDOUT, and to nothing that reaches
 # the run log. The distinction is the whole design: the run log is a 0600 file
@@ -4815,7 +4760,7 @@ acas_py_run_operations() {
     # is in the run log either way.
     after="$(acas_py_log_line_count)"
     if (( ACAS_PY_LOG_OPEN )) && (( after > before )); then
-      # ⭐ REDACTED BEFORE IT REACHES STDOUT (findings F-39, F-40)
+      # REDACTED BEFORE IT REACHES STDOUT
       #
       # What is replayed here is the migrated module's OWN output, and this stream
       # goes to the container log where anything that reads it keeps it. The modules
@@ -4834,9 +4779,9 @@ acas_py_run_operations() {
     fi
 
     ACAS_PY_OBSERVED+=("$rc")
-    # ⭐ NO WALL-CLOCK READING IN THE RETAINED TRANSCRIPT (finding F-41)
+    # NO WALL-CLOCK READING IN THE RETAINED TRANSCRIPT
     #
-    # This line used to read `status = 0 (after 3s)'. The transcript is retained as
+    # This line must NOT read `status = 0 (after 3s)'. The transcript is retained as
     # evidence and is quoted into reports, and a duration is the one byte in it that
     # cannot be reproduced: two runs of one scenario under the same pinned clock must
     # be indistinguishable (R-6), and a reader comparing two transcripts would find a
@@ -4847,7 +4792,7 @@ acas_py_run_operations() {
     # The duration is not discarded -- it is genuinely useful when a run is slow --
     # it goes to STDERR, which is operator diagnostics and not evidence.
     acas_py_log "  status = $rc"
-    printf 'diagnostic: %s completed in %ss (not recorded in the transcript: F-41)\n' \
+    printf 'diagnostic: %s completed in %ss (not recorded in the transcript)\n' \
       "$operation" "$elapsed" >&2
     # Stable machine-readable behavioural evidence for tests/conftest.py. The
     # wrapper itself exits zero when every observed status matches the scenario;
@@ -4870,7 +4815,7 @@ acas_py_run_operations() {
         'run log.'
     fi
 
-    # ⭐ ONLY A DISPOSITION MAY BECOME EVIDENCE (finding MJ-01)
+    # ONLY A DISPOSITION MAY BECOME EVIDENCE
     #
     # Checked BEFORE the declared status is consulted, because the question "is this
     # status a disposition at all" is prior to "is it the disposition the scenario
@@ -5059,7 +5004,7 @@ acas_py_assert_after_run() {
     # should change it, and if it did then the affected-table list no longer
     # describes what the run touched.
     #
-    # ⭐ BOTH SIDES ARE TRIMMED, AND NEITHER IS DEFAULTED BACK TO A SPACE.
+    # BOTH SIDES ARE TRIMMED, AND NEITHER IS DEFAULTED BACK TO A SPACE.
     # `IRS-INSTEAD' is `pic x' and the scenario's General-Ledger-only value for it
     # is a single SPACE. The column is CHAR(1), and MariaDB strips a trailing space
     # from a CHAR on read -- the same server behaviour [harness/normalize.py]
@@ -5110,7 +5055,7 @@ PY
   #    to P-Flag-P.' [purchase/pl100.cbl:L465] -- and `overrewrite''s key-1 rewrite is
   #    their only writer to the store, on this side as on the oracle's.
   #
-  #    ⭐ WHY THIS IS EMITTED HERE RATHER THAN LEFT TO A TEST'S OWN QUERY. The dump of
+  #    WHY THIS IS EMITTED HERE RATHER THAN LEFT TO A TEST'S OWN QUERY. The dump of
   #    `SYSTEM-REC' is a comparison artifact under the diff tree; a test wanting ONE
   #    latch value as a number, attributable to ONE side of ONE operation, would
   #    otherwise have to query the LIVE
@@ -5234,11 +5179,11 @@ acas_py_assert_repo_untouched() {
 # =============================================================================
 # STAGE 7 -- THE STATE CAPTURE IS THE PROTOCOL'S, AND THIS STAGE DOES NOT TAKE IT
 #
-# ⭐ CAPTURE OWNERSHIP IS SINGLE, AND IT IS THE PROTOCOL'S STAGE 7. This script
-# used to take a full capture of every affected table here, and the protocol then
-# took another to the same path -- so the Python state was read and written TWICE
-# per scenario, the tree had two owners, and the first of the two could not be
-# used: [harness/dump_tables.py] reads an attestation from
+# CAPTURE OWNERSHIP IS SINGLE, AND IT IS THE PROTOCOL'S STAGE 7. A full capture of
+# every affected table taken here, with the protocol then taking another to the same
+# path, would read and write the Python state TWICE per scenario, give the tree two
+# owners, and leave the first of the two unusable:
+# [harness/dump_tables.py] reads an attestation from
 # run-logs/<scenario>/python.run-status, and that record cannot exist while this
 # script is still running, because it carries THIS SCRIPT'S OWN EXIT STATUS, which
 # is not settled until the EXIT trap. The capture taken here was therefore

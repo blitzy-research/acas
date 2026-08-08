@@ -744,7 +744,7 @@ _REGISTRY_ROWS: Final[tuple[ConditionNameSpec, ...]] = (
         "False, and for \"Y\" this one is False. Tested at all seven "
         "sales/sl060.cbl sites, three of them - L1046, L1172 and L1177 - as "
         "`IRS-Both-Used or G-L`, and L1144 on its own. The site at "
-        "[sales/sl060.cbl:L1172-L1178] is where anomaly 1 lives: L1175's `if` "
+        "[sales/sl060.cbl:L1172-L1178] is where anomaly A-1 lives: L1175's `if` "
         "carries no terminating period until L1178, so L1177's GL posting "
         "close is NESTED inside it and never runs in pure-GL mode. That "
         "anomaly belongs to the program module; this row only records the "

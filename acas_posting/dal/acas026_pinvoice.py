@@ -195,7 +195,7 @@ _HV_GROUP_SUFFIX_BY_TABLE: Final[Mapping[str, str]] = MappingProxyType(
 )
 
 #: The three declared record-size notes, spread over FOUR statements in THREE files,
-#: published unresolved next to Agent Action Plan anomaly 15.
+#: published unresolved next to Agent Action Plan anomaly A-15.
 DECLARED_RECORD_SIZE_NOTES: Final[Mapping[str, str]] = MappingProxyType(
     {
         "copybooks/plwspinv.cob:L6": "100 bytes",
@@ -239,7 +239,7 @@ _RECORD_SIZE_DIGITS: Final[int] = 4
 #: `*>                                        yyy < Invoice-Rec = zzz` [:L210]
 #: sketches the message `ba012-Test-WS-Rec-Size-2` assembles from it [:L573-L578].
 #:
-#: ``N-error-message-block`` ⭐ - the sketch comment
+#: ``N-error-message-block`` - the sketch comment
 #: `*>                                        yyy < Invoice-Rec = zzz`
 #: [common/acas026.cbl:L210] uses THREE-character placeholders, `yyy` and `zzz`,
 #: for two fields that are declared `pic 9(4)` [common/acas026.cbl:L193-L194] and
@@ -248,7 +248,7 @@ _RECORD_SIZE_DIGITS: Final[int] = 4
 #: wide in each slot. Recorded, not corrected - :data:`_RECORD_SIZE_DIGITS` is 4
 #: because the PICTURE says 4, and the comment is left describing 3.
 #:
-#: ``N-open-close-key-wording`` ⭐ - a second stale-wording finding in the same
+#: ``N-open-close-key-wording`` - a second stale-wording finding in the same
 #: handler, worth reading beside this one. The handler logs
 #: `"OPEN PL INVOICE File"` [common/acas026.cbl:L342] and
 #: `"CLOSE PL INVOICE File"` [common/acas026.cbl:L353], naming the PURCHASE ledger
@@ -575,7 +575,7 @@ WRITE_ONLY_COLUMNS: Final[Mapping[str, str]] = MappingProxyType(
 )
 
 #: The six fields whose sign is destroyed at the bridge boundary, before any SQL
-#: executes - the Agent Action Plan anomaly 11 family, and dictionary anomaly reference
+#: executes - the Agent Action Plan anomaly A-11 family, and dictionary anomaly reference
 #: ``A-11``. The QUESTION of what the unsigned column then holds - ``Q-3`` - has been
 #: measured on the compiled oracle and is no longer published as open; the ANOMALY
 #: stays, because the lost debit-versus-credit sense was not restored by measuring it.
@@ -1677,7 +1677,7 @@ class PInvoiceContext:
     # the bridge are separate COBOL programs with separate working storage.
     record_size_a: int = 0
     record_size_b: int = 0
-    #: `77 Cobol-File-Status pic 9 value zero.` [common/acas026.cbl:L196]. ⭐ ANOMALY
+    #: `77 Cobol-File-Status pic 9 value zero.` [common/acas026.cbl:L196]. ANOMALY
     #: ``N-eof-flag-is-the-field``.
     cobol_file_status: int = 0
     #: `03 invoice-key.` inside `01 Invoice-Record.` [copybooks/plfdpinv.cob:L12-L15] -
@@ -2291,7 +2291,7 @@ def bb000_hv_load(pinvoice: PInvoiceHeader, context: PInvoiceContext) -> None:
     header.hv_ih_discount = sub.ih_fig.ih_discount
     header.hv_ih_e_vat = sub.ih_fig.ih_e_vat
     header.hv_ih_c_vat = sub.ih_fig.ih_c_vat
-    # [common/plinvoiceMT.cbl:L1469]. ⭐ ANOMALY ``N-88-case-swap``.
+    # [common/plinvoiceMT.cbl:L1469]. ANOMALY ``N-88-case-swap``.
     header.hv_ih_status = sub.ih_status
     header.hv_ih_lines = _narrow_signed_to_unsigned_host_variable(sub.ih_lines, 3)
     header.hv_ih_deduct_days = _narrow_signed_to_unsigned_host_variable(
@@ -2348,7 +2348,7 @@ def bb100_unload_hvs(pinvoice: PInvoiceHeader, context: PInvoiceContext) -> None
     sub.ih_update = header.hv_ih_update
 
     # `*> Here save the ih-Lines to WS so we can keep track of body-lines.`
-    # [common/plinvoiceMT.cbl:L1516] ⭐ A NARROWING MOVE, and the rule is the RECEIVING
+    # [common/plinvoiceMT.cbl:L1516] A NARROWING MOVE, and the rule is the RECEIVING
     # field's.
     context.ws_actual_lines_in_row = _move_to_actual_lines_in_row(
         header.hv_ih_lines
@@ -3429,7 +3429,7 @@ def ba090_process_rewrite(
 ) -> _BridgeLabel:
     """`ba090-Process-Rewrite.` [common/plinvoiceMT.cbl:L1351-L1406].
 
-    ⭐ Unlike `ba070`, this verb DOES pair its failure status: `move 99 to fs-reply`
+    Unlike `ba070`, this verb DOES pair its failure status: `move 99 to fs-reply`
     [:L1396] with `move 994 to WE-Error` [:L1397].
     """
     if int(pinvoice.ih_prime.ws_invoice_key.ih_test) != 0:
@@ -3526,7 +3526,7 @@ def bb300_update(
 ) -> ExecutionResult:
     """`bb300-Update Section.` [common/plinvoiceMT.cbl:L1925-L2321].
 
-    ⭐ EVERY column is re-sent including the primary key itself - the statement sets
+    EVERY column is re-sent including the primary key itself - the statement sets
     `PINVOICE-KEY` to the value it is also keying on. Harmless in effect, load-bearing
     in evidence.
     """
@@ -3570,7 +3570,7 @@ def bc050_process_read_indexed(
 ) -> None:
     """`bc050-Process-Read-Indexed.` [common/plinvoiceMT.cbl:L2348-L2431].
 
-    ⭐ `set KOR-x1 to 2. *> was 1 = Primary now invoice line 12/07/23` [:L2365] dates the
+    `set KOR-x1 to 2. *> was 1 = Primary now invoice line 12/07/23` [:L2365] dates the
     switch to key 2.
     """
     header_state = context.cursors.state_for(
@@ -3723,7 +3723,7 @@ def bc070_process_write(
 ) -> None:
     """`bc070-Process-Write.` [common/plinvoiceMT.cbl:L2488-L2528].
 
-    ⭐ `move WS-Invoice-Record to WS-Invoice-Line.` [:L2490] reinterprets the shared
+    `move WS-Invoice-Record to WS-Invoice-Line.` [:L2490] reinterprets the shared
     hundred-byte buffer through the LINE redefinition [copybooks/plwspinv2.cob:L56]
     before loading the host variables - the one place in the bridge where the buffer's
     dual nature is written down as a move rather than assumed.
@@ -3858,7 +3858,7 @@ def bc085_process_delete_all(
     context.ws_temp_ed_row = result.count_rows
     lines_state.free_result()
 
-    # ⭐ ANOMALY ``N-temp-ed-row-substring``. `move WS-MYSQL-COUNT-ROWS to WS-Temp-Ed-
+    # ANOMALY ``N-temp-ed-row-substring``. `move WS-MYSQL-COUNT-ROWS to WS-Temp-Ed-
     # Row` then the string [:L2660-L2667] - built unconditionally, BEFORE the count is
     # tested, and windowing `WS-Temp-Ed-Row (6:2)`.
     _file_key(
@@ -3978,7 +3978,7 @@ def bc200_insert_rg1(
 ) -> ExecutionResult:
     """`bc200-Insert-rg1 Section.` [common/plinvoiceMT.cbl:L2816-L3003].
 
-    ⭐ The column order here is the SCHEMA's - `IL-INVOICE` before `IL-LINE` - while
+    The column order here is the SCHEMA's - `IL-INVOICE` before `IL-LINE` - while
     `bc000-HV-Load-rg1` moves `WS-il-Line` BEFORE `WS-il-Invoice` [:L2757-L2758].
     Anomaly ``N-lines-loadorder``: two orders, two separate lists, neither derived from
     the other.
@@ -4005,7 +4005,7 @@ def bc300_update_rg1(
 ) -> ExecutionResult:
     """`bc300-Update-rg1 Section.` [common/plinvoiceMT.cbl:L3009-L3201].
 
-    ⭐ Like the header update, this re-sends the primary key it is keying on, and it re-
+    Like the header update, this re-sends the primary key it is keying on, and it re-
     sends `IL-INVOICE` from the never-unloaded host variable - so a rewrite of a row
     that was READ through this bridge writes back a zero invoice number unless the
     caller repopulated it, because `bc100-UnloadHVs-rg1` restored only the concatenated
@@ -4058,7 +4058,7 @@ def ca_process_logs(
     # fields are WITHHELD: `WS-File-Key` is `PINVOICE-KEY` or `IL-LINE-KEY`, and
     # `WS-Log-Where` is a predicate carrying it as a literal (CWE-532). It also
     # advances `Log-File-Rec-Written` modulo one million, the range of the frozen
-    # `pic 9(6)` [copybooks/Test-Data-Flags.cob:L20], which this paragraph did not
+    # `pic 9(6)` [copybooks/Test-Data-Flags.cob:L18], which this paragraph did not
     # advance at all.
     status.log_file_handler_record(
         _LOG,
@@ -4257,7 +4257,7 @@ def aa010_main(
     ba012_test_ws_rec_size_2(
         system, pinvoice, file_access, file_defs, dal_common, context
     )
-    # ⭐ ANOMALY ``N-no-status-zeroing``.
+    # ANOMALY ``N-no-status-zeroing``.
     file_access.logging_data.sql_err = " " * status.SQL_ERR_WIDTH
     file_access.logging_data.sql_msg = " " * status.SQL_MSG_WIDTH
     file_access.logging_data.sql_state = " " * status.SQL_STATE_WIDTH
@@ -4292,10 +4292,10 @@ def aa020_process_open(
 
     access_type = int(file_access.access_type)
     if access_type == int(status.AccessType.INPUT):
-        # `open input Invoice-File` [:L312]. ⭐ ANOMALY ``N-select-status-is-fs-reply``.
+        # `open input Invoice-File` [:L312]. ANOMALY ``N-select-status-is-fs-reply``.
         file_access.fs_reply = _FS_REPLY_FILE_NOT_PRESENT
         if int(file_access.fs_reply) != int(status.FsReply.SUCCESS):
-            # ⭐ ANOMALY ``N-open-input-status-flattened``.
+            # ANOMALY ``N-open-input-status-flattened``.
             file_access.fs_reply = _FS_REPLY_FILE_NOT_PRESENT
             return _HandlerLabel.AA999_MAIN_EXIT
     elif access_type == int(status.AccessType.I_O):
@@ -4335,7 +4335,7 @@ def aa030_process_close(
 ) -> _HandlerLabel:
     """`aa030-Process-Close.` [common/acas026.cbl:L347-L358].
 
-    ⭐ ANOMALY ``N-close-logs-twice``. The ordering is unusual and load-bearing.
+    ANOMALY ``N-close-logs-twice``. The ordering is unusual and load-bearing.
     """
     file_access.logging_data.ws_no_paragraph = HANDLER_PARAGRAPH_NUMBERS[
         "aa030-Process-Close"
@@ -4362,7 +4362,7 @@ def aa040_process_read_next(
 ) -> _HandlerLabel:
     """`aa040-Process-Read-Next.` [common/acas026.cbl:L360-L389].
 
-    ⭐ ANOMALY ``N-spaces-into-numeric-key``. The end-of-file pre-test moves `spaces`
+    ANOMALY ``N-spaces-into-numeric-key``. The end-of-file pre-test moves `spaces`
     into `Invoice-Key` [:L369] - a group whose two halves are `pic 9(8)` and `pic 99`
     [copybooks/plwspinv2.cob:L11-L13], both NUMERIC.
     """
@@ -4414,7 +4414,7 @@ def aa041_move_inv_data(
 ) -> None:
     """`aa041-Move-Inv-Data. *> Not really needed as both fields are now chars.`
 
-    Both `pic 9`, not `pic x`. ⛔ The paragraph is NOT deleted on the strength of its own
+    Both `pic 9`, not `pic x`. The paragraph is NOT deleted on the strength of its own
     comment; it is reproduced and the contradiction is recorded.
     """
     context.ws_temp_ed_1 = int(pinvoice.ih_prime.ws_invoice_key.ih_invoice)
@@ -4436,7 +4436,7 @@ def aa045_eval_keys(
 ) -> None:
     """`aa045-Eval-Keys.` [common/acas026.cbl:L398-L414].
 
-    ⭐ ANOMALY ``N-deadbranches``. The maintainer's own comment above the label reads `*>
+    ANOMALY ``N-deadbranches``. The maintainer's own comment above the label reads `*>
     The next block will never get executed unless performed so is it needed ?` [:L396] -
     and it IS performed, from `aa050` [:L419] and `aa060` [:L443].
     """
@@ -4476,7 +4476,7 @@ def aa050_process_read_indexed(
 ) -> _HandlerLabel:
     """`aa050-Process-Read-Indexed.` [common/acas026.cbl:L416-L436].
 
-    ⭐ ANOMALY ``N-failed-action``. On an invalid key the paragraph does TWO things
+    ANOMALY ``N-failed-action``. On an invalid key the paragraph does TWO things
     [:L429-L430].
     """
     file_access.logging_data.ws_no_paragraph = HANDLER_PARAGRAPH_NUMBERS[
@@ -4517,7 +4517,7 @@ def aa060_process_start(
 ) -> _HandlerLabel:
     """`aa060-Process-Start.` [common/acas026.cbl:L438-L487].
 
-    ⭐⭐ ANOMALIES ``N-start-guard-differs-from-bridge`` and ``N-start-guard-no-fs-reply``
+    ANOMALIES ``N-start-guard-differs-from-bridge`` and ``N-start-guard-no-fs-reply``
     - one guard, two independent defects, the second the more serious because it is
     silent.
     """
@@ -4568,7 +4568,7 @@ def aa070_process_write(
 ) -> _HandlerLabel:
     """`aa070-Process-Write.` [common/acas026.cbl:L489-L498].
 
-    ⭐ `perform aa041-Move-Inv-Data.` [:L497] runs UNCONDITIONALLY, after both the
+    `perform aa041-Move-Inv-Data.` [:L497] runs UNCONDITIONALLY, after both the
     success and the failure of the write - so a failed write still logs the key it
     tried. Class 4.
     """
@@ -4600,7 +4600,7 @@ def aa080_process_delete(
 ) -> _HandlerLabel:
     """`aa080-Process-Delete.` [common/acas026.cbl:L500-L509].
 
-    ⭐ Note that `aa080` does NOT re-check `File-Key-No`: `aa010-main`'s guard has
+    Note that `aa080` does NOT re-check `File-Key-No`: `aa010-main`'s guard has
     already rejected anything but 1 with `996` [:L255], which is the one place in the
     handler where the delete verb gets its own error code.
     """
@@ -4632,7 +4632,7 @@ def aa090_process_rewrite(
 ) -> _HandlerLabel:
     """`aa090-Process-Rewrite.` [common/acas026.cbl:L511-L521].
 
-    ⭐ ANOMALY ``N-endrewrite-no-period``. The `end-rewrite` at [:L519] carries NO
+    ANOMALY ``N-endrewrite-no-period``. The `end-rewrite` at [:L519] carries NO
     terminating period, unlike `end-write.` [:L496] and `end-delete.` [:L507] in the two
     paragraphs either side of it - three sibling paragraphs written to the same
     template, one of them punctuated differently.
@@ -4665,7 +4665,7 @@ def aa100_bad_function(
 ) -> _HandlerLabel:
     """`aa100-Bad-Function.` [common/acas026.cbl:L523-L528].
 
-    ⭐ ANOMALY ``N-badfunction-pair-differs``, carried in the register also under the
+    ANOMALY ``N-badfunction-pair-differs``, carried in the register also under the
     heading ``N-badfunction-divergence`` - one finding, two names. The HANDLER writes
     `999` / `99`; the BRIDGE writes `990` / `99` for the same condition
     [common/plinvoiceMT.cbl:L1412-L1413].
@@ -4753,9 +4753,9 @@ def ba010_test_ws_rec_size(
 ) -> bool:
     """`ba010-Test-WS-Rec-Size.` [common/acas026.cbl:L550-L556].
 
-    ⭐⭐ ANOMALY ``N-log-no-increment``. TWELVE - the same value `aa010-main` moved at
+    ANOMALY ``N-log-no-increment``. TWELVE - the same value `aa010-main` moved at
     [:L241]. Ten sibling handlers add ten here; this one does not, and nothing in the
-    source marks the omission. ⛔ NOT corrected to 22.
+    source marks the omission. NOT corrected to 22.
     """
     file_access.logging_data.ws_log_file_no = WS_LOG_FILE_NO_RDB
     return ba012_test_ws_rec_size_2(
@@ -4838,7 +4838,7 @@ def ba015_test_ends(
 ) -> None:
     """`ba015-Test-Ends.` [common/acas026.cbl:L601-L617].
 
-    ⭐ ANOMALY ``N-cdftodo``. Above the call sits an unfinished plan: `*> HERE we need a
+    ANOMALY ``N-cdftodo``. Above the call sits an unfinished plan: `*> HERE we need a
     CDF [Compiler Directive] to select the correct DAL based *> on the pre SQL compiler
     e.g., JCs or dbpre or Prima conversions <<<< ?
     """
@@ -4872,7 +4872,7 @@ def ca_process_logs_handler(
     [common/acas026.cbl:L623-L627]. `call "fhlogger" using File-Access
     ACAS-DAL-Common-data.` [:L626-L627].
 
-    ⭐ ANOMALY ``N-nolog-on-dal``, and the comment that states it sits on the LABEL
+    ANOMALY ``N-nolog-on-dal``, and the comment that states it sits on the LABEL
     LINE ITSELF at [:L623]. On the RDB path the handler must NOT log, because the
     bridge's own `ba999-end` [common/plinvoiceMT.cbl:L1435-L1437] already did -
     and the handler's flat-file `aa999-main-exit` [:L531-L533] is the only route to
@@ -4947,7 +4947,7 @@ def dispatch(
 ) -> FileAccess:
     """`acas026` - the file handler, FIVE parameters in the COBOL's own order.
 
-    ⭐ The statement order is the COBOL's exactly, and it is checked in the validation
+    The statement order is the COBOL's exactly, and it is checked in the validation
     list of the agent brief: log identity [:L240-L241]; the key guard [:L245-L259]; NO
     Open-Output block anywhere; the RDB branch with both maintainer comments
     [:L263-L267].
@@ -4971,7 +4971,7 @@ def dispatch(
     return file_access
 
 
-# The linkage projection - `WS-PInvoice-Record` and its two redefinitions ⭐⭐ TWO
+# The linkage projection - `WS-PInvoice-Record` and its two redefinitions TWO
 # COPYBOOKS DESCRIBE THE SAME HUNDRED BYTES, and each caller copies the one it wants.
 
 
@@ -5102,7 +5102,7 @@ def _new_linkage_header() -> PInvoiceHeader:
 def _stage_line_from_record(record: object, context: PInvoiceContext) -> None:
     """The caller's `Invoice-Line` view into the buffer the bridge re-derives from.
 
-    ⭐⭐ THE INBOUND HALF OF THE LINE VIEW, and it is what makes a caller's edit to a line
+    THE INBOUND HALF OF THE LINE VIEW, and it is what makes a caller's edit to a line
     REACH the database.
     """
     flat_line = getattr(record, "invoice_line", None)

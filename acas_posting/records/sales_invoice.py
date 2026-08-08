@@ -723,8 +723,8 @@ class IhInvoiceHeader:
 class IlInvoiceLine:
     """``01 Invoice-Line redefines Invoice-Record.`` [copybooks/slwsinv2.cob:L91].
 
-    OPEN QUESTION for the compiled program. This view is documented at 80 bytes yet
-    redefines a 137-byte record, leaving 57 bytes unreachable through it.
+    The view is documented at 80 bytes yet redefines a 137-byte record, so 57 bytes are
+    unreachable through it. Recorded as declared; nothing is realigned (R-3, R-4).
     """
 
     COBOL_NAME: ClassVar[str] = "Invoice-Line"
@@ -762,8 +762,8 @@ class IlInvoiceLine:
     il_update: str = field(metadata=_entry("Invoice-Line.il-update#104"))
 
     # 05 il-Back-Ordered pic x. *> value space, or B for a BO item.
-    # [copybooks/slwsinv2.cob:L106] R-4, the same new anomaly as its twin `sil-Back-
-    # Ordered` [copybooks/slwsinv.cob:L97-L98].
+    # [copybooks/slwsinv2.cob:L106] Declared with a comment-only default, exactly as its
+    # twin `sil-Back-Ordered` [copybooks/slwsinv.cob:L97-L98]; carried as declared (R-4).
     il_back_ordered: str = field(metadata=_entry("Invoice-Line.il-Back-Ordered"))
 
 

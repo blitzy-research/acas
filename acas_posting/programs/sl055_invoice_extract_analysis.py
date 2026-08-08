@@ -13,8 +13,6 @@ Two of the cycle's nine period-total writes are here - sales invoices
 [sales/sl055.cbl:L675] and sales credit notes [sales/sl055.cbl:L677]. Those nine
 sites are the only writers of the totals record, which is what makes the
 period-end totals observable in one table.
-
-THE FIRST SALES/PURCHASE MODULE, AND IT IS NOT A GENERAL LEDGER MODULE
 """
 
 from __future__ import annotations
@@ -2340,189 +2338,18 @@ def run(
 # RECORDED rather than left implicit. This footer is that record for
 # `sales/sl055.cbl`, and `docs/migration/traceability.md` aggregates it.
 #
-# PROGRAM -> MODULE
-#   sales/sl055.cbl  ->  acas_posting/programs/sl055_invoice_extract_analysis.py
-#   Boundary: THE WHOLE PROGRAM. Unlike `gl051` and `irs030`, which are migrated
-#   only in part, every section and paragraph of `sl055` is in scope.
-#   Public API: `run` only. `__all__ = ("run",)`, and every other module-level
-#   name begins with `_`, so a caller cannot reach into a program's internals -
-#   exactly as a COBOL `CALL` cannot (section 0.3.3).
-#
-# PARAGRAPH -> FUNCTION   (all eighteen labels, in source order)
-#   da000-mainline section.         L305  -> _da000_mainline
-#   da010-Read-Loop.                L364  -> _da010_read_loop
-#   da020-Header-Analysis.          L426  -> _da020_header_analysis
-#   da030-Skip-Invoice.             L472  -> _da030_skip_invoice
-#   da040-Close-Files.              L481  -> _da040_close_files
-#   da999-Menu-Exit.                L520  -> _da999_menu_exit
-#   db000-Create section.           L527  -> _db000_create
-#   DB000-Create-Main.              L530  -> _db000_create_main
-#   db010-Create-Anal.              L574  -> _db010_create_anal
-#   db999-Main-Exit.                L587  -> _db999_main_exit
-#   dc000-Store-Specials  section.  L590  -> _dc000_store_specials
-#   dc999-Main-Exit.                L623  -> _dc999_main_exit
-#   dd000-Extract section.          L626  -> _dd000_extract
-#   dd999-Main-Ex.                  L691  -> _dd999_main_ex
-#   zz070-Convert-Date        section. L694 -> _zz070_convert_date
-#   zz070-Exit.                     L721  -> _zz070_exit
-#   a01-Eval-Status section.        L724  -> _a01_eval_status
-#   a01-exit.                       L729  -> _a01_exit
-#
-#   Three of the four sections carry statements DIRECTLY under the section
-#   header, with no paragraph label between - `dc000-Store-Specials` L590,
-#   `dd000-Extract` L626 and `zz070-Convert-Date` L694 - so the section function
-#   holds the body and only the trailing `-Exit`/`-Ex` paragraph is separate.
-#   `db000-Create` L527 is the exception: its first statement is inside
-#   `DB000-Create-Main.` L530, so `_db000_create` holds only the retry loop.
-#
-#   Section 0.4.2's inventory for `sl055` is INCOMPLETE and the list above
-#   supersedes it: it omits `dc000-Store-Specials section.` L590 (citing only
-#   that section's exit paragraph) and `a01-exit.` L729 (which is declared on the
-#   same source line as its `exit section.`, and so reads as one line rather than
-#   two).
-#
-# STATEMENT -> CALL SITE
-#   perform Value-Open-Input     L319  -> ctx.verbs.value_open_input
-#   perform Value-Close          L321, L324, L499
-#                                      -> ctx.verbs.value_close
-#   perform Value-Open-Output    L322  -> ctx.verbs.value_open_output
-#   perform Invoice-Open         L356  -> ctx.verbs.invoice_open
-#   perform Value-Open           L357  -> ctx.verbs.value_open
-#   perform Analysis-Open        L358  -> ctx.verbs.analysis_open
-#   open extend  open-item-file-2 L359 -> ctx.open_item_file_2.open_extend
-#   close        open-item-file-2 L361, L501
-#                                      -> ctx.open_item_file_2.close
-#   open output  open-item-file-2 L362 -> ctx.open_item_file_2.open_output
-#   perform Invoice-Read-Next    L366  -> ctx.verbs.invoice_read_next
-#   perform Value-Read-Indexed   L383, L407, L596, L613
-#                                      -> ctx.verbs.value_read_indexed
-#   perform db000-Create         L385, L598
-#                                      -> _db000_create
-#   perform Value-Write          L398, L560, L607
-#                                      -> ctx.verbs.value_write
-#   perform Value-Rewrite        L400, L420, L609, L621
-#                                      -> ctx.verbs.value_rewrite
-#   perform Invoice-Rewrite      L422, L441, L469
-#                                      -> ctx.verbs.invoice_rewrite
-#   perform dd000-Extract        L438  -> _dd000_extract
-#   perform Invoice-Start        L476  -> ctx.verbs.invoice_start
-#   perform dc000-Store-Specials L485, L489, L493, L497
-#                                      -> _dc000_store_specials
-#   perform Invoice-Close        L498  -> ctx.verbs.invoice_close
-#   perform Analysis-Close       L500  -> ctx.verbs.analysis_close
-#   perform Analysis-Read-Indexed L534, L551, L564
-#                                      -> ctx.verbs.analysis_read_indexed
-#   perform Analysis-Write       L580, L583
-#                                      -> ctx.verbs.analysis_write
-#   write   oi-header            L681  -> ctx.open_item_file_2.write
-#   perform a01-Eval-Status      L683  -> _a01_eval_status
-#   perform zz070-Convert-Date   L353  -> _zz070_convert_date
-#                                         (body: dates.zz070_convert_date)
-#
-#   SIXTEEN DISTINCT FACADE VERBS, all from the ENTITY-named vocabulary, because
-#   `sl055` copies `Proc-ACAS-FH-Calls.cob` [sales/sl055.cbl:L731] and not
-#   `Proc-ZZ100-ACAS-IRS-Calls.cob`. That copybook has NO per-handler error-check
-#   paragraph, so every reply is tested INLINE by the caller - which is what the
-#   `if fs-reply ...` tests transcribed throughout this module are. No
-#   handler-named alias (`acas008_*`, `acas012_*`, `acas013_*`, `acas015_*`,
-#   `acas016_*`) is called anywhere in this module.
-#
-#   `move 1 to File-Key-No` is preserved at ALL NINE sites - L349, L382, L406,
-#   L533, L550, L563, L579, L595, L612 - in place, un-hoisted and un-cached
-#   (rule R-3, section 0.8.4, AMBIGUITY Q-55).
-#
-# `GO TO`   - eighteen sites, classified by SHAPE, not by matching a label list
-#   class 1  loop-back to `da010-Read-Loop.` L364, transformed to a dispatcher
-#            `continue`:
-#              L428  da020 -> da010   (already analysed AND applied)
-#              L442  da020 -> da010   (analysed, rewritten, totals skipped)
-#              L470  da020 -> da010   (the principal back-edge)
-#              L479  da030 -> da010   (repositioned, resume reading)
-#   class 2  forward terminator to `da040-Close-Files.` L481, transformed to a
-#            dispatcher `break` PLUS the post-loop block:
-#              L368  inside the inline perform -> da040
-#              L478  da030 -> da040   (START found no further invoice)
-#            Section 0.6.3: the transformation is "`break` PLUS faithful
-#            placement of that work after the loop, not `break` alone.
-#            Mis-splitting here would silently drop end-of-run processing." The
-#            work is the four special-total stores L482-L497 and the four closes
-#            L498-L501.
-#   class 3  section or paragraph exit, transformed to a `return`:
-#              L543, L554, L566, L572  -> db999-Main-Exit. L587
-#              L615                    -> dc999-Main-Exit. L623
-#              L633                    -> dd999-Main-Ex.   L691
-#              L707, L712              -> zz070-Exit.      L721
-#                                         (inside the delegated `dates` body)
-#   class 4  sibling re-dispatch - a named call followed by an explicit transfer
-#            on the callee's own outcome. PER-SITE PROOF REQUIRED, and given:
-#              L431  -> da030-Skip-Invoice. L472   (proof 1 of 4)
-#              L436  -> da030-Skip-Invoice. L472   (proof 2 of 4)
-#              L536  -> db010-Create-Anal.  L574   (proof 3 of 4)
-#              L585  -> DB000-Create-Main.  L530   (proof 4 of 4, BACKWARD)
-#
-#   THE FOUR CLASS-4 EQUIVALENCE PROOFS, one per site:
-#     1. L431. The transfer is the ENTIRE body of `if ih-type = 4`, so no
-#        statement of `da020-Header-Analysis` is skipped by taking it, and
-#        `da030-Skip-Invoice` is not reachable by fall-through because L470
-#        transfers away first. Therefore "transfer to L472" == "run L473-L476,
-#        then transfer where L477-L479 decide". `_da020_header_analysis` returns
-#        `DA030_SKIP_INVOICE`; `run`'s dispatcher calls `_da030_skip_invoice` and
-#        threads its returned label. Equivalent.
-#     2. L436. Its `if` body is `move 1 to ws-p-flag` and then the transfer, and
-#        the `move` is performed BEFORE the label is returned, so the flag is set
-#        exactly once and exactly as early. Otherwise identical to proof 1. The
-#        two sites are proven separately because the property being proven is
-#        about each SITE's trailing statements, not about the shared target.
-#        Equivalent.
-#     3. L536. The transfer is the entire body of `if FS-Reply = 21 or = 23`;
-#        every statement after it in `DB000-Create-Main` is reachable only when
-#        that `if` was false, and `db010-Create-Anal` is unreachable by
-#        fall-through because L572 transfers away. Therefore "transfer to L574" ==
-#        "run L575-L584, then transfer where L585 says". Equivalent.
-#     4. L585. UNCONDITIONAL, and the LAST statement of its paragraph, so nothing
-#        follows it that a loop back-edge would skip. The cycle
-#        `DB000-Create-Main -> db010-Create-Anal -> DB000-Create-Main` therefore
-#        has exactly one entry point (`DB000-Create-Main`'s first statement),
-#        exactly one back-edge, and no work after the back-edge - which is the
-#        definition of a `while` loop over the entry point. `_db000_create`'s
-#        `while True:` is that loop. It has NO iteration guard, matching the
-#        source (AMBIGUITY Q-51). Equivalent.
-#
-# `EXIT PERFORM` / `EXIT PERFORM CYCLE` - six sites, NOT `GO TO`s
-#   These exist because `da010-Read-Loop.` L364 contains an INLINE
-#   `perform until FS-Reply = 10` L365-L424, which the maintainer introduced
-#   deliberately - his own comment at L365 reads "changed 18/01/25 for clean up
-#   using inline perform". The loop is already structured, so it is transcribed
-#   as a `while`, not rebuilt as a `GO TO` cycle.
-#     L371  exit perform        -> `break`, and then a FALL-THROUGH into
-#                                  `da020-Header-Analysis.` L426
-#     L374  exit perform cycle  -> `continue`  (line already analysed)
-#     L377  exit perform cycle  -> `continue`  (comment line, product "/")
-#     L403  exit perform cycle  -> `continue`  (group has no second character)
-#     L409  exit perform cycle  -> `continue`  (group-level value row absent)
-#     L423  exit perform cycle  -> `continue`  (end of the loop body)
-#   The loop's own `UNTIL FS-Reply = 10` AND the explicit `if fs-reply = 10` at
-#   L367 are BOTH reproduced. They are not redundant in the migration for the
-#   same reason they are not redundant in the source: `fs-reply` is written both
-#   by the facade verbs and by `open-item-file-2`, whose SELECT names the same
-#   field, and the `UNTIL` is evaluated at the TOP of each iteration while L367
-#   is evaluated immediately after the read.
-#
-# FALL-THROUGHS - two, recorded explicitly so that a reader diffing the two
-#   files does not go looking for a `GO TO` that is not there
-#     1. `da000-mainline` L362 -> `da010-Read-Loop.` L364. The entry section ends
-#        with the OTM2 open and no transfer statement. Modelled by `run` setting
-#        its initial label to `DA010_READ_LOOP` immediately after
-#        `_da000_mainline` returns.
-#     2. `da040-Close-Files` L518 -> `da999-Menu-Exit.` L520. Taken only when
-#        NEITHER `ws-p-flag` nor `ws-Anal-Flag` is set; the two early `goback`s at
-#        L509 and L518 skip `da999-Menu-Exit` entirely. Modelled by
-#        `_da040_close_files` returning `DA999_MENU_EXIT` rather than `GOBACK`.
-#   A third, inner fall-through is the `exit perform` at L371 listed above.
-#
-# `PERFORM ... THRU` - DOES NOT OCCUR in `sl055`. The four in-scope sites
-#   repository-wide are `gl072` L300, `gl072` L304, `sl100` L344 and `pl100`
-#   L336. Stated so that no later reader hunts for one here.
+# PROGRAM -> MODULE, PARAGRAPH -> FUNCTION, STATEMENT -> CALL SITE
+# ================================================================
+# All three tables live in docs/migration/traceability.md. Locally: the boundary
+# is THE WHOLE PROGRAM, all eighteen labels have a function, and the four class-4
+# `GO TO` sites carry their equivalence proofs at the site - L431 where the
+# transfer is the ENTIRE body of `if ih-type = 4`, L436 whose `if` body is
+# `move 1 to ws-p-flag` and then the transfer, L536 where the transfer is the
+# entire body of `if FS-Reply = 21 or = 23`, and L585 which is unconditional and
+# the LAST statement of its paragraph. Two fall-throughs are recorded explicitly:
+# `da000-mainline` L362 into `da010-Read-Loop.` L364, where the entry section
+# simply ends, and `da040-Close-Files` L518 into `da999-Menu-Exit.` L520. Public
+# API is `run` alone.
 #
 
 # ANOMALY REGISTER (rule R-4)

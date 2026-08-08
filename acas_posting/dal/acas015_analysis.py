@@ -67,7 +67,7 @@ INLINE with no paragraph of its own [common/acas015.cbl:L654-L658]::
 
 Note the parameter ORDER differs between the two: the handler leads with
 `System-Record`, the bridge leads with `File-Access` and never sees the system
-record at all. Both orders are preserved exactly, because a reviewer diffing
+record at all. Both orders are preserved exactly, because a reader diffing
 the argument lists is the mechanism rule R-5 relies on.
 
 The caller of `dispatch` is the Analysis facade paragraph of
@@ -100,25 +100,11 @@ here but in case :(".
 
 THE FOUR COLUMNS, AND EVERYTHING THAT DRIFTS
 ============================================
-From `loader.entries_for_table("ANALYSIS-REC")` in COLUMN-ORDINAL order
-[mysql/ACASDB.sql:L31]. The dictionary holds all three layer views side by
-side; the summary below is a reading aid, and `COLUMNS` is the authority::
-
-    ord  copybook               bridge host variable      column
-    ---  ---------------------  ------------------------  ---------------------
-     1   WS-Pa-Code   group     HV-PA-CODE     X(3)       PA-CODE   char(3) PK
-             L10  x + x + x         L283                      L32
-     2   Pa-Gl        9(6)      HV-PA-GL       9(08) COMP PA-GL     mediumint(6)
-             L15  DISPLAY           L284                      L33  unsigned
-     3   Pa-Desc      x(24)     HV-PA-DESC     X(24)      PA-DESC   char(24)
-             L16                   L285                      L34
-     4   Pa-Print     xxx       HV-PA-PRINT    X(3)       PA-PRINT  char(3)
-             L17                   L286                      L35
-
-Copybook locators are [copybooks/wsanal.cob], bridge locators
-[common/analMT.cbl], column locators [mysql/ACASDB.sql].
-
-Two fields drift, two do not:
+Resolved from `loader.entries_for_table("ANALYSIS-REC")` in COLUMN-ORDINAL order
+[mysql/ACASDB.sql:L31], which is the authority and is what :data:`COLUMNS`
+exposes; the column-by-column copybook / host-variable / column table is in
+`docs/migration/traceability.md` under `ANALYSIS-REC`. Two of the four fields
+drift and two do not:
 
 * `PA-CODE` drifts in NAME ONLY. The copybook calls it `WS-Pa-Code`
   [copybooks/wsanal.cob:L10], the host variable and the column both call it
@@ -155,8 +141,8 @@ no `filler`, so nothing else is dropped.
 The byte arithmetic, stated because it is the counter-example: the copybook
 header declares 36 bytes [copybooks/wsanal.cob:L6] and the fields sum to
 3 + 6 + 24 + 3 = 36. THIS RECORD AGREES. Saying so is worth as much as
-flagging the records that do not - `copybooks/wsbatch.cob` declares 96 against
-a 98-byte sum, Agent Action Plan anomaly 15 - because it shows those
+flagging the records that do not - `copybooks/wsbatch.cob` declares two lengths,
+96 and 98, against a field sum of 96, anomaly A-15 - because it shows those
 disagreements are findings rather than a systematic mis-reading here.
 
 ONE KEY OF REFERENCE, WHICH IS WHY THE GUARD IS NOT ARBITRARY
@@ -222,16 +208,17 @@ WHAT THIS MODULE MAY NOT DO, AND WHY
 * R-6: no clock, no seeded generator, no identifier generator. Statement order
   is the COBOL's order.
 
-There is no user rules document for this project - `review_rules` reports that
-none was provided - so R-1 to R-6 above are the binding constraints, taken from
-Agent Action Plan section 0.7.2, and everything they are silent on is held to
-ordinary enterprise practice.
+R-1 to R-6 above are the binding constraints of Agent Action Plan section 0.7.2;
+everything they are silent on is held to ordinary enterprise practice.
 
 THE ANOMALY REGISTER FOR THIS MODULE
 ====================================
 Each entry is reproduced or recorded at its own site below with the same
-locator, and each belongs in `docs/migration/anomaly-log.md` naming this module
-as the reproducing module.
+locator. The `N-` family is registered as a family in
+`docs/migration/anomaly-log.md` section 15.1, which names this module and fixes
+its tag count; the text and locators of each entry live here, which is the one
+place they can be kept correct. An `N-` tag is scoped to this module and is not
+globally unique.
 
 From the handler [common/acas015.cbl]:
 
@@ -373,7 +360,7 @@ From the handler [common/acas015.cbl]:
   N-rewrite-nofinalperiod  `end-rewrite` carries no terminating period [:L564]
                    where `end-write` does [:L542]. Harmless because a `go to`
                    cannot be conditional, and recorded because this is exactly
-                   the typo of Agent Action Plan anomaly 1.
+                   the typo of Agent Action Plan anomaly A-1.
   N-dal-logs-anyway  `Ca-Process-Logs`'s label-line claim that it is "Not called
                    on DAL access" is FALSE for one arm: the record-length error
                    performs it [:L626] from a paragraph reached on BOTH paths
@@ -1379,7 +1366,7 @@ class _HandlerWorkingStorage:
     and would not compile. The program escapes only because it never references
     any of them: it moves whole groups, and the one key it does name differs by
     a prefix - `PA-Code` in the FD against `WS-Pa-Code` in working storage. Agent
-    Action Plan anomaly 21 records the same class of collision forcing qualified
+    Action Plan anomaly A-21 records the same class of collision forcing qualified
     references at [general/gl070.cbl:L497], [general/gl070.cbl:L521] and
     [general/gl070.cbl:L525] - the register cites L510, which in the frozen
     checkout is `move post-cr to pre-ac`, an unqualified move; here the collision
@@ -1419,14 +1406,14 @@ class _BridgeWorkingStorage:
             predicate.
         most_relation: `05 MOST-Relation pic xxx` [common/analMT.cbl:L250], the
             comparison operator `ba060-Process-Start` selects.
-        ws_mysql_error_number: `Ws-Mysql-Error-Number pic x(5)` [copybooks/mysql-
-            variables.cpy:L84]. Cleared by `ba010-Initialise` [common/analMT.cbl:L363]
-            and re-read by every post-command test.
-        ws_mysql_sqlstate: `WS-Mysql-SqlState pic x(5)` [copybooks/mysql-
-            variables.cpy:L85].
-        ws_mysql_error_message: `Ws-Mysql-Error-Message pic x(160)` [copybooks/mysql-
-            variables.cpy:L86] - the 160-character intermediate every message crosses on
-            its way into the 512-character `SQL-Msg`.
+        ws_mysql_error_number: `Ws-Mysql-Error-Number pic x(5)`
+            [copybooks/mysql-variables.cpy:L84]. Cleared by `ba010-Initialise`
+            [common/analMT.cbl:L363] and re-read by every post-command test.
+        ws_mysql_sqlstate: `WS-Mysql-SqlState pic x(5)`
+            [copybooks/mysql-variables.cpy:L85].
+        ws_mysql_error_message: `Ws-Mysql-Error-Message pic x(160)`
+            [copybooks/mysql-variables.cpy:L86] - the 160-character intermediate every message
+            crosses on its way into the 512-character `SQL-Msg`.
         open_outcome: The open this bridge is holding, or `None` before the first `fn-
             Open` and after `fn-Close`.
     """
@@ -2005,7 +1992,7 @@ def _log_record(
 
     `Log-File-Rec-Written` [common/analMT.cbl:L308] IS NOW ADVANCED - `(n + 1)`
     modulo one million, the range of the frozen `pic 9(6)`
-    [copybooks/Test-Data-Flags.cob:L20]. Leaving it untouched was wrong twice: the
+    [copybooks/Test-Data-Flags.cob:L18]. Leaving it untouched was wrong twice: the
     counter lives in `ACAS-DAL-Common-data`, which the CALLER owns and carries
     across calls, and this module does write the record it counts.
 
@@ -3975,9 +3962,9 @@ def dispatch(
         file_defs: `File-Defs` [copybooks/wsnames.cob], the fourth parameter. A
             DELIBERATE OMISSION, RECORDED AS ONE (rule R-5). NOTHING IN `acas015` READS
             IT.
-        dal_common: `ACAS-DAL-Common-data`, the fifth. Copied from `copybooks/Test-Data-
-            Flags.cob` in this program [common/acas015.cbl:L274] and declared INLINE in
-            the bridge [common/analMT.cbl:L296-L308] - anomaly N-swtesting-default.
+        dal_common: `ACAS-DAL-Common-data`, the fifth. Copied from
+            `copybooks/Test-Data-Flags.cob` in this program [common/acas015.cbl:L274] and
+            declared INLINE in the bridge [common/analMT.cbl:L296-L308] - anomaly N-swtesting-default.
         transport: Forwarded to the open, where `dal/connection.py` enforces its
             transport policy.
         allow_frozen_placeholder_credentials: Forwarded to the open.

@@ -98,7 +98,7 @@ THE SIX BINDING RULES, as they apply to this file.
     R-6  Compiled behaviour is the tie-breaker. Expected values come from the
          compiled oracle, never from reading the COBOL and reasoning about what it
          ought to produce. BOTH questions this file carries have now been MEASURED
-         (finding F-19), so there is no `xfail` here: each measurement is asserted,
+, so there is no `xfail` here: each measurement is asserted,
          and the reading it refuted is asserted AGAINST, so a change back to the
          refuted reading fails by name.
 
@@ -161,9 +161,7 @@ successor imposes on `post-amount`, are locked by `test_irs_vat_from_gross.py` a
 `test_irs_vat_from_net.py`. This file asserts ONLY the rounding at each site and the
 truncation at each successor, and it implements no VAT helper of its own.
 
-THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports that none
-was provided, so no reader should look for an on-disk rules file. The six rules above
-live in the Agent Action Plan itself, section 0.7.2, and their exact wording is
+THE SIX RULES ABOVE live in Agent Action Plan section 0.7.2; their exact wording is
 retrievable from the requirements via `review_prompt`.
 """
 
@@ -1819,7 +1817,7 @@ def test_sites_1_and_4_quantize_once_across_a_multiply_then_divide() -> None:
 
 
 def test_site_2_stores_the_extended_precision_penny() -> None:
-    """Site 2's penny, MEASURED on the compiled oracle (finding F-19).
+    """Site 2's penny, MEASURED on the compiled oracle.
 
     [general/gl051.cbl:L796] with 117.55 at 17.50%. The two readings of the compound
     statement are:
@@ -2234,7 +2232,7 @@ def test_a_rounded_store_that_overflows_is_silent_and_keeps_low_order_digits() -
 
 
 def test_an_overflowing_rounded_store_rounds_first_then_discards_the_carry() -> None:
-    """The overflow ORDER, MEASURED on the compiled oracle (finding F-19).
+    """The overflow ORDER, MEASURED on the compiled oracle.
 
     `99.5` into `77 a pic 99` [general/gl080.cbl:L183]. ISO leaves the receiver's
     content undefined when a size error occurs with no `ON SIZE ERROR` phrase, and there

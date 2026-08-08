@@ -31,15 +31,16 @@ __all__ = ["VaCode", "VaGroup", "WsValueRecord"]
 # was obtained by reading the generated dictionary and matching on the entry's
 # `copybook.name`.
 
-# va-code a group of three characters, level 03 [copybooks/wsval.cob:L10] ANOMALY, group
-# concatenation.
+# va-code a group of three characters, level 03 [copybooks/wsval.cob:L10] A GROUP whose
+# three subordinate characters concatenate into the column.
 _VA_CODE: Final = FieldDescriptor.from_dictionary_key("VALUEANAL-REC.VA-CODE")
 
 _VA_SYSTEM: Final = FieldDescriptor.from_dictionary_key("WS-Value-Record.va-system")
 
 _VA_GROUP: Final = FieldDescriptor.from_dictionary_key("WS-Value-Record.va-group")
 
-# va-first pic x, level 07 [copybooks/wsval.cob:L13] ANOMALY, level numbering.
+# va-first pic x, level 07 [copybooks/wsval.cob:L13] Level 07 under a level 03, with no
+# 05 between; carried as declared.
 _VA_FIRST: Final = FieldDescriptor.from_dictionary_key("WS-Value-Record.va-first")
 
 _VA_SECOND: Final = FieldDescriptor.from_dictionary_key("WS-Value-Record.va-second")
@@ -48,8 +49,8 @@ _VA_GL: Final = FieldDescriptor.from_dictionary_key("VALUEANAL-REC.VA-GL")
 
 _VA_DESC: Final = FieldDescriptor.from_dictionary_key("VALUEANAL-REC.VA-DESC")
 
-# va-print pic xxx, level 03 [copybooks/wsval.cob:L17] ANOMALY, picture spelling: the
-# copybook spells this `pic xxx` rather than `pic x(3)`.
+# va-print pic xxx, level 03 [copybooks/wsval.cob:L17] The copybook spells this
+# `pic xxx` rather than `pic x(3)`; the spelling is preserved, never normalised (R-4).
 _VA_PRINT: Final = FieldDescriptor.from_dictionary_key("VALUEANAL-REC.VA-PRINT")
 
 # va-t-this pic 9(5) comp, level 03 [copybooks/wsval.cob:L18] UNSIGNED in the copybook,
@@ -60,8 +61,8 @@ _VA_T_LAST: Final = FieldDescriptor.from_dictionary_key("VALUEANAL-REC.VA-T-LAST
 
 _VA_T_YEAR: Final = FieldDescriptor.from_dictionary_key("VALUEANAL-REC.VA-T-YEAR")
 
-# va-v-this pic s9(8)v99 comp-3, level 03 [copybooks/wsval.cob:L21] NEW ANOMALY - MONEY
-# LOSES ITS SIGN AT THE BRIDGE.
+# va-v-this pic s9(8)v99 comp-3, level 03 [copybooks/wsval.cob:L21] MONEY LOSES ITS SIGN
+# AT THE BRIDGE - the A-11 family, and the dictionary entry carries that reference.
 _VA_V_THIS: Final = FieldDescriptor.from_dictionary_key("VALUEANAL-REC.VA-V-THIS")
 
 _VA_V_LAST: Final = FieldDescriptor.from_dictionary_key("VALUEANAL-REC.VA-V-LAST")

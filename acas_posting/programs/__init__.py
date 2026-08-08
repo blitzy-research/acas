@@ -12,7 +12,7 @@ package does not drag in twelve modules and, through them, the whole data-access
 layer and a database driver. Import the module you need directly.
 
     gl051_batch_control_check       general/gl051.cbl - the control-total gate
-                                    only [general/gl051.cbl:L1096-L1133]
+                                    only [general/gl051.cbl:L1096-L1134]
     gl070_transaction_pre_process   general/gl070.cbl - phases 1 and 2
     gl071_batch_sort                general/gl071.cbl - a pure sort
     gl072_transaction_update        general/gl072.cbl - phase 4
@@ -24,7 +24,7 @@ layer and a database driver. Import the module you need directly.
     pl060_order_posting             purchase/pl060.cbl
     pl100_payment_posting           purchase/pl100.cbl
     irs030_posting                  irs/irs030.cbl - `Ledger-Postings-Add`
-                                    only [irs/irs030.cbl:L1569-L1733]
+                                    only [irs/irs030.cbl:L1569-L1730]
 
 Two of the twelve are migrated only in part, and their boundaries are narrow
 because both files are otherwise interactive: working from the file rather than

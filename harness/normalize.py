@@ -147,7 +147,7 @@ EXPECTED_SCHEMA_TABLES: Final[int] = 33
 # `MANIFEST_KEYS`, inherited here verbatim from the dump manifest along with the run
 # attestation. What carries no side is the per-table dump OBJECT (`DUMP_KEYS`), and those
 # are the only files harness/diff_states.py compares -- so the manifest's copy cannot
-# influence a verdict. Stated in full because an earlier revision of this comment claimed
+# influence a verdict. Stated in full because it is tempting to claim
 # the content never records it, which the manifest contradicts.
 SIDES: Final[tuple[str, ...]] = ("cobol", "python")
 
@@ -189,7 +189,7 @@ DATE_TEXT_COLUMNS: Final[Mapping[tuple[str, str], DateTextSpec]] = {
         "date", 8, 158, "copybooks/wspost.cob:L18"
     ),
     # The internal IRS posting date - the same eight-character form, and the field the
-    # three bridge-only components are derived from (anomaly 7.
+    # three bridge-only components are derived from (anomaly A-7.
     ("IRSPOSTING-REC", "POST4-DAT"): DateTextSpec(
         "date", 8, 277, "copybooks/irswspost.cob:L11"
     ),
@@ -456,7 +456,7 @@ ATTESTATION_KEYS: Final[tuple[str, ...]] = (
 )
 
 # =============================================================================
-# PROVENANCE AND LINEAGE (findings F-34, F-36)
+# PROVENANCE AND LINEAGE
 #
 # The provenance block is CARRIED THROUGH from the raw manifest for the same reason the
 # attestation is: what a capture was taken from is a fact about the capture, and
@@ -469,8 +469,8 @@ ATTESTATION_KEYS: Final[tuple[str, ...]] = (
 # normalised tree whose manifest inherited A's scenario, side and attestation, and
 # nothing in the result recorded WHICH raw bytes it canonicalised. A re-run of the
 # dump stage between the two normalisations, a hand edit of a dump, a --src pointing at
-# the other side's tree -- each produced a normalised tree that looked exactly right
-# and described a capture it was not made from.
+# the other side's tree -- would each produce a normalised tree that looked exactly
+# right and described a capture it was not made from.
 #
 # So the digest of the source manifest is recorded here and REQUIRED downstream:
 # harness/diff_states.py refuses a normalised tree whose recorded lineage does not
@@ -2408,6 +2408,10 @@ def build_manifest(
         selector: How the table list was originally chosen, likewise inherited - which
             is what lets the comparison stage report the scope the evidence actually
             has.
+        provenance: The source manifest's provenance block, carried through verbatim so
+            the normalised tree cites the same inputs the raw one did. `None` writes
+            every `PROVENANCE_KEYS` entry as null rather than omitting the block, so a
+            tree normalised from a manifest without one cannot pass for one with it.
         attestation: What the RUN stage claimed, inherited verbatim. None becomes a
             recorded refusal rather than an omitted key, so a tree normalised from a
             waived or absent source manifest cannot pass for an attested one.
@@ -2537,7 +2541,7 @@ def normalize_tree(
         )
 
     source_manifest: Mapping[str, Any] | None = None
-    # ⭐ THE LINEAGE DIGEST IS TAKEN FROM THE BYTES ON DISK (finding F-36), not from a
+    # THE LINEAGE DIGEST IS TAKEN FROM THE BYTES ON DISK, not from a
     # re-serialisation of the parsed object, so it identifies exactly what this stage
     # read and exactly what harness/diff_states.py will re-hash to check it.
     source_manifest_digest: str | None = None
@@ -2615,7 +2619,7 @@ def normalize_tree(
                 f"{len(canonical['columns']):>3} column(s)  canonicalised"
             )
 
-        # ⭐ THE INPUT MUST STILL BE THE INPUT (finding F-36).
+        # THE INPUT MUST STILL BE THE INPUT.
         #
         # The lineage digest was taken before a single dump was read. Everything since
         # then - discovering the tables, reading each one, canonicalising it, staging it
@@ -2702,7 +2706,7 @@ def _inherit_provenance(
     Every field is carried through unchanged except `source_manifest_sha256`, which only
     this stage can know: it is the digest of the manifest the normalised tree was
     DERIVED from. See PROVENANCE KEYS above for why its absence made a normalised tree
-    unattributable (finding F-36).
+    unattributable.
 
     Args:
         manifest: The source tree's manifest, or None when the check was waived with
@@ -3306,7 +3310,7 @@ def build_parser() -> argparse.ArgumentParser:
     #  scenario definition or about the protocol itself and exits; none reads a dump, so
     #  none needs --src or --dst. They are here rather than in three files of their own
     #  because the definitions they publish are shared by every consumer and must have
-    #  exactly one home (findings M-07 and M-08).
+    #  exactly one home.
     modes = parser.add_argument_group(
         "modes that publish a definition instead of normalising a dump"
     )
@@ -3645,22 +3649,22 @@ def _parse_table_selection(
 # ======================================================================================
 #  SECTION S  -  THE SHARED SCENARIO READER AND THE PARITY-STAGE REGISTRY
 #
-#  Three things live here that used to live in three separate files of their own, and
+#  Three things live here rather than in three separate files of their own, and
 #  they are here because this module is the harness's canonicalisation module: reading a
 #  scenario definition ONE way, and naming the protocol's stages ONE way, are the same
-#  kind of job as rendering a dumped row one way (findings M-05, M-07, M-08).
+#  kind of job as rendering a dumped row one way.
 #
 #    * `load_scenario_yaml` - the DUPLICATE-REJECTING parser every consumer reads a
 #      definition through. `yaml.safe_load` applies last-one-wins to a repeated key,
 #      silently; a scenario definition carries the destructive answers, the fan-out
 #      switch that decides which tables a run touches, the comparison bound and the
 #      expected statuses, so a shadowed key means two consumers read two different
-#      files and an empty diff drawn across that pair is meaningless (finding MJ-17).
+#      files and an empty diff drawn across that pair is meaningless.
 #    * `emit_scenario_stream` - the flat TAB-delimited record stream BOTH runners read a
-#      definition through, so one document cannot mean two things (finding F-32).
+#      definition through, so one document cannot mean two things.
 #    * `PARITY_STAGES` - the ten-stage registry, defined ONCE, published to shell
 #      through `--print-stage-shell` and to everything else through `--print-stages`
-#      (finding F-16).
+#.
 # ======================================================================================
 
 #: Largest document accepted, in bytes of UTF-8. Measured maximum 101,222 (~99 KiB);
@@ -3690,7 +3694,7 @@ _SCENARIO_LOADER_TYPE_NAMES: Final[tuple[str, ...]] = (
 def _scenario_loader_types() -> dict[str, type]:
     """Build the three PyYAML-derived scenario-loader types, once, on first use.
 
-    ⭐ WHY THESE THREE CLASSES ARE BUILT IN A FUNCTION RATHER THAN AT MODULE SCOPE.
+    WHY THESE THREE CLASSES ARE BUILT IN A FUNCTION RATHER THAN AT MODULE SCOPE.
     All three name a PyYAML class as their BASE - `yaml.YAMLError`,
     `yaml.constructor.ConstructorError` and `yaml.SafeLoader` - and a `class` statement
     evaluates its bases when it executes. Written at module scope they would force
@@ -3922,7 +3926,7 @@ def load_scenario_yaml(text: str) -> Any:
 class _ScenarioStreamRefusal(Exception):
     """A scalar in a scenario definition cannot travel in the flat record stream.
 
-    Carries the exit status the caller must report, so the refusal that used to be a
+    Carries the exit status the caller must report, so a refusal that would otherwise be a
     bare `SystemExit(5)` inside a script stays a status rather than becoming an
     exception a caller has to translate.
     """
@@ -3998,8 +4002,8 @@ def _is_scenario_block(value):
 def emit_scenario_stream(path: Path) -> int:
     """Emit one scenario definition as the flat TAB-delimited record stream.
 
-    ⭐ THE ONE SCENARIO READER BOTH RUNNERS USE (finding F-32), folded in from
-    what used to be a separate `harness/scenario_stream.py` (finding M-07). The
+    THE ONE SCENARIO READER BOTH RUNNERS USE, folded in from
+    what would otherwise be a separate `harness/scenario_stream.py`. The
     oracle side once used a bespoke `awk` subset that recognised only unindented
     `key:` lines while the Python side used PyYAML, so one valid document could
     mean two different things to the two sides of a comparison whose entire
@@ -4118,7 +4122,7 @@ def _emit_scenario_records(document: dict) -> int:
 
 
 # --------------------------------------------------------------------------------------
-#  THE PARITY-STAGE REGISTRY (finding F-16, and finding M-08 for its move here)
+#  THE PARITY-STAGE REGISTRY
 #
 #  The oracle-comparison protocol has TEN stages, in ONE order, and that order is what
 #  makes an empty diff mean anything at all (Agent Action Plan section 0.8.5). Before the
@@ -4146,7 +4150,7 @@ def _emit_scenario_records(document: dict) -> int:
 #  and every shell consumer already requires python3 for a stage of its own - the reset
 #  script, both runners and the driver each invoke it - so emitting the fragment adds no
 #  dependency any of them did not already have. The alternative, a shell file, is what
-#  was there before and is the extra path finding M-08 names.
+#  is the extra path this registry must also cover.
 # --------------------------------------------------------------------------------------
 
 #: The number of stages. Anything printing "stage N of M" reads M from here.
@@ -4274,7 +4278,7 @@ def parity_stage_shell() -> str:
     joined = "\n".join(rows)
     return f"""\
 # Generated by harness/normalize.py --print-stage-shell. Do not edit a copy of this:
-# the rows are defined in PARITY_STAGES in that file and nowhere else (finding M-08).
+# the rows are defined in PARITY_STAGES in that file and nowhere else.
 if [[ -z "${{ACAS_PARITY_STAGES_DEFINED:-}}" ]]; then
   ACAS_PARITY_STAGE_COUNT={PARITY_STAGE_COUNT}
   readonly ACAS_PARITY_STAGE_COUNT

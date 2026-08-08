@@ -15,7 +15,11 @@ Plain dataclasses mirror that block field for field with nothing added (R-3).
 The COBOL tree is frozen: read as the specification, never modified, and
 nothing here executes, embeds or shells out to a COBOL program (R-1).
 
-THE TWO-WAY SPLIT - THE CENTRAL CONSTRAINT OF THIS MODULE
+The central constraint is that the split of `wsfnctn.cob` is two-way: this module
+takes the record LAYOUT and nothing else, while the function codes, access types,
+`FS-Reply` values and the lock-retry ladder - the operation VOCABULARY - live in
+`acas_posting.dal.status`, which is not on a record module's permitted import
+list.
 """
 
 from __future__ import annotations
@@ -218,7 +222,7 @@ class RdbData:
 
     # 05  DB-UPass    pic x(12)  value spaces.          [:L59]
     #
-    # ⭐ `repr=False`, AND NOTHING ELSE ABOUT THIS FIELD CHANGES. It is still the
+    # `repr=False`, AND NOTHING ELSE ABOUT THIS FIELD CHANGES. It is still the
     # third member of the group, still `x(12)`, still defaulted to twelve spaces
     # by the same `_spaces(_descriptor(...))` call, still readable and writable by
     # name, and still listed in `FIELDS` above - so the layout, the declaration

@@ -1,7 +1,7 @@
 """`irs030` - IRS nominal ledger posting [irs/irs030.cbl].
 
 A PARTIAL migration: only the `Ledger-Postings-Add` section
-[irs/irs030.cbl:L1569-L1733], which walks the SL/PL transfer file and updates the
+[irs/irs030.cbl:L1569-L1730], which walks the SL/PL transfer file and updates the
 IRS nominal ledger. The remaining 1,500-odd lines are interactive posting entry
 and are out of scope, apart from the two VAT computes the posting path consumes
 [irs/irs030.cbl:L1551], [irs/irs030.cbl:L1562] - the only `ROUNDED` sites here.
@@ -965,7 +965,7 @@ def _eoj_q1(ws: _WorkingStorage) -> None:
     That the missing `WITH UPDATE` is deliberate shows in this same file, which
     uses the phrase at six other accepts: [irs/irs030.cbl:L582], [:L732], [:L829],
     [:L848], [:L883] and [:L1015].  So a bare Enter RE-PROMPTS rather than
-    clearing (finding CLI-05).
+    clearing.
 
     THIS PARAMETER'S OWN DEFAULT OF `True` IS RETAINED DELIBERATELY, and it is a
     signature contract rather than a claim about the COBOL: this module's file
@@ -1048,7 +1048,7 @@ def run(
             not `"Y"` or `"N"`. Every caller in the migration passes this
             explicitly, so the default is never consulted, and
             `acas_posting/cli/irs_post.py` requires the answer at the boundary an
-            operator touches (finding CLI-05).
+            operator touches.
         file_access: the `File-Access` block [irs/irs030.cbl:L285].  Not a
             linkage parameter - it is this program's own WORKING-STORAGE, exposed
             because the connection details the handlers need are loaded into it by
@@ -1257,8 +1257,8 @@ def run(
 #          CALL "<handler>" USING WS-System-Record <record> File-Access
 #                                 File-Defs ACAS-DAL-Common-data
 #
-#      which is also the argument order of the already-written handler dispatch
-#      functions, so the two agree and a reviewer can diff the lists.  The record
+#      which is also the argument order of the handler dispatch functions, so the
+#      two argument lists can be diffed against each other.  The record
 #      operand differs per handler and is the one that handler owns: the transfer
 #      record for `acas008`, the nominal-ledger record for `acasirsub1`, the
 #      defaults record for `acasirsub3`, the internal posting record for
@@ -1363,254 +1363,130 @@ def run(
 # data-entry paragraph in L1-L1543 other than `Net` and `Gross`.
 #
 #
-# PROGRAM -> MODULE
-# =================
-#     irs/irs030.cbl  Ledger-Postings-Add (+ Net, Gross)  ->  this module
+# PROGRAM -> MODULE, PARAGRAPH -> FUNCTION, STATEMENT -> CALL SITE
+# ================================================================
+# All three tables live in docs/migration/traceability.md. Locally: all NINE
+# in-scope labels have a function - `_net_section`, `_net_main_exita`,
+# `_gross_section`, `_gross_main_exitb`, `_ledger_postings_add`, `_input_loop`,
+# `_eoj`, `_eoj_q1`, `_main99_exit` - including the two plain-`EXIT` paragraphs
+# whose bodies do nothing, per R-5 and the plan's requirement that a paragraph
+# keep a named function even where its `GO TO` becomes a `continue`, a `break` or
+# a `return`. Two further module-private functions carry no COBOL label and are
+# therefore named as statements rather than paragraphs, so that no invented
+# paragraph appears above: `_move_nl_record_to_snapshot` and
+# `_move_snapshot_to_nl_record`; `_index` transcribes no statement at all.
 #
+# The facade verbs are HANDLER-NAMED throughout - the entity-named vocabulary is
+# never used, because this program copies the IRS convention. Eighteen calls
+# across acas008 (open-input, read-next, close, open-output which MEANS
+# delete-all, close), acasirsub3 in its bare form, acasirsub1 (four read-indexed,
+# four rewrite - L1641 is A-4 and L1705/L1708 are A-5) and acasirsub4 (open,
+# write, close).
 #
-# PARAGRAPH -> FUNCTION            (all NINE in-scope labels, in source order)
-# =====================
-#     Net section.                 L1544  ->  _net_section
-#     Main-Exita.                  L1553  ->  _net_main_exita
-#     Gross section.               L1556  ->  _gross_section
-#     Main-Exitb.                  L1566  ->  _gross_main_exitb
-#     Ledger-Postings-Add section. L1569  ->  _ledger_postings_add
-#     Input-Loop.                  L1619  ->  _input_loop
-#     EOJ.                         L1702  ->  _eoj
-#     EOJ-q1.                      L1715  ->  _eoj_q1
-#     main99-exit.                 L1729  ->  _main99_exit
+# The in-scope arithmetic census is EIGHT distinct statements at THIRTEEN sites -
+# two COMPUTEs, one SUBTRACT and ten ADDs - of which exactly TWO are ROUNDED:
+# L1551 and L1562-L1563. Every other store truncates toward zero.
 #
-# Every label has a function, including the two plain-`EXIT` paragraphs whose
-# bodies do nothing, per rule R-5 and the plan's requirement that a paragraph
-# retain a named function even where its `GO TO` becomes a `continue`, a `break`
-# or a `return`.
-#
-# Two further module-private functions carry no COBOL label and are named as
-# statements rather than paragraphs, so that no invented paragraph appears above:
-#     _move_nl_record_to_snapshot   <-  move WS-IRSNL-Record to nl31/nl32-record
-#     _move_snapshot_to_nl_record   <-  move nl31/nl32-record to WS-IRSNL-Record
-# plus `_index`, a descriptor-lookup helper that transcribes no statement at all.
-#
-#
-# STATEMENT -> CALL SITE
-# ======================
-#   facade verbs, handler-named throughout - the entity-named vocabulary is
-#   never used, because this program copies the IRS convention:
-#     L1578  acas008-Open-Input        ->  facade.acas008_open_input
-#     L1586  acasirsub3   (bare form)  ->  facade.acasirsub3
-#     L1596  acasirsub1-Read-Indexed   ->  facade.acasirsub1_read_indexed
-#     L1606  acasirsub1-Read-Indexed   ->  facade.acasirsub1_read_indexed
-#     L1617  acasirsub4-Open           ->  facade.acasirsub4_open
-#     L1620  acas008-Read-Next         ->  facade.acas008_read_next
-#     L1629  acasirsub1-Read-Indexed   ->  facade.acasirsub1_read_indexed
-#     L1641  acasirsub1-Rewrite        ->  facade.acasirsub1_rewrite   (A-4)
-#     L1647  acasirsub1-Read-Indexed   ->  facade.acasirsub1_read_indexed
-#     L1657  acasirsub1-Rewrite        ->  facade.acasirsub1_rewrite
-#     L1673  acasirsub4-Write          ->  facade.acasirsub4_write
-#     L1705  acasirsub1-Rewrite        ->  facade.acasirsub1_rewrite   (A-5)
-#     L1708  acasirsub1-Rewrite        ->  facade.acasirsub1_rewrite   (A-5)
-#     L1711  acasirsub4-Close          ->  facade.acasirsub4_close
-#     L1712  acas008-Close             ->  facade.acas008_close
-#     L1723  acas008-Open-Output       ->  facade.acas008_open_output  (delete-all)
-#     L1724  acas008-Close             ->  facade.acas008_close
-#
-#   arithmetic - the complete in-scope census is EIGHT distinct statements at
-#   THIRTEEN sites, of which exactly TWO are ROUNDED.  By verb: two COMPUTEs,
-#   one SUBTRACT and ten ADDs:
-#     L1551        compute .. rounded    ->  arithmetic.compute  [ROUNDED store]
-#     L1562-L1563  compute .. rounded    ->  arithmetic.compute  [ROUNDED store]
-#     L1564        subtract              ->  arithmetic.subtract_from   (truncates)
-#     L1623        add 1                 ->  arithmetic.add_to          (truncates)
-#     L1635        add amount to nl-dr   ->  arithmetic.add_to
-#     L1637        add vat    to nl-dr   ->  arithmetic.add_to
-#     L1653        add amount to nl-cr   ->  arithmetic.add_to
-#     L1655        add vat    to nl-cr   ->  arithmetic.add_to
-#     L1671        add 1 to next-post    ->  arithmetic.add_to
-#     L1687        add vat to nl31-cr    ->  arithmetic.add_to
-#     L1691        add vat to nl31-dr    ->  arithmetic.add_to
-#     L1695        add vat to nl32-cr    ->  arithmetic.add_to
-#     L1699        add vat to nl32-dr    ->  arithmetic.add_to
-#   There is no ON SIZE ERROR, no REMAINDER, no DIVIDE verb and no MULTIPLY verb
-#   anywhere in the in-scope region.
-#
-#   relation conditions - each reads its OWN status field; the protocol is mixed
-#   and the two fields are never unified:
-#     L1579  FS-Reply not = zero          ->  compare(fs_reply,  SUCCESS)     != 0
-#     L1597  we-error not = zero          ->  compare(we_error,  SUCCESS)     != 0
-#     L1607  we-error not = zero          ->  compare(we_error,  SUCCESS)     != 0
-#     L1621  FS-Reply = 10                ->  compare(fs_reply,  END_OF_FILE) == 0
-#     L1630  we-error = 2                 ->  compare(we_error,  2)           == 0
-#     L1648  we-error = 2                 ->  compare(we_error,  2)           == 0
-#     L1674  we-error not = zero          ->  compare(we_error,  SUCCESS)     != 0
-#     L1682  Vat-AC-Def = zero            ->  compare(vat_ac_def, 0)          == 0
-#     L1685  Vat-AC-Def = 31              ->  compare(vat_ac_def, 31)         == 0
-#     L1689  Vat-AC-Def = 31              ->  compare(vat_ac_def, 31)         == 0
-#     L1693  Vat-AC-Def = 32              ->  compare(vat_ac_def, 32)         == 0
-#     L1697  Vat-AC-Def = 32              ->  compare(vat_ac_def, 32)         == 0
-#     L1636  post-vat-side = "CR"         ->  == "CR"   (equal-width, byte-wise)
-#     L1654  post-vat-side = "DR"         ->  == "DR"
-#     L1686  Post-Vat-Side = "CR"         ->  == "CR"
-#     L1690  Post-Vat-Side = "DR"         ->  == "DR"
-#     L1694  Post-Vat-Side = "CR"         ->  == "CR"
-#     L1698  Post-Vat-Side = "DR"         ->  == "DR"
-#     L1718  WS-Reply not = "Y" and not = "N"  ->  collapsed; see class 4 below
-#
-#   MOVE - the nine posting-record moves plus the key allocation, the four
-#   account-key stores, the four sub-nominal zeroings, the function-code store
-#   and the two group moves.  All go through the MOVE layer; none is a Python
-#   assignment of a converted value.
-#
-#
-# `GO TO`                (the in-scope region has exactly TEN transfer sites)
-# =======
-#   Class 1 - loop back  ->  `continue` inside the `while True:` of _input_loop
-#     L1634  -> Input-Loop   the CLEAN SKIP when the debit account is missing
-#     L1652  -> Input-Loop   A-4's half-posted abandon
-#     L1683  -> Input-Loop   the zero-VAT-account guard, skipping the ladder
-#     L1700  -> Input-Loop   the normal end of an iteration
-#
-#   Class 2 - forward terminator  ->  `break`, PLUS the post-loop block
-#     L1622  -> EOJ  L1702   normal end of file
-#     L1678  -> EOJ  L1702   the write-failure jump
-#   The post-loop block is `_eoj` then `_eoj_q1` then `_main99_exit`, performed by
-#   `_ledger_postings_add` after `_input_loop` returns.  It carries the two
-#   VAT-snapshot rewrites, the three closes and the conditional table truncation,
-#   so a `break` alone would silently drop the section's most consequential
-#   database effects.  BOTH class-2 sites reach it; the three class-3 sites below
-#   skip it.  The split is exact.
-#
-#   Class 3 - section exit  ->  `return`
-#     L1581  -> main99-exit  L1729    transfer file would not open
-#     L1601  -> main99-exit  L1729    VAT control account 31 would not read
-#     L1611  -> main99-exit  L1729    VAT control account 32 would not read
-#   All three bypass `EOJ` entirely: no snapshot rewrite, no close, no
-#   truncation.  This is the ABORT-WITH-NOTHING disposition.
-#
-#   Class 4 - sibling re-dispatch  ->  named paragraph + explicit transfer
-#     L1719  -> EOJ-q1  L1715
-#   Classified 4 rather than 1 because it re-dispatches to the head of its own
-#   paragraph as an input-acquisition retry, and because the paragraph it
-#   re-enters GATES A DATABASE WRITE - the transfer-table truncation - so it
-#   cannot be dismissed as presentation.  The per-site equivalence proof is in
-#   `_eoj_q1`'s docstring: the retry mutates nothing but `WS-Reply`, performs no
-#   database operation, and terminates only when `WS-Reply` is one of exactly two
-#   values; supplying that already-validated two-valued answer as a parameter
-#   makes the loop's post-condition true on entry, so the body is unreachable and
-#   the transfer collapses with nothing observable lost.
-#
-#   `PERFORM ... THRU` DOES NOT OCCUR IN THE IN-SCOPE REGION - see CITATION
-#   CORRECTIONS.
-#
-#
+
 # ANOMALY REGISTER (rule R-4)                     - reproduced, never fixed
 # ===========================
-#   A-4   THE HALF-POSTED DOUBLE ENTRY.
-#         Sites annotated: L1641 (the debit commits), L1652 (the abandon).
-#         The debit is rewritten before the credit account is looked up at
-#         L1647, so a missing credit leaves an unbalanced debit, no credit and
+# Four reproductions, each annotated at its own site with its COBOL locator; the
+# register text is in docs/migration/anomaly-log.md.
+#   A-4   THE HALF-POSTED DOUBLE ENTRY.  L1641 the debit commits, L1652 the
+#         abandon.  The debit is rewritten before the credit account is looked up
+#         at L1647, so a missing credit leaves an unbalanced debit, no credit and
 #         no internal posting row - the posting write is at L1673, past the
-#         abandoned point.  Compounded by the rewrite verb having neither a
-#         facade check nor an inline test.
-#         NOT fixed: the rewrite stays where it is, no rollback is added and the
-#         credit account is not pre-validated.
-#
-#   A-5   THE LOST UPDATE ON THE TWO VAT CONTROL ACCOUNTS.
-#         Sites annotated: L1602, L1612 (the snapshots), L1704/L1705 and
-#         L1707/L1708 (the rewrites from them), plus the ladder at L1685-L1699
-#         which accumulates into the snapshots rather than the live rows.
-#         Any in-loop rewrite of account 31 or 32 is silently discarded at end
-#         of job.
-#         NOT fixed: the accounts are not re-read, the snapshots are not merged
-#         with the live rows and the collision is not detected.
-#
-#   A-19  SUPERSEDED COMMENTED-OUT VARIANTS OF BOTH VAT COMPUTES.
-#         Sites annotated: L1550, L1561.  Both dead lines reference a differently
-#         named rate field `vat` where the live statements reference
-#         `WS-Vat-Current`.  Both are carried into this module verbatim as
-#         comments beside their live translations, together with the maintainer's
-#         uncertainty note at L1547-L1548.  Carrying them IS the reproduction.
-#         NOT fixed: neither dead line is deleted and the note is not acted on.
-#
-#   THE WRITE-FAILURE JUMP.
-#         Site annotated: L1674-L1678.  It transfers to `EOJ`, not to
+#         abandoned point.  The rewrite stays where it is, no rollback is added
+#         and the credit account is not pre-validated.
+#   A-5   THE LOST UPDATE ON THE TWO VAT CONTROL ACCOUNTS.  L1602 and L1612 take
+#         the snapshots, L1704-L1705 and L1707-L1708 rewrite from them, and the
+#         ladder at L1685-L1699 accumulates into the snapshots rather than the
+#         live rows - so any in-loop rewrite of account 31 or 32 is silently
+#         discarded at end of job.  The accounts are not re-read, the snapshots
+#         are not merged and the collision is not detected.
+#   A-19  SUPERSEDED COMMENTED-OUT VARIANTS OF BOTH VAT COMPUTES, at L1550 and
+#         L1561, referencing a differently named rate field `vat` where the live
+#         statements reference `WS-Vat-Current`.  Both dead lines are carried
+#         verbatim as comments beside their live translations, with the
+#         maintainer's uncertainty note at L1547-L1548.  Carrying them IS the
+#         reproduction.
+#   THE WRITE-FAILURE JUMP at L1674-L1678 transfers to `EOJ`, not to
 #         `Input-Loop`, and `EOJ` still performs both snapshot rewrites and all
-#         three closes, so the partial state is COMMITTED.
-#         NOT fixed: no rollback, no retry, and none of the end-of-job work is
-#         skipped.
-#
-#   Anomalies owned ELSEWHERE that touch this section, noted so a reader does
-#   not expect them here:
-#     A-6  the transfer-file handler rejects read-indexed, rewrite, start and
-#          delete unconditionally, so its published rewrite verb can never
-#          succeed.  This section calls none of those four verbs, which is why
-#          it works.  Owned by the transfer-file handler module.
-#     A-7  the internal posting bridge derives three date-component columns that
-#          exist in no copybook.  This section's only contribution is the date
-#          move at L1662, which is the field that rule reads.  Owned by the
-#          internal posting handler module.
+#         three closes, so the partial state is COMMITTED.  No rollback, no
+#         retry, and none of the end-of-job work is skipped.
+# Owned ELSEWHERE but touching this section: A-6, the transfer-file handler's
+# four unconditionally rejected verbs - this section calls none of them, which is
+# why it works - and A-7, the internal posting bridge's three derived
+# date-component columns, whose only input from here is the date move at L1662.
 #
 #
+
 # FINDING LIST                       - recorded, not acted on
 # ============
-#   F-1  L1579-L1581 IS UNREACHABLE-WHEN-TRUE.  `acas008-Open-Input` already
+# Candidate register additions scoped to this program. They are named
+# `F-IRS030-<n>` rather than bare `F-<n>`, because a bare number allocated inside
+# one module collides with the identifiers other registers allocate - the rule
+# docs/migration/anomaly-log.md section 15.1 states after exactly that collision
+# happened between two other modules. Nothing outside this file cites them.
+#   F-IRS030-1  L1579-L1581 IS UNREACHABLE-WHEN-TRUE.  `acas008-Open-Input` already
 #        performs `acas008-Check-4-Errors`, whose predicate is identical
 #        [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L136-L140]; on failure that
 #        check hard-returns out of the program, so control never arrives at
 #        L1579, and on success FS-Reply is zero.  Kept regardless, because rule
 #        R-3 forbids removing a predicate the compiled program contains.
-#   F-2  THERE IS NO `acasirsub4-Check-4-Errors`.  The copybook declares five
+#   F-IRS030-2  THERE IS NO `acasirsub4-Check-4-Errors`.  The copybook declares five
 #        error-check paragraphs for six dispatched handlers.  That absence is why
 #        L1674 must test inline, and why the failed open at L1617 is silently
 #        ignored.
-#   F-3  `acasirsub1-Rewrite` has neither a facade check nor an inline test at
+#   F-IRS030-3  `acasirsub1-Rewrite` has neither a facade check nor an inline test at
 #        any of its four sites, so a failed rewrite is silently ignored.  This
 #        compounds A-4.
-#   F-4  A MIXED STATUS PROTOCOL.  Two sites read FS-Reply, five read we-error.
+#   F-IRS030-4  A MIXED STATUS PROTOCOL.  Two sites read FS-Reply, five read we-error.
 #        Never unified.
-#   F-5  THE `we-error = 2` PREDICATE IS AN EQUALITY, not "not = zero", so any
+#   F-IRS030-5  THE `we-error = 2` PREDICATE IS AN EQUALITY, not "not = zero", so any
 #        other non-zero error falls through into the accumulate.  Not widened.
-#   F-6  THE VAT SIDE IS APPLIED INVERTED.  L1636-L1637 adds VAT to the DEBIT
+#   F-IRS030-6  THE VAT SIDE IS APPLIED INVERTED.  L1636-L1637 adds VAT to the DEBIT
 #        accumulator when the side is "CR"; L1654-L1655 adds it to the CREDIT
 #        accumulator when the side is "DR".  Not corrected.
-#   F-7  THE LADDER HAS NO FINAL `else`.  A VAT account that is non-zero but
+#   F-IRS030-7  THE LADDER HAS NO FINAL `else`.  A VAT account that is non-zero but
 #        neither 31 nor 32 accumulates nowhere and nothing is reported.  No
 #        `else` and no diagnostic added.
-#   F-8  `next-post` IS INCREMENTED BEFORE THE WRITE (L1671 before L1673), so the
+#   F-IRS030-8  `next-post` IS INCREMENTED BEFORE THE WRITE (L1671 before L1673), so the
 #        allocator advances even when the write fails.  Ordering preserved.
-#   F-9  FIELD-NAME CASE INCONSISTENCY.  The VAT side is spelled
+#   F-IRS030-9  FIELD-NAME CASE INCONSISTENCY.  The VAT side is spelled
 #        `ws-irs-post-vat-side` (L1636), `WS-irs-post-vat-side` (L1654) and
 #        `WS-IRS-Post-Vat-Side` (L1686).  COBOL is case-insensitive; recorded, not
 #        propagated.
-#   F-10 `EOJ-q1.` IS WRITTEN AT COLUMN 1 (L1715), unlike every other label in
+#   F-IRS030-10 `EOJ-q1.` IS WRITTEN AT COLUMN 1 (L1715), unlike every other label in
 #        the section, which are indented one column.  A formatting oddity only.
-#   F-11 `Main-Exita.` AND `Main-Exitb.` ARE PLAIN `EXIT`s, not `EXIT SECTION`,
+#   F-IRS030-11 `Main-Exita.` AND `Main-Exitb.` ARE PLAIN `EXIT`s, not `EXIT SECTION`,
 #        and their `a`/`b` suffixes make them distinct labels - unlike the
 #        repeated `main-exit` of the Sales and Purchase programs.  Both retain a
 #        named function anyway.
-#   F-12 THE SNAPSHOT DECLARATIONS DIVERGE FROM THE COPYBOOK in two ways:
+#   F-IRS030-12 THE SNAPSHOT DECLARATIONS DIVERGE FROM THE COPYBOOK in two ways:
 #        `nl31-type`/`nl31-ac` are `pic a` where the copybook has `pic x`, and
 #        the snapshots carry no `filler redefines NL-Data` and therefore no
 #        `NL-Pointer`.  Byte widths are identical, so the group move is still an
 #        exact byte copy.  See `_NlSnapshot` and STRUCTURAL NOTE S-4.
-#   F-13 THE MAINTAINER'S OWN UNCERTAINTY NOTE at L1547-L1548 asks whether the
+#   F-IRS030-13 THE MAINTAINER'S OWN UNCERTAINTY NOTE at L1547-L1548 asks whether the
 #        VAT compute needs a non-zero-rate test.  Recorded; no test added.
-#   F-14 THE CREDIT AND DEBIT MOVES AT L1663-L1664 ARE IN THE OPPOSITE ORDER to
+#   F-IRS030-14 THE CREDIT AND DEBIT MOVES AT L1663-L1664 ARE IN THE OPPOSITE ORDER to
 #        the two legs that were posted at L1627-L1657.  Transcribed in source
 #        order; harmless, but a reader diffing will notice.
-#   F-15 THE TRANSFER FILE IS CLOSED AT L1712 AND REOPENED AT L1723 purely so
+#   F-IRS030-15 THE TRANSFER FILE IS CLOSED AT L1712 AND REOPENED AT L1723 purely so
 #        that opening it for output can truncate it, then closed again at L1724.
 #        Both calls reproduced, in order.
-#   F-16 THREE DISTINCT REJECTION DISPOSITIONS coexist in this one section and
+#   F-IRS030-16 THREE DISTINCT REJECTION DISPOSITIONS coexist in this one section and
 #        leave three different database states: CLEAN SKIP (L1634 - nothing
 #        written), COMMIT-AND-STOP (L1678 - partial state committed, end-of-job
 #        work still performed) and ABORT-WITH-NOTHING (L1581/L1601/L1611 - no
 #        rewrite, no close, no truncation).  Implemented separately; a single
 #        generic rejection path would not reproduce them.
-#   F-17 REPEATED WORK LEFT UNOPTIMISED.  The two VAT accounts are fetched by two
+#   F-IRS030-17 REPEATED WORK LEFT UNOPTIMISED.  The two VAT accounts are fetched by two
 #        separate indexed reads with the sub-nominal zeroing written out twice,
 #        and `nl-sub-nominal` is re-zeroed before all four lookups.  An optimiser
 #        would collapse these; performance work is out of scope by construction.
-#   F-18 THE FOUR REWRITES RUN THROUGH A FILE OPENED FOR *INPUT*, and the
+#   F-IRS030-18 THE FOUR REWRITES RUN THROUGH A FILE OPENED FOR *INPUT*, and the
 #        handler lets them.  `Initialise-Main` opens the nominal ledger I-O at
 #        L1437, then closes it at L1480 and RE-OPENS IT FOR INPUT at L1481 so it
 #        can walk the whole file, and never reverts; `Main-Loop` and therefore
@@ -1620,7 +1496,7 @@ def run(
 #        [common/acasirsub1.cbl:L627-L635] issues a bare `rewrite Record-1` with
 #        no mode test whatsoever.  Reproduced as measured: `run` opens INPUT.
 #        Opening I-O instead "because a rewrite needs it" would be a fix, and
-#        rule R-4 forbids fixes.  Compounds F-3, which records that a failed
+#        rule R-4 forbids fixes.  Compounds F-IRS030-3, which records that a failed
 #        rewrite is never tested for at any of its sites.
 #
 #
@@ -1685,7 +1561,7 @@ def run(
 #        presentation; the transfer is behaviour.
 #   O-5  `accept WS-Reply` AT L1717 IS NOT DROPPED.  It gates a database write -
 #        the transfer-table truncation - so it becomes the explicit
-#        `clear_posting_file` parameter of `run`.  ⭐ IT HAS NO DEFAULT, AND THAT IS
+#        `clear_posting_file` parameter of `run`.  IT HAS NO DEFAULT, AND THAT IS
 #        DELIBERATE: it is keyword-only and required, so this module cannot be
 #        called without an answer.  The file brief gives it a `True` default and the
 #        module does not follow the brief here, because there is no COBOL default to
@@ -1693,7 +1569,7 @@ def run(
 #        no `WITH UPDATE`, `WS-Reply` is never set to `"Y"` anywhere in the program,
 #        and L1718-L1719 re-prompt on anything else, so a bare Enter re-prompts
 #        rather than clearing.  A `True` default would have been this migration
-#        inventing the DESTRUCTIVE answer (finding CLI-05), which rule R-3 forbids
+#        inventing the DESTRUCTIVE answer, which rule R-3 forbids
 #        as much as rule R-4 forbids dropping a real one.
 #        acas_posting/cli/irs_post.py likewise requires the answer at its boundary.
 #   O-6  `copy "screenio.cpy"` (L344) and `copy "envdiv.cob"` (L197) map to

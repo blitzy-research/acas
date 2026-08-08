@@ -49,10 +49,9 @@ Neither is re-proved here. What IS proved here, and only here, is the two
 truncations acting TOGETHER through the verbs, end to end, in the order the
 frozen source writes them.
 
-THE SIX RULES, as they bind this file. There is NO user rules document: the
-`review_rules` facility reports "No user rules provided.", so the binding rules
-are the six requirement-embedded rules restated in Agent Action Plan section
-0.7.2, and enterprise-standard best practice applies wherever they are silent.
+THE SIX RULES, as they bind this file. The binding rules are the six
+requirement-embedded rules restated in Agent Action Plan section 0.7.2, and
+enterprise-standard best practice applies wherever they are silent.
 
 * R-1 No COBOL at runtime. This file imports no COBOL, spawns no process,
       reaches no database and never touches `harness/`. The compiled oracle is
@@ -93,16 +92,15 @@ un-arbitrated value to be marked `pytest.mark.xfail(strict=True)` against a
 named question. Every value this file asserts is ARBITRATED, so a strict
 `xfail` would XPASS and fail the suite:
 
-* Q-2  the intermediate precision and the truncation direction. ⭐ ITS TWO HALVES
-       HAVE DIFFERENT STATUSES, and this file depends only on the settled one. The
-       TRUNCATION DIRECTION on an un-`ROUNDED` store is settled - it is the language's,
+* Q-2  the intermediate precision and the truncation direction. BOTH HALVES ARE
+       SETTLED. The TRUNCATION DIRECTION on an un-`ROUNDED` store is the language's,
        and `acas_posting/cobol/arithmetic.py` states it beside `TRUNCATING_STORE`. The
-       NUMBER OF INTERMEDIATE DIGITS is a property of the compiler build and is
-       PENDING in `docs/migration/ambiguity-resolutions.md`. Every figure below is
-       reached by a single store from operands well inside the receiver's declared
-       digits, so no assertion here would change whichever way the open half lands;
-       the one figure that would is in `tests/arithmetic/test_irs_vat_from_gross.py`
-       and is marked there.
+       NUMBER OF INTERMEDIATE DIGITS was measured: `Q-2` is `RESOLVED BY ORACLE` in
+       `docs/migration/ambiguity-resolutions.md` - extended precision throughout,
+       quantized once at the store. Every figure below is reached by a single store from
+       operands well inside the receiver's declared digits, so none of them depends on
+       the intermediate width either way; the one figure that does is in
+       `tests/arithmetic/test_irs_vat_from_gross.py` and is cited there.
 * Q-7  a zero divisor. RESOLVED, and the resolution overturned the provisional
        answer: the compiled program stores NOTHING and carries on, which
        `arithmetic.SizeErrorNoStore` documents. No idiom below reaches it,
@@ -660,7 +658,7 @@ def test_store_refuses_a_binary_float_carrier() -> None:
     """A `float` operand raises `TypeError` rather than being converted.
 
     Rule R-2 forbids a binary floating-point accounting value outright, and the
-    refusal has to live in the production code rather than in a reviewer's
+    refusal has to live in the production code rather than in a reader's
     vigilance - so this test proves the tripwire exists. The carrier is obtained
     by dividing two ints rather than by writing a float literal or calling the
     float constructor, so that the only float in this file is the one the tripwire
@@ -1171,7 +1169,7 @@ def test_a9_sl060_credit_comp_never_increments_its_activity_counter() -> None:
 
     THE MISSING INCREMENT IS NOT ADDED HERE. Rule R-4: a defect reproduced is
     correct; a defect fixed is a failure. This test exists so that adding the
-    increment - which any reviewer would call an obvious fix - fails the suite.
+    increment - which any reader would call an obvious fix - fails the suite.
 
     PROVENANCE: as for A-8, every step is the published behaviour of the audited
     store path. Its truncation DIRECTION is settled by the language - an
@@ -1508,7 +1506,7 @@ def test_a_unified_moving_average_helper_cannot_reproduce_all_three_idioms() -> 
 
     The three idioms look like one idiom written three times, and every instinct a
     good engineer has says to factor them. This test writes that factoring out -
-    the helper a reviewer would ask for - applies it to all three sets of inputs,
+    the helper a reader would ask for - applies it to all three sets of inputs,
     and shows that it CANNOT reproduce all three. It therefore fails the moment
     somebody acts on the instinct, which is the only reliable defence rule R-4
     has.
@@ -2342,9 +2340,8 @@ def test_the_defensive_key_resolver_reports_a_key_it_cannot_resolve() -> None:
 #      So the import happens INSIDE each test body, and the loader removes every
 #      tier-isolation-prefixed name it added in a `finally`.
 #
-#      IT IS MANDATORY, NOT SKIPPABLE. An earlier revision used
-#      `pytest.importorskip` here so a driver-free host would SKIP this section.
-#      That was wrong twice over: `mysql-connector-python==26.7.0` is a HARD
+#      IT IS MANDATORY, NOT SKIPPABLE. Using `pytest.importorskip` here so a
+#      driver-free host would SKIP this section is wrong twice over: `mysql-connector-python==26.7.0` is a HARD
 #      `[project.dependencies]` entry and a hard `requirements.txt` pin, so the
 #      guarded state cannot arise for an installed package; and the assertions
 #      below are the anomaly locks rule R-4 requires, which must fail loudly
@@ -2388,12 +2385,12 @@ def _is_tier_isolated_name(name: str) -> bool:
 def _shipped_module(dotted_name: str) -> Iterator[types.ModuleType]:
     """Import a shipped module FOR REAL for one test, leaving `sys.modules` as found.
 
-    ⭐ THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
+    THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
 
-    NOT OPTIONAL. `pytest.importorskip` stood here, and it turned the one failure this
-    section exists to catch into a PASS. A shipped module that cannot be imported at
-    all - a syntax error, a circular import, a name it imports that no longer exists -
-    produced a SKIP, and a skipped test reads as green. The pinned MySQL driver the
+    NOT OPTIONAL. `pytest.importorskip` here would turn the one failure this section exists
+    to catch into a PASS: a shipped module that cannot be imported at all - a syntax error,
+    a circular import, a name it imports that no longer exists - would produce a SKIP, and
+    a skipped test reads as green. The pinned MySQL driver the
     reason text blamed is a hard requirement of `requirements.txt`, so its absence is a
     broken environment and not a supported configuration; `importlib.import_module`
     lets the `ImportError` reach pytest as the FAILURE it is.
@@ -2703,7 +2700,7 @@ def test_shipped_c_sl100_compute_sales_pay_counts_after_and_divides_by() -> None
         assert state.work_b == 105
         # The counter moved AFTER the accumulate, so the divisor is 3.
         assert state.sales.sales_pay_activety == 3
-        # ⭐ THE `BY` SPELLING COMPUTES accumulator / counter, WHICH IS WHAT `INTO`
+        # THE `BY` SPELLING COMPUTES accumulator / counter, WHICH IS WHAT `INTO`
         # COMPUTES TOO - only the operand ORDER in the source text differs. `divide
         # work-b by sales-pay-activety` [sales/sl100.cbl:L511] and the sibling
         # paragraphs' `divide sales-activety into work-2` [sales/sl060.cbl:L827] both
@@ -2893,11 +2890,11 @@ def test_shipped_f_pl100_compute_purch_pay_counts_after_and_divides_by() -> None
 def test_the_six_shipped_paragraphs_leave_no_driver_loaded() -> None:
     """Rule R-1 holds even though this section reaches four program modules.
 
-    ⭐ AND THE IMPORT REALLY HAPPENS, which is what makes the claim worth making. The
-    loader used to memoise, so this guard imported nothing: the module was already
-    resident from an earlier test, the purge removed nothing, and "leaves no driver
-    loaded" was a statement about a module that had never left. The loader no longer
-    caches, so each `with` below performs a genuine import - asserted INSIDE the block
+    AND THE IMPORT REALLY HAPPENS, which is what makes the claim worth making. The
+    loader MUST NOT memoise, or this guard would import nothing: the module would already
+    be resident from an earlier test, the purge would remove nothing, and "leaves no driver
+    loaded" would be a statement about a module that had never left. The loader does not
+    cache, so each `with` below performs a genuine import - asserted INSIDE the block
     by reading live `sys.modules` - and the delta afterwards is a real measurement of
     what the purge removed.
     """
@@ -3449,8 +3446,8 @@ def _freshly_imported(dotted_name: str) -> Iterator[types.ModuleType]:
 
     Raises:
         ImportError: The module could not be imported. DELIBERATELY not turned into a
-            skip: `pytest.importorskip` stood here and reported a shipped module that
-            cannot be imported at all as a PASS. `mysql-connector-python==26.7.0` is a
+            skip: `pytest.importorskip` here would report a shipped module that cannot
+            be imported at all as a PASS. `mysql-connector-python==26.7.0` is a
             HARD `[project.dependencies]` entry and a hard `requirements.txt` pin, so
             an installed package always has it and its absence is a broken environment
             rather than a supported configuration. The assertions this loader serves

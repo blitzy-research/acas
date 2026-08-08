@@ -16,10 +16,8 @@ declares them:
   [copybooks/wssl.cob:L43-L53] -> [common/salesMT.cbl:L302-L312] ->
   `int(8) unsigned` / `smallint(4) unsigned` in the frozen schema.
 
-WHERE THE RULES COME FROM. `review_rules` reports, verbatim, "No user rules
-provided": this project has NO user rules document, so nothing below is verified
-against one and none has been invented. The binding rules are the six the
-Technical Specification carries at section 0.7.2, and this file honours them so:
+WHERE THE RULES COME FROM. The binding rules are the six the Technical
+Specification carries at section 0.7.2, and this file honours them so:
 
 * R-1, no COBOL at runtime. This tier "touch[es] neither COBOL nor a database":
   no subprocess, no foreign-function interface, no driver, no `acas_posting.dal`,
@@ -55,7 +53,7 @@ Technical Specification carries at section 0.7.2, and this file honours them so:
   no field metadata is hand-written. Coverage is evidence, never a gate.
 * R-6, compiled behaviour is the tie-breaker. An expectation that only the
   compiled oracle can settle is never asserted as fact. Both questions this file
-  names have now been MEASURED on GnuCOBOL 3.2.0 (finding F-19), so there is no
+  names have now been MEASURED on GnuCOBOL 3.2.0, so there is no
   `xfail` here: each measurement is asserted, and where it refuted a reading the
   refutation is asserted too, so a change back fails by name.
 
@@ -66,7 +64,7 @@ THE TWO QUESTION IDS THIS FILE NAMES, both real, both citable, both MEASURED:
   OPEN ambiguity on all 91 affected entries (emitted by
   `acas_posting/dictionary/generate.py`), paired with anomaly A-11. Section
   0.6.8 is explicit that the stored value "must be measured rather than
-  assumed", and IT HAS NOW BEEN MEASURED (finding F-19). GnuCOBOL 3.2.0 was
+  assumed", and IT HAS NOW BEEN MEASURED. GnuCOBOL 3.2.0 was
   driven with a `binary-long` sending item and a `pic 9(10) comp` receiver, and
   with narrower receivers besides: the bridge stores the ABSOLUTE VALUE and then
   bounds it by the RECEIVING DIGIT COUNT - `-1` arrives as 1 and not as 255,
@@ -149,7 +147,7 @@ pytestmark = pytest.mark.arithmetic
 
 
 #: How long the import-isolation probe may take before a hang is REPORTED
-#: (finding F-20). It imports five pure-Python modules and prints `sys.modules`,
+#:. It imports five pure-Python modules and prints `sys.modules`,
 #: so anything approaching this is a module doing work at import time.
 _IMPORT_PROBE_TIMEOUT_SECONDS = 30
 
@@ -341,7 +339,7 @@ BRIDGE_SIGN_QUESTION = "Q-3"
 
 #: The distinguishing phrase of the SIGN_LOST note that
 #: acas_posting/dictionary/generate.py writes into every sign-loss entry, carrying the
-#: compiled measurement that SETTLED Q-3 (finding F-19). Matched rather than
+#: compiled measurement that SETTLED Q-3. Matched rather than
 #: transcribed in full, so a rewording of the note does not break these tests while an
 #: absence of the measurement still does.
 BRIDGE_SIGN_MEASUREMENT = "MEASURED against GnuCOBOL"
@@ -407,9 +405,9 @@ def _measured() -> Mapping[str, object]:
 #  usage and scale imply. That locator IS the traceability R-5 asks for, and it
 #  is transcribed from the declaration rather than inferred.
 #
-#  `FieldDescriptor` once published a `for_working_storage` factory for this; it
-#  has since been withdrawn - `acas_posting/cobol/field.py` records its removal -
-#  and the picture parser that supersedes it is outside this tier's import set
+#  `FieldDescriptor` publishes NO `for_working_storage` factory for this -
+#  `acas_posting/cobol/field.py` records why it does not - and the picture parser that
+#  covers the case is outside this tier's import set
 #  (section 0.4.3 admits `cobol.usage`, `cobol.field`, `cobol.arithmetic` and the
 #  dictionary loader). Direct construction through the helper below is therefore
 #  the sanctioned route, and it goes through exactly the same validation.
@@ -1271,12 +1269,12 @@ def test_declaration_wins_over_the_comment_that_says_page_lines_holds_999() -> N
 #  THE BRIDGE, not at the database". Three layers, and the middle one is where it
 #  happens:
 #
-#    copybooks/wssl.cob:L49   03  Sales-Average    binary-long. *> 9(8) comp
-#                                                                    <-- SIGNED
-#    common/salesMT.cbl:L308      05  HV-SALES-AVERAGE  PIC 9(10) COMP.
-#                                                                  <-- UNSIGNED
-#    mysql/ACASDB.sql:L969        `SALES-AVERAGE` int(8) unsigned NOT NULL
-#                                                                  <-- UNSIGNED
+#  copybooks/wssl.cob:L49   03  Sales-Average    binary-long. *> 9(8) comp
+#  <-- SIGNED
+#  common/salesMT.cbl:L308      05  HV-SALES-AVERAGE  PIC 9(10) COMP.
+#  <-- UNSIGNED
+#  mysql/ACASDB.sql:L969        `SALES-AVERAGE` int(8) unsigned NOT NULL
+#  <-- UNSIGNED
 #
 #  Three instances are asserted - `binary-long` in two different records and
 #  `binary-short` in one - plus a CLEAN PASS-THROUGH contrast, so the drift is
@@ -1297,7 +1295,8 @@ def test_a11_sales_average_loses_its_sign_at_the_bridge() -> None:
     [copybooks/wssl.cob:L49] declares it signed; [common/salesMT.cbl:L308]
     declares the host variable unsigned; [mysql/ACASDB.sql:L969] declares the
     column unsigned. The artifact's drift block reports the signedness
-    disagreement, and the entry carries both the anomaly and the open question.
+    disagreement, and the entry carries the anomaly reference and the measured
+    storage rule that settled `Q-3`.
     """
     field = _descriptor(SALES_AVERAGE_KEY)
     drift = field.drift()
@@ -1338,8 +1337,8 @@ def test_a11_sales_average_loses_its_sign_at_the_bridge() -> None:
     # asserted so that neither can drift: republishing Q-3 would misreport a settled
     # question, and dropping A-11 would hide a live defect.
     assert BRIDGE_SIGN_ANOMALY in field.anomaly_refs()
-    # Q-3 IS RESOLVED (finding F-19), so the entry no longer publishes it as an OPEN
-    # ambiguity - it publishes the MEASUREMENT instead. The anomaly stays: the sign
+    # Q-3 IS RESOLVED, so the entry publishes the MEASUREMENT rather than an OPEN
+    # ambiguity. The anomaly stays: the sign
     # loss is the reproduced defect and does not stop being one because the resulting
     # value is now known (rule R-4).
     assert BRIDGE_SIGN_QUESTION not in field.ambiguity_refs()
@@ -1513,7 +1512,7 @@ def test_a11_drift_is_specific_and_not_systemic() -> None:
 
 
 def test_q3_the_bridge_stores_the_absolute_value_for_a_negative() -> None:
-    """A-11's value consequence, MEASURED and therefore asserted (finding F-19).
+    """A-11's value consequence, MEASURED and therefore asserted.
 
     Q-3 asked what the bridge's C interface actually stores when a negative COBOL value
     is moved into an unsigned host variable, [copybooks/wssl.cob:L49] ->
@@ -1606,8 +1605,8 @@ def test_q3_the_bridge_stores_the_absolute_value_for_a_negative() -> None:
 #  Anomaly A-8 is a DOUBLE truncation in the moving-average idiom. This file owns
 #  the second one only:
 #
-#      divide   sales-activety into work-2 giving sales-average.
-#                                                  [sales/sl060.cbl:L827]
+#  divide   sales-activety into work-2 giving sales-average.
+#  [sales/sl060.cbl:L827]
 #
 #  `sales-average` is a picture-less `binary-long` [copybooks/wssl.cob:L49], so it
 #  has scale zero and an `int` carrier, so the remainder of the divide is
@@ -1974,7 +1973,7 @@ def test_overflow_into_a_signed_field_keeps_the_original_sign() -> None:
     rather than an open question, so it is asserted plainly - and the companion
     sign question, which concerns an UNSIGNED receiving field, is no longer open
     either: the next test holds it against Q-3, which is `RESOLVED BY ORACLE`
-    (2026-08-07, finding F-19) with the magnitude kept and the sign discarded.
+    (2026-08-07) with the magnitude kept and the sign discarded.
     """
     assert (
         cobol_usage.coerce(
@@ -2031,7 +2030,7 @@ def test_store_into_an_unsigned_field_drops_the_sign(
 
 
 def test_q3_an_overflowing_negative_store_lands_on_its_magnitudes_byte() -> None:
-    """The negative-into-unsigned OVERFLOW, MEASURED and therefore asserted (F-19).
+    """The negative-into-unsigned OVERFLOW, MEASURED and therefore asserted.
 
     Q-3's second flavour: reducing a negative value into an unsigned field takes the
     absolute-value step first, so the question is not only "is the sign discarded" but
@@ -2123,7 +2122,7 @@ def test_q3_an_overflowing_negative_store_lands_on_its_magnitudes_byte() -> None
 #  assertion that depended on an unmeasured compiler default would need that
 #  marker; none here does.
 #
-#  ⚠️ CORRECTION, 2026-08-07. This header used to call those constants "the
+#   CORRECTION, 2026-08-07. This header used to call those constants "the
 #  measured policy". They were not measured; they were transcribed from
 #  GnuCOBOL's documented defaults, and the register said so, carrying Q-5.1 as
 #  PENDING while this file and the module both said RESOLVED. The wording is
@@ -2287,7 +2286,7 @@ def test_this_tier_imports_no_database_no_cobol_and_no_oracle() -> None:
         "from acas_posting.dictionary import loader, model\n"
         "print(chr(10).join(sorted(sys.modules)))\n"
     )
-    # FINITE, AND UNABLE TO WAIT ON A TERMINAL (finding F-20).
+    # FINITE, AND UNABLE TO WAIT ON A TERMINAL.
     #
     # A bare `subprocess.run` inherits this process's stdin and has no deadline, so a
     # probe that ever blocks on input - an interpreter startup file reading a prompt, a
@@ -2452,12 +2451,12 @@ def test_a_stale_dictionary_key_is_reported_with_its_near_misses() -> None:
 #
 #  THE DISTINCTION THE MEASUREMENT ESTABLISHED, and it is the whole point of the
 #  group: `binary-truncate` and the byte capacity govern DIFFERENT declarations.
-#    * An item with a PICTURE has a declared digit count, and the store reduces
-#      MODULO 10**digits - so `pic 9(4) comp` turns 32767 into 2767 even though
-#      two bytes could hold 32767 perfectly well. Digits win over capacity.
-#    * An item declared by USAGE ALONE has no digit count for a policy to apply
-#      to, so only the capacity is left, and the store WRAPS as signed two's
-#      complement - `binary-short` turns 32768 into -32768.
+#  * An item with a PICTURE has a declared digit count, and the store reduces
+#  MODULO 10**digits - so `pic 9(4) comp` turns 32767 into 2767 even though
+#  two bytes could hold 32767 perfectly well. Digits win over capacity.
+#  * An item declared by USAGE ALONE has no digit count for a policy to apply
+#  to, so only the capacity is left, and the store WRAPS as signed two's
+#  complement - `binary-short` turns 32768 into -32768.
 #  Reading the policy as one rule would get one of those two classes wrong, and
 #  the classes are not rare: the copybook census counts 236 bare `comp` against
 #  282 pictureless `binary-*` declarations.
@@ -2639,20 +2638,12 @@ def test_q5_1_the_two_ceilings_are_not_the_same_rule() -> None:
 
 
 # ==========================================================================
-#  MERGED GROUP - was tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py
-#
-#  Relocated verbatim so that this directory holds exactly the fourteen test
-#  modules the Agent Action Plan section 0.3.1 inventory names. Nothing was
-#  rewritten: the group's own preamble follows, as its author wrote it, and
-#  every test below is the test that ran under the old file name.
-# ==========================================================================
 #
 #  Regression locks for shared COBOL storage and DAL call boundaries.
 #
-#  EVERY IMPORT HERE IS MANDATORY, NOT SKIPPABLE. An earlier revision reached each
-#  module through `pytest.importorskip`, so a host that could not import one
-#  reported this file as SKIPPED rather than as broken - and every lock in it
-#  silently stopped locking. These are regression locks for the anomalies rule R-4
+#  EVERY IMPORT HERE IS MANDATORY, NOT SKIPPABLE. Reaching a module through
+#  `pytest.importorskip` would make a host that cannot import one report this file as
+#  SKIPPED rather than as broken - and every lock in it would silently stop locking. These are regression locks for the anomalies rule R-4
 #  requires be reproduced, so a lock that can disappear into a skip line is not a
 #  lock. `mysql-connector-python==26.7.0` is a hard `[project.dependencies]` entry,
 #  so an installed package can always import every name below;
@@ -3181,18 +3172,17 @@ def test_acas016_reuses_bridge_connection_across_fresh_buffers(
 #  THE DEPLOYMENT SECURITY CONTRACT
 #
 #  ONE VARIABLE NAME AND ONE RESOLVER, asserted rather than assumed. The
-#  declaration used to be spelled `ACAS_DB_ALLOW_PLAINTEXT` by the shell half of
-#  the harness and by `harness/docker-compose.yml`, and read as
-#  `ACAS_DB_ISOLATED_ORACLE` by the policy installer - so a harness run exported
-#  the declaration, the installer never saw it, and every handler open logged the
-#  unprotected-transport warning while the Compose file said the declaration had
-#  been made. These tests fail if the two halves drift apart again.
+#  failure mode is a declaration spelled one way by the shell half of the harness and by
+#  `harness/docker-compose.yml` and read another way by the policy installer - say
+#  `ACAS_DB_ALLOW_PLAINTEXT` against `ACAS_DB_ISOLATED_ORACLE` - so a harness run exports
+#  the declaration, the installer never sees it, and every handler open logs the
+#  unprotected-transport warning while the Compose file says the declaration was made.
+#  These tests fail if the two halves drift apart.
 #
-#  ⭐ AND THEY LOCK THE TWO MODES THE RIGHT WAY ROUND (finding F-02, rule R-3).
-#  An earlier revision of this block asserted that an undeclared deployment
-#  REFUSES a non-local target and refuses the frozen placeholder credentials, and
-#  said in these words that it should fail "if the fail-closed default is ever
-#  softened back into a warning". That locked a disposition the compiled program
+#  AND THEY LOCK THE TWO MODES THE RIGHT WAY ROUND (rule R-3).
+#  IT WOULD BE WRONG to assert that an undeclared deployment REFUSES a non-local target
+#  and refuses the frozen placeholder credentials, failing "if the fail-closed default is
+#  ever softened back into a warning". That would lock a disposition the compiled program
 #  cannot produce: `Mysql-1000-Open` connects or reports (99, 911)
 #  [copybooks/mysql-procedures.cpy:L60-L128] and inspects neither the address nor
 #  the account, so a pre-connect refusal installed by DEFAULT was a validation the
@@ -3228,7 +3218,7 @@ def test_an_undeclared_deployment_resolves_to_the_exact_parity_policy() -> None:
     The parity contract, asserted at the resolver rather than inferred from the
     data-access layer's own defaults: an environment that declares nothing must
     not install a pre-connect refusal, because the frozen paragraph has no such
-    outcome [copybooks/mysql-procedures.cpy:L60-L128] (rule R-3, finding F-02).
+    outcome [copybooks/mysql-procedures.cpy:L60-L128] (rule R-3).
     """
     cli_args = importlib.import_module("acas_posting.cli.args")
 
@@ -3313,7 +3303,7 @@ def test_the_installed_policy_carries_the_resolved_declaration() -> None:
         assert undeclared is connection.connection_policy()
         #  EXACT PARITY ON EVERY ROUTE: this function is reached by all seven, so
         #  these two assertions are what keep a refusal the compiled program cannot
-        #  produce off the shipped critical path (rule R-3, finding F-02).
+        #  produce off the shipped critical path (rule R-3).
         assert undeclared.require_encrypted_transport is False
         assert undeclared.require_declared_placeholder_credentials is False
 
@@ -3530,7 +3520,7 @@ def test_the_three_fixture_root_derivations_are_textually_identical() -> None:
     contain the `${ACAS_FIXTURES...}` / `$ACAS_DATA/fixtures` pair, so a change to
     one that is not made in the other is visible here rather than at stage 1.
 
-    The producer is `harness/seed.sh --build-fixtures` (finding M-04): the builder was
+    The producer is `harness/seed.sh --build-fixtures`: the builder was
     `harness/build_fixtures.sh`, and folding it into the script that CONSUMES the
     fixtures is what makes the producer and the consumer share one derivation instead
     of agreeing about one.
@@ -3750,7 +3740,7 @@ def test_the_reset_preflight_shares_the_hardened_seed_transport() -> None:
     rather than a shorter version of them.
 
     It lived in the deleted ten-stage driver and moved into the stage that performs the
-    destruction (finding M-06), which is strictly stronger: a hand-driven reset is now
+    destruction, which is strictly stronger: a hand-driven reset is now
     protected exactly as a composed one is.
     """
     resetter = (_harness_dir() / "reset_db.sh").read_text(encoding="utf-8")
@@ -3777,11 +3767,11 @@ def test_the_reset_preflight_shares_the_hardened_seed_transport() -> None:
 #  Three properties of the ten-stage protocol that nothing but a test can hold,
 #  because each is a relationship BETWEEN files rather than a fact inside one:
 #
-#    * exactly one stage takes the state capture, and it is the protocol's stage 7
-#      -- the only moment at which the run status its attestation carries is final;
-#    * a run that COMPLETED and found a behavioural difference is comparable, while
-#      a run that the harness broke is not;
-#    * both runners can drive every operation a scenario declares.
+#  * exactly one stage takes the state capture, and it is the protocol's stage 7
+#  -- the only moment at which the run status its attestation carries is final;
+#  * a run that COMPLETED and found a behavioural difference is comparable, while
+#  a run that the harness broke is not;
+#  * both runners can drive every operation a scenario declares.
 # ---------------------------------------------------------------------------
 
 
@@ -3887,13 +3877,12 @@ def test_a_completed_run_that_found_a_difference_is_still_comparable(tmp_path) -
     `harness/run_python_scenario.sh` exits 69 only after every operation has run,
     every post-run assertion has been taken and the database holds whatever the run
     produced - so that state IS the finding, and the table diff is the only artifact
-    that says which rows and columns it consists of. An earlier revision refused it
-    along with the harness faults, which withheld the evidence exactly when it
-    mattered most.
+    that says which rows and columns it consists of. Refusing it along with the harness
+    faults would withhold the evidence exactly when it matters most.
     """
     dump_tables = _load_harness_module("dump_tables")
 
-    #  A COMPLETE RECORD, because an incomplete one now attests nothing at all. The
+    #  A COMPLETE RECORD, because an incomplete one attests nothing at all. The
     #  reader requires the whole provenance set - the attempt id, both seed digests,
     #  the declared operation count and one disposition per operation, with
     #  `wrapper_status` agreeing with `status` - so a fixture that wrote only the
@@ -3994,9 +3983,9 @@ def test_both_sides_are_checked_against_every_declared_operation() -> None:
         encoding="utf-8"
     )
 
-    # THE CHECK LIVES IN THE FIRST STAGE THAT DRIVES AN OPERATION (finding M-06 moved
-    # it out of the deleted driver), so it runs before any state is produced and a hand
-    # invocation is protected exactly as a composed one is. It reads both maps out of
+    # THE CHECK LIVES IN THE FIRST STAGE THAT DRIVES AN OPERATION rather than in a
+    # ten-stage driver, so it runs before any state is produced and a hand invocation is
+    # protected exactly as a composed one is. It reads both maps out of
     # the shipped scripts rather than holding a third copy that could drift from either.
     assert "acas_assert_operations_supported_by_both_sides()" in cobol_runner
     assert "ACAS_RUN_OPERATION_MAP" in cobol_runner
@@ -4030,17 +4019,17 @@ def test_both_sides_are_checked_against_every_declared_operation() -> None:
 # neither can be reached from the package (R-1 keeps `harness/` off the import path)
 # and both are the kind of thing that is correct once and then quietly regresses:
 #
-#   * a path the operator supplies cannot end a COBOL string literal early, so the
-#     fixture builder cannot be steered into generating a different program;
-#   * every source, object and translator the oracle is built from can name where it
-#     came from, on the reuse branch as well as the build branch.
+#  * a path the operator supplies cannot end a COBOL string literal early, so the
+#  fixture builder cannot be steered into generating a different program;
+#  * every source, object and translator the oracle is built from can name where it
+#  came from, on the reuse branch as well as the build branch.
 # ---------------------------------------------------------------------------
 
 
 def test_a_generated_cobol_literal_cannot_be_ended_early() -> None:
     """Every path the fixture builder writes into COBOL goes through one gate.
 
-    The builder is `harness/dump_tables.py --make-fixtures` (finding M-02); it was
+    The builder is `harness/dump_tables.py --make-fixtures`; it was
     `harness/make_fixtures.py`, and the gate moved with it unchanged.
 
     The generator emits `move "<path>" to <field>.` statements. A path holding a
@@ -4236,7 +4225,7 @@ def test_the_image_records_the_provenance_the_build_script_requires() -> None:
 # ---------------------------------------------------------------------------
 # SECTION 18 -- WITHDRAWN. THE gl051 CONTROL-TOTAL GATE IS DRIVEN ELSEWHERE.
 #
-# ⭐ THIS SECTION HELD SIX TESTS THAT DROVE `gl051_batch_control_check._end_batch`
+# THIS SECTION HELD SIX TESTS THAT DROVE `gl051_batch_control_check._end_batch`
 # FROM PRE-GATE DATA, AND THEY WERE REDUNDANT. They were written on the belief that no
 # test drove the migrated gate - a belief formed from an incomplete reading of
 # `tests/arithmetic/test_control_total_comparison.py`, whose first twelve hundred lines
@@ -4259,23 +4248,23 @@ def test_the_image_records_the_provenance_the_build_script_requires() -> None:
 # to be the only place the gate is driven would have been the larger.
 #
 # WHAT DRIVES WHAT, for a reader arriving from either file:
-#   - the gl051 control-total gate      -> tests/arithmetic/test_control_total_comparison.py
-#   - the gl072 silent skips            -> SECTION 19 below
-#   - the acas008 refusal pair (A-6)    -> SECTION 20 below
+#  - the gl051 control-total gate      -> tests/arithmetic/test_control_total_comparison.py
+#  - the gl072 silent skips            -> SECTION 19 below
+#  - the acas008 refusal pair (A-6)    -> SECTION 20 below
 # ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
 # SECTION 19 -- gl072'S TWO SILENT SKIPS, DRIVEN AGAINST THE MIGRATED LOOP
 #
-# ⭐ WHY THESE ARE HERE AND NOT IN A SCENARIO, WITH THE MEASUREMENT THAT DECIDED IT.
+# WHY THESE ARE HERE AND NOT IN A SCENARIO, WITH THE MEASUREMENT THAT DECIDED IT.
 # `mixed_accepted_rejected` is the scenario whose stated headline is these two skips
 # [general/gl072.cbl:L291-L292] and [general/gl072.cbl:L306-L307]. It does not reach
 # either of them, and no seed can, which was established by running the compiled
 # cycle and looking at the work file gl070 writes and gl072 reads:
 #
-#     pretrans.tmp  EXISTS  size=0 bytes
-#     postrans.tmp  EXISTS  size=0 bytes
+#  pretrans.tmp  EXISTS  size=0 bytes
+#  postrans.tmp  EXISTS  size=0 bytes
 #
 # Zero bytes means gl070 emitted no work record, so gl072's first `read post-trans`
 # met AT END [general/gl072.cbl:L286-L289] and neither skip test was ever evaluated.
@@ -4654,7 +4643,7 @@ def test_the_measured_post_key_round_trip_is_what_starves_gl072() -> None:
 # ---------------------------------------------------------------------------
 # SECTION 20 -- ANOMALY A-6, LOCKED AT THE HANDLER WHERE IT LIVES
 #
-# ⭐ WHY A HANDLER-LEVEL CASE IS NEEDED WHEN A SCENARIO ALREADY ASSERTS THE STATE.
+# WHY A HANDLER-LEVEL CASE IS NEEDED WHEN A SCENARIO ALREADY ASSERTS THE STATE.
 # `acas008` refuses FOUR verbs unconditionally at its own entry
 # [common/acas008.cbl:L299-L307] and the facade publishes all four anyway, so a
 # caller invoking the re-write verb ALWAYS fails. The only TABLE STATE that can
@@ -4670,12 +4659,12 @@ def test_the_measured_post_key_round_trip_is_what_starves_gl072() -> None:
 # its own order [common/acas008.cbl:L278-L284], logging off, and `File-System-Used`
 # set to the RDB mode. GnuCOBOL 3.2 answered:
 #
-#     verb              File-Function  WE-Error  FS-Reply
-#     ----------------  -------------  --------  --------
-#     read-indexed      04             988       99
-#     re-write          07             988       99
-#     delete            08             988       99
-#     start             09             988       99
+#  verb              File-Function  WE-Error  FS-Reply
+#  ----------------  -------------  --------  --------
+#  read-indexed      04             988       99
+#  re-write          07             988       99
+#  delete            08             988       99
+#  start             09             988       99
 #
 # No database was needed and none was opened, because the guard returns before any
 # access-type or file-mode logic runs - which is itself part of what was measured.
@@ -4934,7 +4923,7 @@ def test_a6_the_handler_named_rewrite_is_refused_by_calling_it() -> None:
     asserts the two PLANS agree; this one asserts a caller following the IRS convention
     actually gets the identical refusal.
 
-    ⭐ THE IRS VOCABULARY PUBLISHES ONLY THE REWRITE of the four. It has no
+    THE IRS VOCABULARY PUBLISHES ONLY THE REWRITE of the four. It has no
     `acas008-Read-Indexed`, `-Start` or `-Delete` paragraph at all, which is asserted
     here as an absence: inventing aliases the frozen copybook does not declare would be
     a facade this migration made up.
@@ -5032,7 +5021,7 @@ def test_a6_the_supported_functions_are_not_refused() -> None:
 # ---------------------------------------------------------------------------
 # SECTION 21 -- THE TIER-IMPORT CONTRACT, MADE EXPLICIT AND BOUNDED
 #
-# ⭐ WHY THIS SECTION EXISTS. Agent Action Plan section 0.4.3 gives `tests/arithmetic/*`
+# WHY THIS SECTION EXISTS. Agent Action Plan section 0.4.3 gives `tests/arithmetic/*`
 # a deliberately narrow import set: `cobol` and `records`, and NOT `dal`, NOT
 # `programs` and NOT a database. The point of that boundary is not tidiness. It is
 # that the arithmetic tier is the one tier which runs ANYWHERE - no container, no
@@ -5051,17 +5040,17 @@ def test_a6_the_supported_functions_are_not_refused() -> None:
 #
 # THE TWO HALVES, AND WHY BOTH ARE ASSERTED SEPARATELY.
 #
-#   (1) NO MODULE-LEVEL IMPORT, in ANY file of the tier. This is the structural
-#       property, and it is absolute - there is no allow-list for it. A deferred
-#       import inside a function body costs nothing until that test runs, and the
-#       helpers that perform them restore `sys.modules` afterwards, so collection
-#       stays clean and a bare host still collects the whole tier.
+#  (1) NO MODULE-LEVEL IMPORT, in ANY file of the tier. This is the structural
+#  property, and it is absolute - there is no allow-list for it. A deferred
+#  import inside a function body costs nothing until that test runs, and the
+#  helpers that perform them restore `sys.modules` afterwards, so collection
+#  stays clean and a bare host still collects the whole tier.
 #
-#   (2) A BOUNDED SET OF FILES may defer-import. This half is a ratchet rather than
-#       a prohibition. Without it the practice spreads file by file, each step
-#       locally justified, until the tier's import set is whatever happened to
-#       accumulate - and nobody ever decided that. Adding a file to the set below is
-#       a deliberate edit with a reason attached, which is the whole mechanism.
+#  (2) A BOUNDED SET OF FILES may defer-import. This half is a ratchet rather than
+#  a prohibition. Without it the practice spreads file by file, each step
+#  locally justified, until the tier's import set is whatever happened to
+#  accumulate - and nobody ever decided that. Adding a file to the set below is
+#  a deliberate edit with a reason attached, which is the whole mechanism.
 #
 # WHAT THIS SECTION DOES NOT DO. It does not check that a deferred import is *used*
 # correctly, and it does not check the third mechanism - `pytest.importorskip` and
@@ -5087,7 +5076,7 @@ _MAY_DEFER_IMPORT_PROGRAM_OR_DAL: Final[Mapping[str, str]] = MappingProxyType(
             "shipped sl060 close paragraph and the irs030 input loop with a "
             "recording facade stand-in, because A-1's nested posting close and the "
             "IR032 clean rejection are call sequences no table dump can observe "
-            "(findings MJ-07 and MJ-11)"
+            ""
         ),
         "test_gl080_cycle_divide_rounded.py": (
             "drives gl080.run() with every facade verb substituted, to prove the "
@@ -5336,14 +5325,14 @@ def test_the_tier_still_collects_without_the_data_access_layer_imported() -> Non
 # ---------------------------------------------------------------------------
 # SECTION 22 -- THE POST-KEY ROUND TRIP, MEASURED AND PINNED  (ANOMALY N-KEY)
 #
-# ⭐ WHAT WAS WRONG, AND WHY NO GREEN SCENARIO WOULD HAVE SHOWN IT.
+# WHAT WAS WRONG, AND WHY NO GREEN SCENARIO WOULD HAVE SHOWN IT.
 #
 # `WS-Post-Key` is a GROUP of two `pic 9(5)` items [copybooks/wspost.cob:L14-L16] and
 # `HV-POST-KEY` is `PIC 9(18) COMP` [common/glpostingMT.cbl:L283]. Both directions of
 # the bridge move between them:
 #
-#     move WS-Post-Key to HV-POST-KEY.   [common/glpostingMT.cbl:L1054]   LOAD
-#     move HV-POST-KEY to WS-Post-Key.   [common/glpostingMT.cbl:L1085]   UNLOAD
+#  move WS-Post-Key to HV-POST-KEY.   [common/glpostingMT.cbl:L1054]   LOAD
+#  move HV-POST-KEY to WS-Post-Key.   [common/glpostingMT.cbl:L1085]   UNLOAD
 #
 # Because one operand is a group, BOTH are alphanumeric BYTE moves - nothing is
 # converted numerically on the way. The load was implemented that way. The unload was
@@ -5364,11 +5353,11 @@ def test_the_tier_still_collects_without_the_data_access_layer_imported() -> Non
 # bridge stores for a 0000100001 key, hence the value a fetch really returns - and all
 # ten group bytes read back with FUNCTION ORD:
 #
-#     group bytes      06 8E 0C 15 3B 04 30 30 20 20
-#     Batch            0x06 8E 0C 15 3B   -> reported NOT NUMERIC
-#     Post-Number      0x04 30 30 20 20   -> reported NOT NUMERIC
-#     first ten digits 4723282962         -> does not match
-#     last ten digits  6244457520         -> does not match
+#  group bytes      06 8E 0C 15 3B 04 30 30 20 20
+#  Batch            0x06 8E 0C 15 3B   -> reported NOT NUMERIC
+#  Post-Number      0x04 30 30 20 20   -> reported NOT NUMERIC
+#  first ten digits 4723282962         -> does not match
+#  last ten digits  6244457520         -> does not match
 #
 # So the answer to "first ten or last ten" is NEITHER: it is eight BYTES, space-padded
 # to the group's ten. The last two bytes are 0x20 - measured, not assumed, and not zero.
@@ -5524,16 +5513,16 @@ def test_an_in_memory_post_key_round_trip_is_byte_symmetric() -> None:
 #  believes what they find there.
 #
 #  A code review found twenty-six such citations. Fixing them one by one would have
-#  left the next twenty-six to the next reviewer, so this section makes the
-#  property MACHINE-CHECKED instead. It found and closed fifty-three:
-#    * 5 out of range - `copybooks/irswssystem.cob:L44` and `:L43` in `args.py`
-#      (that copybook has 41 lines; `Print-Spool-Name` is line 37 and
-#      `PL-Approp-AC` is line 36, a consistent +7 drift), plus
-#      `harness/docker-compose.yml` lines 869-871 in `build_oracle.sh` and line 792
-#      in `dump_tables.py`, for a file of 592 lines.
-#    * 48 bare FILENAMES with no directory - `ACASDB.sql`, `irsfinalMT.cbl`,
-#      `irswsfinal.cob`, `acasirsub5.cbl`, `run_cobol_scenario.sh`. Each resolved
-#      to exactly ONE tracked path, so qualifying them was mechanical.
+#  hand-checking leaves the rest unverified, so this section makes the property
+#  MACHINE-CHECKED instead. It found and closed fifty-three:
+#  * 5 out of range - `copybooks/irswssystem.cob:L44` and `:L43` in `args.py`
+#  (that copybook has 41 lines; `Print-Spool-Name` is line 37 and
+#  `PL-Approp-AC` is line 36, a consistent +7 drift), plus
+#  `harness/docker-compose.yml` lines 869-871 in `build_oracle.sh` and line 792
+#  in `dump_tables.py`, for a file of 592 lines.
+#  * 48 bare FILENAMES with no directory - `ACASDB.sql`, `irsfinalMT.cbl`,
+#  `irswsfinal.cob`, `acasirsub5.cbl`, `run_cobol_scenario.sh`. Each resolved
+#  to exactly ONE tracked path, so qualifying them was mechanical.
 #
 #  TWO CITATION FORMS, AND WHY THE SECOND NEEDS A DOCUMENTED RULE. The
 #  fully-qualified form -- `general/gl080.cbl` then `:L328`, wrapped in brackets --
@@ -5542,22 +5531,22 @@ def test_an_in_memory_post_key_round_trip_is_byte_symmetric() -> None:
 #  inheritance is what a validation check has to model. Reading the codebase rather
 #  than assuming, the convention is TWO-LEVEL:
 #
-#    1. THE NEAREST PRECEDING fully-qualified citation in the same scope, where a
-#       scope is one function (or, for markdown, one heading section). This is what
-#       a human reader does, and it accounts for 1749 of the 2155 shorthand
-#       citations. It was verified against a case that discriminates: the shorthand
-#       `:L324` in `acas007_gl_batch.py` resolves to `common/acas007.cbl` line 324,
-#       which reads
-#       `perform ba012-Test-WS-Rec-Size-2.` - an exact match for the comment on it,
-#       and NOT the more-frequently-cited `common/glbatchMT.cbl`, whose line 324 is
-#       an unrelated screen literal.
-#    2. THE FILE'S DECLARED SUBJECT, when level 1 yields nothing or yields a file
-#       too short to contain the line. A module docstring whose shorthand names line
-#       1176 of the program it migrates means that program, even where some other
-#       file was
-#       mentioned more recently - which is the case for the shorthand pointing at
-#       line 1176 in `sl060_invoice_posting.py`, and accounts for most of the
-#       remaining 406.
+#  1. THE NEAREST PRECEDING fully-qualified citation in the same scope, where a
+#  scope is one function (or, for markdown, one heading section). This is what
+#  a human reader does, and it accounts for 1749 of the 2155 shorthand
+#  citations. It was verified against a case that discriminates: the shorthand
+#  `:L324` in `acas007_gl_batch.py` resolves to `common/acas007.cbl` line 324,
+#  which reads
+#  `perform ba012-Test-WS-Rec-Size-2.` - an exact match for the comment on it,
+#  and NOT the more-frequently-cited `common/glbatchMT.cbl`, whose line 324 is
+#  an unrelated screen literal.
+#  2. THE FILE'S DECLARED SUBJECT, when level 1 yields nothing or yields a file
+#  too short to contain the line. A module docstring whose shorthand names line
+#  1176 of the program it migrates means that program, even where some other
+#  file was
+#  mentioned more recently - which is the case for the shorthand pointing at
+#  line 1176 in `sl060_invoice_posting.py`, and accounts for most of the
+#  remaining 406.
 #
 #  A DAL module has TWO declared subjects, its handler AND its bridge, because it
 #  narrates both: `acas007_gl_batch.py` cites `common/acas007.cbl` for the
@@ -5565,7 +5554,7 @@ def test_an_in_memory_post_key_round_trip_is_byte_symmetric() -> None:
 #  is not laxity in the rule - it is the module's actual subject matter, and a
 #  one-subject rule would reject correct citations.
 #
-#  ⛔ WHAT THIS SECTION DELIBERATELY DOES NOT DO. It does not check that a citation
+#  WHAT THIS SECTION DELIBERATELY DOES NOT DO. It does not check that a citation
 #  points at the RIGHT line, only that the line EXISTS. Semantic correctness is not
 #  mechanically decidable and the surviving quotations in the prose are what carry
 #  it. What is decidable - the path resolves, and the line is inside the file - is
@@ -5698,12 +5687,11 @@ _CITED_SUFFIXES = (".py", ".md", ".sh", ".yaml", ".yml")
 def _cited_files() -> tuple[str, ...]:
     """Every text file of this migration that may carry a citation.
 
-    DELIBERATELY NOT `git ls-files`. An earlier revision shelled out to git, and
-    that made this check environment-dependent in the one environment that matters
-    most: the harness container has python3 but NO git, so the whole check raised
-    `FileNotFoundError: 'git'` there while passing on the host. A check that is
-    skipped or broken exactly where the authoritative run happens is worse than no
-    check, because its green result on the host is then read as coverage.
+    DELIBERATELY NOT `git ls-files`. Shelling out to git would make this check
+    environment-dependent in the one environment that matters most: the harness container has python3 but NO git, so the whole check would raise
+    `FileNotFoundError: 'git'` there while passing on the host. A check that is skipped or
+    broken exactly where the authoritative run happens is worse than no check, because its
+    green result on the host is then read as coverage.
 
     The walk below is deterministic and needs no tooling: a sorted traversal of
     four named trees, filtered by suffix, with cache and virtual-environment
@@ -5831,7 +5819,7 @@ def _validate_citations() -> tuple[dict[str, int], tuple[str, ...]]:
 
 
 def test_every_citation_resolves_to_a_real_line() -> None:
-    """R-5's citations must lead a reviewer somewhere real.
+    """R-5's citations must lead a reader somewhere real.
 
     This is the check a code review asked for, standing in place of the twenty-six
     corrections it listed. It resolves both citation forms and fails with the file,

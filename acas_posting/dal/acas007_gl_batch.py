@@ -1079,10 +1079,10 @@ class _BridgeWorkingStorage:
             and a fetch overwrites it.
         dal_data: ``01 DAL-Data`` [common/glbatchMT.scb:L247-L251], the bridge's OWN
             cursor block.
-        ws_mysql_count_rows: ``Ws-Mysql-Count-Rows`` [copybooks/mysql-
-            variables.cpy:L73], ONE field written by TWO things - ``MYSQL-1210-COMMAND``
-            stores the affected-row count of an insert, update or delete, and
-            ``MYSQL-1220-STORE-RESULT`` stores the row count of a select.
+        ws_mysql_count_rows: ``Ws-Mysql-Count-Rows``
+            [copybooks/mysql-variables.cpy:L73], ONE field written by TWO things -
+            ``MYSQL-1210-COMMAND`` stores the affected-row count of an insert, update or delete,
+            and ``MYSQL-1220-STORE-RESULT`` stores the row count of a select.
         ws_mysql_error_number: ``WS-MYSQL-Error-Number``, the three-character field
             compared against the literal ``"0 "`` [:L830].
         ws_mysql_error_message: ``WS-MYSQL-Error-Message``.
@@ -1146,7 +1146,7 @@ def declare_connection_policy(
 ) -> None:
     """Record a per-handler connection-policy declaration for later opens.
 
-    ⛔ NORMALLY THERE IS NOTHING TO CALL HERE. The connection policy of a run is
+    NORMALLY THERE IS NOTHING TO CALL HERE. The connection policy of a run is
     ONE object installed once by the deployment -
     :func:`acas_posting.dal.connection.set_connection_policy` - and every open
     that declares nothing resolves to it, this handler's included. This function
@@ -2480,8 +2480,8 @@ def mt_ca_process_logs(
     """``Ca-Process-Logs.`` [common/glbatchMT.cbl:L1705-L1709].
 
     THE GATE IS ``Testing-1``, not this function. ``if Testing-1 perform Ca-Process-
-    Logs`` [:L1053-L1054] reads ``88 Testing-1 value 1`` [copybooks/Test-Data-
-    Flags.cob:L11], declared over ``SW-Testing``, which reaches Python as
+    Logs`` [:L1053-L1054] reads ``88 Testing-1 value 1``
+    [copybooks/Test-Data-Flags.cob:L11], declared over ``SW-Testing``, which reaches Python as
     :attr:`~acas_posting.records.test_data_flags.AcasDalCommonData.sw_testing`.
 
     Args:
@@ -2496,7 +2496,7 @@ def mt_ca_process_logs(
     if int(dal_common.sw_testing) != 1:
         return
     logging_data = file_access.logging_data
-    #  THE ONE ADAPTER, and three fields fewer than this record used to carry.
+    #  THE ONE ADAPTER, carrying three fields where the frozen record carries six.
     #  `WS-File-Key` is the batch key, `WS-Log-Where` is the `WHERE` clause built
     #  around it and `SQL-Msg` is the driver's free text; `redact_for_log` was
     #  applied to the last two and removed nothing, because its rules recognise
@@ -2533,7 +2533,7 @@ def glbatch_mt(
     the bridge, over one implementation.
 
     Args:
-        file_access: ``File-Access`` [copybooks/wsfnctn.cob:L23-L38]. Carries the verb
+        file_access: ``File-Access`` [copybooks/wsfnctn.cob:L22-L41]. Carries the verb
             in ``file_function``, the START relation in ``access_type``, and receives
             ``fs_reply``, ``we_error`` and every logging field.
         dal_common: ``ACAS-DAL-Common-data``, the ``Testing-1`` logging gate.
@@ -2638,7 +2638,7 @@ def dispatch(
         batch: ``WS-Batch-Record`` [copybooks/wsbatch.cob:L13-L54]. Supplies the key,
             and for a write or rewrite all twenty-one column values; receives a row on a
             successful read.
-        file_access: ``File-Access`` [copybooks/wsfnctn.cob:L23-L38].
+        file_access: ``File-Access`` [copybooks/wsfnctn.cob:L22-L41].
         file_defs: ``File-Defs`` [copybooks/wsnames.cob]. Read only by the indexed
             store's ``assign`` clause, which is omission O-1.
         dal_common: ``ACAS-DAL-Common-data`` [copybooks/Test-Data-Flags.cob]. Its ``SW-
@@ -3140,7 +3140,7 @@ def aa070_process_write(
 ) -> None:
     """``aa070-Process-Write.`` [common/acas007.cbl:L511-L520].
 
-    ⭐ THE ``invalid key`` PHRASE CONTAINS NOTHING BUT A TRANSFER [:L517-L518].
+    THE ``invalid key`` PHRASE CONTAINS NOTHING BUT A TRANSFER [:L517-L518].
 
     Args:
         system: ``System-Record``.
@@ -3177,7 +3177,7 @@ def aa080_process_delete(
 ) -> None:
     """``aa080-Process-Delete.`` [common/acas007.cbl:L522-L532].
 
-    ⭐ THERE IS NO ``invalid key`` PHRASE AT ALL.
+    THERE IS NO ``invalid key`` PHRASE AT ALL.
 
     Args:
         system: ``System-Record``.
@@ -3214,7 +3214,7 @@ def aa090_process_rewrite(
 ) -> None:
     """``aa090-Process-Rewrite.`` [common/acas007.cbl:L534-L542].
 
-    ⭐ NO ``invalid key`` PHRASE, exactly as in ``aa080-Process-Delete``, so a rewrite of
+    NO ``invalid key`` PHRASE, exactly as in ``aa080-Process-Delete``, so a rewrite of
     a record that is not there is answered by the file status alone. The bridge answers
     that condition ``(99, 994)`` [common/glbatchMT.cbl:L1016-L1017].
 
@@ -3442,7 +3442,7 @@ def ba012_test_ws_rec_size_2(
         file_access.we_error = RECORD_SIZE_WE_ERROR
         file_access.fs_reply = int(FsReply.ERROR)
 
-    # `if WE-Error = 901` [:L592] - ⭐ ANOMALY N-901-STICKY.
+    # `if WE-Error = 901` [:L592] - ANOMALY N-901-STICKY.
     if int(file_access.we_error) == RECORD_SIZE_WE_ERROR:
         # `move spaces to Display-Blk` [:L593], then the STRING [:L594-L599]. Five
         # sending items, all `delimited by size`, so each contributes its FULL declared

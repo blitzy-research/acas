@@ -264,7 +264,7 @@ REFERENCE_MODIFICATION_CENSUS: Final[
     (1, 22, 1),
 )
 
-#: ⭐ WHAT A RANGE THAT IS NOT WHOLLY INSIDE ITS ITEM ACTUALLY YIELDS - MEASURED
+#: WHAT A RANGE THAT IS NOT WHOLLY INSIDE ITS ITEM ACTUALLY YIELDS - MEASURED
 #: (question Q-10, rule R-6). Two readings were possible and they are not close: the
 #: range might yield only the characters that ARE inside the item, or it might yield the
 #: full requested length by continuing into the storage that follows. GnuCOBOL 3.2.0 was
@@ -864,7 +864,7 @@ def move_to_all(
     """`MOVE <sender> TO <several receivers>` - each applying its own rules.
 
     The results come back in RECEIVER ORDER, in a `tuple`, so a program module unpacks
-    them in the order the COBOL statement names them and a reviewer can diff the two
+    them in the order the COBOL statement names them and a reader can diff the two
     lists position by position.
 
     Args:
@@ -1121,18 +1121,18 @@ def is_numeric_class(
 #  UNCHECKED SUBSCRIPTED STORAGE - `table (n)` where `n` is outside `OCCURS`
 # ---------------------------------------------------------------------------
 #
-# ⭐ WHY THIS EXISTS. Four of the in-scope programs index an `OCCURS` table with
+# WHY THIS EXISTS. Four of the in-scope programs index an `OCCURS` table with
 # a variable that nothing constrains to the declared range:
 #
-#     move     ledger-balance  to  ledger-q (a).          [general/gl080.cbl:L345]
-#     add      work-vat  to  total-vat (a).               [sales/sl060.cbl:L526]
-#     add      work-net  to  total-net (a).              [sales/sl060.cbl:L527]
-#     add      work-goods to STurnover-Q (current-quarter)
-#                                    [sales/sl060.cbl:L545, :L551, :L558]
-#     add      work-vat  to  total-vat (a).            [purchase/pl060.cbl:L467]
-#     add      work-net  to  total-net (a).            [purchase/pl060.cbl:L468]
-#     add      work-goods to pturnover-q (current-quarter)
-#                              [purchase/pl060.cbl:L484, :L490, :L497]
+#  move     ledger-balance  to  ledger-q (a).          [general/gl080.cbl:L345]
+#  add      work-vat  to  total-vat (a).               [sales/sl060.cbl:L526]
+#  add      work-net  to  total-net (a).              [sales/sl060.cbl:L527]
+#  add      work-goods to STurnover-Q (current-quarter)
+#  [sales/sl060.cbl:L545, :L551, :L558]
+#  add      work-vat  to  total-vat (a).            [purchase/pl060.cbl:L467]
+#  add      work-net  to  total-net (a).            [purchase/pl060.cbl:L468]
+#  add      work-goods to pturnover-q (current-quarter)
+#  [purchase/pl060.cbl:L484, :L490, :L497]
 #
 # `a` is loaded straight from `oi-type` [sales/sl060.cbl:L509],
 # [purchase/pl060.cbl:L450], whose own copybook documents type codes running to
@@ -1143,7 +1143,7 @@ def is_numeric_class(
 # whatever byte the arithmetic lands on. That is anomaly A-2 in the register and
 # it is reproduced, never fixed (rule R-4).
 #
-# ⭐ WHAT THE COMPILED PROGRAM ACTUALLY DOES - MEASURED, NOT INFERRED (rule R-6).
+# WHAT THE COMPILED PROGRAM ACTUALLY DOES - MEASURED, NOT INFERRED (rule R-6).
 # GnuCOBOL 3.2.0 - the version the maintainer's own compile script targets
 # [common/comp-common.sh:L9] - was driven with each of the four real layouts
 # transcribed verbatim and a VARIABLE subscript, a literal one being refused at
@@ -1154,15 +1154,15 @@ def is_numeric_class(
 # and whichever elementary items share those bytes are what change.
 # :data:`UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE` records every reading.
 #
-# ⛔ WHAT MUST NOT BE DONE HERE, and each of these was measured to be wrong:
-#   * NO clamp, NO modulo, NO default occurrence, NO skip. The compiled program
-#     does none of them.
-#   * NO Python `[n - 1]`. Subscript 0 becomes index -1 and silently accumulates
-#     into the LAST occurrence, which corresponds to nothing: the measured
-#     answer is the field IMMEDIATELY BEFORE the table.
-#   * NO exception for an in-group window. The compiled program has a definite,
-#     measured answer there, so raising would replace a reproduced anomaly with
-#     an invented one (rules R-3, R-4).
+# WHAT MUST NOT BE DONE HERE, and each of these was measured to be wrong:
+#  * NO clamp, NO modulo, NO default occurrence, NO skip. The compiled program
+#  does none of them.
+#  * NO Python `[n - 1]`. Subscript 0 becomes index -1 and silently accumulates
+#  into the LAST occurrence, which corresponds to nothing: the measured
+#  answer is the field IMMEDIATELY BEFORE the table.
+#  * NO exception for an in-group window. The compiled program has a definite,
+#  measured answer there, so raising would replace a reproduced anomaly with
+#  an invented one (rules R-3, R-4).
 #
 # HOW IT IS MODELLED. A :class:`StorageGroup` is the enclosing COBOL group
 # expressed as what the compiled program addresses: an ordered list of elementary
@@ -1182,33 +1182,21 @@ def is_numeric_class(
 # reported as a log record with no effect on control flow. Section 0.3.4's rule
 # for a diagnostic that has no database effect is what licenses the log record.
 #
-# ⭐ HOW FAR "NOT REPRODUCIBLE" ACTUALLY EXTENDS - MEASURED, so that the boundary
-# is a reading and not a hedge (question Q-19). The 126-byte ledger record was
-# transcribed with a `pic x(20)` sentinel declared immediately after it INSIDE one
-# enclosing `01`, which is the only arrangement that makes the neighbouring bytes
-# observable, and the store was executed THROUGH A VARIABLE subscript - `move
-# 999.99 to ledger-q (a)` with `a = 13`, exactly as [general/gl080.cbl:L345]
-# reaches it. The literal form `ledger-q (13)` cannot be used to measure this at
-# all: cobc refuses it at compile time ("error: subscript of 'Ledger-Q' out of
-# bounds: 13"), so a probe written that way measures the parser rather than the
-# program. Every byte of the area was then read back one at a time through
-# `function ord`:
-#
-#     the six bytes 00 00 00 99 99 9C - the packed image of +999.99 - landed at
-#     1-based offsets 125 through 130, i.e. TWO bytes inside the record's trailing
-#     `filler pic x(50)` and FOUR bytes past the record's last byte, in the
-#     sentinel that follows it;
-#     `Ledger-Q1` through `Ledger-Q4` were UNCHANGED, and so was `Ledger-Last`;
-#     the program printed its own "survived the store" line and exited 0, with no
-#     runtime message of any kind.
-#
-# Subscript 14 was then stored and landed at offsets 131 through 136, six bytes
-# further on, again with no diagnostic - so the addressing stays plainly linear
-# past the record's end rather than wrapping, clamping or faulting. What remains
-# genuinely unknowable from the frozen source is only WHICH `01` item the four
-# overrun bytes belong to in the real program, because that is the compiler's
-# allocation; the two facts this layer needs - that control flow continues and
-# that NO column of `GLLEDGER-REC` changes - are measured, not assumed.
+# HOW FAR "NOT REPRODUCIBLE" ACTUALLY EXTENDS. The boundary is a reading rather
+# than a hedge: question Q-19 in `docs/migration/ambiguity-resolutions.md` records
+# the byte-by-byte result for occurrence 13 of the 126-byte ledger record, and
+# occurrence 14 landed six bytes further on, so the addressing stays plainly
+# linear past the record's end rather than wrapping, clamping or faulting.
+# TWO METHOD POINTS THAT STOP A LATER READER MEASURING THE WRONG THING: the probe
+# must use a VARIABLE subscript, because cobc refuses the literal form at compile
+# time ("error: subscript of 'Ledger-Q' out of bounds: 13") and a probe written
+# that way measures the parser instead of the program; and the sentinel must be
+# declared inside the SAME enclosing `01`, which is the only arrangement that
+# makes the neighbouring bytes observable. What stays genuinely unknowable from
+# the frozen source is only WHICH `01` item the overrun bytes belong to in the
+# real program, because that is the compiler's allocation; the two facts this
+# layer needs - that control flow continues and that NO column of `GLLEDGER-REC`
+# changes - are measured, not assumed.
 
 
 #: Every reading taken from the compiled oracle, kept beside the code that
@@ -1292,7 +1280,7 @@ UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE: Final[tuple[tuple[str, int, str], ...]] = (
 )
 
 
-#: ⭐⭐ HOW THE COMPILED PROGRAM READS THE RECEIVER OF A SUBSCRIPTED `ADD` -
+#: HOW THE COMPILED PROGRAM READS THE RECEIVER OF A SUBSCRIPTED `ADD` -
 #: MEASURED, NOT INFERRED (rule R-6).
 #:
 #: An unchecked subscript makes the receiver's bytes an arbitrary slice of the
@@ -1324,7 +1312,7 @@ UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE: Final[tuple[tuple[str, int, str], ...]] = (
 #: which is how a window whose bytes decode to more digits than the field holds
 #: still yields a definite answer.
 #:
-#: ⛔ SIX READINGS ARE DELIBERATELY NOT REPRODUCED, and they are named rather than
+#: SIX READINGS ARE DELIBERATELY NOT REPRODUCED, and they are named rather than
 #: quietly absorbed. When the receiver's LAST byte has an invalid HIGH nibble and a
 #: zero low nibble - `0xA0`, `0xC0`, `0xD0`, `0xE0`, `0xF0` - the runtime yielded
 #: 2550 where every other rule it obeys predicts 0, and no consistent digit rule
@@ -1429,7 +1417,7 @@ class StorageGroup:
     subscript lands on bytes, so a byte model is the only thing that can say
     what it hits.
 
-    ⛔ NOT A RECORD LAYER, and not a substitute for one. It holds no values, no
+    NOT A RECORD LAYER, and not a substitute for one. It holds no values, no
     identity and no defaults; the record dataclasses in
     `acas_posting.records` remain the layouts. This is a projection of ONE group
     for ONE statement, built at module scope beside the statement that needs it.
@@ -1736,7 +1724,7 @@ def subscripted_store(
     group is then decoded back out, so a caller sees exactly what the compiled
     program would leave behind, including in the fields that share the window.
 
-    ⛔ NOTHING IS VALIDATED, CLAMPED OR REFUSED for an in-group window. That is
+    NOTHING IS VALIDATED, CLAMPED OR REFUSED for an in-group window. That is
     the whole point: see this section's header for the measurements.
 
     Args:
@@ -1753,7 +1741,7 @@ def subscripted_store(
     Returns:
         Every elementary item of the group, decoded after the store.
 
-    ⛔ THE ONE LIMIT OF A VALUE-CARRYING MODEL, stated rather than left to be
+    THE ONE LIMIT OF A VALUE-CARRYING MODEL, stated rather than left to be
     discovered. The window's own bytes are reproduced exactly, and so is the
     VALUE of every neighbour the window clips - which is what reaches the
     database, because the bridge's host variables carry values and never raw
@@ -1774,7 +1762,8 @@ def subscripted_store(
     [sales/sl060.cbl:L565] then accumulates into - and it needs `oi-type = 4`,
     which [copybooks/slwsoi.cob:L24] documents as `Proforma (Not used)` on the
     sales side. The purchase side DOES use type 4 [copybooks/plwsoi.cob:L28] -
-    that is finding F7 - but there the clipped neighbours are `line-cnt`
+    - which is why the purchase group's tail matters - but there the clipped
+    neighbours are `line-cnt`
     (`binary-char`) and `File-28-status` (`pic 9` DISPLAY), neither of which any
     later statement accumulates into as a packed receiver, and the whole site was
     checked against the oracle: `line-cnt` came out at 115 in both.

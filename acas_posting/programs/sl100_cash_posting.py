@@ -200,7 +200,7 @@ class _State:
     # [common/otm3MT.cbl:L459] passes host, user, password, schema, port and
     # socket and nothing else.
     #
-    # ⭐ THE DEFAULT IS AN EMPTY MAPPING, WHICH IS THE SAFE ANSWER, NOT THE ABSENT
+    # THE DEFAULT IS AN EMPTY MAPPING, WHICH IS THE SAFE ANSWER, NOT THE ABSENT
     # ONE. Every handler declares ``transport: TransportSecurity | None = None``
     # and ``connection._require_permitted_connection`` resolves ``None`` against
     # the INSTALLED PROCESS POLICY: under the exact-parity default an unencrypted
@@ -807,9 +807,9 @@ def _menu_exit(state: _State) -> None:
     # program never produced, which R-4 forbids inventing.  The caller already
     # observes the return, and ``WS-Term-Code`` carries whatever the run set.
     #
-    # ``state`` IS STILL THE PARAMETER even though the body no longer reads it:
-    # R-5 keeps the paragraph's signature uniform with every other paragraph
-    # function in this module, and the three call sites [L300, L317, L474] pass it
+    # ``state`` IS A PARAMETER EVEN THOUGH THE BODY DOES NOT READ IT: R-5 keeps
+    # the paragraph's signature uniform with every other paragraph function in
+    # this module, and the three call sites [L300, L317, L474] pass it
     # exactly as the frozen transfers reach the label.
     del state
 
@@ -987,7 +987,7 @@ _BATCH_NOS_SCALE: Final[int] = 10**5
 def _restate_ws_batch_key9(batch: GlBatchRecord) -> None:
     """Keep ``WS-Batch-Key9`` in step with the two members it redefines.
 
-    ⭐⭐ ONE STORAGE, TWO READINGS. ``03 WS-Batch-Key.`` holds ``05 WS-Ledger pic 9.`` and
+    ONE STORAGE, TWO READINGS. ``03 WS-Batch-Key.`` holds ``05 WS-Ledger pic 9.`` and
     ``05 WS-Batch-Nos pic 9(5).``, and ``03 WS-Batch-Key9 redefines WS-Batch-Key pic
     9(6).`` [copybooks/wsbatch.cob:L14-L21] is those SAME six bytes read as one number.
 
@@ -1495,7 +1495,7 @@ def run(
     ``ws_calling_data`` is passed through untouched: ``sl100`` reads and writes
     none of its seven fields [copybooks/wscall.cob:L6-L14].  It is a parameter
     because the COBOL declares it, and it is declared because the caller -
-    ``sales/sales.cbl`` ``load11.`` [sales/sales.cbl:L790-L797] - routes every
+    ``sales/sales.cbl`` ``load11.`` [sales/sales.cbl:L792-L796] - routes every
     dispatch through one common ``CALL``.
 
     ``to_day`` is the run date as ``pic x(10)`` text, DD/MM/CCYY; the binary
@@ -1503,33 +1503,31 @@ def run(
     observables, and pinning them is what makes two runs of a scenario
     byte-identical (R-6).  Nothing here reads a clock.
 
+    :param ws_calling_data: ``WS-Calling-Data`` [copybooks/wscall.cob:L7-L14], the
+        first linkage operand.  Passed through untouched: ``sl100`` reads and writes
+        none of its seven fields.
+    :param system_record: ``System-Record`` [copybooks/wssystem.cob], the second.
+        Supplies the pinned ``Run-Date`` [copybooks/wssystem.cob:L67], the
+        ``S-Flag-P`` one-shot latch and the IRS three-state switch, and receives this
+        program's system-record writes.
+    :param system_record_4: ``System-Record-4`` [copybooks/wssys4.cob], the third.
+        Receives the period total ``SL-Payments`` at [sales/sl100.cbl:L404].
+    :param to_day: ``to-day pic x(10)``, the fourth - the pinned run date as text in
+        the presentation ``Date-Form`` selects, and the first of the two
+        controlled-clock observables.
+    :param file_defs: ``File-Defs`` [copybooks/wsnames.cob], the fifth.
     :param ok_to_post: the run-confirm of [sales/sl100.cbl:L310-L319], which
         gates every database write in the program.  ``False`` reproduces the
         ``"NO"`` branch at [L316-L317] exactly: control transfers to
         ``menu-exit`` before a single file is opened, so the run has no effect
-        whatsoever.  ⛔ REQUIRED, WITH NO DEFAULT.  The field's own ``value
+        whatsoever.  REQUIRED, WITH NO DEFAULT.  The field's own ``value
         spaces`` [L167] is not an answer, [L313] moves spaces into it again
         immediately before the accept, and [L318-L319] re-prompts on a blank, so
         the frozen program HAS no default: only ``"YES"`` proceeds and only
         ``"NO"`` exits.  Agent Action Plan section 0.3.4 promotes a write-gating
         accept "with the COBOL default preserved", and where there is none to
         preserve a keyword default would invent one - in the direction that
-        writes to the database.  An earlier draft defaulted this to ``True``.
-        See AMBIGUITY Q-6.
-
-    :param dal_options: keyword-only, and NOT one of the five linkage operands.
-        Forwarded to every facade ``PERFORM`` this program issues, and the
-        declaration it exists for is the caller's transport-security policy.  The
-        frozen program has no counterpart because its bridge has none: transport
-        is compiled into ``cobmysqlapi.c`` [common/otm3MT.cbl:L459] rather than
-        declared by the COBOL.  ``None`` - the default - declares nothing, which
-        every handler resolves FAIL-CLOSED: a Unix socket or a loopback address is
-        permitted and any other target refused.  A run against the containerised
-        parity harness must therefore say so explicitly,
-        ``dal_options={"transport": TransportSecurity(isolated_oracle=True)}``,
-        and a run against a real server should be given
-        ``TransportSecurity(ca_file=...)``.  It changes no status, no statement,
-        no arithmetic and no write order.
+        writes to the database.  See AMBIGUITY Q-6.
 
     :param dal_options: keyword-only, and NOT one of the five linkage operands.
         Forwarded to every facade ``PERFORM`` this program issues, and the

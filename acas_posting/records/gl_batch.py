@@ -362,9 +362,10 @@ class GlBatchRecord:
     posting_data: PostingData = field(default_factory=PostingData)
 
     # Batch-Start pic 9(5) (display, unsigned, scale 0) [copybooks/wsbatch.cob:L54] The
-    # last item in the layout, and the other trailing item most at risk if the declared
-    # length rather than the field sum governs the record actually read - open question
-    # Q-4, arbitrated by the compiled program (rule R-6).
+    # last item in the layout, and the trailing item a length misalignment would move.
+    # Question Q-4 settled it against the compiled program (rule R-6): both declared
+    # copies measure 96 bytes and the 98-byte note is false, so the field sum governs and
+    # nothing here shifts.
     batch_start: int = 0
 
     def __post_init__(self) -> None:

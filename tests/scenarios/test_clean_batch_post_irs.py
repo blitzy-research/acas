@@ -332,9 +332,9 @@ DELETE-ALL against `PSIRSPOST-REC` — [common/acas008.cbl:L313-L319] sets
 `and not FS-Cobol-Files-Used`), and [common/acas008.cbl:L566] with
 [common/acas008.cbl:L571-L574] does it again unguarded.
 
-⚠️ ONE HOP FURTHER, AND IT IS NOT A MASS DELETE. This passage previously called the
-result "a mass delete of every row", which is what the handler ASKS FOR but not what
-the bridge ISSUES. The bridge moves 99999 into both halves of the posting key
+ONE HOP FURTHER, AND IT IS NOT A MASS DELETE. "A mass delete of every row" is what
+the handler ASKS FOR, but not what the bridge ISSUES. The bridge moves 99999 into
+both halves of the posting key
 [common/slpostingMT.cbl:L850-L851] and deletes STRICTLY BELOW that sentinel
 [common/slpostingMT.cbl:L860-L868, L885-L891] — its own log text is "Deleting back
 from" [common/slpostingMT.cbl:L870-L871]:
@@ -545,24 +545,19 @@ the bound.
 NORMALISATION DOES EXACTLY THREE THINGS, AND THERE IS NO FOURTH
 -------------------------------------------------------------------------------
 
-Delegated entirely to `harness/normalize.py`. Nothing is reimplemented or extended
-here:
+Delegated entirely to `harness/normalize.py`, which states the three jobs and their
+rules; nothing is reimplemented or extended here. What is specific to THIS scenario:
 
-  1. TRAILING spaces in fixed-character columns, `rstrip(" ")`, TRAILING ONLY,
-     because a COBOL alphanumeric `MOVE` is left-justified with right padding so
-     LEADING spaces are content. ASCII U+0020 only, by declared type, `char(1)`
-     included. Motivated by A-12, the width drift from `pic x(24)`
+  1. TRAILING-space stripping matters here through A-12's width drift, `pic x(24)`
      [copybooks/wsledger.cob:L27] to `PIC X(32)` [common/nominalMT.cbl:L299] to
-     `char(32)` [mysql/ACASDB.sql:L127]. The frozen schema has 238 `char(` columns
-     and zero `varchar(`.
-  2. DECIMAL scale rendering AT THE DECLARED SCALE, which is NOT uniformly 2.
-     `PSIRSPOST-REC` carries `SIGN LEADING` display fields
-     [copybooks/wspost-irs.cob:L21, L25] and `IRSPOSTING-REC` the `sign is leading`
-     form [copybooks/irswspost.cob:L14, L19]; collapsing either into a plain numeric
-     would change on-the-wire values. The semantics layer owns them and this file
-     does not touch them.
-  3. The two- versus four-digit date text forms, under an EXPLICIT FIVE-COLUMN
-     ALLOW-LIST — and TWO of the five live in this scenario:
+     `char(32)` [mysql/ACASDB.sql:L127].
+  2. DECIMAL scale is NOT uniformly 2 on this route: `PSIRSPOST-REC` carries
+     `SIGN LEADING` display fields [copybooks/wspost-irs.cob:L21, L25] and
+     `IRSPOSTING-REC` the `sign is leading` form [copybooks/irswspost.cob:L14, L18].
+     Collapsing either into a plain numeric would change on-the-wire values; the
+     semantics layer owns them and this file does not touch them.
+  3. Of the five date-text columns on the explicit allow-list, TWO live in this
+     scenario:
      `IRSPOSTING-REC.POST4-DAT` and `PSIRSPOST-REC.IRS-POST-DAT`. The other three are
      `GLPOSTING-REC.POST-DAT`, `SYSTEM-REC.STATS-DATE-PERIOD` and
      `SALEDGER-REC.SALES-STATS-DATE`. `char(8)` does NOT imply date — batch
@@ -591,7 +586,7 @@ directive." They are distinguished and never collapsed.
      [irs/irs030.cbl:L1635, L1641] with the [irs/irs030.cbl:L1648-L1652] skip, and
      A-5's snapshots [irs/irs030.cbl:L1602, L1612] overwritten at
      [irs/irs030.cbl:L1704-L1708].
-  4. FILE-ABANDONING REJECTION. ⭐ NOT EXERCISED ON THIS FIXTURE, and the claim is
+  4. FILE-ABANDONING REJECTION. NOT EXERCISED ON THIS FIXTURE, and the claim is
      withdrawn rather than qualified. [irs/irs030.cbl:L1673-L1678] jumps to `EOJ` on
      `we-error not = zero` after `perform acasirsub4-Write`, and `EOJ` still performs
      both snapshot rewrites and both closes — so IF it fired, the partial state would be
@@ -962,7 +957,7 @@ def _table_diff(parity: object, table: str) -> object:
 # THE FAILURE-MESSAGE ROUTE IS `parity.diagnose()`, defined once in tests/conftest.py.
 # This module used to wrap `harness.diff_states.render` in a local `_render` helper,
 # which printed every differing value and every primary key into pytest output
-# (finding SEC-05). The wrapper is gone rather than repointed, so there is no
+#. The wrapper is gone rather than repointed, so there is no
 # module-local name left that looks like the old route. The values are not lost: they
 # are in the report `diagnose()` names, with its digest.
 
@@ -1164,7 +1159,7 @@ def parity(
 
     # ------------------------------------------------------------------
     #  GUARD 5b - THE OBSERVED DISPOSITION MATCHES THE ONE THE SCENARIO DECLARED
-    #  (finding F-48).
+    #.
     #
     #  Guard 5 above establishes that neither run stage was a HARNESS FAULT, which is
     #  a different and much weaker claim: it says the runner did its job, not that the
@@ -1181,7 +1176,7 @@ def parity(
     #  the oracle is a behavioural regression and is reported as a failure by the
     #  test that compares the two dispositions.
     # ------------------------------------------------------------------
-    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST (finding F-12). The
+    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST. The
     #  comparison below is between one COBOL run and one Python run, and it means
     #  nothing unless the two drove the same work in the same order - an empty diff
     #  between a short run and a full one being the most dangerous false pass this tier
@@ -1435,7 +1430,7 @@ def test_scenario_definition_preconditions(
         f"{definition.get('expected_status')!r}."
     )
 
-    # ⭐ 3.5b THE ALLOCATOR CANNOT COLLIDE, WHICH IS WHY REJECTION CLASS 4 IS NOT
+    # 3.5b THE ALLOCATOR CANNOT COLLIDE, WHICH IS WHY REJECTION CLASS 4 IS NOT
     # REACHED. `move next-post to post-key.` [irs/irs030.cbl:L1670] then `add 1 to
     # next-post.` [irs/irs030.cbl:L1671] allocate one internal posting key per transfer
     # row that reaches the write, and `perform acasirsub4-Write`
@@ -1749,7 +1744,7 @@ def test_diff_exit_contract_is_honoured(
     AVAILABLE IN THIS TREE, so the mapping is exercised rather than trusted. Rule R-6
     makes an empty diff the pass condition ONLY when a comparison actually happened.
 
-    ⭐ DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
+    DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
     `tests/conftest.py`'s `assert_diff_exit_contract` publishes two synthetic sides with
     `harness/dump_tables.py`'s own writer, canonicalises them with `harness/normalize.py`
     and compares them with `harness/diff_states.py` - once for each of the four cases.
@@ -1914,13 +1909,13 @@ def test_a4_half_posted_double_entry_reproduced(
     findings.
 
     THE TWO DISPOSITIONS MUST NEVER BE COLLAPSED, AND ONLY ONE OF THEM IS SEEDED HERE
-    (finding MJ-11). A missing DEBIT account [irs/irs030.cbl:L1627-L1634], message
+. A missing DEBIT account [irs/irs030.cbl:L1627-L1634], message
     IR032, is rejection class 1 - a CLEAN no-op, because nothing has been written yet. A
     missing CREDIT account [irs/irs030.cbl:L1645-L1652], message IR033, is rejection
     class 3 - a PARTIAL WRITE. Agent Action Plan section 0.8.1: "a single generic
     rejection path would fail this directive."
 
-    ⚠️ THIS FIXTURE SEEDS CLASS 3 ONLY. `clean_batch_irs.yaml` withholds exactly one
+     THIS FIXTURE SEEDS CLASS 3 ONLY. `clean_batch_irs.yaml` withholds exactly one
     account - the CREDIT one, for A-4 - and requires every DEBIT account the transfer
     records reference to be present, so the IR032 path is never taken on this route and
     the assertions below say nothing about it. Nor could a state comparison say much: a
@@ -2071,6 +2066,8 @@ def test_a5_lost_update_on_vat_control_accounts_reproduced(
     Args:
         parity: The completed, guarded ten-stage run.
         harness: The three harness modules, for reading the normalised dumps.
+        withheld: The value-free stand-in for a dumped cell, so a failure message can
+            name a column without reproducing an accounting figure.
     """
     ledger = _table_diff(parity, "IRSNL-REC")
     assert ledger.is_empty, (
@@ -2191,8 +2188,8 @@ def test_psirspost_rec_clear_reproduces_the_frozen_high_key_threshold(
     [common/slpostingMT.cbl:L849-L851] and deletes only rows whose SQL key is below
     the resulting text bound, 9999999999 [common/slpostingMT.cbl:L857-L891].
 
-    F-7 made the six fixture rows independently reachable by assigning distinct post
-    numbers. The frozen group-to-binary move stores each resulting key near
+    The six fixture rows are independently reachable because each is assigned a distinct
+    post number. The frozen group-to-binary move stores each resulting key near
     472328296244... - well ABOVE 9999999999. Consequently the operator's Y answer is
     a measured NO-OP for this reachable RDBMS fixture: all six rows remain on both
     sides. Treating the paragraph name "Delete-ALL" as proof of truncation would assert
@@ -2330,7 +2327,7 @@ def test_a6_rewrite_verb_can_never_succeed(
         protocol: The protocol bundle, for the before-and-after state comparison that
             makes this assertion non-vacuous.
     """
-    # ⭐ THE NON-VACUITY GUARD, AND THE STRONGEST CLAIM HERE. Each side's PRE-run digest
+    # THE NON-VACUITY GUARD, AND THE STRONGEST CLAIM HERE. Each side's PRE-run digest
     # of the transfer table is compared against its OWN POST-run digest. A table diff
     # compares the two SIDES, and two cycles that both mutated the table identically
     # would agree perfectly; this comparison instead asks "did this cycle change the
@@ -2449,6 +2446,8 @@ def test_a7_partial_date_component_derivation_is_dumped_as_stored(
         harness: The three harness modules, for reading the normalised dumps.
         scenario_loader: Loads the scenario definition, so the seeded partial date is
             named from the fixture rather than assumed.
+        withheld: The value-free stand-in for a dumped cell, so a failure message can
+            name a column without reproducing an accounting figure.
     """
     # THE FIXTURE PRECONDITION, READ FROM THE DEFINITION. Asserted before the dumps, so
     # a fixture that stopped carrying a non-numeric date component is reported as such
@@ -2524,7 +2523,7 @@ def test_a7_partial_date_component_derivation_is_dumped_as_stored(
         if text.strip() and any(int(str(value)) == 0 for value in components):
             partial_rows += 1
 
-    # ⭐ A MISSING PARTIAL ROW IS A FAILURE, NOT A SKIP. This was a `pytest.skip` and
+    # A MISSING PARTIAL ROW IS A FAILURE, NOT A SKIP. This was a `pytest.skip` and
     # that was wrong: a skip is for something the ENVIRONMENT cannot provide, and this
     # is something the FIXTURE is built to provide. The parity loop above holds
     # trivially for rows whose three components all derived cleanly, so without a
@@ -2811,9 +2810,8 @@ def test_dump_is_wellformed_on_both_sides(
 def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, protocol: object) -> None:
     """THE PARAMETER ROW IS BOUNDED TWICE - by the dump, and by a digest of it.
 
-    WHAT THIS CLOSES. An earlier draft kept `SYSTEM-REC` off every scenario's
-    `affected_tables` and justified that by claiming no side writes it. That claim is
-    FALSE:
+    WHAT THIS CLOSES. The tempting shortcut is to keep `SYSTEM-REC` off every scenario's
+    `affected_tables` on the ground that no side writes it. THAT GROUND IS FALSE:
     `acas_posting/cli/args.py`'s `overrewrite` reproduces
     [general/general.cbl:L656-L672] and every one of the seven routes calls it, so the
     parameter row is written on BOTH sides of every scenario. Until this assertion
@@ -2852,11 +2850,10 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
-    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
-    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
-    counter -- that scenario has since been removed (findings M-09 and M-17), and the
-    observation is recorded because it is what established that half.
+    over the eight committed scenarios, which is all four `unchanged` ones. THE `changed`
+    HALF IS NOT COVERED BY ANY COMMITTED SCENARIO: it was established on a definition that
+    declared `changed` and moved the row by construction, its Phase 5 advancing the cycle
+    and rotating the quarter counter, and no scenario in `harness/scenarios/` does that.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 

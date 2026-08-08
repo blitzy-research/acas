@@ -153,7 +153,7 @@ def pin_from_calendar_date(calendar_date: date) -> PinnedRunDate:
     # [L77] move u-date to to-day. A COPY, not an alias.
     to_day = work.u_date
 
-# [copybooks/Proc-ACAS-Mapser-RDB.cob:L78] move zero to u-bin. ANOMALY #16, ITS MASKING
+# [copybooks/Proc-ACAS-Mapser-RDB.cob:L78] move zero to u-bin. ANOMALY A-16, ITS MASKING
 # MECHANISM REPRODUCED (rule R-4).
     work.u_bin = 0
 
@@ -271,7 +271,7 @@ def verify_pin(pin: PinnedRunDate) -> None:
             f"pinned pair is not usable as a controlled clock: run_date "
             f"{pin.run_date} is not a day number maps04 can unpack, so the "
             f"specification rejected to_day {pin.to_day!r} (a rejected date "
-            f"leaves run_date at 0 - see anomaly #16)"
+            f"leaves run_date at 0 - see anomaly A-16)"
         )
 
     reverse = Maps03Ws()

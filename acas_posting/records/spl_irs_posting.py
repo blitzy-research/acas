@@ -120,8 +120,8 @@ class WsIrsPostKey:
         FIELDS: The two descriptors, in copybook declaration order.
     """
 
-    # 05 WS-IRS-Batch pic 9(5). unsigned zoned DISPLAY, scale 0 [copybooks/wspost-
-    # irs.cob:L15] Declared by the copybook alone.
+    # 05 WS-IRS-Batch pic 9(5). unsigned zoned DISPLAY, scale 0
+    # [copybooks/wspost-irs.cob:L15] Declared by the copybook alone.
     ws_irs_batch: int = 0
 
     ws_irs_post_number: int = 0
@@ -156,14 +156,14 @@ class WsIrsPostingRecord:
 
     ws_irs_post_code: str = _spaces(_POST_CODE)
 
-    # 03 WS-IRS-Post-Date pic x(8). alphanumeric, 8 characters [copybooks/wspost-
-    # irs.cob:L18] EIGHT characters of TEXT, a two-digit-year form - not a date object
-    # and not a binary day number.
+    # 03 WS-IRS-Post-Date pic x(8). alphanumeric, 8 characters
+    # [copybooks/wspost-irs.cob:L18] EIGHT characters of TEXT, a two-digit-year form - not a
+    # date object and not a binary day number.
     ws_irs_post_date: str = _spaces(_POST_DATE)
 
-    # 03 WS-IRS-Post-DR pic 9(5). unsigned zoned DISPLAY, scale 0 [copybooks/wspost-
-    # irs.cob:L19] FIVE digits. The General Ledger posting record's equivalent is `9(6)`
-    # [copybooks/wspost.cob:L19].
+    # 03 WS-IRS-Post-DR pic 9(5). unsigned zoned DISPLAY, scale 0
+    # [copybooks/wspost-irs.cob:L19] FIVE digits. The General Ledger posting record's equivalent
+    # is `9(6)` [copybooks/wspost.cob:L19].
     ws_irs_post_dr: int = 0
 
     ws_irs_post_cr: int = 0

@@ -2,7 +2,7 @@
 
 One dataclass mirroring the copybook's ten fields, two of which are signed in the
 `sign is leading` form [copybooks/irswspost.cob:L14],
-[copybooks/irswspost.cob:L19] - a zoned DISPLAY field whose sign travels in its
+[copybooks/irswspost.cob:L18] - a zoned DISPLAY field whose sign travels in its
 first character rather than over its last digit, so the stored bytes differ from
 an ordinary signed DISPLAY field.
 

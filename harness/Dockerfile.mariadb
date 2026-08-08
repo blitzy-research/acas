@@ -74,15 +74,14 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #      [common/glbatchLD.cbl:L9-L13]" -- the loaders ARE the seeding stage, and
 #      the citation is the same loader banner as the other two.
 #
-#  An earlier revision of this image read those three provisions as a server-wide
-#  pin and wrote `autocommit=0` into [mysqld]. That is a strictly wider reading
-#  than the text supports, and it had two consequences that made the harness
-#  unable to do its job: there was no ON window anywhere, so runtime application
-#  access ran in a mode the AAP never asked for; and because the frozen code
-#  reaches no COMMIT (measured below), a seed reported success while leaving every
-#  table empty, after which the comparison stage happily diffed two empty
-#  captures and returned the pass condition. Nothing about the migration had been
-#  measured. Scoping the mode to the window the AAP names removes the first
+#  READING those three provisions as a server-wide pin and writing `autocommit=0` into
+#  [mysqld] is a strictly wider reading than the text supports, and it has two
+#  consequences that would make the harness unable to do its job. There would be no ON
+#  window anywhere, so runtime application access would run in a mode the AAP never
+#  asked for; and because the frozen code reaches no COMMIT (measured below), a seed
+#  would report success while leaving every table empty, after which the comparison
+#  stage would diff two empty captures and return the pass condition, having measured
+#  nothing. Scoping the mode to the window the AAP names removes the first
 #  problem; the fail-closed durability gate in `seed.sh` removes the second.
 #
 #  The consequence of the OFF mode is still set out in full below, because it is
@@ -110,14 +109,11 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #  "MySQL_rollback" and a `aa030-Commit` paragraph calling "MySQL_commit", and
 #  in the frozen source BOTH are unreachable:
 #
-#    * every `perform aa020-Rollback` is commented out with the `*>` marker --
-#      [common/glbatchLD.cbl:L386], [common/glbatchLD.cbl:L428],
-#      [common/nominalLD.cbl:L386], [common/nominalLD.cbl:L428],
-#      [common/nominalLD.cbl:L473], [common/slpostingLD.cbl:L363],
-#      [common/slpostingLD.cbl:L405], [common/slpostingLD.cbl:L450];
-#    * `aa030-Commit` has ZERO `perform` sites of any kind, commented or not,
-#      in any of the 28 loaders -- the mainline falls through
-#      `go to aa010-Read` / `go to aa999-Finish` and never reaches it.
+#    * every `perform aa020-Rollback` is commented out with the `*>` marker,
+#      e.g. [common/glbatchLD.cbl:L386] and [common/slpostingLD.cbl:L363]; the
+#      site totals are under THE NO-COMMIT DEFECT below;
+#    * `aa030-Commit` has no live `perform` site anywhere -- the mainline falls
+#      through `go to aa010-Read` / `go to aa999-Finish` and never reaches it.
 #
 #  Census command, run over the frozen tree, which returns NO matches:
 #      grep -n '^ *perform.*\(aa020\|aa030\|Commit\|Rollback\)' common/*LD.cbl
@@ -146,24 +142,14 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #
 #  WHERE THE OFF MODE APPLIES -- THE SEEDING WINDOW, AND ONLY THERE
 #  ----------------------------------------------------------------
-#  The three AAP provisions quoted at the head of this section all scope the OFF
-#  mode to seeding, and all three cite the same frozen banner. `harness/seed.sh`
-#  is therefore the authority for the window: it sets the mode OFF immediately
-#  before the first frozen loader runs, asserts it inside the window, and restores
-#  ON from its exit trap however the run ends. The window is established with the
+#  All three AAP provisions scope the OFF mode to seeding and cite the same
+#  frozen banner, so `harness/seed.sh` is the authority for the window (its
+#  contract is under NOTE below). The window is established with the
 #  administrative account the Compose file already hands the gnucobol service
 #  (ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD), because SET GLOBAL requires a
 #  privilege the narrowed application grant deliberately does not hold.
-#  The banner itself, verbatim from [common/glbatchLD.cbl:L9-L13]:
-#      *>  This modules uses commit and rollback so *
-#      *>  you MUST ensure that autocommit is OFF   *
-#      *>   in the rdb settings. It is as default   *
-#      *>   set ON.                                 *
-#  It appears in EVERY ONE of the 28 `common/*LD.cbl` loaders, not just the batch
-#  loader -- e.g. [common/analLD.cbl:L11], [common/finalLD.cbl:L10],
-#  [common/dfltLD.cbl:L10], [common/systemLD.cbl:L9], [common/sys4LD.cbl:L10].
 #
-#  Note the banner's exact wording: it instructs the OPERATOR to ensure the
+#  Note the banner quoted above instructs the OPERATOR, and its exact wording: it instructs the OPERATOR to ensure the
 #  setting, and cannot do otherwise. The vendored C interface
 #  `cobmysqlapi38.c` exposes 25 entry points -- MySQL_init, MySQL_real_connect,
 #  MySQL_query, MySQL_commit, MySQL_rollback, MySQL_close and the rest -- and
@@ -196,9 +182,8 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #  reading ZERO rows; with the runtime mode this file declares, the same INSERT
 #  and disconnect leaves the row in place.
 #
-#  That is why the window is a WINDOW. Widening it to the whole server, as an
-#  earlier revision of this file did, makes the oracle side of every comparison
-#  structurally empty -- and an empty diff is the pass condition, so the harness
+#  That is why the window is a WINDOW. Widening it to the whole server makes the
+#  oracle side of every comparison structurally empty -- and an empty diff is the pass condition, so the harness
 #  would report a clean pass having measured nothing at all.
 #
 #  That is a defect of the frozen code, and R-4 makes it a specification rather
@@ -355,11 +340,11 @@ RUN set -eu; \
 #  frozen loaders and the generated bridges connect to this database by name.
 ENV MARIADB_DATABASE=ACASDB
 
-#  THE DISPOSABILITY MARKER, AND WHY IT IS NOT A TABLE ANY MORE (finding F-43).
+#  THE DISPOSABILITY MARKER, AND WHY IT IS NOT A TABLE.
 #  harness/reset_db.sh will not drop and re-apply the 33 frozen tables until it can
-#  prove the target is a throwaway this harness built. That proof used to be a
-#  marker TABLE in a second schema, created here with CREATE DATABASE, CREATE
-#  TABLE and INSERT -- which is DDL and DML, and rule R-3 admits neither: "No new
+#  prove the target is a throwaway this harness built. Proving it with a marker TABLE in a
+#  second schema would need CREATE DATABASE, CREATE TABLE and INSERT -- DDL and DML, and
+#  rule R-3 admits neither: "No new
 #  tables, columns, indexes, constraints, views, triggers or DDL statements." The
 #  schema being a separate one did not make the statements disappear, and a reset
 #  gate that depends on them makes the rule's violation load-bearing.
@@ -372,7 +357,7 @@ ENV MARIADB_DATABASE=ACASDB
 #  reads it. A plain MariaDB container leaves it EMPTY, so the marker below can only
 #  be seen on a server started from THIS image -- exactly the property the table had.
 #
-#  ⭐ WHY `report_host` AND NOT `version_comment`, MEASURED (rule R-6). The first
+#  WHY `report_host` AND NOT `version_comment`, MEASURED (rule R-6). The first
 #  attempt at this fix used `version_comment`, on the reading that a variable the
 #  server reports must be a variable the server accepts. IT IS NOT: mariadbd 10.11.7
 #  refuses it in an option file outright -- "unknown variable
@@ -691,7 +676,7 @@ RUN set -eu; \
       case "${entry}" in \
         */10-ACASDB.sql|*/20-acas-least-privilege.sh) continue ;; \
       esac; \
-      echo "FATAL: ${entry} is an added initdb.d member; the disposability marker is a server setting now, not a schema (finding F-43)." >&2; \
+      echo "FATAL: ${entry} is an added initdb.d member; the disposability marker is a server setting now, not a schema." >&2; \
       exit 1; \
     done; \
     \

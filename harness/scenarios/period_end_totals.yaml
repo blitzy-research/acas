@@ -52,7 +52,7 @@
 # FOR SIMULTANEOUS EXECUTION OF ANY KIND, and no halt rule between steps is
 # relied on: an operation that must not run is simply not listed.
 #
-# KEYS APPEAR IN A FIXED ORDER, identically in all nine scenario files, and
+# KEYS APPEAR IN A FIXED ORDER, identically in all eight scenario files, and
 # the file is UTF-8, ASCII-only, LF-terminated, two-space indented and free of
 # tabs. It carries no wall-clock reading, no host identity, no process id, no
 # random value and no absolute host path, so two captures of one scenario are
@@ -725,17 +725,16 @@ description: |
     record -- and separately stamps GLBATCH-REC and rewrites GLLEDGER-REC.
     Appending it would mean this file bounded fifteen tables for the totals
     claim and three more for an unrelated one.
-      CORRECTION, RECORDED RATHER THAN OVERWRITTEN. This ground previously read
-      "gl080's OWN STATE CHANGES CANNOT BE PERSISTED BY THE PYTHON SIDE",
-      arguing that comparing them would be "an unavoidable divergence dressed
-      up as a test". THAT WAS WRONG, and measurement is what showed it (rule
-      R-6). The system record IS persisted on both sides: the menu exit does it
+      A CORRECTION WORTH RECORDING, BECAUSE THE WRONG READING IS PLAUSIBLE. It is
+      tempting to argue that "gl080's OWN STATE CHANGES CANNOT BE PERSISTED BY THE
+      PYTHON SIDE" and that comparing them would be "an unavoidable divergence dressed
+      up as a test". THAT IS WRONG, and measurement is what shows it (rule R-6). The system record IS persisted on both sides: the menu exit does it
       at [general/general.cbl:L656-L692] and the headless route reproduces that
       same paragraph as args.overrewrite in
       acas_posting/cli/gl_end_of_cycle.py. A dedicated end_of_cycle_gl scenario
       compared SYSTEM-REC and found the cycle advance and the quarter wrap
       byte-identical on the two sides -- measured, and then removed with that
-      scenario by findings M-09 and M-17, which hold the tree to the Agent
+      scenario, the tree being held to the Agent
       Action Plan's eight definitions. The ground is corrected rather than
       deleted because a reader who acted on the old claim would have concluded
       the comparison was impossible; it is not, and the measurement showed so.
@@ -760,19 +759,15 @@ description: |
     tests/arithmetic/test_gl080_cycle_divide_rounded.py's
     test_a3_current_quarter_rotates_independently_of_a and its siblings, which
     make the counter and the subscript disagree and require that the subscript
-    write Q1 while the counter writes Ledger-Last and leaves Q4 alone. It was
-    ALSO pinned in table state, by a dedicated end_of_cycle_gl scenario that has
-    since been removed (findings M-09, M-17); the unit-level pin is what
-    survives, and it is stated here rather than left to be discovered.
-  CONSEQUENCE, STATED HONESTLY AND TWICE CORRECTED: gl_end_of_cycle is NOT
-  appended to THIS file, and the six grounds above are why. A dedicated ninth
-  definition drove it for a time, which is the resolution these six grounds
-  pointed towards; that definition has been removed by findings M-09 and M-17,
-  because the Agent Action Plan's inventory names EIGHT scenario definitions and
-  this tree is held to it. So gl080 has no table-state comparison behind it
-  today -- said plainly rather than implied -- and its coverage is the arithmetic
-  tier's, per ground SIX. Appending the operation here would still be wrong for
-  grounds ONE through FIVE, none of which the removal touches.
+    write Q1 while the counter writes Ledger-Last and leaves Q4 alone. The
+    unit-level pin is the whole of it, and it is stated here rather than left to
+    be discovered.
+  CONSEQUENCE, STATED PLAINLY: gl_end_of_cycle is NOT appended to THIS file, and
+  the six grounds above are why. NO committed definition drives it, because the
+  Agent Action Plan's inventory names EIGHT scenario definitions and this tree is
+  held to it -- so gl080 has no table-state comparison behind it, and its coverage
+  is the arithmetic tier's, per ground SIX. Appending the operation here would be
+  wrong for grounds ONE through FIVE regardless.
   `period` remains an INERT value HERE -- carried because it is part of the
   seeded system record and because the key set is uniform, not because any
   operation listed in THIS file divides by it. It is emphatically not inert in
@@ -897,27 +892,16 @@ description: |
     boundaries.
 
   THE ACCEPTANCE PROTOCOL
-  TEN stages, in this order, one scenario at a time and nothing
-  alongside it. harness/normalize.py is the single registry and
-  `harness/normalize.py --print-stages' prints it, so this list is a restatement
-  and never the authority:
-    1 reset the schema and seed the scenario
-    2 run the compiled COBOL cycle
-    3 dump the COBOL state
-    4 normalise the COBOL dump
-    5 reset the schema and RE-SEED THE SAME SCENARIO -- the same fixture bytes, so
-      the Python cycle starts from the state the COBOL cycle started from and not
-      the state it left
-    6 run the migrated Python cycle
-    7 dump the Python state
-    8 normalise the Python dump
-    9 verify both captures are published -- BEFORE a single row is compared,
-      because two PARTIAL captures can produce an empty diff and so pass a
-      comparison that compared nothing
-    10 diff the two normalised trees
-  harness/build_oracle.sh and harness/seed.sh --build-fixtures come before stage 1 and are
-  not stages: the first runs once per image, the second once per change to a
-  scenario's seed records.
+  TEN stages, one scenario at a time and nothing alongside it.
+  `harness/normalize.py --print-stages' is the registry and the authority. The
+  two stages a reader would not guess are stage 5, which re-seeds THE SAME
+  FIXTURE BYTES so the Python cycle starts from the state the COBOL cycle
+  started from rather than the state it left, and stage 9, which verifies both
+  captures are published BEFORE a single row is compared, because two PARTIAL
+  captures produce an empty diff and so pass a comparison that compared nothing.
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures precede stage 1
+  and are not stages: the first runs once per image, the second once per change
+  to a scenario's seed records.
   FOR THIS SCENARIO, stages 2 and 6 each drive FOUR OPERATIONS IN THE DECLARED
   ORDER inside ONE invocation of their runner. Both runners resolve the ordered
   `operations:' list and drive every entry sequentially, re-selecting the
@@ -942,14 +926,13 @@ description: |
   makes the second leg comparable to the first at all -- without it operations
   2 and 4 would post nothing on the second leg and the diff would be empty for
   the wrong reason.
-  This file's consumers are all present in the checkout:
-  the four documents under docs/migration/, the eight modules under
-  tests/scenarios/ (one per scenario), and harness/run_python_scenario.sh.
-  The seed FLAT FILES are deliberately not in the
-  checkout: the records are declared above under seed_records and
-  harness/seed.sh --build-fixtures builds the files from them inside the image, because
-  fifteen of the seventeen frozen loaders read ORGANIZATION INDEXED or RELATIVE
-  files whose on-disk form belongs to the Berkeley DB version that image carries.
+  This file's consumers are all in the checkout: the four documents under
+  docs/migration/, the eight modules under tests/scenarios/ and
+  harness/run_python_scenario.sh. Its seed FLAT FILES are not: the records are
+  declared above under seed_records and harness/seed.sh --build-fixtures builds
+  the files inside the image, because fifteen of the seventeen frozen loaders
+  read ORGANIZATION INDEXED or RELATIVE files whose on-disk form belongs to the
+  Berkeley DB version that image carries.
 
   THE CONSUMER CONTRACT -- WHY SOME VALUES APPEAR UNDER TWO KEYS
   This file serves consumers with two different reading strategies, so a few
@@ -1014,27 +997,21 @@ description: |
   spans two menus.
 
   LOCATOR PROVENANCE
-  Every line number cited above was read directly out of the frozen source in
-  this checkout rather than copied from a plan, and several planning citations
-  were found to be off by one. The corrections worth knowing when cross-reading
-  are: the Purchase order-post dispatch paragraph is
-  [purchase/purchase.cbl:L752] and its commented-out autogen call and gate are
-  [purchase/purchase.cbl:L755-L758], with the four program dispatches at
-  [purchase/purchase.cbl:L759-L762] -- one line later throughout than a
-  planning citation suggested, and matching the oracle-side runner's own
-  recorded locator for that paragraph; the type-six else-branch in pl100 ends
-  at [purchase/pl100.cbl:L402] and not two lines earlier; the batch loader's
-  autocommit caveat is [common/glbatchLD.cbl:L9-L12]; the menu's terminal-size
-  check begins at [general/general.cbl:L374]; and G-L is a condition name on
-  the installed-ledger level byte at [copybooks/wssystem.cob:L85], NOT on the
-  fan-out switch at [copybooks/wssystem.cob:L179-L181], which is the
-  correction that produced the two-field statement of pure General Ledger mode
-  above and that makes anomaly A-PL100-A legible.
-  THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common,
-  copybooks, general, sales, purchase, irs, stock or mysql is a defect in the
-  migration however harmless it looks.
-
-
+  Every line number cited above was read out of the frozen source in this
+  checkout; docs/migration/traceability.md carries the corrected-locator record.
+  Four spans are cited only here: the Purchase order-post dispatch paragraph is
+  [purchase/purchase.cbl:L752] with its commented-out autogen call and gate at
+  [purchase/purchase.cbl:L755-L758] and the four program dispatches at
+  [purchase/purchase.cbl:L759-L762]; the type-six else-branch in pl100 ends at
+  [purchase/pl100.cbl:L402]; the batch loader's autocommit caveat is
+  [common/glbatchLD.cbl:L9-L12]; and the menu's terminal-size check begins at
+  [general/general.cbl:L374]. G-L is a condition name on the installed-ledger
+  level byte at [copybooks/wssystem.cob:L85] and NOT on the fan-out switch at
+  [copybooks/wssystem.cob:L179-L181], which is what makes pure General Ledger mode
+  two seeded fields rather than one and what makes anomaly A-PL100-A legible.
+  THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common, copybooks,
+  general, sales, purchase, irs, stock or mysql is a defect in the migration
+  however harmless it looks.
 # THE ONE KEY WHOSE VALUE DIFFERS IN KIND FROM ITS SEVEN SIBLINGS. This
 # scenario spans TWO menus, and the oracle-side runner refuses a file whose
 # subsystem disagrees with the subsystem of the operation it was asked to run
@@ -1057,14 +1034,14 @@ subsystem: ""
 # coherent single-operation run rather than at nothing.
 #
 # It is kept, rather than dropped, so the key set stays identical across all
-# nine scenario files -- eight of which declare exactly one operation and are
+# eight scenario files -- the other seven declare exactly one operation and are
 # therefore indifferent to which key supplies it.
 #
 # The precedence is identical on both sides -- repeated --operation first, then
-# `operations:', then this key -- at [harness/run_cobol_scenario.sh
-# acas_resolve_operations] and [harness/run_python_scenario.sh
-# acas_py_resolve_scenario], so one file cannot resolve to different lists on the
-# two legs of a comparison.
+# `operations:', then this key -- at
+# [harness/run_cobol_scenario.sh acas_resolve_operations] and
+# [harness/run_python_scenario.sh acas_py_resolve_scenario], so one file cannot
+# resolve to different lists on the two legs of a comparison.
 operation: sl_invoice_post
 
 clock:

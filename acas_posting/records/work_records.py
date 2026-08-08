@@ -254,9 +254,9 @@ class PreTransRecord:
 class PostLedger:
     """`03 post-ledger.` - the eight-character composite `gl072` alone declares.
 
-    R-4, and half of the anomaly this module reproduces rather than repairs. `gl071`
-    declares the SAME two fields FLAT at level `03` [general/gl071.cbl:L129-L130] with
-    no enclosing group, and `grep -n "post-ledger"` returns nothing against
+    R-4, and half of the two-declaration divergence this module reproduces rather than
+    repairs. `gl071` declares the SAME two fields FLAT at level `03`
+    [general/gl071.cbl:L129-L130] with no enclosing group, and `grep -n "post-ledger"` returns nothing against
     `general/gl071.cbl` or `general/gl070.cbl`.
 
     Attributes:
@@ -278,8 +278,8 @@ class PostLedger:
 class PostTransRecord:
     """`01 post-trans-record.` - the sorted stream, declared two ways.
 
-    R-4, and the reproduction site of the anomaly in full. ONE `01` name, ONE physical
-    work file, TWO incompatible declarations.
+    R-4, and the reproduction site of that divergence in full. ONE `01` name, ONE
+    physical work file, TWO incompatible declarations.
 
     Attributes:
         post_batch: `03 post-batch pic 9(5).` FIRST sort key [general/gl071.cbl:L173].

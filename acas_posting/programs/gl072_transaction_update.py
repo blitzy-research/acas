@@ -523,8 +523,8 @@ def _end_batch(st: _ProgramStorage) -> None:
         sending_field=_RUN_DATE,
     )
 
-    # 377 perform GL-Batch-Rewrite. *> rewrite batch-record. [copybooks/Proc-ACAS-FH-
-    # Calls.cob:L475-L478]. Its reply is NOT tested.
+    # 377 perform GL-Batch-Rewrite. *> rewrite batch-record.
+    # [copybooks/Proc-ACAS-FH-Calls.cob:L475-L478]. Its reply is NOT tested.
     facade.gl_batch_rewrite(st.batch_ctx)
 
 
@@ -707,8 +707,8 @@ def _get_batch(st: _ProgramStorage) -> None:
         sending_field=_POST_BATCH,
     )
 
-    # 454 perform GL-Batch-Read-Next. *> read batch-file record. [copybooks/Proc-ACAS-
-    # FH-Calls.cob:L460-L463]. SEQUENTIAL.
+    # 454 perform GL-Batch-Read-Next. *> read batch-file record.
+    # [copybooks/Proc-ACAS-FH-Calls.cob:L460-L463]. SEQUENTIAL.
     facade.gl_batch_read_next(st.batch_ctx)
 
     # 456 move description of WS-Batch-Record to l3-desc. OMITTED - print-line receiver

@@ -5,12 +5,9 @@ Scenario `empty_batch`, subsystem `general`, operation `gl_post_cycle`, declared
 terminal status `expected_status: [0]`. It drives the ten-stage parity protocol
 and asserts an EMPTY ordering-normalised diff across three bounded tables.
 
-THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports that none
-was provided, so there is no on-disk rules file and no reader should look for one.
-The six binding rules R-1 to R-6 live in the Agent Action Plan itself, section
-0.7.2, and their exact wording is retrievable from the requirements via
-`review_prompt`. Summarised in this file's own words, and each named at the site
-that honours it:
+THE SIX BINDING RULES R-1 to R-6 live in Agent Action Plan section 0.7.2, and their
+exact wording is retrievable from the requirements via `review_prompt`. Summarised in
+this file's own words, and each named at the site that honours it:
 
     R-1  No COBOL at runtime. This file NEVER imports `harness`; harness/ has no
          `__init__.py` and pyproject.toml's packaging allow-list excludes it, which
@@ -168,9 +165,9 @@ pre-processed."
 touches nothing at all - which in THIS scenario is nearly indistinguishable from
 the intended outcome, making it a peculiarly silent trap. The pin is asserted;
 `system.period: 1` is inert here, because only `gl_end_of_cycle` reads it and
-this route never reaches gl080. No committed scenario drives that operation: a
-dedicated `end_of_cycle_gl` definition did, and was removed by findings M-09 and
-M-17, so gl080's own effects are covered in the arithmetic tier.
+this route never reaches gl080. NO committed scenario drives that operation at all -
+the Agent Action Plan's inventory names eight, and none of the eight is an
+end-of-cycle definition - so gl080's own effects are covered in the arithmetic tier.
 
 -------------------------------------------------------------------------------
 THE CENTRAL OPEN QUESTION - RESOLVED BY THE ORACLE, NEVER BY READING
@@ -733,26 +730,20 @@ UNVERIFIED_NOTE = "no oracle-side seed fingerprint at"
 #  precise SKIP rather than a collection error - so this fixture is function-scoped
 #  and the RUN behind it is shared.
 #
-#  ⭐ THE SHARING LIVES IN `run_scenario_parity` ITSELF, AND THE COMMENT THAT USED TO
-#  BE HERE HAD THE ARGUMENT BACKWARDS. It said that memoising "would let two tests in
-#  one session mean different things by the diff", and the truth is the reverse:
-#  memoising is what makes every test in this file mean the SAME thing by it. Nine
-#  tests each running their own protocol were nine separate runs, and every assertion
-#  here is a claim about ONE of them - "the diff is empty", "the term code was zero in
-#  that run", "the report the verdict came from says so". If two of those nine runs had
-#  ever disagreed, this file would still have been green, because no assertion compared
-#  a run to another run. That is a quiet incoherence, not nine independent
-#  confirmations; independence of runs is the determinism tier's claim to make, and it
-#  makes it explicitly, twice, in tests/determinism/.
+#  THE SHARING LIVES IN `run_scenario_parity` ITSELF, and it is a correctness
+#  requirement rather than a speed one. Every assertion in this file is a claim about
+#  ONE run - "the diff is empty", "the term code was zero in that run", "the report the
+#  verdict came from says so" - so a file whose tests each ran their own protocol would
+#  be reporting agreement between runs it never compared, and would stay green even if
+#  two of them disagreed. Independence of runs is the determinism tier's claim to make,
+#  and it makes it explicitly, twice, in tests/determinism/.
 #
-#  So the protocol now runs ONCE per distinct request for the whole session, cached in
-#  `tests/conftest.py`'s `_PARITY_RUN_CACHE`. The seven sibling scenario modules had
-#  each already reached for module-level state to get this; putting it in the helper
-#  means this file gets it without its own cache and no future module has to remember.
-#  Agent Action Plan section 0.8.4 sets no performance target and forbids optimising
-#  for one - and this is not that: it is what makes the file's own narrative true, with
-#  the run time falling out as a side effect. Runs are strictly sequential (R-3);
-#  nothing here is parallel.
+#  The protocol therefore runs ONCE per distinct request for the whole session, cached
+#  in `tests/conftest.py`'s `_PARITY_RUN_CACHE`, so no scenario module needs a cache of
+#  its own. Agent Action Plan section 0.8.4 sets no performance target and forbids
+#  optimising for one - and this is not that: it is what makes the file's own narrative
+#  true, with the run time falling out as a side effect. Runs are strictly sequential
+#  (R-3); nothing here is parallel.
 #
 #  The injected objects are annotated `object` because their precise
 #  tests/conftest.py types cannot be named without a module-level import of that
@@ -803,7 +794,7 @@ def empty_batch_parity(protocol: object) -> object:
     # that exited in its own documented band never ran the cycle, and on THIS scenario
     # that is indistinguishable from success in the verdict alone. `reference_only`
     # leaves the Python side's status to `test_run_completes_with_term_code_zero`.
-    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST (finding F-12). The
+    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST. The
     #  comparison below is between one COBOL run and one Python run, and it means
     #  nothing unless the two drove the same work in the same order - an empty diff
     #  between a short run and a full one being the most dangerous false pass this tier
@@ -1265,7 +1256,7 @@ def test_affected_tables_are_byte_identical_to_the_seed(
 ) -> None:
     """BYTE-IDENTICAL TO THE SEED - compared against the seed, not against the other run.
 
-    ⭐ WHAT THIS TEST USED TO COMPARE, AND WHY THAT WAS NOT ITS OWN TITLE. Its name
+    WHAT THIS TEST USED TO COMPARE, AND WHY THAT WAS NOT ITS OWN TITLE. Its name
     claims the affected tables came back byte-identical TO THE SEED; every assertion it
     made compared the two POST-RUN trees to each other. Those are different claims, and
     the weaker one is satisfied by outcomes the stronger one rejects: two cycles that
@@ -1285,11 +1276,12 @@ def test_affected_tables_are_byte_identical_to_the_seed(
     `end-account` then `end-batch` [general/gl072.cbl:L286-L289] - would not be a
     spurious change but the specification. The scenario declares
     `expected_table_effect: unchanged`, which is the reading that those two rewrites
-    target a ZERO KEY and match no row; that reading is an EXPECTATION and is filed as
-    ambiguity `Q-EMPTY-BATCH-AT-END` in docs/migration/ambiguity-resolutions.md, with the
-    three readings and the observable set out in full. If the oracle takes a different
-    one, THIS ASSERTION IS WHERE IT SURFACES - and the resolution is to record the
-    measurement and reproduce it, never to weaken this back to a side-to-side comparison.
+    target a ZERO KEY and match no row - and that reading is the MEASURED one:
+    `Q-EMPTY-BATCH-AT-END` is `RESOLVED BY ORACLE` in
+    docs/migration/ambiguity-resolutions.md, with the three readings and the observable
+    set out in full. If a later measurement takes a different one, THIS ASSERTION IS
+    WHERE IT SURFACES - and the resolution is to record it and reproduce it, never to
+    weaken this back to a side-to-side comparison.
     Nothing here predicts `CLEARED-STATUS` or `POSTED`.
 
     THE SEED COMPARISON IS BOUNDED BY THE DECLARED EFFECT and the side-to-side
@@ -1478,10 +1470,10 @@ def test_batch_disposition_is_whatever_the_oracle_produced(
     `CLEARED-STATUS` BECOMES 1 AND WHETHER `POSTED` RECEIVES THE RUN DATE IS
     DETERMINED BY THE ORACLE AND NOT BY THIS TEST. Nothing here predicts either;
     the assertion is that the two sides produced the SAME `GLBATCH-REC`, whatever
-    it is. The question is filed as ambiguity `Q-EMPTY-BATCH-AT-END`, and anomaly
-    A-15's competing record lengths [copybooks/wsbatch.cob:L7-L9] are filed as
-    `Q-4`, because whether the declared length or the field sum governs decides
-    the alignment of exactly the trailing fields at issue - `Batch-Status`
+    it is. The question is filed as ambiguity `Q-EMPTY-BATCH-AT-END`, `RESOLVED BY
+    ORACLE`; anomaly A-15's competing record lengths [copybooks/wsbatch.cob:L7-L9] were
+    filed as `Q-4`, also `RESOLVED BY ORACLE` - both copies measure 96 and the 98-byte
+    note is false, so the field sum governs the alignment of the trailing fields at issue - `Batch-Status`
     [copybooks/wsbatch.cob:L25-L27], `Cleared-Status`
     [copybooks/wsbatch.cob:L29-L32] and the four `binary-long` dates
     [copybooks/wsbatch.cob:L36-L39].
@@ -1547,10 +1539,10 @@ def test_no_empty_batch_special_case_was_added(
     NOT assert that any diagnostic exists: asserting a message the COBOL does not
     emit would itself be an added behaviour, and therefore a defect.
 
-    ⚠️ WHAT THIS TEST CAN AND CANNOT SEE, corrected (finding MJ-14). An earlier
-    revision claimed a guard on the Python side "is observable precisely because it
-    would SKIP the at-end work, so it shows up as a `GLBATCH-REC` or `GLLEDGER-REC`
-    difference". THAT IS FALSE, and `Q-EMPTY-BATCH-AT-END` says why: it is
+     WHAT THIS TEST CAN AND CANNOT SEE. The plausible claim is that a guard on the
+    Python side "is observable precisely because it would SKIP the at-end work, so it
+    shows up as a `GLBATCH-REC` or `GLLEDGER-REC` difference". THAT IS FALSE, and
+    `Q-EMPTY-BATCH-AT-END` says why: it is
     `RESOLVED BY ORACLE` (2026-08-07) with the answer that NEITHER at-end paragraph
     leaves any observable effect. `end-account` and `end-batch` rewrite the BLANK
     records the program is holding, so both statements are an `UPDATE` on key zero,
@@ -1586,7 +1578,7 @@ def test_no_empty_batch_special_case_was_added(
             f"{harness.diff_states.render_table(entry)}\n"
             f"  AN ADDED EMPTY-CASE GUARD IS *NOT* THE HYPOTHESIS THIS "
             f"DIFFERENCE SUPPORTS, and saying otherwise would send a reader the "
-            f"wrong way (MJ-14). A short circuit over the empty work file omits "
+            f"wrong way. A short circuit over the empty work file omits "
             f"the at-end work [general/gl072.cbl:L287-L288], and that work is a "
             f"rewrite on key ZERO which matches no row - so a guard shows up "
             f"NOWHERE in this comparison. Q-EMPTY-BATCH-AT-END is `RESOLVED BY "
@@ -1699,7 +1691,7 @@ def test_diff_exit_contract_is_honoured(
     AVAILABLE IN THIS TREE, so the mapping is exercised rather than trusted. Rule R-6
     makes an empty diff the pass condition ONLY when a comparison actually happened.
 
-    ⭐ DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
+    DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
     `tests/conftest.py`'s `assert_diff_exit_contract` publishes two synthetic sides with
     `harness/dump_tables.py`'s own writer, canonicalises them with `harness/normalize.py`
     and compares them with `harness/diff_states.py` - once for each of the four cases.
@@ -1799,6 +1791,8 @@ def test_dump_is_wellformed_on_both_sides(
         harness: The three harness modules (R-1).
         frozen_schema: The parsed `mysql/ACASDB.sql`, read and never written
             (Agent Action Plan section 0.8.1).
+        withheld: The value-free stand-in for a dumped cell, so a failure message can
+            name a column without reproducing an accounting figure.
     """
     run = empty_batch_parity
     diff_states = harness.diff_states
@@ -2020,7 +2014,7 @@ def test_seed_fingerprints_agree(
     produced the same green result. Requiring the file instead would assert a
     contract the harness does not offer, so the disposition is what is asserted.
 
-    ⭐ THE RECORD CARRIES ONE MORE LINE THAN THE SCENARIO BOUNDS, and that is the
+    THE RECORD CARRIES ONE MORE LINE THAN THE SCENARIO BOUNDS, and that is the
     contract rather than a discrepancy. Both runners append the PARAMETER ROW,
     `SYSTEM-REC`, to the bounded tables - it is the one in-scope table BOTH cycles
     write on EVERY route (ambiguity `Q-7`), so leaving it wholly unobserved would be
@@ -2154,9 +2148,8 @@ def test_seed_fingerprints_agree(
 def test_system_record_parity_by_digest_as_well_as_by_dump(empty_batch_parity: object, protocol: object) -> None:
     """THE PARAMETER ROW IS BOUNDED TWICE - by the dump, and by a digest of it.
 
-    WHAT THIS CLOSES. An earlier draft kept `SYSTEM-REC` off every scenario's
-    `affected_tables` and justified that by claiming no side writes it. That claim is
-    FALSE:
+    WHAT THIS CLOSES. The tempting shortcut is to keep `SYSTEM-REC` off every scenario's
+    `affected_tables` on the ground that no side writes it. THAT GROUND IS FALSE:
     `acas_posting/cli/args.py`'s `overrewrite` reproduces
     [general/general.cbl:L656-L672] and every one of the seven routes calls it, so the
     parameter row is written on BOTH sides of every scenario. Until this assertion
@@ -2196,11 +2189,10 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(empty_batch_parity: o
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
-    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
-    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
-    counter -- that scenario has since been removed (findings M-09 and M-17), and the
-    observation is recorded because it is what established that half.
+    over the eight committed scenarios, which is all four `unchanged` ones. THE `changed`
+    HALF IS NOT COVERED BY ANY COMMITTED SCENARIO: it was established on a definition that
+    declared `changed` and moved the row by construction, its Phase 5 advancing the cycle
+    and rotating the quarter counter, and no scenario in `harness/scenarios/` does that.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 

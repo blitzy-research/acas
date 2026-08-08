@@ -279,7 +279,7 @@ class _FacadeContext:
     def pinvoice_record_area(self) -> _PInvoiceRecordArea:
         """`WS-PInvoice-Record` as ONE area, stable for the life of the run.
 
-        ⭐ THE SAME OBJECT ON EVERY VERB, deliberately. A COBOL record area is one
+        THE SAME OBJECT ON EVERY VERB, deliberately. A COBOL record area is one
         storage for the life of the program, and the data-access layer relies on that.
         """
         area = self._pinvoice_record_area
@@ -414,7 +414,7 @@ class _Pl055State:
 def _initialise_oi_header() -> OiHeader:
     """`initialise OI-Header.` [purchase/pl055.cbl:L547]
 
-    ⭐ DIVERGENCE 5, THE BEHAVIOURAL ONE, PRESERVED AS WRITTEN. `pl055` spells the verb
+    DIVERGENCE 5, THE BEHAVIOURAL ONE, PRESERVED AS WRITTEN. `pl055` spells the verb
     the British way and, critically, omits the `WITH FILLER` phrase that its sales
     counterpart carries.
     """
@@ -665,7 +665,7 @@ def _read_loop(st: _Pl055State) -> None:
         st.ctx.file_access.logging_data.file_key_no = 1
         st.facade.value_rewrite(ctx)
 
-        # 358 move "z" to il-update. ⭐⭐ DIVERGENCE 6 [purchase/pl055.cbl:L358] vs
+        # 358 move "z" to il-update. DIVERGENCE 6 [purchase/pl055.cbl:L358] vs
         # [sales/sl055.cbl:L421]. LOWER-CASE "z" here.
         line.il_update = move.move(
             "z", pinvoice_descriptor_for(IlInvoiceLine, "il_update")
@@ -723,7 +723,7 @@ def _subtract_from_pair(
 def _header_analysis(st: _Pl055State) -> None:
     """`header-analysis.` [purchase/pl055.cbl:L362-L398]
 
-    ⭐ DIVERGENCE 8 - TWO SIGN FLIPS, NOT THREE. The sales program negates three work
+    DIVERGENCE 8 - TWO SIGN FLIPS, NOT THREE. The sales program negates three work
     values for a credit note - VAT [sales/sl055.cbl:L446], carriage
     [sales/sl055.cbl:L457] and discount [sales/sl055.cbl:L461-L466].
 
@@ -806,7 +806,7 @@ def _header_analysis(st: _Pl055State) -> None:
 def _close_files(st: _Pl055State) -> None:
     """`close-files.` [purchase/pl055.cbl:L400-L432]
 
-    ⭐ ONE CONDITIONAL `goback`, NOT TWO. The sales program has two
+    ONE CONDITIONAL `goback`, NOT TWO. The sales program has two
     [sales/sl055.cbl:L509, L518] because it also carries a proforma flag; `pl055` has no
     `ws-p-flag` at all and so has one, at [purchase/pl055.cbl:L432], complete with the
     maintainer's shrug.
@@ -993,7 +993,7 @@ def _create__create_main(st: _Pl055State) -> None:
                     length=3,
                 ),
             )
-            # 468 go to main-exit. GO TO class 3 - section exit. ⭐ FINDING
+            # 468 go to main-exit. GO TO class 3 - section exit. FINDING
             # [purchase/pl055.cbl:L461, L467-L468] - THIS EXIT RESTORES `WS-Pa-Code` AND
             # LEAVES `va-code` BLANKED.
             return _create__main_exit()
@@ -1198,7 +1198,7 @@ def _zero_the_six_value_totals(value: WsValueRecord) -> None:
 def _store_specials(st: _Pl055State) -> None:
     """`store-specials section.` [purchase/pl055.cbl:L503-L534]
 
-    ⭐ IT ADDS. `pl060`'s deduction analysis later SUBTRACTS from these same groups,
+    IT ADDS. `pl060`'s deduction analysis later SUBTRACTS from these same groups,
     which is why the direction is worth stating rather than assuming.
 
     Args:
@@ -1387,7 +1387,7 @@ def _extract(st: _Pl055State) -> None:
     )
 
     if arithmetic.compare(header.ih_type, 3) == 0:
-        # ⭐⭐ DIVERGENCE 1 - FOUR fields, and `oi-deduct-amt` is deliberately not one of
+        # DIVERGENCE 1 - FOUR fields, and `oi-deduct-amt` is deliberately not one of
         # them. [purchase/pl055.cbl:L571-L575] against the nine at
         # [sales/sl055.cbl:L658-L666].
         _set_oi_net(oi, arithmetic.multiply_by(-1, oi.filler_1.oi_net, _OI_MONEY["oi_net"]))
@@ -1430,7 +1430,7 @@ def _extract(st: _Pl055State) -> None:
             receiving=_S4["pl-credit-notes-this-month"],
         )
 
-    # 586 move "Z" to ih-status. *> 07/01/18 was "z" ⭐ DIVERGENCE 12 - UPPER case, and
+    # 586 move "Z" to ih-status. *> 07/01/18 was "z" DIVERGENCE 12 - UPPER case, and
     # `ih-status` alone.
     header.ih_status = move.move(
         "Z", pinvoice_descriptor_for(IhInvoiceHeader, "ih_status")
@@ -1461,7 +1461,7 @@ def _extract(st: _Pl055State) -> None:
         # already been stamped `"Z"` at [L586] and will be rewritten by the
         # caller at [purchase/pl055.cbl:L397], but its OTM4 row is missing, so
         # `pl060` will never see it. The sequence is left short and the walk
-        # continues. ⛔ Rule R-3 forbids adding either recovery.
+        # continues. Rule R-3 forbids adding either recovery.
         #
         # AMBIGUITY Q-PL055-4 - the disposition of a failed write at
         # [purchase/pl055.cbl:L588]. Whether the compiled program leaves the
@@ -1475,7 +1475,7 @@ def _extract(st: _Pl055State) -> None:
 def _extract__main_exit() -> None:
     """`main-exit. exit.` [purchase/pl055.cbl:L597]
 
-    ⭐ DIVERGENCE 18 - A PLAIN `EXIT`, NOT `EXIT SECTION`. The other two sections end
+    DIVERGENCE 18 - A PLAIN `EXIT`, NOT `EXIT SECTION`. The other two sections end
     `main-exit. exit section.` [purchase/pl055.cbl:L501, L536].
     """
     #  NO LOG RECORD. This paragraph displays NOTHING - [purchase/pl055.cbl:L597] carries
@@ -1612,8 +1612,8 @@ def run(
             and tests every reply inline.
         file_access: `01 File-Access.` [copybooks/wsfnctn.cob:L22]. Shared with the OTM4
             sequence, because `seloi4.cob:L4` declares `status fs-reply`.
-        acas_dal_common_data: `01 ACAS-DAL-Common-data.` [copybooks/Test-Data-
-            Flags.cob:L6].
+        acas_dal_common_data: `01 ACAS-DAL-Common-data.`
+            [copybooks/Test-Data-Flags.cob:L6].
         ws_value_record: `01 WS-Value-Record.` [copybooks/wsval.cob:L9].
         ws_analysis_record: `01 WS-Analysis-Record.` [copybooks/wsanal.cob:L9].
         ws_pinvoice_record: `01 WS-PInvoice-Record.` [copybooks/plwspinv2.cob:L10].
@@ -1723,158 +1723,48 @@ def run(
 # so a reader who wants to know whether something was carried across must be
 # able to find the answer here rather than by re-reading 635 lines of COBOL.
 #
-# PROGRAM -> MODULE
-#   purchase/pl055.cbl  ->  acas_posting/programs/pl055_order_proof_extract.py
-#   Boundary: THE WHOLE PROGRAM. Unlike `gl051` and `irs030`, which are migrated
-#   in part, every section of `pl055` is in scope.
+# PROGRAM -> MODULE, LABEL -> FUNCTION, `GO TO` CENSUS
+# ====================================================
+# All three tables live in docs/migration/traceability.md. Locally: the boundary
+# is THE WHOLE PROGRAM - unlike `gl051` and `irs030`, which are partial. Sixteen
+# labels were measured in the procedure division, each with a function, and every
+# function name is SECTION-QUALIFIED because paragraph names are not unique in
+# this codebase. Helper functions carry no COBOL label of their own; they exist
+# because one COBOL statement can need several Python ones - a two-receiver
+# `MOVE`, a subscripted store, a facade call with its status test. Public API is
+# `run` alone: `__all__ = ("run",)`, and every other module-level name is
+# underscore-private.
 #
-# -----------------------------------------------------------------------------
-# 1.  SECTION AND PARAGRAPH -> FUNCTION
+# The 19 `GO TO` sites are classified BY SHAPE at each site, not by matching a
+# label name: 7 class 1 (loop-back -> `continue`), 1 class 2 (forward terminator
+# -> `break` PLUS the post-loop block), 8 class 3 (section or paragraph exit ->
+# `return`) and 3 class 4 (sibling re-dispatch -> a named call plus an explicit
+# transfer). Class 4 is the only class needing a per-site equivalence proof, and
+# each of the three carries one at its site. Two of the class-3 sites live in
+# `dates.zz070_convert_date`, because that section is consolidated across the
+# carriers rather than reproduced per program.
 #
-# Sixteen labels were measured in the procedure division. Agent Action Plan
-# section 0.4.2 lists only the five section heads for this program and omits
-# every paragraph, so the ten paragraphs plus `a01-Eval-Status` are a measured
-# addition. Each label has its own function; the three `main-exit` labels are
-# SECTION-QUALIFIED because paragraph names are not unique in this codebase.
-#
-#   COBOL label                    Line   Section            Python function
-#   ---------------------------- ------ ------------------ ---------------------
-#   mainline section.               246  mainline           _mainline
-#   read-loop.                      306  mainline           _read_loop
-#   header-analysis.                362  mainline           _header_analysis
-#   close-files.                    400  mainline           _close_files
-#   menu-exit.                      434  mainline           _menu_exit
-#   create section.                 441  create             _create
-#   Create-Main.                    444  create             _create__create_main
-#   Create-Anal.                    488  create             _create__create_anal
-#   main-exit.                      501  create             _create__main_exit
-#   store-specials section.         503  store-specials     _store_specials
-#   main-exit.                      536  store-specials     _store_specials__main_exit
-#   extract section.                538  extract            _extract
-#   main-exit.                      597  extract            _extract__main_exit
-#   zz070-Convert-Date section.     599  zz070-Convert-Date _zz070_convert_date
-#   zz070-Exit.                     626  zz070-Convert-Date _zz070_exit
-#   a01-Eval-Status section.        629  a01-Eval-Status    _a01_eval_status
-#
-#   `create section.` [L441] and `Create-Main.` [L444] are two labels three
-#   lines apart, and both are named by real transfers: `perform create` at
-#   [L324] and [L511] names the SECTION, while the backward `go to create-Main`
-#   at [L499] names the PARAGRAPH. They therefore get two functions, the first
-#   of which carries no statements because the COBOL section head carries none.
-#
-#   Helper functions carry no COBOL label of their own. They exist because one
-#   COBOL statement can need several Python ones - a two-receiver `MOVE`, a
-#   group move into a nested dataclass, a byte image of a group item - and each
-#   names in its docstring the statement it serves:
-#     _by_name  _ws  _initialise_oi_header
-#     _initial_pinvoice_view  _pinvoice_attributes  _move_into_va_group
-#     _add_to_pair  _subtract_from_pair  _store_group  _caller_is_xl150
-#     _va_code_image  _pa_code_image  _move_into_va_code  _move_into_pa_code
-#     _group_move_analysis_into_value  _analysis_tail_image
-#     _zero_the_six_value_totals  _ih_supplier_image  _move_into_oi_supplier
-#     _set_oi_net  _fs_reply_message
-#   Types: _CobolFilesModeUnsupportedError  _FacadeContext
-#          _Pl055State.
-#   Public API: `run` alone. `__all__ = ("run",)`, and every other module-level
-#   name begins with an underscore, so a caller cannot reach into the program's
-#   internals - exactly as a COBOL `CALL` cannot.
-#
-# -----------------------------------------------------------------------------
-# 2.  `GO TO` CENSUS - NINETEEN SITES, CLASSIFIED BY SHAPE
-#
-# Classified by shape rather than by matching the Agent Action Plan's label
-# list, which is not exhaustive for this program.
-#
-#   Class 1 - loop-back -> `continue` (7 sites)
-#     L315  if il-analyised            go to read-loop     -> continue
-#     L341  if va-second = space       go to read-loop     -> continue
-#     L347  if FS-Reply = 21           go to read-loop     -> continue
-#     L360  (unconditional, last stmt) go to read-loop     -> continue
-#     L366  if ih-analyised and applied go to read-loop    -> return to caller
-#     L372  after PInvoice-Rewrite     go to read-loop     -> return to caller
-#     L398  (unconditional, last stmt) go to read-loop     -> return to caller
-#     The last three are inside `header-analysis`, which the loop calls; a
-#     `return` there lands on the `continue` at the class-4 site below, so the
-#     effect is the same loop-back.
-#
-#   Class 2 - forward terminator -> `break` PLUS the post-loop block (1 site)
-#     L309  if FS-Reply not = zero     go to close-files   -> break
-#     Agent Action Plan section 0.6.3, verbatim: *"the target label is followed
-#     by real work - closing files, printing totals, rewriting a control record
-#     - so the transformation is `break` PLUS faithful placement of that work
-#     after the loop, not `break` alone. Mis-splitting here would silently drop
-#     end-of-run processing."* Here that work is the FOUR special-total stores
-#     and the FOUR closes at [L403-L423]; dropping it would lose the entire
-#     purchase value-analysis roll-up. And because [L308] leaves on ANY non-zero
-#     status rather than only at end of file, this break is reached in more
-#     circumstances than its sales counterpart - see divergence 4.
-#
-#   Class 3 - section or paragraph exit -> `return` (8 sites)
-#     L457  if va-second = space       go to main-exit  [L501]
-#     L468  after restoring WS-Pa-Code go to main-exit  [L501]
-#     L480  if FS-Reply = 21           go to main-exit  [L501]
-#     L486  (unconditional, last stmt) go to main-exit  [L501]
-#     L528  if FS-Reply = 21           go to main-exit  [L536]
-#     L545  if applied                 go to main-exit  [L597]
-#     L612  if Date-UK                 go to zz070-Exit [L626]
-#     L617  if Date-USA, after swap    go to zz070-Exit [L626]
-#     The last two live in `dates.zz070_convert_date`, because that section is
-#     textually identical in all ten carriers; they are annotated at the call
-#     site so this census is complete for `pl055`.
-#
-#   Class 4 - sibling re-dispatch -> named call plus an explicit transfer
-#             (3 sites, each with its own equivalence proof)
-#     L312  if ih-test = zero  go to header-analysis  [L362]
-#           PROOF: every path through `header-analysis` ends in `go to
-#           read-loop` - at [L366], at [L372] and at [L398], the paragraph's
-#           last statement - so the paragraph has no fall-through and no other
-#           exit. A call followed by an unconditional `continue` visits the same
-#           statements in the same order. Note the sales program reaches its
-#           header block by `exit perform` and FALL-THROUGH
-#           [sales/sl055.cbl:L371, L426]; this one names the target.
-#     L450  if FS-Reply = 21 or = 23  go to Create-Anal  [L488]
-#           PROOF: `Create-Anal` has exactly one exit, the unconditional `go to
-#           create-Main` at its last line [L499], and contains no other
-#           transfer. So the transfer pair is a retry loop and nothing else.
-#     L499  (unconditional, last stmt) go to create-Main  [L444]
-#           A BACKWARD transfer to the section's FIRST paragraph - the only
-#           genuine cross-paragraph retry in the program. PROOF: combined with
-#           the L450 proof above, the pair is exactly `while True:` around
-#           `Create-Main`'s statements with a call to `Create-Anal` followed by
-#           `continue`. Termination is NOT guaranteed by the COBOL and no guard
-#           is added - see AMBIGUITY Q-PL055-2.
-#
-#   Plain `EXIT`, not `EXIT SECTION` (1 site, not a `GO TO`)
-#     L597  main-exit.   exit.        -> `_extract__main_exit`
-#     `EXIT` on its own is a no-op that documents an exit point; `create` [L501]
-#     and `store-specials` [L536] both write `exit section.` instead. Divergence
-#     18, preserved.
-#
-#   `PERFORM ... THRU` DOES NOT OCCUR IN `pl055`. The four in-scope sites
-#   repository-wide are [general/gl072.cbl:L300], [general/gl072.cbl:L304],
-#   [sales/sl100.cbl:L344] and [purchase/pl100.cbl:L336].
-#
-# -----------------------------------------------------------------------------
+
 # 3.  FALL-THROUGH
 #
-#   `mainline` [L246-L304] has no terminating `exit section.`, so control
-#   arrives at `read-loop.` [L306] by falling through. Represented by the call
-#   to `_read_loop` at the end of `_mainline`.
+#  `mainline` [L246-L304] has no terminating `exit section.`, so control
+#  arrives at `read-loop.` [L306] by falling through. Represented by the call
+#  to `_read_loop` at the end of `_mainline`.
 #
-#   `close-files` [L400-L432] falls through into `menu-exit.` [L434] whenever
-#   `Anal-Created` is zero - the conditional `goback` at [L432] is taken only
-#   when an emergency analysis record was written. Represented by the call to
-#   `_menu_exit` after the conditional return in `_close_files`.
+#  `close-files` [L400-L432] falls through into `menu-exit.` [L434] whenever
+#  `Anal-Created` is zero - the conditional `goback` at [L432] is taken only
+#  when an emergency analysis record was written. Represented by the call to
+#  `_menu_exit` after the conditional return in `_close_files`.
 #
-#   `create section.` [L441] falls through into `Create-Main.` [L444], the
-#   section head carrying no statements. Represented by `_create` calling
-#   `_create__create_main`.
+#  `create section.` [L441] falls through into `Create-Main.` [L444], the
+#  section head carrying no statements. Represented by `_create` calling
+#  `_create__create_main`.
 
 #
 # -----------------------------------------------------------------------------
 # 4.  DIVERGENCES FROM `sales/sl055.cbl` - EIGHTEEN, ALL PRESERVED
 #
-# ⛔⛔ `pl055` IS NOT A MIRROR OF `sl055`. The Agent Action Plan describes it as
+# `pl055` IS NOT A MIRROR OF `sl055`. The Agent Action Plan describes it as
 # the "Purchase mirror of `sl055`"; measured against the two sources that is
 # WRONG. The two programs diverge in eighteen places, at least eight of them
 # behaviourally significant and directly visible in a table dump. This module
@@ -1884,154 +1774,154 @@ def run(
 # be both a layering violation and the single most likely way to destroy these
 # eighteen facts.
 #
-#   #   Subject                     sl055                     pl055
+#  #   Subject                     sl055                     pl055
 #  --- --------------------------- ------------------------- --------------------
-#   1   negation-block width        NINE fields               ⭐ FOUR fields
-#       [sales/sl055.cbl:L658-L666] vs [purchase/pl055.cbl:L571-L575]
-#       `oi-net`, `oi-carriage`, `oi-vat`, `oi-c-vat` only. `oi-deduct-amt` IS
-#       moved at [purchase/pl055.cbl:L564] and is NOT negated, where the sales
-#       program negates it first [sales/sl055.cbl:L658]. Diff-visible in every
-#       credit-note row of the OTM4 sequence that `pl060` then consumes.
+#  1   negation-block width        NINE fields               FOUR fields
+#  [sales/sl055.cbl:L658-L666] vs [purchase/pl055.cbl:L571-L575]
+#  `oi-net`, `oi-carriage`, `oi-vat`, `oi-c-vat` only. `oi-deduct-amt` IS
+#  moved at [purchase/pl055.cbl:L564] and is NOT negated, where the sales
+#  program negates it first [sales/sl055.cbl:L658]. Diff-visible in every
+#  credit-note row of the OTM4 sequence that `pl060` then consumes.
 #
-#   2   invoice-total addends       NINE addends              ⭐ FOUR addends
-#       [sales/sl055.cbl:L671-L673] vs [purchase/pl055.cbl:L580]
-#       `ih-net ih-carriage ih-vat ih-c-vat` giving `ws-inv-amt`. Diff-visible
-#       in `SYSTOT-REC` through the two period totals.
+#  2   invoice-total addends       NINE addends              FOUR addends
+#  [sales/sl055.cbl:L671-L673] vs [purchase/pl055.cbl:L580]
+#  `ih-net ih-carriage ih-vat ih-c-vat` giving `ws-inv-amt`. Diff-visible
+#  in `SYSTOT-REC` through the two period totals.
 #
-#   3   main-loop control structure inline PERFORM UNTIL      ⭐ a `GO TO` loop
-#       [sales/sl055.cbl:L365-L424] vs [purchase/pl055.cbl:L306-L360]
-#       The maintainer modernised the sales extract - its own note reads
-#       *"changed 18/01/25 for clean up using inline perform"* - and never came
-#       back to this one. Structural, not behavioural, but it is why the class-1
-#       and class-2 census above has seven and one entries here and none there.
+#  3   main-loop control structure inline PERFORM UNTIL      a `GO TO` loop
+#  [sales/sl055.cbl:L365-L424] vs [purchase/pl055.cbl:L306-L360]
+#  The maintainer modernised the sales extract - its own note reads
+#  *"changed 18/01/25 for clean up using inline perform"* - and never came
+#  back to this one. Structural, not behavioural, but it is why the class-1
+#  and class-2 census above has seven and one entries here and none there.
 #
-#   4   loop-exit condition         `if fs-reply = 10`        ⭐⭐ `not = zero`
-#       [sales/sl055.cbl:L367] vs [purchase/pl055.cbl:L308]
-#       BEHAVIOURAL. The sales program leaves the walk only at end of file;
-#       `pl055` leaves it on ANY non-zero status. In a scenario where a read
-#       fails mid-walk the two programs write different amounts of data.
+#  4   loop-exit condition         `if fs-reply = 10`        `not = zero`
+#  [sales/sl055.cbl:L367] vs [purchase/pl055.cbl:L308]
+#  BEHAVIOURAL. The sales program leaves the walk only at end of file;
+#  `pl055` leaves it on ANY non-zero status. In a scenario where a read
+#  fails mid-walk the two programs write different amounts of data.
 #
-#   5   `INITIALIZE`                `with filler`             ⭐⭐ no `with filler`
-#       [sales/sl055.cbl:L635] vs [purchase/pl055.cbl:L547]
-#       BEHAVIOURAL, and a British spelling into the bargain - `initialise`.
-#       Without `WITH FILLER`, `FILLER` items are not reset and retain their
-#       previous contents, which is directly visible in the written record. See
-#       AMBIGUITY Q-PL055-1 and the note in `_initialise_oi_header`.
+#  5   `INITIALIZE`                `with filler`             no `with filler`
+#  [sales/sl055.cbl:L635] vs [purchase/pl055.cbl:L547]
+#  BEHAVIOURAL, and a British spelling into the bargain - `initialise`.
+#  Without `WITH FILLER`, `FILLER` items are not reset and retain their
+#  previous contents, which is directly visible in the written record. See
+#  AMBIGUITY Q-PL055-1 and the note in `_initialise_oi_header`.
 #
-#   6   case of a STORED flag       upper `"Z"`               ⭐⭐ lower `"z"`
-#       [sales/sl055.cbl:L421, L468] vs [purchase/pl055.cbl:L358, L396]
-#       BEHAVIOURAL AND DIFF-VISIBLE: `il-update` in `PUINV-LINES-REC` and
-#       `ih-update` in `PUINVOICE-REC` are stored columns, and the case differs.
-#       The sales program even documents its own change - *"Analysied flag
-#       changed from z (1/6/13)"* - and `pl055` was left behind. The `88`-level
-#       [copybooks/plwspinv2.cob:L53, L72] accepts both cases, which is why the
-#       program still recognises its own flag and the defect stays invisible at
-#       run time.
+#  6   case of a STORED flag       upper `"Z"`               lower `"z"`
+#  [sales/sl055.cbl:L421, L468] vs [purchase/pl055.cbl:L358, L396]
+#  BEHAVIOURAL AND DIFF-VISIBLE: `il-update` in `PUINV-LINES-REC` and
+#  `ih-update` in `PUINVOICE-REC` are stored columns, and the case differs.
+#  The sales program even documents its own change - *"Analysied flag
+#  changed from z (1/6/13)"* - and `pl055` was left behind. The `88`-level
+#  [copybooks/plwspinv2.cob:L53, L72] accepts both cases, which is why the
+#  program still recognises its own flag and the defect stays invisible at
+#  run time.
 #
-#   7   skip-invoice path           a whole apparatus         ⭐⭐ NONE OF IT
-#       [sales/sl055.cbl:L430, L433-L434, L472-L479] vs nothing in `pl055`
-#       BEHAVIOURAL. No `da030-Skip-Invoice` paragraph, no `Invoice-Start`, no
-#       `set fn-not-less-than`, no proforma filter, no pending/status filter and
-#       no `ws-p-flag`. `header-analysis` [L362] goes straight from [L365-L366]
-#       to `perform extract` [L368], so a purchase proforma IS extracted and IS
-#       counted. See the note at the top of `_header_analysis`.
+#  7   skip-invoice path           a whole apparatus         NONE OF IT
+#  [sales/sl055.cbl:L430, L433-L434, L472-L479] vs nothing in `pl055`
+#  BEHAVIOURAL. No `da030-Skip-Invoice` paragraph, no `Invoice-Start`, no
+#  `set fn-not-less-than`, no proforma filter, no pending/status filter and
+#  no `ws-p-flag`. `header-analysis` [L362] goes straight from [L365-L366]
+#  to `perform extract` [L368], so a purchase proforma IS extracted and IS
+#  counted. See the note at the top of `_header_analysis`.
 #
-#   8   header-analysis sign flips  THREE                     ⭐ TWO
-#       [sales/sl055.cbl:L446, L457, L463] vs [purchase/pl055.cbl:L376, L387]
-#       BEHAVIOURAL for the discount total: the discount block
-#       [purchase/pl055.cbl:L391-L394] has no `if ih-type = 3 multiply -1`.
-#       Mechanically consistent with `03 ih-deduct-amt pic 999v99 comp.`
-#       [copybooks/plwspinv2.cob:L46] being UNSIGNED, which cannot hold a
-#       negative in the first place - recorded as evidence, not as a licence.
+#  8   header-analysis sign flips  THREE                     TWO
+#  [sales/sl055.cbl:L446, L457, L463] vs [purchase/pl055.cbl:L376, L387]
+#  BEHAVIOURAL for the discount total: the discount block
+#  [purchase/pl055.cbl:L391-L394] has no `if ih-type = 3 multiply -1`.
+#  Mechanically consistent with `03 ih-deduct-amt pic 999v99 comp.`
+#  [copybooks/plwspinv2.cob:L46] being UNSIGNED, which cannot hold a
+#  negative in the first place - recorded as evidence, not as a licence.
 #
-#   9   VAT total addends           THREE                     ⭐ TWO
-#       [sales/sl055.cbl:L444] vs [purchase/pl055.cbl:L374]
-#       BEHAVIOURAL. `ih-e-vat` [copybooks/plwspinv2.cob:L38] exists in the
-#       purchase header and is simply not summed.
+#  9   VAT total addends           THREE                     TWO
+#  [sales/sl055.cbl:L444] vs [purchase/pl055.cbl:L374]
+#  BEHAVIOURAL. `ih-e-vat` [copybooks/plwspinv2.cob:L38] exists in the
+#  purchase header and is simply not summed.
 #
-#  10   paragraph naming            `da`/`db`/`dc`/`dd`       ⭐ UNPREFIXED
-#       [sales/sl055.cbl:L305, L364] vs [purchase/pl055.cbl:L306, L362, ...]
-#       Structural. The Python functions carry the COBOL's own unprefixed names,
-#       section-qualified only where a name is not unique.
+#  10   paragraph naming            `da`/`db`/`dc`/`dd`       UNPREFIXED
+#  [sales/sl055.cbl:L305, L364] vs [purchase/pl055.cbl:L306, L362, ...]
+#  Structural. The Python functions carry the COBOL's own unprefixed names,
+#  section-qualified only where a name is not unique.
 #
-#  11   the Value-file open         an existence probe        ⭐ just an open
-#       [sales/sl055.cbl:L319-L324] vs [purchase/pl055.cbl:L261]
-#       BEHAVIOURAL on a missing file: the sales program probes with
-#       `Value-Open-Input`, conditionally closes and re-opens for output, then
-#       unconditionally closes; `pl055` performs `Value-Open` with NO reply test
-#       and does it a SECOND time at [purchase/pl055.cbl:L299]. A failed open is
-#       therefore not noticed until the first read.
+#  11   the Value-file open         an existence probe        just an open
+#  [sales/sl055.cbl:L319-L324] vs [purchase/pl055.cbl:L261]
+#  BEHAVIOURAL on a missing file: the sales program probes with
+#  `Value-Open-Input`, conditionally closes and re-opens for output, then
+#  unconditionally closes; `pl055` performs `Value-Open` with NO reply test
+#  and does it a SECOND time at [purchase/pl055.cbl:L299]. A failed open is
+#  therefore not noticed until the first read.
 #
-#  12   `ih-status-A`               set as well               ⭐ NOT set
-#       [sales/sl055.cbl:L679-L680] vs [purchase/pl055.cbl:L586]
-#       BEHAVIOURAL AND DIFF-VISIBLE: only `ih-status` is stamped. Corroborated
-#       from the copybook side - `ih-status-A` DOES NOT EXIST in
-#       `copybooks/plwspinv2.cob` at all, so there is no field to set. Note the
-#       program's own internal inconsistency: `ih-status` takes UPPER-case `"Z"`
-#       here while `ih-update` and `il-update` take LOWER-case `"z"` at [L396]
-#       and [L358], and the maintainer's own comment at [L586] reads
-#       *"07/01/18 was "z""*.
+#  12   `ih-status-A`               set as well               NOT set
+#  [sales/sl055.cbl:L679-L680] vs [purchase/pl055.cbl:L586]
+#  BEHAVIOURAL AND DIFF-VISIBLE: only `ih-status` is stamped. Corroborated
+#  from the copybook side - `ih-status-A` DOES NOT EXIST in
+#  `copybooks/plwspinv2.cob` at all, so there is no field to set. Note the
+#  program's own internal inconsistency: `ih-status` takes UPPER-case `"Z"`
+#  here while `ih-update` and `il-update` take LOWER-case `"z"` at [L396]
+#  and [L358], and the maintainer's own comment at [L586] reads
+#  *"07/01/18 was "z""*.
 #
-#  13   the write target            `oi-header` (WS)          ⭐ `open-item-record-4`
-#       [sales/sl055.cbl:L681] vs [purchase/pl055.cbl:L587]
-#       COSMETIC IN `pl055`, and the resolution is structural - see STRUCTURAL
-#       NOTES below and AMBIGUITY Q-PL055-5.
+#  13   the write target            `oi-header` (WS)          `open-item-record-4`
+#  [sales/sl055.cbl:L681] vs [purchase/pl055.cbl:L587]
+#  COSMETIC IN `pl055`, and the resolution is structural - see STRUCTURAL
+#  NOTES below and AMBIGUITY Q-PL055-5.
 #
-#  14   `a01-Eval-Status` exit      `a01-exit.`               ⭐ NO exit paragraph
-#       [sales/sl055.cbl:L729] vs [purchase/pl055.cbl:L629-L632]
-#       Structural. The section ends at the `copy` and the following `copy
-#       "Proc-ACAS-FH-Calls.cob"` [L634] terminates it.
+#  14   `a01-Eval-Status` exit      `a01-exit.`               NO exit paragraph
+#  [sales/sl055.cbl:L729] vs [purchase/pl055.cbl:L629-L632]
+#  Structural. The section ends at the `copy` and the following `copy
+#  "Proc-ACAS-FH-Calls.cob"` [L634] terminates it.
 #
-#  15   accumulation verb count     four single-receiver      ⭐ two two-receiver
-#       [sales/sl055.cbl:L391-L395] vs [purchase/pl055.cbl:L330, L332]
-#       `add il-net to va-v-this va-v-year` and `subtract il-net from va-v-this
-#       va-v-year`. Each receiver converts INDEPENDENTLY under its own
-#       description, which is why `_add_to_pair` and `_subtract_from_pair` call
-#       the primitive twice rather than computing once and assigning twice.
+#  15   accumulation verb count     four single-receiver      two two-receiver
+#  [sales/sl055.cbl:L391-L395] vs [purchase/pl055.cbl:L330, L332]
+#  `add il-net to va-v-this va-v-year` and `subtract il-net from va-v-this
+#  va-v-year`. Each receiver converts INDEPENDENTLY under its own
+#  description, which is why `_add_to_pair` and `_subtract_from_pair` call
+#  the primitive twice rather than computing once and assigning twice.
 #
-#  16   `il-product (1:1) = "/"`    present                   ⭐ absent
-#       [sales/sl055.cbl:L376] vs nothing in `pl055`
-#       BEHAVIOURAL. A purchase line whose product code opens with a comment
-#       marker IS analysed and DOES contribute to `VALUEANAL-REC`.
+#  16   `il-product (1:1) = "/"`    present                   absent
+#  [sales/sl055.cbl:L376] vs nothing in `pl055`
+#  BEHAVIOURAL. A purchase line whose product code opens with a comment
+#  marker IS analysed and DOES contribute to `VALUEANAL-REC`.
 #
-#  17   value-analysis groups       `vo` `vp` `zc` `zd`       ⭐ `vi` `vj` `za` `zb`
-#       [sales/sl055.cbl] vs [purchase/pl055.cbl:L404, L408, L412, L416]
-#       and `va-system` set EXPLICITLY by `move "P" to va-system` at
-#       [purchase/pl055.cbl:L403], where the sales program sets it implicitly by
-#       moving a three-character literal such as `"Svo"` into `va-code`.
-#       `pl060`'s deduction analysis later targets the `"zb"` group, the
-#       purchase analogue of `sl060`'s `"Szd"`.
+#  17   value-analysis groups       `vo` `vp` `zc` `zd`       `vi` `vj` `za` `zb`
+#  [sales/sl055.cbl] vs [purchase/pl055.cbl:L404, L408, L412, L416]
+#  and `va-system` set EXPLICITLY by `move "P" to va-system` at
+#  [purchase/pl055.cbl:L403], where the sales program sets it implicitly by
+#  moving a three-character literal such as `"Svo"` into `va-code`.
+#  `pl060`'s deduction analysis later targets the `"zb"` group, the
+#  purchase analogue of `sl060`'s `"Szd"`.
 #
-#  18   `extract` terminator        `exit section.`           ⭐ plain `exit.`
-#       [sales/sl055.cbl] vs [purchase/pl055.cbl:L597]
-#       Cosmetic, and inconsistent within `pl055` itself: `create` [L501] and
-#       `store-specials` [L536] both write `exit section.`
+#  18   `extract` terminator        `exit section.`           plain `exit.`
+#  [sales/sl055.cbl] vs [purchase/pl055.cbl:L597]
+#  Cosmetic, and inconsistent within `pl055` itself: `create` [L501] and
+#  `store-specials` [L536] both write `exit section.`
 #
 # FURTHER DIVERGENCES AND INCONSISTENCIES RECORDED IN THE CODE, not numbered
 # above because they are internal to `pl055` rather than contrasts with `sl055`:
-#   * `= 21` alone at [L323], [L346], [L510] and [L527] against `= 21 or = 23`
-#     at [L449] - the only site testing both. The data-access layer records that
-#     `FS-Reply` 23 is documented but never actually returned, so the `or = 23`
-#     arm is dead in practice; ⛔ it is not removed for that.
-#   * The unguarded backward retry at [L499] - AMBIGUITY Q-PL055-2.
-#   * `Create-Main.` declared mixed-case at [L444] and spelled `create-Main` at
-#     the `GO TO` [L499]. COBOL is case-insensitive; `sl055` has the identical
-#     quirk [sales/sl055.cbl:L530, L585].
-#   * `end-if.` at [L338] - a period AFTER `end-if`, closing a construct whose
-#     `if` at [L334] already ends at [L337]'s period. Harmless.
-#   * The extra `move 1 to File-Key-No` at [L355], between the accumulation and
-#     the `Value-Rewrite`, which the first accumulation block does not have at
-#     the equivalent point.
-#   * `call "sl070"` at [L273] - the SALES program called from a PURCHASE
-#     module, not `pl070`. `sl070` creates the shared Analysis and Value files,
-#     so it is probably deliberate; `sl055` makes the identical call
-#     [sales/sl055.cbl:L332]. ⛔ Not "corrected" to `pl070`.
-#   * The `va-code` left blanked by the [L467-L468] exit of `Create-Main` - a
-#     latent defect recorded at that site, reproduced per R-4.
-#   * Missing terminating periods at [L470] and [L482] where [L452] has one.
-#   * [L547] carries one extra leading space relative to its neighbours.
-#   * `01 ws-Test-Date pic x(10).` [L181], `01 error-code pic 999.` [L227] and
-#     `03 ws-Conv-Date pic x(10).` [L184] are declared and NEVER referenced.
+#  * `= 21` alone at [L323], [L346], [L510] and [L527] against `= 21 or = 23`
+#  at [L449] - the only site testing both. The data-access layer records that
+#  `FS-Reply` 23 is documented but never actually returned, so the `or = 23`
+#  arm is dead in practice; it is not removed for that.
+#  * The unguarded backward retry at [L499] - AMBIGUITY Q-PL055-2.
+#  * `Create-Main.` declared mixed-case at [L444] and spelled `create-Main` at
+#  the `GO TO` [L499]. COBOL is case-insensitive; `sl055` has the identical
+#  quirk [sales/sl055.cbl:L530, L585].
+#  * `end-if.` at [L338] - a period AFTER `end-if`, closing a construct whose
+#  `if` at [L334] already ends at [L337]'s period. Harmless.
+#  * The extra `move 1 to File-Key-No` at [L355], between the accumulation and
+#  the `Value-Rewrite`, which the first accumulation block does not have at
+#  the equivalent point.
+#  * `call "sl070"` at [L273] - the SALES program called from a PURCHASE
+#  module, not `pl070`. `sl070` creates the shared Analysis and Value files,
+#  so it is probably deliberate; `sl055` makes the identical call
+#  [sales/sl055.cbl:L332]. Not "corrected" to `pl070`.
+#  * The `va-code` left blanked by the [L467-L468] exit of `Create-Main` - a
+#  latent defect recorded at that site, reproduced per R-4.
+#  * Missing terminating periods at [L470] and [L482] where [L452] has one.
+#  * [L547] carries one extra leading space relative to its neighbours.
+#  * `01 ws-Test-Date pic x(10).` [L181], `01 error-code pic 999.` [L227] and
+#  `03 ws-Conv-Date pic x(10).` [L184] are declared and NEVER referenced.
 #
 # SHARED LEGACY DEFECTS - PRESENT IDENTICALLY IN `sl055`, SO NOT DIVERGENCES.
 # Both were found by RUNNING this module and tracing its verb order, then
@@ -2039,50 +1929,50 @@ def run(
 # and both are locked in place by the ad-hoc walk, so that a later "tidy-up"
 # fails rather than passing unnoticed.
 #
-#   FINDING A - THE ROLL-UP `Value-Write` AT [L474] IS UNCONDITIONAL AND
-#   UNTESTED, SO IT ISSUES A DUPLICATE INSERT ON ESSENTIALLY EVERY RUN AND
-#   SWALLOWS THE FAILURE.
-#     `Create-Main` blanks the second character of the key [L461], group-moves
-#     the analysis record over the value record [L470], zeroes all six totals
-#     [L471-L472] and then writes UNCONDITIONALLY [L474] - with no `v-exists`
-#     test, unlike the two structurally identical sites at [L334-L337] and
-#     [L519-L522] - and never inspects the reply. When the roll-up row does not
-#     yet exist this is the intended materialisation. When it does, the handler
-#     `ba070_process_write` in `acas_posting.dal.acas013_value` issues
-#     `INSERT INTO `VALUEANAL-REC` SET ...`, hits the duplicate key, sets
-#     `FS-Reply` 22 and LEAVES THE STORED ROW UNTOUCHED - reproducing
-#     [common/valueMT.cbl:L817-L831]. ⛔ The accumulated totals are therefore NOT
-#     lost; this is not a lost update. The two real effects are a duplicate
-#     INSERT - guaranteed by `close-files` [L403-L419], where `vi`/`vj` share the
-#     roll-up `Pv ` and `za`/`zb` share `Pz ` - and a stale `FS-Reply` 22 on
-#     return, inert only because the next read at [L345] or [L526] assigns over
-#     it. Measured for one type-3 header against an empty table: duplicate writes
-#     for `Pv ` and `Pz `, with `Pv ` holding (1, -11.00) and `Pz ` (2, -1.00).
-#     `sl055` writes unconditionally at the same point,
-#     `perform Value-Write.` [sales/sl055.cbl:L560], after the same blank-key
-#     [sales/sl055.cbl:L547] and zeroing sequence, restoring `va-code` only
-#     afterwards [sales/sl055.cbl:L562]. Recorded at its site in
-#     `_create__create_main`. DO NOT FIX - guarding the write would remove a
-#     statement the COBOL issues against the database, and testing the reply
-#     would add a control transfer the COBOL does not have (R-3).
+#  FINDING A - THE ROLL-UP `Value-Write` AT [L474] IS UNCONDITIONAL AND
+#  UNTESTED, SO IT ISSUES A DUPLICATE INSERT ON ESSENTIALLY EVERY RUN AND
+#  SWALLOWS THE FAILURE.
+#  `Create-Main` blanks the second character of the key [L461], group-moves
+#  the analysis record over the value record [L470], zeroes all six totals
+#  [L471-L472] and then writes UNCONDITIONALLY [L474] - with no `v-exists`
+#  test, unlike the two structurally identical sites at [L334-L337] and
+#  [L519-L522] - and never inspects the reply. When the roll-up row does not
+#  yet exist this is the intended materialisation. When it does, the handler
+#  `ba070_process_write` in `acas_posting.dal.acas013_value` issues
+#  `INSERT INTO `VALUEANAL-REC` SET ...`, hits the duplicate key, sets
+#  `FS-Reply` 22 and LEAVES THE STORED ROW UNTOUCHED - reproducing
+#  [common/valueMT.cbl:L817-L831]. The accumulated totals are therefore NOT
+#  lost; this is not a lost update. The two real effects are a duplicate
+#  INSERT - guaranteed by `close-files` [L403-L419], where `vi`/`vj` share the
+#  roll-up `Pv ` and `za`/`zb` share `Pz ` - and a stale `FS-Reply` 22 on
+#  return, inert only because the next read at [L345] or [L526] assigns over
+#  it. Measured for one type-3 header against an empty table: duplicate writes
+#  for `Pv ` and `Pz `, with `Pv ` holding (1, -11.00) and `Pz ` (2, -1.00).
+#  `sl055` writes unconditionally at the same point,
+#  `perform Value-Write.` [sales/sl055.cbl:L560], after the same blank-key
+#  [sales/sl055.cbl:L547] and zeroing sequence, restoring `va-code` only
+#  afterwards [sales/sl055.cbl:L562]. Recorded at its site in
+#  `_create__create_main`. DO NOT FIX - guarding the write would remove a
+#  statement the COBOL issues against the database, and testing the reply
+#  would add a control transfer the COBOL does not have (R-3).
 #
-#   FINDING B - A SINGLE-CHARACTER ANALYSIS GROUP IS ACCUMULATED BUT NEVER
-#   STAMPED, SO IT IS RE-ANALYSED AND DOUBLE-COUNTED ON EVERY LATER RUN.
-#     `if va-second = space go to read-loop.` [L340-L341] correctly skips the
-#     inapplicable second half of the twice-over accumulation, but because it
-#     targets `read-loop` rather than the loop tail it ALSO skips
-#     `move "z" to il-update` [L358] and `perform PInvoice-Rewrite` [L359]. The
-#     line has already been committed into `VALUEANAL-REC` by [L327-L337], yet
-#     `il-analyised` [copybooks/plwspinv2.cob:L69] still reads FALSE, so the
-#     next run accumulates the same line again. Measured: for `il-pa = "v "` the
-#     value rows are written and rewritten and `PInvoice-Rewrite` is never called
-#     at all. `sl055` has the identical ordering -
-#     `if va-second = space exit perform cycle` [sales/sl055.cbl:L402-L404]
-#     before `move "Z" to il-update` [sales/sl055.cbl:L421] and
-#     `perform Invoice-Rewrite` [sales/sl055.cbl:L422]. Only the STAMPED case
-#     differs between the programs, and that is DIVERGENCE 6. Recorded at its
-#     site in `_read_loop`. DO NOT FIX - issuing the stamp would set a stored
-#     `PUINV-LINES-REC` column the COBOL leaves blank.
+#  FINDING B - A SINGLE-CHARACTER ANALYSIS GROUP IS ACCUMULATED BUT NEVER
+#  STAMPED, SO IT IS RE-ANALYSED AND DOUBLE-COUNTED ON EVERY LATER RUN.
+#  `if va-second = space go to read-loop.` [L340-L341] correctly skips the
+#  inapplicable second half of the twice-over accumulation, but because it
+#  targets `read-loop` rather than the loop tail it ALSO skips
+#  `move "z" to il-update` [L358] and `perform PInvoice-Rewrite` [L359]. The
+#  line has already been committed into `VALUEANAL-REC` by [L327-L337], yet
+#  `il-analyised` [copybooks/plwspinv2.cob:L69] still reads FALSE, so the
+#  next run accumulates the same line again. Measured: for `il-pa = "v "` the
+#  value rows are written and rewritten and `PInvoice-Rewrite` is never called
+#  at all. `sl055` has the identical ordering -
+#  `if va-second = space exit perform cycle` [sales/sl055.cbl:L402-L404]
+#  before `move "Z" to il-update` [sales/sl055.cbl:L421] and
+#  `perform Invoice-Rewrite` [sales/sl055.cbl:L422]. Only the STAMPED case
+#  differs between the programs, and that is DIVERGENCE 6. Recorded at its
+#  site in `_read_loop`. DO NOT FIX - issuing the stamp would set a stored
+#  `PUINV-LINES-REC` column the COBOL leaves blank.
 #
 # THE TWICE-OVER BLOCKS ARE NOT FACTORED, DELIBERATELY. [L327-L337] against
 # [L349-L356], and [L514-L522] against [L530-L534], each look like one helper
@@ -2098,140 +1988,140 @@ def run(
 #
 # 5.1  THE OTM4 WORK FILE, AND WHY IT LIVES IN `acas_posting.workfiles`
 #
-#   `open-item-file-4` is the purchase temp extract: `copy "seloi4.cob"` [L109]
-#   carries its author's own note *"Temp file only for i/p to pl060"*, `copy
-#   "fdoi4.cob"` [L120] gives it `01 open-item-record-4 pic x(113)`, and
-#   `file-28` is `"openitm4.dat"` [copybooks/file28.cob:L1]. It reaches NO
-#   schema table and appears in NO table dump; `pl060` consumes it
-#   [purchase/pl060.cbl:L421-L425].
+#  `open-item-file-4` is the purchase temp extract: `copy "seloi4.cob"` [L109]
+#  carries its author's own note *"Temp file only for i/p to pl060"*, `copy
+#  "fdoi4.cob"` [L120] gives it `01 open-item-record-4 pic x(113)`, and
+#  `file-28` is `"openitm4.dat"` [copybooks/file28.cob:L1]. It reaches NO
+#  schema table and appears in NO table dump; `pl060` consumes it
+#  [purchase/pl060.cbl:L421-L425].
 #
-#   It is modelled the way the Agent Action Plan models the General Ledger work
-#   files - an ordered in-process sequence with the same record layout and the
-#   same ordering guarantee - by the SHARED `acas_posting.workfiles`
-#   `OpenItemWorkFile`, which serves both open-item files and both sides of each:
-#     `open extend`  [L301]  -> positions at the end, existing records survive
-#     `open output`  [L304]  -> truncates, which is what makes the fallback a
-#                               create
-#     `write`        [L587]  -> appends, in insertion order, a SNAPSHOT
-#     `close`        [L423]  -> a no-op on the records; they are the deliverable
-#     `read_next`            -> what `pl060` uses [purchase/pl060.cbl:L425]
-#   IT WAS ONCE DECLARED HERE, module-privately, because `OpenMode` had no
-#   `EXTEND` member. The observation was true and the conclusion was wrong: a work
-#   file the producer and the consumer declare separately is not a channel, so
-#   `pl060` could never read what this program wrote. `OpenMode.EXTEND` is now
-#   published and the file is declared ONCE. `run` returns the carrier so the
-#   route can hand it to `pl060`, which is what naming the same `assign file-28`
-#   does in COBOL.
+#  It is modelled the way the Agent Action Plan models the General Ledger work
+#  files - an ordered in-process sequence with the same record layout and the
+#  same ordering guarantee - by the SHARED `acas_posting.workfiles`
+#  `OpenItemWorkFile`, which serves both open-item files and both sides of each:
+#  `open extend`  [L301]  -> positions at the end, existing records survive
+#  `open output`  [L304]  -> truncates, which is what makes the fallback a
+#  create
+#  `write`        [L587]  -> appends, in insertion order, a SNAPSHOT
+#  `close`        [L423]  -> a no-op on the records; they are the deliverable
+#  `read_next`            -> what `pl060` uses [purchase/pl060.cbl:L425]
+#  IT WAS ONCE DECLARED HERE, module-privately, because `OpenMode` had no
+#  `EXTEND` member. The observation was true and the conclusion was wrong: a work
+#  file the producer and the consumer declare separately is not a channel, so
+#  `pl060` could never read what this program wrote. `OpenMode.EXTEND` is now
+#  published and the file is declared ONCE. `run` returns the carrier so the
+#  route can hand it to `pl060`, which is what naming the same `assign file-28`
+#  does in COBOL.
 #
-#   WHY `OpenItemWorkFile` RATHER THAN `workfiles.LineSequentialWorkFile`. The
-#   General Ledger class has no `open_extend`; its `OpenMode` vocabulary is
-#   `CLOSED`/`INPUT`/`OUTPUT`, and its only route into a writable state is
-#   `open_output`, which truncates. Its record list, open mode, read pointer and
-#   status field are all private, so adding an extend by reaching into them would
-#   be a layering violation dressed up as reuse. The answer was to publish a
-#   SECOND carrier beside it, in the same module and over the same status
-#   vocabulary - `OpenItemWorkFile`, whose `OpenMode.EXTEND` and raw file statuses
-#   `FS_REPLY_OPEN_NOT_FOUND` and `FS_REPLY_WRITE_NOT_OPEN` are declared there
-#   once. No parallel vocabulary is invented beside the published one.
+#  WHY `OpenItemWorkFile` RATHER THAN `workfiles.LineSequentialWorkFile`. The
+#  General Ledger class has no `open_extend`; its `OpenMode` vocabulary is
+#  `CLOSED`/`INPUT`/`OUTPUT`, and its only route into a writable state is
+#  `open_output`, which truncates. Its record list, open mode, read pointer and
+#  status field are all private, so adding an extend by reaching into them would
+#  be a layering violation dressed up as reuse. The answer was to publish a
+#  SECOND carrier beside it, in the same module and over the same status
+#  vocabulary - `OpenItemWorkFile`, whose `OpenMode.EXTEND` and raw file statuses
+#  `FS_REPLY_OPEN_NOT_FOUND` and `FS_REPLY_WRITE_NOT_OPEN` are declared there
+#  once. No parallel vocabulary is invented beside the published one.
 #
-#   AND NO NEW FILE WAS CREATED. `acas_posting/programs/` is closed at exactly
-#   thirteen files - `__init__.py` plus the twelve program modules - per Agent
-#   Action Plan sections 0.4.1.2 and 0.4.4, and `acas_posting/workfiles.py` is
-#   an existing individually-named in-scope module (sections 0.3.1, 0.4.1.6).
+#  AND NO NEW FILE WAS CREATED. `acas_posting/programs/` is closed at exactly
+#  thirteen files - `__init__.py` plus the twelve program modules - per Agent
+#  Action Plan sections 0.4.1.2 and 0.4.4, and `acas_posting/workfiles.py` is
+#  an existing individually-named in-scope module (sections 0.3.1, 0.4.1.6).
 #
-#   The status field is shared with the data-access layer DELIBERATELY:
-#   `seloi4.cob:L4` declares `status fs-reply`, and `Fs-Reply`
-#   [copybooks/wsfnctn.cob:L25] is the very field every facade verb also writes.
-#   That sharing is what lets [L302] and [L588] test `fs-reply` straight after a
-#   native `OPEN` and `WRITE`.
+#  The status field is shared with the data-access layer DELIBERATELY:
+#  `seloi4.cob:L4` declares `status fs-reply`, and `Fs-Reply`
+#  [copybooks/wsfnctn.cob:L25] is the very field every facade verb also writes.
+#  That sharing is what lets [L302] and [L588] test `fs-reply` straight after a
+#  native `OPEN` and `WRITE`.
 #
 # 5.2  `OI-Header` AGAINST `open-item-record-4` - DIVERGENCE 13, RESOLVED
 #
-#   [L547] initialises `OI-Header` and [L587] writes `open-item-record-4`, which
-#   reads at first glance as a write of an area nothing filled. It is not. In
-#   `pl055` BOTH `copy "fdoi4.cob"` [L120] and `copy "plwsoi.cob"` [L121] sit
-#   inside the FILE SECTION under one FD, so `01 open-item-record-4 pic x(113)`
-#   and `01 OI-Header` are two `01` DESCRIPTIONS OF THE SAME 113-BYTE RECORD
-#   AREA - a second `01` under an FD is an alternative description, not a second
-#   buffer - and `OI-Header`'s fields sum to exactly 113. The divergence is
-#   therefore COSMETIC here, and `OpenItemWorkFile` models the one area.
+#  [L547] initialises `OI-Header` and [L587] writes `open-item-record-4`, which
+#  reads at first glance as a write of an area nothing filled. It is not. In
+#  `pl055` BOTH `copy "fdoi4.cob"` [L120] and `copy "plwsoi.cob"` [L121] sit
+#  inside the FILE SECTION under one FD, so `01 open-item-record-4 pic x(113)`
+#  and `01 OI-Header` are two `01` DESCRIPTIONS OF THE SAME 113-BYTE RECORD
+#  AREA - a second `01` under an FD is an alternative description, not a second
+#  buffer - and `OI-Header`'s fields sum to exactly 113. The divergence is
+#  therefore COSMETIC here, and `OpenItemWorkFile` models the one area.
 #
-#   `pl060` proves the contrast: it copies `plwsoi.cob` into WORKING-STORAGE
-#   [purchase/pl060.cbl:L152] and consequently needs an explicit `move
-#   open-item-record-4 to oi-header` [purchase/pl060.cbl:L428] that `pl055` has
-#   no counterpart to. What remains for the oracle is recorded as AMBIGUITY
-#   Q-PL055-5.
+#  `pl060` proves the contrast: it copies `plwsoi.cob` into WORKING-STORAGE
+#  [purchase/pl060.cbl:L152] and consequently needs an explicit `move
+#  open-item-record-4 to oi-header` [purchase/pl060.cbl:L428] that `pl055` has
+#  no counterpart to. What remains for the oracle is recorded as AMBIGUITY
+#  Q-PL055-5.
 #
 # 5.3  THE `OI-Header` LAYOUT IS PUBLISHED, NOT DECLARED HERE
 #
-#   `copybooks/plwsoi.cob` has no `records/` module of its own in Agent Action
-#   Plan section 0.3.1's list, which suggested a module-private declaration would
-#   be needed. It is not: `acas_posting/records/otm5.py` already publishes
-#   `OiHeader` with its subordinate groups `OiKey`, `OiBatch`, `OiCustomer`,
-#   `OiSupplier` and `Filler1`, and `otm5.descriptors_of()` supplies a descriptor
-#   for every field WITH a dictionary key. So every field of the record this
-#   module writes is traceable to a dictionary entry, and no layout was invented.
-#   (`field.descriptors_for_copybook_record("OI-Header")` is NOT used: it is
-#   ambiguous, returning 69 descriptors that mix the purchase `PUITM5-REC` and
-#   the sales `SAITM3-REC` views of the same copybook name.)
+#  `copybooks/plwsoi.cob` has no `records/` module of its own in Agent Action
+#  Plan section 0.3.1's list, which suggested a module-private declaration would
+#  be needed. It is not: `acas_posting/records/otm5.py` already publishes
+#  `OiHeader` with its subordinate groups `OiKey`, `OiBatch`, `OiCustomer`,
+#  `OiSupplier` and `Filler1`, and `otm5.descriptors_of()` supplies a descriptor
+#  for every field WITH a dictionary key. So every field of the record this
+#  module writes is traceable to a dictionary entry, and no layout was invented.
+#  (`field.descriptors_for_copybook_record("OI-Header")` is NOT used: it is
+#  ambiguous, returning 69 descriptors that mix the purchase `PUITM5-REC` and
+#  the sales `SAITM3-REC` views of the same copybook name.)
 #
 # 5.4  `WITH FILLER` HAS NO ELEMENTARY TARGET IN THIS COPYBOOK
 #
-#   `copybooks/plwsoi.cob` contains exactly one `FILLER`, the GROUP item at
-#   [copybooks/plwsoi.cob:L41] whose ten subordinates are ALL named. So the
-#   omitted `WITH FILLER` at [L547] cannot be observed by watching a named field
-#   - it can only be observed in bytes the group description does not name, and
-#   whether any such bytes exist is the oracle question Q-PL055-1.
-#   `_initialise_oi_header` therefore initialises the seventeen top-level fields
-#   under their own descriptors and NOTHING ELSE, which is the closest faithful
-#   reading of `initialise` without `WITH FILLER`.
+#  `copybooks/plwsoi.cob` contains exactly one `FILLER`, the GROUP item at
+#  [copybooks/plwsoi.cob:L41] whose ten subordinates are ALL named. So the
+#  omitted `WITH FILLER` at [L547] cannot be observed by watching a named field
+#  - it can only be observed in bytes the group description does not name, and
+#  whether any such bytes exist is the oracle question Q-PL055-1.
+#  `_initialise_oi_header` therefore initialises the seventeen top-level fields
+#  under their own descriptors and NOTHING ELSE, which is the closest faithful
+#  reading of `initialise` without `WITH FILLER`.
 #
 # 5.5  FIELD DESCRIPTORS AND THEIR PROVENANCE
 #
-#   Every descriptor this module uses is either looked up from the generated
-#   dictionary - `_VAL`, `_ANL`, `_S4`, the five `_OI*` dicts, and
-#   `pinvoice_descriptor_for` - and therefore carries a `dictionary_key`, or is
-#   built by `_ws()` from the program's OWN working storage and therefore carries
-#   a `source_locator` of the form `purchase/pl055.cbl:L<n>`. FOURTEEN `_D_*`
-#   descriptors are the second kind: `Anal-Created` [L163], `save-code` [L164],
-#   `ws-inv-amt` [L165], `work-2` [L166], `work-3` [L167], the four money totals
-#   [L168-L171], the four counts [L172-L175] and `v-exists` [L176]. A fifteenth
-#   `_ws()` descriptor, `Exception-Msg` [L126], is built inline in
-#   `_a01_eval_status` rather than at module scope because nothing else needs it.
-#   `_D_TERM_CODE` is the FIRST kind - it comes from
-#   `calling_data_descriptor_for("ws_term_code")`, so its provenance is the
-#   dictionary entry for `WS-Term-Code` [copybooks/wscall.cob:L10] rather than a
-#   locator written here.
+#  Every descriptor this module uses is either looked up from the generated
+#  dictionary - `_VAL`, `_ANL`, `_S4`, the five `_OI*` dicts, and
+#  `pinvoice_descriptor_for` - and therefore carries a `dictionary_key`, or is
+#  built by `_ws()` from the program's OWN working storage and therefore carries
+#  a `source_locator` of the form `purchase/pl055.cbl:L<n>`. FOURTEEN `_D_*`
+#  descriptors are the second kind: `Anal-Created` [L163], `save-code` [L164],
+#  `ws-inv-amt` [L165], `work-2` [L166], `work-3` [L167], the four money totals
+#  [L168-L171], the four counts [L172-L175] and `v-exists` [L176]. A fifteenth
+#  `_ws()` descriptor, `Exception-Msg` [L126], is built inline in
+#  `_a01_eval_status` rather than at module scope because nothing else needs it.
+#  `_D_TERM_CODE` is the FIRST kind - it comes from
+#  `calling_data_descriptor_for("ws_term_code")`, so its provenance is the
+#  dictionary entry for `WS-Term-Code` [copybooks/wscall.cob:L10] rather than a
+#  locator written here.
 #
-#   VERIFIED BY INTROSPECTION, not by reading: 97 `FieldDescriptor` objects are
-#   reachable from this module's namespace; 83 carry a `dictionary_key`, 14 carry
-#   a `source_locator` matching `^[A-Za-z0-9_./-]+:L[0-9]+(-L[0-9]+)?$`, and NONE
-#   carries neither. No descriptor is constructed without one or the other.
+#  VERIFIED BY INTROSPECTION, not by reading: 97 `FieldDescriptor` objects are
+#  reachable from this module's namespace; 83 carry a `dictionary_key`, 14 carry
+#  a `source_locator` matching `^[A-Za-z0-9_./-]+:L[0-9]+(-L[0-9]+)?$`, and NONE
+#  carries neither. No descriptor is constructed without one or the other.
 #
 # 5.6  THE FACADE IS INJECTED, NOT IMPORTED AT MODULE SCOPE
 #
-#   `pl055` copies `Proc-ACAS-FH-Calls.cob` [L634], so it uses the ENTITY-named
-#   verb vocabulary and TESTS THE REPLY INLINE - that copybook has no
-#   per-handler error-check paragraph at all, unlike the IRS convention. The
-#   thirteen distinct verbs this module calls are `PInvoice-Open` [L298],
-#   `PInvoice-Read-Next` [L307], `PInvoice-Rewrite` [L359, L371, L397],
-#   `PInvoice-Close` [L420], `Value-Open` [L261, L299], `Value-Read-Indexed`
-#   [L322, L345, L509, L526], `Value-Write` [L335, L474, L520], `Value-Rewrite`
-#   [L337, L356, L522, L534], `Value-Close` [L421], `Analysis-Open` [L300],
-#   `Analysis-Read-Indexed` [L448, L465, L478], `Analysis-Write` [L494, L497]
-#   and `Analysis-Close` [L422]. ⛔ No handler-named alias
-#   (`acas013_*`/`acas015_*`/`acas026_*`) is called.
+#  `pl055` copies `Proc-ACAS-FH-Calls.cob` [L634], so it uses the ENTITY-named
+#  verb vocabulary and TESTS THE REPLY INLINE - that copybook has no
+#  per-handler error-check paragraph at all, unlike the IRS convention. The
+#  thirteen distinct verbs this module calls are `PInvoice-Open` [L298],
+#  `PInvoice-Read-Next` [L307], `PInvoice-Rewrite` [L359, L371, L397],
+#  `PInvoice-Close` [L420], `Value-Open` [L261, L299], `Value-Read-Indexed`
+#  [L322, L345, L509, L526], `Value-Write` [L335, L474, L520], `Value-Rewrite`
+#  [L337, L356, L522, L534], `Value-Close` [L421], `Analysis-Open` [L300],
+#  `Analysis-Read-Indexed` [L448, L465, L478], `Analysis-Write` [L494, L497]
+#  and `Analysis-Close` [L422]. No handler-named alias
+#  (`acas013_*`/`acas015_*`/`acas026_*`) is called.
 #
-#   `acas_posting/dal/facade.py` is generated in this same batch and does not
-#   exist while this module is written, so it is resolved lazily inside `run`
-#   and can be substituted by a caller. See AMBIGUITY Q-PL055-7 and Q-PL055-8.
+#  `acas_posting/dal/facade.py` is generated in this same batch and does not
+#  exist while this module is written, so it is resolved lazily inside `run`
+#  and can be substituted by a caller. See AMBIGUITY Q-PL055-7 and Q-PL055-8.
 #
-#   ALL TEN `move 1 to File-Key-No` STATEMENTS ARE PRESERVED IN PLACE - [L291],
-#   [L321], [L344], [L355], [L447], [L464], [L477], [L493], [L508] and [L525] -
-#   and so are BOTH `Value-Open` calls, neither with a reply test. They look
-#   cacheable and are not cached: Agent Action Plan section 0.8.4, verbatim,
-#   *"Any performance work is therefore out of scope by construction, not merely
-#   unrequested."*
+#  ALL TEN `move 1 to File-Key-No` STATEMENTS ARE PRESERVED IN PLACE - [L291],
+#  [L321], [L344], [L355], [L447], [L464], [L477], [L493], [L508] and [L525] -
+#  and so are BOTH `Value-Open` calls, neither with a reply test. They look
+#  cacheable and are not cached: Agent Action Plan section 0.8.4, verbatim,
+#  *"Any performance work is therefore out of scope by construction, not merely
+#  unrequested."*
 #
 # -----------------------------------------------------------------------------
 # 6.  CITATION CORRECTIONS - FOUR MEASURED FACTS THAT OVERTURN THE PLAN
@@ -2240,61 +2130,61 @@ def run(
 # would otherwise be misled. Each was measured against the frozen source.
 #
 # 6.1  `pl055` DOES HAVE A FACADE STUB BLOCK.
-#   The plan states this program has "NO facade stub block (unlike gl072
-#   L135-L155 and gl080 L194-L214)". It does: `01
-#   Dummies-4-Unused-ACAS-FH-Calls.` at [purchase/pl055.cbl:L139-L159], carrying
-#   the comment *"Call blk at zz080-ACAS-Calls"*. What makes it look absent is
-#   that FOUR of its members are COMMENTED OUT - `System-Record-4` [L142],
-#   `WS-Value-Record` [L150], `WS-Analysis-Record` [L152] and
-#   `WS-PInvoice-Record` [L158] - precisely because those four are real records
-#   in this program rather than stubs. Like `gl072`'s block it maps to NOTHING
-#   in Python, which has no linker to satisfy; recorded here as a
-#   representation-only omission so that a reader diffing the two files does not
-#   conclude something was lost.
+#  The plan states this program has "NO facade stub block (unlike gl072
+#  L135-L155 and gl080 L194-L214)". It does: `01
+#  Dummies-4-Unused-ACAS-FH-Calls.` at [purchase/pl055.cbl:L139-L159], carrying
+#  the comment *"Call blk at zz080-ACAS-Calls"*. What makes it look absent is
+#  that FOUR of its members are COMMENTED OUT - `System-Record-4` [L142],
+#  `WS-Value-Record` [L150], `WS-Analysis-Record` [L152] and
+#  `WS-PInvoice-Record` [L158] - precisely because those four are real records
+#  in this program rather than stubs. Like `gl072`'s block it maps to NOTHING
+#  in Python, which has no linker to satisfy; recorded here as a
+#  representation-only omission so that a reader diffing the two files does not
+#  conclude something was lost.
 #
 # 6.2  THE `extract` SECTION COMMENT PROMISES A FILTER THAT DOES NOT EXIST.
-#   [purchase/pl055.cbl:L541-L542] reads *"only Process header records, drop
-#   pro-formas"* and *"ignore records which have already been copied"*. Only the
-#   second is implemented, by `if applied` [L544]. There is NO `ih-type = 4`
-#   proforma test anywhere in `pl055` - see divergence 7. The comment is the
-#   maintainer's intent; the code is the specification.
+#  [purchase/pl055.cbl:L541-L542] reads *"only Process header records, drop
+#  pro-formas"* and *"ignore records which have already been copied"*. Only the
+#  second is implemented, by `if applied` [L544]. There is NO `ih-type = 4`
+#  proforma test anywhere in `pl055` - see divergence 7. The comment is the
+#  maintainer's intent; the code is the specification.
 #
-# 6.3  ⛔ THE PURCHASE TERM-CODE GATE EXISTS, AND THE PLAN'S CONCLUSION IS WRONG.
-#   The plan observes correctly that `load08.` [purchase/purchase.cbl:L752-L762]
-#   has NO inline gate - its would-be gate lines are commented out at
-#   [purchase/purchase.cbl:L755-L758] - and concludes that `move 8 to
-#   WS-Term-Code` [purchase/pl055.cbl:L286] "has no gating effect on `pl060`".
-#   MEASURED, IT DOES. The shared dispatch paragraph `load000.`
-#   [purchase/purchase.cbl:L691] gates for every loader:
-#       if       ws-term-code < 8   perform overrewrite.   [L702-L703]
-#       if       ws-term-code > 7   go to overrewrite.     [L704-L705]
-#   With term code 8, [L702] is false and [L704] is TRUE, so `go to overrewrite`
-#   transfers OUT of the `perform load000.` range at
-#   [purchase/purchase.cbl:L760]. A `GO TO` escaping a `PERFORM` range never
-#   returns, so control reaches `overrewrite.` [purchase/purchase.cbl:L621],
-#   falls through to `overclose.` [L652] and `goback.` [L653], and
-#   `purchase.cbl` TERMINATES. `pl060` IS NEVER CALLED.
-#   The three gate predicates must still NOT be unified - General tests `= 5`
-#   [general/general.cbl:L810-L811], Sales `not = zero`
-#   [sales/sales.cbl:L759-L768] and Purchase `> 7`
-#   [purchase/purchase.cbl:L704].
-#   SECOND-ORDER CONSEQUENCE, AND IT SHAPES THIS MODULE. `overrewrite.`
-#   [purchase/purchase.cbl:L621-L651] is what PERSISTS the period totals: it
-#   moves `WS-System-Record-4` into `System-Record` and rewrites under
-#   `File-Key-No` 4, for both the RDB and the Cobol parameter file. So the two
-#   period-total adds at [purchase/pl055.cbl:L582, L584] are written to
-#   `SYSTOT-REC` BY THE MENU, not by `pl055`. This module therefore mutates
-#   `system_record_4` in place and does NOT persist it - persisting it here
-#   would double-write on the normal path and would write on the abort path,
-#   where the COBOL does not.
+# 6.3  THE PURCHASE TERM-CODE GATE EXISTS, AND THE PLAN'S CONCLUSION IS WRONG.
+#  The plan observes correctly that `load08.` [purchase/purchase.cbl:L752-L762]
+#  has NO inline gate - its would-be gate lines are commented out at
+#  [purchase/purchase.cbl:L755-L758] - and concludes that `move 8 to
+#  WS-Term-Code` [purchase/pl055.cbl:L286] "has no gating effect on `pl060`".
+#  MEASURED, IT DOES. The shared dispatch paragraph `load000.`
+#  [purchase/purchase.cbl:L691] gates for every loader:
+#  if       ws-term-code < 8   perform overrewrite.   [L702-L703]
+#  if       ws-term-code > 7   go to overrewrite.     [L704-L705]
+#  With term code 8, [L702] is false and [L704] is TRUE, so `go to overrewrite`
+#  transfers OUT of the `perform load000.` range at
+#  [purchase/purchase.cbl:L760]. A `GO TO` escaping a `PERFORM` range never
+#  returns, so control reaches `overrewrite.` [purchase/purchase.cbl:L621],
+#  falls through to `overclose.` [L652] and `goback.` [L653], and
+#  `purchase.cbl` TERMINATES. `pl060` IS NEVER CALLED.
+#  The three gate predicates must still NOT be unified - General tests `= 5`
+#  [general/general.cbl:L810-L811], Sales `not = zero`
+#  [sales/sales.cbl:L759-L768] and Purchase `> 7`
+#  [purchase/purchase.cbl:L704].
+#  SECOND-ORDER CONSEQUENCE, AND IT SHAPES THIS MODULE. `overrewrite.`
+#  [purchase/purchase.cbl:L621-L651] is what PERSISTS the period totals: it
+#  moves `WS-System-Record-4` into `System-Record` and rewrites under
+#  `File-Key-No` 4, for both the RDB and the Cobol parameter file. So the two
+#  period-total adds at [purchase/pl055.cbl:L582, L584] are written to
+#  `SYSTOT-REC` BY THE MENU, not by `pl055`. This module therefore mutates
+#  `system_record_4` in place and does NOT persist it - persisting it here
+#  would double-write on the normal path and would write on the abort path,
+#  where the COBOL does not.
 #
 # 6.4  `copybooks/wscall.cob`'s SEVEN-FIELD SPAN IS L6-L14, NOT L6-L13.
-#   The plan cites [copybooks/wscall.cob:L6-L13]; measured, the seventh field
-#   `WS-CD-Args pic x(13)` is at [copybooks/wscall.cob:L14]. The published
-#   `records/calling_data.py` already records the correct span. Also note
-#   [copybooks/wscall.cob:L4], *"14/11/25 vbc - 1.02 - Chg WS-Term-Code from 9
-#   to 99"* - `WS-Term-Code` is `pic 99` [copybooks/wscall.cob:L10], which is
-#   why the value 8 is stored through a descriptor rather than assigned raw.
+#  The plan cites [copybooks/wscall.cob:L6-L13]; measured, the seventh field
+#  `WS-CD-Args pic x(13)` is at [copybooks/wscall.cob:L14]. The published
+#  `records/calling_data.py` already records the correct span. Also note
+#  [copybooks/wscall.cob:L4], *"14/11/25 vbc - 1.02 - Chg WS-Term-Code from 9
+#  to 99"* - `WS-Term-Code` is `pic 99` [copybooks/wscall.cob:L10], which is
+#  why the value 8 is stored through a descriptor rather than assigned raw.
 
 #
 # -----------------------------------------------------------------------------
@@ -2305,107 +2195,107 @@ def run(
 # conclude something was lost."* This is the complete list for `pl055`.
 #
 # 7.1  THE `if FS-Cobol-Files-Used` BLOCK BODY  [L266-L290]
-#   The GATE is reproduced, data-driven through the condition name over `07
-#   File-System-Used pic 9.` [copybooks/wssystem.cob:L112], so the decision is
-#   made at run time exactly as the COBOL makes it. The BODY is not: it needs
-#   `call "CBL_CHECK_FILE_EXIST"` [L267-L269, L278-L279] and `call "sl070"`
-#   [L273-L277]. `sl070` is not one of the twelve in-scope programs - Agent
-#   Action Plan section 0.2.2 - so there is no Python module to call, and rule
-#   R-1 forbids invoking the COBOL. Inside the gate the module therefore RAISES
-#   `_CobolFilesModeUnsupportedError`, an explicitly typed error whose message
-#   states all four facts. ⛔ NOT silently skipped and NOT stubbed as a no-op: a
-#   silent skip would make a genuinely divergent configuration look like a clean
-#   run. The observable consequences of the COBOL's own abort path ARE preserved
-#   - `move 8 to WS-Term-Code` [L286] happens BEFORE the raise, and the `goback`
-#   [L287] is the raise itself. See AMBIGUITY Q-PL055-6.
+#  The GATE is reproduced, data-driven through the condition name over `07
+#  File-System-Used pic 9.` [copybooks/wssystem.cob:L112], so the decision is
+#  made at run time exactly as the COBOL makes it. The BODY is not: it needs
+#  `call "CBL_CHECK_FILE_EXIST"` [L267-L269, L278-L279] and `call "sl070"`
+#  [L273-L277]. `sl070` is not one of the twelve in-scope programs - Agent
+#  Action Plan section 0.2.2 - so there is no Python module to call, and rule
+#  R-1 forbids invoking the COBOL. Inside the gate the module therefore RAISES
+#  `_CobolFilesModeUnsupportedError`, an explicitly typed error whose message
+#  states all four facts. NOT silently skipped and NOT stubbed as a no-op: a
+#  silent skip would make a genuinely divergent configuration look like a clean
+#  run. The observable consequences of the COBOL's own abort path ARE preserved
+#  - `move 8 to WS-Term-Code` [L286] happens BEFORE the raise, and the `goback`
+#  [L287] is the raise itself. See AMBIGUITY Q-PL055-6.
 #
 # 7.2  `display ... at` OUTPUT -> LOG RECORDS, BUT NOT ALL OF IT
-#   Agent Action Plan section 0.3.4 converts a DIAGNOSTIC display, and requires
-#   that it *"must not alter control flow and must not appear in any table
-#   dump."* Neither does any record this module emits. What is converted:
-#   [L293-L294] the program banner and the "Invoice Post Extract" title;
-#   [L426-L427] the two emergency-analysis warnings; [L590-L592] the OTM4
-#   write-failure message, its file status and the decoded status name.
+#  Agent Action Plan section 0.3.4 converts a DIAGNOSTIC display, and requires
+#  that it *"must not alter control flow and must not appear in any table
+#  dump."* Neither does any record this module emits. What is converted:
+#  [L293-L294] the program banner and the "Invoice Post Extract" title;
+#  [L426-L427] the two emergency-analysis warnings; [L590-L592] the OTM4
+#  write-failure message, its file status and the decoded status name.
 #
-#   WHAT IS NOT CONVERTED, AND WHY:
-#     * [L282], [L429], [L593] - `PL003`/`PL006`, pure acknowledgement prompts.
-#       Dropped with the `accept` each introduces; see 7.3 and the note on the
-#       `01 Error-Messages.` block.
-#     * [L281] - `PL203`, inside the unreachable `sl070` block; see the same note.
-#     * [L296] - `display ws-date`. The posting date is business data, which the
-#       safe-event schema in `acas_posting/dal/status.py` excludes from a record
-#       (CWE-532); it is a command-line INPUT and `clock.py` pins it.
-#     * Every `move ... to print-record`/`l?-...` field. Report formatting is out
-#       of scope per section 0.2.2, and section 0.3.4 converts a DISPLAY, not a
-#       report line.
-#     * The five paragraph exits [L434, L501, L536, L597, L626]. Each carries the
-#       `exit`/`goback` and nothing else, so there is nothing to convert; an
-#       "entered/left" trace would be output the compiled program never produced,
-#       which R-4 forbids inventing.
+#  WHAT IS NOT CONVERTED, AND WHY:
+#  * [L282], [L429], [L593] - `PL003`/`PL006`, pure acknowledgement prompts.
+#  Dropped with the `accept` each introduces; see 7.3 and the note on the
+#  `01 Error-Messages.` block.
+#  * [L281] - `PL203`, inside the unreachable `sl070` block; see the same note.
+#  * [L296] - `display ws-date`. The posting date is business data, which the
+#  safe-event schema in `acas_posting/dal/status.py` excludes from a record
+#  (CWE-532); it is a command-line INPUT and `clock.py` pins it.
+#  * Every `move ... to print-record`/`l?-...` field. Report formatting is out
+#  of scope per section 0.2.2, and section 0.3.4 converts a DISPLAY, not a
+#  report line.
+#  * The five paragraph exits [L434, L501, L536, L597, L626]. Each carries the
+#  `exit`/`goback` and nothing else, so there is nothing to convert; an
+#  "entered/left" trace would be output the compiled program never produced,
+#  which R-4 forbids inventing.
 #
 # 7.3  `accept WS-Reply`  [L284], [L430], [L594]  -> DROPPED
-#   Acknowledgement pauses whose only effect is to block a terminal. BUT the
-#   `if WS-Caller not = "xl150"` branches around [L284] and [L430] ARE
-#   PRESERVED - that test is the codebase's own unattended-mode check, and when
-#   the out-of-scope `xl150` driver is the caller the COBOL skips the accept
-#   itself. And both `goback`s ARE PRESERVED: [L287] and [L432].
+#  Acknowledgement pauses whose only effect is to block a terminal. BUT the
+#  `if WS-Caller not = "xl150"` branches around [L284] and [L430] ARE
+#  PRESERVED - that test is the codebase's own unattended-mode check, and when
+#  the out-of-scope `xl150` driver is the caller the COBOL skips the accept
+#  itself. And both `goback`s ARE PRESERVED: [L287] and [L432].
 #
 # 7.4  TERMINAL GEOMETRY  [L249-L255]
-#   `accept ws-env-lines from lines`, the companion `from columns`, and the
-#   arithmetic `subtract 1 from ws-lines giving ws-23-lines`. A TERMINAL-SIZE
-#   READ, NOT A CLOCK READ - it feeds only screen positioning, which is out of
-#   scope. `ws-lines`, `ws-23-lines` and `ws-env-lines` are consequently not
-#   modelled. Rule R-6 is unaffected: `purchase/pl055.cbl` contains ZERO clock
-#   reads and the date arrives entirely through the `to-day` operand.
+#  `accept ws-env-lines from lines`, the companion `from columns`, and the
+#  arithmetic `subtract 1 from ws-lines giving ws-23-lines`. A TERMINAL-SIZE
+#  READ, NOT A CLOCK READ - it feeds only screen positioning, which is out of
+#  scope. `ws-lines`, `ws-23-lines` and `ws-env-lines` are consequently not
+#  modelled. Rule R-6 is unaffected: `purchase/pl055.cbl` contains ZERO clock
+#  reads and the date arrives entirely through the `to-day` operand.
 #
 # 7.5  REPRESENTATION-ONLY DECLARATIONS
-#   `set ENVIRONMENT` [L257-L258] and `copy "envdiv.cob"` [L102] - environment
-#   configuration with no database effect. The facade stub block
-#   [L139-L159] - see citation correction 6.1. `01 File-Info` [L205-L213] - eight
-#   filesystem-metadata fields that only `CBL_CHECK_FILE_EXIST` populates and
-#   that `pl055` never reads, testing `return-code` instead; NOT a clock read.
-#   `01 ws-Test-Date pic x(10).` [L181], `01 error-code pic 999.` [L227] and
-#   `03 ws-Conv-Date pic x(10).` [L184] - declared and never referenced anywhere
-#   in the program. `03 ws-swap` [L183] IS modelled, inside
-#   `dates.zz070_convert_date`, because [L614] and [L616] use it.
+#  `set ENVIRONMENT` [L257-L258] and `copy "envdiv.cob"` [L102] - environment
+#  configuration with no database effect. The facade stub block
+#  [L139-L159] - see citation correction 6.1. `01 File-Info` [L205-L213] - eight
+#  filesystem-metadata fields that only `CBL_CHECK_FILE_EXIST` populates and
+#  that `pl055` never reads, testing `return-code` instead; NOT a clock read.
+#  `01 ws-Test-Date pic x(10).` [L181], `01 error-code pic 999.` [L227] and
+#  `03 ws-Conv-Date pic x(10).` [L184] - declared and never referenced anywhere
+#  in the program. `03 ws-swap` [L183] IS modelled, inside
+#  `dates.zz070_convert_date`, because [L614] and [L616] use it.
 #
 # 7.6  MESSAGE LITERALS
-#   `prog-name` [L125] survives as the log prefix. `PL003` [L217], `PL006`
-#   [L218], `PL201` [L220], `PL202` [L221], `PL203` [L222] and `PL204` [L223]
-#   survive only insofar as they become log text; `PL204` is in fact never
-#   referenced by any statement.
+#  `prog-name` [L125] survives as the log prefix. `PL003` [L217], `PL006`
+#  [L218], `PL201` [L220], `PL202` [L221], `PL203` [L222] and `PL204` [L223]
+#  survive only insofar as they become log text; `PL204` is in fact never
+#  referenced by any statement.
 #
 # 7.7  THE OTM4 SEQUENCE IS IN-MEMORY ONLY
-#   It reaches no schema table and appears in no table dump - see STRUCTURAL
-#   NOTES 5.1. Its `OI-Header` layout is the PUBLISHED `records/otm5.OiHeader`,
-#   so nothing was declared privately after all; only the FILE was.
+#  It reaches no schema table and appears in no table dump - see STRUCTURAL
+#  NOTES 5.1. Its `OI-Header` layout is the PUBLISHED `records/otm5.OiHeader`,
+#  so nothing was declared privately after all; only the FILE was.
 #
 # 7.8  THINGS `pl055` SIMPLY DOES NOT HAVE, STATED EXPLICITLY
-#   * NO print file and NO `call "SYSTEM" using Print-Report` - unlike `sl060`,
-#     `sl100`, `pl060` and `pl100`. Nothing is spooled to the operating system.
-#   * NO `PInvoice-Start` and NO `set fn-` of any kind - so no cursor
-#     repositioning to emulate. `sl055` has `Invoice-Start`
-#     [sales/sl055.cbl:L476] preceded by `set fn-not-less-than to true`
-#     [sales/sl055.cbl:L475].
-#   * NO skip-invoice paragraph, NO proforma filter, NO pending filter and NO
-#     `ws-p-flag` - divergence 7. `pl055` has ONE conditional `goback` [L432]
-#     where `sl055` has two [sales/sl055.cbl:L509, L518].
-#   * ZERO IRS fan-out tests. It is an extract program, like `sl055`; the
-#     `IRS-Used`/`IRS-Instead` switch [copybooks/wssystem.cob:L179-L181] is
-#     tested by `sl060`/`pl060`, not here.
-#   * ZERO `ROUNDED` stores and ZERO `DIVIDE` statements. Every store in this
-#     program truncates toward zero. The five `ROUNDED` sites in the whole
-#     migration are [general/gl051.cbl:L791], [general/gl051.cbl:L796],
-#     [general/gl080.cbl:L328], [irs/irs030.cbl:L1551] and
-#     [irs/irs030.cbl:L1562] - none of them here.
-#   * ZERO `ON SIZE ERROR`, ZERO `REMAINDER`, ZERO relation-condition
-#     arithmetic.
-#   * NO `zz050`, NO `zz060` and NO `maps03`/`maps04` wrapper. `pl055` does not
-#     `copy "wsmaps03.cob"` and never calls the date module, so anomaly A-22 -
-#     the wrapper named after the copybook with its exit named after the called
-#     program, [general/gl070.cbl:L603-L609] - CANNOT ARISE HERE. Only `zz070`
-#     exists.
-#   * NO `PERFORM ... THRU`.
+#  * NO print file and NO `call "SYSTEM" using Print-Report` - unlike `sl060`,
+#  `sl100`, `pl060` and `pl100`. Nothing is spooled to the operating system.
+#  * NO `PInvoice-Start` and NO `set fn-` of any kind - so no cursor
+#  repositioning to emulate. `sl055` has `Invoice-Start`
+#  [sales/sl055.cbl:L476] preceded by `set fn-not-less-than to true`
+#  [sales/sl055.cbl:L475].
+#  * NO skip-invoice paragraph, NO proforma filter, NO pending filter and NO
+#  `ws-p-flag` - divergence 7. `pl055` has ONE conditional `goback` [L432]
+#  where `sl055` has two [sales/sl055.cbl:L509, L518].
+#  * ZERO IRS fan-out tests. It is an extract program, like `sl055`; the
+#  `IRS-Used`/`IRS-Instead` switch [copybooks/wssystem.cob:L179-L181] is
+#  tested by `sl060`/`pl060`, not here.
+#  * ZERO `ROUNDED` stores and ZERO `DIVIDE` statements. Every store in this
+#  program truncates toward zero. The five `ROUNDED` sites in the whole
+#  migration are [general/gl051.cbl:L791], [general/gl051.cbl:L796],
+#  [general/gl080.cbl:L328], [irs/irs030.cbl:L1551] and
+#  [irs/irs030.cbl:L1562] - none of them here.
+#  * ZERO `ON SIZE ERROR`, ZERO `REMAINDER`, ZERO relation-condition
+#  arithmetic.
+#  * NO `zz050`, NO `zz060` and NO `maps03`/`maps04` wrapper. `pl055` does not
+#  `copy "wsmaps03.cob"` and never calls the date module, so anomaly A-22 -
+#  the wrapper named after the copybook with its exit named after the called
+#  program, [general/gl070.cbl:L603-L609] - CANNOT ARISE HERE. Only `zz070`
+#  exists.
+#  * NO `PERFORM ... THRU`.
 #
 # -----------------------------------------------------------------------------
 # 8.  AMBIGUITY REGISTER - EIGHT QUESTIONS FOR THE ORACLE
@@ -2415,52 +2305,52 @@ def run(
 # the source; each is marked `AMBIGUITY Q-PL055-<n>` at the site it affects and
 # belongs in `docs/migration/ambiguity-resolutions.md`.
 #
-#   Q-PL055-1  The observable effect of the missing `WITH FILLER` at [L547].
-#              Site: `_initialise_oi_header`.  Divergence 5.
-#   Q-PL055-2  Whether the unguarded `Create-Anal` -> `Create-Main` retry
-#              [L499] can fail to terminate, and what the compiled program does
-#              when `Analysis-Write` [L494] fails.
-#              Site: `_create__create_main`.
-#   Q-PL055-3  The negated `oi-` extract row against the UNNEGATED `ih-` sum:
-#              for a credit note the OTM4 row carries negatives [L571-L575]
-#              while `ws-inv-amt` [L580] holds the positive sum that [L584]
-#              adds into `pl-credit-notes-this-month`.
-#              Site: `_extract`.  Divergences 1 and 2.
-#   Q-PL055-4  The disposition of a failed `write open-item-record-4` [L588]:
-#              the diagnostic transfers no control, so the sequence is left
-#              short with no retry and no abort, and the partial state stands.
-#              Site: `_extract`.
-#   Q-PL055-5  The `OI-Header` / `open-item-record-4` storage relationship and
-#              whether the object handoff to `pl060` can differ from the
-#              113-byte handoff the COBOL performs.
-#              Site: `acas_posting.workfiles.OpenItemWorkFile`.
-#              Divergence 13.  See 5.2 above.
-#   Q-PL055-6  Whether any mandated scenario seeds `File-System-Used` to zero
-#              and therefore reaches the `FS-Cobol-Files-Used` branch at all.
-#              Site: `_mainline`.  See 7.1 above.
-#   Q-PL055-7  The exact shape of the single context argument the generated
-#              facade verbs take.
-#              Site: `_FacadeContext`.
-#   Q-PL055-8  Which purchase-invoice record shape the `acas026` handler wants -
-#              the flat `plwspinv2.cob` views this program copies, or the nested
-#              `plwspinv.cob` `PInvoiceHeader` the published handler dispatches
-#              on.
-#              Site: `_FacadeContext`.
+#  Q-PL055-1  The observable effect of the missing `WITH FILLER` at [L547].
+#  Site: `_initialise_oi_header`.  Divergence 5.
+#  Q-PL055-2  Whether the unguarded `Create-Anal` -> `Create-Main` retry
+#  [L499] can fail to terminate, and what the compiled program does
+#  when `Analysis-Write` [L494] fails.
+#  Site: `_create__create_main`.
+#  Q-PL055-3  The negated `oi-` extract row against the UNNEGATED `ih-` sum:
+#  for a credit note the OTM4 row carries negatives [L571-L575]
+#  while `ws-inv-amt` [L580] holds the positive sum that [L584]
+#  adds into `pl-credit-notes-this-month`.
+#  Site: `_extract`.  Divergences 1 and 2.
+#  Q-PL055-4  The disposition of a failed `write open-item-record-4` [L588]:
+#  the diagnostic transfers no control, so the sequence is left
+#  short with no retry and no abort, and the partial state stands.
+#  Site: `_extract`.
+#  Q-PL055-5  The `OI-Header` / `open-item-record-4` storage relationship and
+#  whether the object handoff to `pl060` can differ from the
+#  113-byte handoff the COBOL performs.
+#  Site: `acas_posting.workfiles.OpenItemWorkFile`.
+#  Divergence 13.  See 5.2 above.
+#  Q-PL055-6  Whether any mandated scenario seeds `File-System-Used` to zero
+#  and therefore reaches the `FS-Cobol-Files-Used` branch at all.
+#  Site: `_mainline`.  See 7.1 above.
+#  Q-PL055-7  The exact shape of the single context argument the generated
+#  facade verbs take.
+#  Site: `_FacadeContext`.
+#  Q-PL055-8  Which purchase-invoice record shape the `acas026` handler wants -
+#  the flat `plwspinv2.cob` views this program copies, or the nested
+#  `plwspinv.cob` `PInvoiceHeader` the published handler dispatches
+#  on.
+#  Site: `_FacadeContext`.
 #
 # TWO FURTHER QUESTIONS AROSE DURING VALIDATION AND ARE NOT IN THE REGISTER
 # BECAUSE THEY WERE ANSWERED, NOT DEFERRED. Both concern what a COBOL `WRITE`
 # against an existing key does, and both were settled by reading the handler
 # rather than by reasoning about the COBOL:
-#   * `Value-Write` [L474] against an existing roll-up key. `ba070_process_write`
-#     in `acas_posting.dal.acas013_value` issues `INSERT INTO `VALUEANAL-REC`
-#     SET ...`, and on `1062`/`1022`/SQLSTATE `23000` sets `FS-Reply` 22 and
-#     LEAVES THE STORED ROW UNTOUCHED - reproducing
-#     [common/valueMT.cbl:L817-L831]. So the roll-up totals survive; the defect
-#     is an unchecked duplicate INSERT and a stale status, NOT a lost update.
-#     Recorded as FINDING A in section 4.
-#   * `Analysis-Write` [L494, L497] against an existing analysis key. Same shape
-#     in `acas_posting.dal.acas015_analysis`; the reply is never tested at either
-#     call site, so a duplicate is silently tolerated.
+#  * `Value-Write` [L474] against an existing roll-up key. `ba070_process_write`
+#  in `acas_posting.dal.acas013_value` issues `INSERT INTO `VALUEANAL-REC`
+#  SET ...`, and on `1062`/`1022`/SQLSTATE `23000` sets `FS-Reply` 22 and
+#  LEAVES THE STORED ROW UNTOUCHED - reproducing
+#  [common/valueMT.cbl:L817-L831]. So the roll-up totals survive; the defect
+#  is an unchecked duplicate INSERT and a stale status, NOT a lost update.
+#  Recorded as FINDING A in section 4.
+#  * `Analysis-Write` [L494, L497] against an existing analysis key. Same shape
+#  in `acas_posting.dal.acas015_analysis`; the reply is never tested at either
+#  call site, so a duplicate is silently tolerated.
 # They are minuted here because the FIRST reading of the source suggested a lost
 # update, and the wrong reading is easy to arrive at independently. It is worth a
 # reader's while to know it was checked against the handler and rejected.
@@ -2468,19 +2358,19 @@ def run(
 # -----------------------------------------------------------------------------
 # 9.  WHAT THIS PROGRAM WRITES - THREE TABLES AND ONE WORK SEQUENCE
 #
-#   VALUEANAL-REC     `Value-Write` [L335, L474, L520] and `Value-Rewrite`
-#                     [L337, L356, L522, L534]
-#   ANALYSIS-REC      `Analysis-Write` [L494, L497] - the emergency records
-#   PUINVOICE-REC     `PInvoice-Rewrite` [L371, L397], stamping `ih-update` and
-#                     `ih-status`
-#   PUINV-LINES-REC   `PInvoice-Rewrite` [L359], stamping `il-update`
-#   SYSTOT-REC        indirectly, through the two period-total adds at [L582]
-#                     and [L584] - sites 6 and 7 of the nine period-total writes
-#                     that Agent Action Plan section 0.6.4 calls *"the sole
-#                     writers"* of that record. Persisted by the menu, not here;
-#                     see citation correction 6.3.
-#   SYSTEM-REC        indirectly, through the `Date-Form` default at [L610].
-#   open-item-file-4  the OTM4 work sequence, which `pl060` consumes and which
-#                     reaches no table.
+#  VALUEANAL-REC     `Value-Write` [L335, L474, L520] and `Value-Rewrite`
+#  [L337, L356, L522, L534]
+#  ANALYSIS-REC      `Analysis-Write` [L494, L497] - the emergency records
+#  PUINVOICE-REC     `PInvoice-Rewrite` [L371, L397], stamping `ih-update` and
+#  `ih-status`
+#  PUINV-LINES-REC   `PInvoice-Rewrite` [L359], stamping `il-update`
+#  SYSTOT-REC        indirectly, through the two period-total adds at [L582]
+#  and [L584] - sites 6 and 7 of the nine period-total writes
+#  that Agent Action Plan section 0.6.4 calls *"the sole
+#  writers"* of that record. Persisted by the menu, not here;
+#  see citation correction 6.3.
+#  SYSTEM-REC        indirectly, through the `Date-Form` default at [L610].
+#  open-item-file-4  the OTM4 work sequence, which `pl060` consumes and which
+#  reaches no table.
 #
 # --- end traceability -------------------------------------------------------

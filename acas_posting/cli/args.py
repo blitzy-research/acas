@@ -47,8 +47,8 @@ lossy mapping.
 THE THREE LINKAGE SHAPES - THREE ARGUMENT SHAPES, NOT ONE
 None of the twelve migrated programs is a main program; each is a `CALL`ed
 sub-program with a fixed parameter list, and there are exactly three shapes. The
-carriers below hold them in COBOL parameter order so a reviewer can diff the
-argument lists side by side.
+carriers below hold them in COBOL parameter order, so the two argument lists can
+be read side by side.
 
   Shape 1 - General Ledger, FOUR parameters -> `GlLinkage`
       ws-calling-data, system-record, to-day, file-defs
@@ -114,7 +114,7 @@ to the migrated `maps04`. That program judges it with its own six-part test
 on rejection falls through leaving its output field untouched
 [common/maps04.cbl:L146], [common/maps04.cbl:L154] - so the caller pre-zero at
 [copybooks/Proc-ACAS-Mapser-RDB.cob:L78] is what makes a rejected date come back
-as `Run-Date = 0` rather than as stale content. That is anomaly 16, reproduced
+as `Run-Date = 0` rather than as stale content. That is anomaly A-16, reproduced
 rather than corrected: "31/02/2025" yields a pinned pair whose `run_date` is 0
 and DOES NOT RAISE, because validating here would add a validation the COBOL
 does not perform (R-3) and correct legacy behaviour (R-4).
@@ -145,12 +145,12 @@ it the job of binding "the system records"; the seven entry-point modules of thi
 package construct their linkage through here.
 
 There is no intra-package sibling import to reason about: the RDBMS connection
-contract that used to occupy a module of its own is SECTION 0 below (finding
-M-01), and `acas_posting/cli/__init__.py` imports no submodule at all, so there
-is no cycle to create.
+contract is SECTION 0 of this module, and `acas_posting/cli/__init__.py` imports
+no submodule at all, so there is no cycle to create.
 
-`acas_posting.cobol.move` belongs on that list, and an earlier draft of this file
-put it on the other one. The import table of section 0.4.3 bars
+`acas_posting.cobol.move` belongs on the permitted list and not the forbidden one,
+which is worth stating because the grouping looks arbitrary. The import table of
+section 0.4.3 bars
 `acas_posting/cli/` from the data-access handlers - "Must not import:
 `dal.acas*`" - and from nothing else in the semantics package, while section
 0.1.2, transformation rule 11, requires a `MOVE` between unlike pictures to go
@@ -188,13 +188,13 @@ THE SIX CONNECTION FIELDS ARE THE ONE EXCEPTION TO "DECLARED DEFAULTS"
 =====================================================================
 `RDBMS-DB-Name`, `RDBMS-User`, `RDBMS-Passwd`, `RDBMS-Port`, `RDBMS-Host` and
 `RDBMS-Socket` [copybooks/wssystem.cob:L137-L144] are filled from the deployment
-contract by `acas_posting/cli/`py`, which reproduces the frozen
+contract by SECTION 0 of this module, which reproduces the frozen
 `common/acas-get-params.cbl` and the six `MOVE` statements every load program
 performs after calling it [common/glbatchLD.cbl:L262-L267].
 
 They cannot be left at their declared defaults, because those defaults are the
-copybook's own placeholders - the literal user `"ACAS-User"` and the literal
-password `"PaSsWoRd"` - and `SYSTEM-REC` is the ONLY carrier by which a
+copybook's own placeholders - the shipped placeholder user and password
+[copybooks/wssystem.cob:L138-L139] - and `SYSTEM-REC` is the ONLY carrier by which a
 connection parameter reaches the data-access layer
 [common/acas008.cbl:L558-L563]. A run built purely at declared defaults would
 therefore not reach the database the operator provisioned.
@@ -244,8 +244,7 @@ still cannot.
 
 THE RULES THAT BIND THIS FILE
 =============================
-`review_rules` reports NO user rules document for this project, so the binding
-constraints are the Agent Action Plan's own six (section 0.7.2):
+The binding constraints are the Agent Action Plan's own six (section 0.7.2):
 
 R-1 No COBOL at run time. Nothing here spawns a child process, loads a foreign
     library or reaches the GnuCOBOL toolchain, and there is no import path from
@@ -355,7 +354,7 @@ __all__: Final[tuple[str, ...]] = (
     "SlPlLinkage",
     "IrsLinkage",
     #  The IRS route's carrier for the ONE `zz090` pass: the three `CALL`
-    #  operands plus the snapshot that pass captured (finding F-01).
+    #  operands plus the snapshot that pass captured.
     "IrsRouteBinding",
     # ---- the menu shell's own WORKING-STORAGE and its acas000 traffic ------
     "MenuState",
@@ -392,14 +391,13 @@ __all__: Final[tuple[str, ...]] = (
     "resolve_clock",
     # ---- the one configuration-failure contract, shared by every route ----
     #  A RE-EXPORT and one helper over it, not a second implementation:
-    #  `cli/`py` owns the class and its frozen return codes, and this
+    #  SECTION 0 owns the class and its frozen return codes, and this
     #  layer republishes both so that all seven entry points and the package
     #  router can catch the EXACT type without importing the adapter (finding
-    #  CLI-09).
     "RdbmsParamError",
     "report_configuration_failure",
     # ---- the menus' database-affecting record paragraphs ------------------
-    #  ⭐ MN-08: ONE NAME, ONE ENTRY. This group used to re-list seven names that
+    #  MN-08: ONE NAME, ONE ENTRY. This group used to re-list seven names that
     #  the two groups above already publish -- the four `acas000` key numbers and
     #  the store selector digit, and `aa010_get_system_recs`, `overrewrite` and
     #  `zz095_restore_irs_system_data` -- because the same paragraph belongs to
@@ -447,14 +445,13 @@ __all__: Final[tuple[str, ...]] = (
     "redact_boundary_error",
     "require_stated",
     "stated_explicitly",
-    # ---- THE RDBMS CONNECTION CONTRACT, folded in from what used to be a
-    #      separate cli/ module (finding M-01). Agent Action Plan section 0.4.1.1
-    #      gives this module the job of binding the linkage blocks from argv and
-    #      the environment, and the six RDBMS-* fields of SYSTEM-REC are part of
-    #      that binding: they are the ONLY carrier by which a connection parameter
-    #      reaches the handlers [common/acas008.cbl:L558-L563]. So the reader of
-    #      `common/acas-get-params.cbl` lives here, beside the linkage binders it
-    #      serves, and every name it published is published here unchanged.
+    # ---- THE RDBMS CONNECTION CONTRACT. Agent Action Plan section 0.4.1.1
+    #  gives this module the job of binding the linkage blocks from argv and
+    #  the environment, and the six RDBMS-* fields of SYSTEM-REC are part of
+    #  that binding: they are the ONLY carrier by which a connection parameter
+    #  reaches the handlers [common/acas008.cbl:L558-L563]. So the reader of
+    #  `common/acas-get-params.cbl` lives here, beside the linkage binders it
+    #  serves, and every name it published is published here unchanged.
     "RDB_RETURN_OK",
     "RDB_RETURN_MALFORMED",
     "RDB_RETURN_NO_SOURCE",
@@ -484,7 +481,7 @@ __all__: Final[tuple[str, ...]] = (
     "audit_deployment_contract",
 )
 
-#  ⭐ MN-08: the public contract holds each name exactly once, checked here rather
+#  MN-08: the public contract holds each name exactly once, checked here rather
 #  than trusted. `__all__` is grouped by theme for a reader, and several paragraphs
 #  belong to more than one theme, so a duplicate is the natural mistake to make while
 #  editing it -- and it is invisible, because a duplicate in `__all__` raises nothing
@@ -499,10 +496,7 @@ assert len(set(__all__)) == len(__all__), (
 
 ######################################################################################
 #  SECTION 0  -  THE RDBMS CONNECTION CONTRACT: `acas-get-params` reimplemented
-#                natively, folded in from the separate module it used to occupy
-#                (finding M-01).
-#
-#  The RDBMS connection contract: `acas-get-params` reimplemented natively.
+#  natively.
 #
 #  Puts real connection parameters into the six `RDBMS-*` fields of `SYSTEM-REC`
 #  before that record reaches a program module, so the data-access layer connects
@@ -540,12 +534,12 @@ RDB_RETURN_OK: Final[int] = 0
 #: "1 = No valid keyword terminator i.e., = or :" - the frozen code for "the
 #: source is present but malformed" [common/acas-get-params.cbl:L200-L203].
 #:
-#: ⭐ M-06. NOT RAISED BY THIS TRANSPORT, and recorded so the frozen set is
-#: complete rather than because anything reaches it. It used to be raised for a
-#: blank, spaced or over-long VALUE; the frozen program refuses none of those - it
-#: transforms them - so `_as_the_frozen_reader_would` now reproduces the
-#: transformation and the refusals moved to `audit_deployment_contract`, which
-#: warns instead. The condition this code actually names, a keyword terminator that
+#: NOT RAISED BY THIS TRANSPORT, and recorded so the frozen set is
+#: complete rather than because anything reaches it. A blank, spaced or over-long
+#: VALUE is not refused: the frozen program transforms such a value rather than
+#: rejecting it, so `_as_the_frozen_reader_would` reproduces the transformation
+#: and `audit_deployment_contract` warns instead. The condition this code names, a
+#: keyword terminator that
 #: is neither "=" nor ":", cannot arise over an environment mapping at all: the
 #: mapping is already split into names and values, so there is no terminator to
 #: get wrong.
@@ -573,8 +567,8 @@ class _ParamSpec:
             space-padded to exactly this many characters, which is what `MOVE` into an
             alphanumeric item does.
         required: Whether a blank value is a fault. Five are required; the socket is
-            legitimately blank, which means "connect over TCP", and `harness/docker-
-            compose.yml` sets `ACAS_DB_SOCKET: ""` explicitly.
+            legitimately blank, which means "connect over TCP", and
+            `harness/docker-compose.yml` sets `ACAS_DB_SOCKET: ""` explicitly.
         locator: Where the receiving item is declared, for traceability.
     """
 
@@ -631,8 +625,8 @@ ACAS_PARAM_CONTRACT: Final[tuple[_ParamSpec, ...]] = (
         variable="ACAS_DB_PORT",
         attribute="rdbms_port",
         # FOUR, not five. `LK-Port-Number pic x(4)` [common/acas-get-params.cbl:L158] on
-        # the fallback path, and `01 Ws-Mysql-Port-Number pic x(4)` [copybooks/mysql-
-        # variables.cpy:L91] on every bridge path [common/glpostingMT.cbl:L410-L413].
+        # the fallback path, and `01 Ws-Mysql-Port-Number pic x(4)`
+        # [copybooks/mysql-variables.cpy:L91] on every bridge path [common/glpostingMT.cbl:L410-L413].
         carrier_width=4,
         stored_width=5,
         required=True,
@@ -662,7 +656,7 @@ class RdbmsParamError(ValueError):
             [common/acas-get-params.cbl:L37-L42]. In practice always
             `RDB_RETURN_NO_SOURCE` (8) - the contract is absent entirely -
             because that is the frozen program's only refusal this transport can
-            express (M-06). `RDB_RETURN_MALFORMED` (1) is published on the class
+            express. `RDB_RETURN_MALFORMED` (1) is published on the class
             so the frozen set is complete and so a caller may compare against it,
             but nothing in this module raises it: a present-but-awkward value is
             transformed as the frozen reader transforms it, and
@@ -672,7 +666,7 @@ class RdbmsParamError(ValueError):
     def __init__(self, return_code: int, message: str) -> None:
         """Build the error with its frozen return code.
 
-        THE ARGUMENTS ARE CHECKED, and the reason is finding SEC-01 rather than
+        THE ARGUMENTS ARE CHECKED, and the reason is a security boundary rather than
         defensiveness for its own sake. Two raise sites in this module once passed
         `(message, return_code)`, and nothing noticed: `return_code` became the
         formatted text, `str(self)` became the integer, and the wrong-typed status
@@ -697,7 +691,7 @@ class RdbmsParamError(ValueError):
                 f"order; it was given ({type(return_code).__name__}, "
                 f"{type(message).__name__}). Swap the arguments. A reversed pair "
                 "makes `return_code` a string, which a caller then returns as a "
-                "process exit status (finding SEC-01). Neither value is echoed "
+                "process exit status. Neither value is echoed "
                 "here: the message may name a variable read from the same "
                 "transport as ACAS_DB_PASSWORD."
             )
@@ -756,11 +750,10 @@ def _pic_x(text: str, width: int) -> str:
     Plan's import table (section 0.4.3) does not permit a `cli` module to reach
     the `cobol` package.
 
-    ⭐ M-06. TRUNCATION IS NOW REACHABLE, and this note used to say the opposite:
-    "the caller has already refused anything longer than its carrier". That
-    refusal has been removed as an added validation, so an over-long value now
-    arrives here and is truncated - which is what the frozen `MOVE` does, and the
-    reason this helper was written as the full rule rather than as a pad.
+    TRUNCATION IS REACHABLE. Refusing an over-long value would be an added
+    validation (rule R-3), so one arrives here and is truncated - which is what
+    the frozen `MOVE` does, and the reason this helper is the full rule rather
+    than a pad.
 
     Args:
         text: The sending value.
@@ -798,7 +791,7 @@ _WS_RDB_VALUE_WIDTH: Final[int] = 64
 def _as_the_frozen_reader_would(value: str, spec: _ParamSpec) -> str:
     """Put one value through the frozen reader's own three transformations.
 
-    ⭐ M-06.  THIS IS WHAT REPLACED THREE REFUSALS. `acas-get-params` never
+    THIS IS WHAT REPLACED THREE REFUSALS. `acas-get-params` never
     objects to a value's emptiness, spacing or length; it disposes of all three
     silently, and each disposal is a statement in the frozen source rather than a
     policy:
@@ -855,12 +848,12 @@ def audit_deployment_contract(
 ) -> tuple[str, ...]:
     """Report deployment concerns about the contract. NOT on the parity path.
 
-    ⭐ M-06.  THE POLICY THAT USED TO LIVE INSIDE `resolve_rdbms_params`, MOVED
-    HERE INTACT. It was three refusals, and they were right about the operational
-    risk and wrong about where the risk belongs: `acas-get-params` refuses only an
-    absent source, a bad keyword terminator and an unrecognised keyword, so
-    refusing a blank, a spaced or an over-long VALUE added dispositions the
-    compiled program has not got, and rule R-3 forbids that.
+    THIS IS WHERE THE OPERATIONAL POLICY BELONGS, AND `resolve_rdbms_params` IS
+    NOT. The three concerns below are right about the operational risk and would be
+    wrong as refusals: `acas-get-params` refuses only an absent source, a bad
+    keyword terminator and an unrecognised keyword, so refusing a blank, a spaced or
+    an over-long VALUE would add dispositions the compiled program has not got, and
+    rule R-3 forbids that. They are reported here instead, off the parity path.
 
     So the concerns are published as WARNINGS from a function the migrated cycle
     never calls. Nothing in `acas_posting` calls it - verify with a grep - which is
@@ -972,7 +965,7 @@ def resolve_rdbms_params(
     express - an absent source. Nothing is defaulted, guessed or repaired, and
     equally nothing is refused that the frozen program would have accepted: a
     blank, spaced or over-long value is put through the frozen reader's own
-    UNSTRING-and-MOVE transformations by `_as_the_frozen_reader_would` (M-06).
+    UNSTRING-and-MOVE transformations by `_as_the_frozen_reader_would`.
     `audit_deployment_contract` reports those three as warnings for a caller that
     wants to act on them before a run; this function does not, because a refusal
     here would be a disposition the compiled cycle has not got (rule R-3).
@@ -996,7 +989,7 @@ def resolve_rdbms_params(
             one of the six variables is present - this transport's "No file
             found" [common/acas-get-params.cbl:L39], and reproducing
             `move 8 to LK-Return / goback` [common/acas-get-params.cbl:L174-L178].
-            THAT IS THE ONLY REFUSAL (M-06). A blank, spaced or over-long value is
+            THAT IS THE ONLY REFUSAL. A blank, spaced or over-long value is
             transformed rather than refused, because the frozen program transforms
             it; call `audit_deployment_contract` to be WARNED about those three
             instead.
@@ -1021,10 +1014,10 @@ def resolve_rdbms_params(
             "them before invoking an entry point. Without them SYSTEM-REC "
             "keeps the copybook's placeholder literals "
             "[copybooks/wssystem.cob:L137-L144] and the run would connect as "
-            "ACAS-User to a blank host.",
+            "that placeholder account to a blank host.",
         )
 
-    #  ⭐ M-06.  THE THREE REFUSALS THAT USED TO STAND HERE ARE REPLACED BY THE
+    #  THE THREE REFUSALS THAT USED TO STAND HERE ARE REPLACED BY THE
     #  TRANSFORMATIONS THE FROZEN READER ACTUALLY PERFORMS. They refused a
     #  required-and-blank value, a value containing whitespace, and a value longer
     #  than its carrier, each on the reasoning that the COBOL's silence would let
@@ -1148,7 +1141,7 @@ def bind_rdbms_connection(
 #  THE DEPLOYMENT TRANSPORT DECLARATION  -  NO FROZEN COUNTERPART
 # =============================================================================
 #
-#  ⛔ THIS IS NOT PART OF THE SIX-PARAMETER CONTRACT, AND `ACAS_PARAM_CONTRACT`
+#  THIS IS NOT PART OF THE SIX-PARAMETER CONTRACT, AND `ACAS_PARAM_CONTRACT`
 #  STAYS CLOSED AT SIX. `common/acas-get-params.cbl` has no seventh keyword and
 #  the frozen `evaluate` closes the set [common/acas-get-params.cbl:L204-L220];
 #  the four names below are DEPLOYMENT settings for a facility the compiled
@@ -1180,18 +1173,17 @@ TRANSPORT_KEY_VARIABLE: Final[str] = "ACAS_DB_TLS_KEY"
 #: This is what silences the unprotected-transport warning for a harness run,
 #: and it is a DECLARATION - nothing infers it from the address.
 #:
-#: ⭐ ONE KEY, AND THIS IS IT. The spelling is the harness's own, published by
+#: ONE KEY, AND THIS IS IT. The spelling is the harness's own, published by
 #: `harness/docker-compose.yml` and read by `harness/build_oracle.sh`,
 #: `harness/seed.sh`, `harness/reset_db.sh`, `harness/run_cobol_scenario.sh` and
-#: `harness/run_python_scenario.sh`. An earlier revision of this module read a
-#: SECOND name here, `ACAS_DB_ISOLATED_ORACLE`, which nothing set: a harness run
-#: exported the Compose spelling, this resolver looked for the other one, and the
-#: declaration silently did not arrive - so a non-loopback target was refused
-#: even though the operator had declared it. There is now exactly one name for
-#: this decision across Python, shell, Compose, the tests and the documentation.
+#: `harness/run_python_scenario.sh`. Reading a second name here - one the harness
+#: does not export - would let a declaration silently not arrive, so that a
+#: non-loopback target is refused even though the operator declared it. There is
+#: exactly ONE name for this decision across Python, shell, Compose, the tests and
+#: the documentation.
 TRANSPORT_ALLOW_PLAINTEXT_VARIABLE: Final[str] = "ACAS_DB_ALLOW_PLAINTEXT"
 
-#: ⭐ SELECTS HARDENED MODE for the transport, and it is the ONLY thing that
+#: SELECTS HARDENED MODE for the transport, and it is the ONLY thing that
 #: does. Unset - which is the default and the parity mode - the unprotected-
 #: transport exposure is REPORTED and the connection is made, because the
 #: compiled program applies no such check (rule R-3). Set, the report becomes a
@@ -1215,7 +1207,7 @@ TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE: Final[str] = (
 )
 
 #: The spellings read as YES, compared case-insensitively after stripping. A
-#: The three driver deadlines, in whole seconds (finding F-05). The frozen C
+#: The three driver deadlines, in whole seconds. The frozen C
 #: interface passes none - `mysql_real_connect` is called with a literal zero
 #: client-flag word and no option is set on the handle
 #: [copybooks/mysql-procedures.cpy:L72-L77] - so an unreachable or wedged server
@@ -1245,14 +1237,14 @@ _TIMEOUT_CEILING_SECONDS: Final[int] = 86_400
 #: closed set rather than "anything non-empty": a variable left as `"0"` or
 #: `"false"` by a deployment template must not silently mean yes.
 #:
-#: ⭐ THE SET IS THE HARNESS SHELL'S OWN, CHARACTER FOR CHARACTER. Every reader
+#: THE SET IS THE HARNESS SHELL'S OWN, CHARACTER FOR CHARACTER. Every reader
 #: in the tree matches on `1|true|yes|on` - `harness/seed.sh`,
 #: `harness/reset_db.sh`, `harness/build_oracle.sh`,
 #: `harness/run_cobol_scenario.sh` and the preflight embedded in
 #: `harness/run_python_scenario.sh` - so one exported value cannot mean two
-#: different things to the two halves of the harness. `y` used to be accepted
-#: here and nowhere else, which is precisely the kind of drift this constant
-#: exists to remove.
+#: different things to the two halves of the harness. Accepting a spelling here
+#: that nothing else accepts - `y`, for instance - is precisely the drift this
+#: constant exists to remove.
 AFFIRMATIVE_SPELLINGS: Final[frozenset[str]] = frozenset(
     {"1", "true", "yes", "on"}
 )
@@ -1289,13 +1281,12 @@ class TransportContractEntry:
     meaning: str
 
 
-#: THE WHOLE TRANSPORT ENVIRONMENT CONTRACT, IN ONE PLACE (finding F-07).
+#: THE WHOLE TRANSPORT ENVIRONMENT CONTRACT, IN ONE PLACE.
 #:
-#: There used to be two: this module declared four flag variables while
-#: `acas_posting/cli/args.py` read a fifth of its own and the harness set only
-#: that fifth - so the four this module declared had no provider, and the
-#: command-line path returned before the refusal knobs were ever consulted. One
-#: table now names every variable, the field it resolves into (its consumer) and
+#: Splitting it in two is how a flag variable ends up with no provider: one half
+#: declares four names, the other reads a fifth, the harness sets only the fifth,
+#: and the command-line path returns before the refusal knobs are consulted. ONE
+#: table names every variable, the field it resolves into (its consumer) and
 #: whether the shipped stack provides it, and `tests/` asserts that every row has
 #: both a provider and a consumer, so a knob that nothing sets or nothing reads
 #: cannot be added again unnoticed.
@@ -1399,7 +1390,7 @@ class TransportPolicyParams:
     and the entry-point layer turns these values into the one installed
     ``ConnectionPolicy``.
 
-    ⭐ TWO MODES, AND THE DEFAULT ONE IS EXACT PARITY (rule R-3).
+    TWO MODES, AND THE DEFAULT ONE IS EXACT PARITY (rule R-3).
     An environment that sets none of the variables resolves to
     ``require_encrypted_transport=False`` and
     ``require_declared_placeholder_credentials=False``, which is EXACT-PARITY
@@ -1467,7 +1458,7 @@ class TransportPolicyParams:
     certificate_file: str | None = None
     key_file: str | None = None
     isolated_oracle: bool = False
-    #  EXACT-PARITY DEFAULTS (rule R-3, finding F-02). Both refusals are OFF
+    #  EXACT-PARITY DEFAULTS (rule R-3). Both refusals are OFF
     #  unless the deployment asks for them by name; see the class docstring for
     #  why an inherited refusal is a behaviour change and a reported exposure is
     #  not. `dal.connection.ConnectionPolicy` carries the same two defaults, so
@@ -1506,11 +1497,11 @@ def read_declared_flag(env: Mapping[str, str], variable: str) -> bool:
     :data:`AFFIRMATIVE_SPELLINGS` and :data:`NEGATIVE_SPELLINGS`, compared
     case-insensitively after stripping, and they are the shell half's own set.
 
-    ⭐ UNRECOGNISED TEXT IS REFUSED, NOT GUESSED. An earlier revision of the
-    entry-point layer read "any value other than empty and ``0``" as yes, so
-    ``ACAS_DB_ALLOW_PLAINTEXT=false`` DECLARED PLAINTEXT - the opposite of what
-    was written - while this module read the same word as no. Silently picking
-    either reading is worse than stopping: the value governs whether a
+    UNRECOGNISED TEXT IS REFUSED, NOT GUESSED. Reading "any value other than
+    empty and ``0``" as yes would make ``ACAS_DB_ALLOW_PLAINTEXT=false`` DECLARE
+    PLAINTEXT - the opposite of what was written - while this module reads the same
+    word as no. Silently picking either reading is worse than stopping: the value
+    governs whether a
     credential and every posted figure may cross a network in the clear, and the
     operator who typed it is the only party who knows what was meant. Nothing
     accounting is validated here (rule R-3): this is deployment configuration,
@@ -1555,8 +1546,7 @@ def _optional_seconds(
 ) -> int:
     """Read one finite, positive timeout in whole seconds.
 
-    THE DEFAULT IS FINITE AND THERE IS NO SPELLING FOR "NO TIMEOUT" (finding
-    F-05). A connect, read or write with no deadline turns an unreachable or wedged
+    THE DEFAULT IS FINITE AND THERE IS NO SPELLING FOR "NO TIMEOUT". A connect, read or write with no deadline turns an unreachable or wedged
     server into a process that never returns, which outside the harness's outer
     deadline is indistinguishable from a long posting run. The value is a
     DEPLOYMENT setting, exactly as the six connection parameters are: it changes no
@@ -1579,8 +1569,8 @@ def _optional_seconds(
             Carries :data:`RDB_RETURN_MALFORMED` in the FIRST argument position,
             which is where the constructor declares it - see the note below.
     """
-    #  ⭐ THE ARGUMENT ORDER IS `(return_code, message)`, AND BOTH RAISES BELOW ONCE
-    #  HAD IT REVERSED (finding SEC-01). `RdbmsParamError.__init__` takes the frozen
+    #  THE ARGUMENT ORDER IS `(return_code, message)`, AND BOTH RAISES BELOW ONCE
+    #  HAD IT REVERSED. `RdbmsParamError.__init__` takes the frozen
     #  return code first, so passing the message first made `error.return_code` the
     #  FORMATTED TEXT and `str(error)` the integer code. Nothing here failed: the
     #  exception constructed cleanly and travelled outward carrying a `str` where
@@ -1664,10 +1654,10 @@ def resolve_transport_policy(
         certificate_file=_optional_path(mapping, TRANSPORT_CERTIFICATE_VARIABLE),
         key_file=_optional_path(mapping, TRANSPORT_KEY_VARIABLE),
         isolated_oracle=allow_plaintext,
-        #  ⭐ REFUSE ONLY WHEN ASKED (rule R-3, finding F-02). These two fields
-        #  used to read `read_declared_flag(...) or not allow_*`, which made an
-        #  undeclared deployment REFUSE any non-loopback target and any run still
-        #  carrying the frozen placeholder credentials. The compiled program has no
+        #  REFUSE ONLY WHEN ASKED (rule R-3). Reading these two as
+        #  `read_declared_flag(...) or not allow_*` would make an undeclared
+        #  deployment REFUSE any non-loopback target and any run still carrying
+        #  the frozen placeholder credentials. The compiled program has no
         #  such disposition - `Mysql-1000-Open` connects or reports (99, 911)
         #  [copybooks/mysql-procedures.cpy:L60-L128] and inspects neither the
         #  address nor the account - so an inherited refusal was a validation the
@@ -1708,150 +1698,149 @@ def resolve_transport_policy(
 # -----------------------------------------------------------------------------
 #
 # MODULE -> COBOL PROGRAM
-#   acas_posting.cli.args SECTION 0  <-  common/acas-get-params.cbl (224 lines,
-#   program-id at L10), plus the six-statement MOVE block every load program
-#   performs after calling it, e.g. common/glbatchLD.cbl:L262-L267.
-#   Both are REFERENCE only: frozen, read as specification, never modified.
+#  acas_posting.cli.args SECTION 0  <-  common/acas-get-params.cbl (224 lines,
+#  program-id at L10), plus the six-statement MOVE block every load program
+#  performs after calling it, e.g. common/glbatchLD.cbl:L262-L267.
+#  Both are REFERENCE only: frozen, read as specification, never modified.
 #
 # PARAGRAPH -> FUNCTION
-#   aa000-Main.                          -> resolve_rdbms_params
-#     L173      move zero to LK-Return      the RDB_RETURN_OK path
-#     L174-L178 CBL_CHECK_FILE_EXIST /      the "is there a source?" gate;
-#               move 8 to LK-Return         RDB_RETURN_NO_SOURCE
-#     L180-L182 initialise LK-RDB-Vars      the `value spaces` starting state,
-#                                           which is why an incomplete source
-#                                           is treated as malformed
-#     L183-L221 open / perform until /      the one-pass read, in contract order
-#               read / unstring
-#     L193-L199 unstring ... delimited by   the whitespace gate
-#               "=" or ":" or space
-#     L200-L203 if WS-RDB-Equal not = "="   RDB_RETURN_MALFORMED
-#               and not = ":" / move 1
-#     L204-L220 evaluate WS-RDB-Keyword     ACAS_PARAM_CONTRACT, six entries
-#               (1:6) ... when other        (`when other` -> see OMISSIONS)
-#     L222-L223 close / goback              return RdbmsParams
+#  aa000-Main.                          -> resolve_rdbms_params
+#  L173      move zero to LK-Return      the RDB_RETURN_OK path
+#  L174-L178 CBL_CHECK_FILE_EXIST /      the "is there a source?" gate;
+#  move 8 to LK-Return         RDB_RETURN_NO_SOURCE
+#  L180-L182 initialise LK-RDB-Vars      the `value spaces` starting state,
+#  which is why an incomplete source
+#  is treated as malformed
+#  L183-L221 open / perform until /      the one-pass read, in contract order
+#  read / unstring
+#  L193-L199 unstring ... delimited by   the whitespace gate
+#  "=" or ":" or space
+#  L200-L203 if WS-RDB-Equal not = "="   RDB_RETURN_MALFORMED
+#  and not = ":" / move 1
+#  L204-L220 evaluate WS-RDB-Keyword     ACAS_PARAM_CONTRACT, six entries
+#  (1:6) ... when other        (`when other` -> see OMISSIONS)
+#  L222-L223 close / goback              return RdbmsParams
 #
-#   the caller-side MOVE block           -> bind_rdbms_connection
-#     common/glbatchLD.cbl:L262           move WS-Host-Name      to RDBMS-Host
-#                          L263           move WS-Implementation to RDBMS-User
-#                          L264           move WS-Password       to RDBMS-Passwd
-#                          L265           move WS-Base-Name      to RDBMS-DB-Name
-#                          L266           move WS-Port-Number    to RDBMS-Port
-#                          L267           move WS-Socket         to RDBMS-Socket
+#  the caller-side MOVE block           -> bind_rdbms_connection
+#  common/glbatchLD.cbl:L262           move WS-Host-Name      to RDBMS-Host
+#  L263           move WS-Implementation to RDBMS-User
+#  L264           move WS-Password       to RDBMS-Passwd
+#  L265           move WS-Base-Name      to RDBMS-DB-Name
+#  L266           move WS-Port-Number    to RDBMS-Port
+#  L267           move WS-Socket         to RDBMS-Socket
 #
 # RECORD -> CLASS
-#   01 LK-RDB-Vars     common/acas-get-params.cbl:L152-L159  -> RdbmsParams
-#   01 LK-Return       common/acas-get-params.cbl:L150       -> RdbmsParamError
-#                                                               .return_code
+#  01 LK-RDB-Vars     common/acas-get-params.cbl:L152-L159  -> RdbmsParams
+#  01 LK-Return       common/acas-get-params.cbl:L150       -> RdbmsParamError
+#  .return_code
 #
 # FIELD -> RECEIVING ITEM -> COLUMN  (each also carried in ACAS_PARAM_CONTRACT)
-#   DBHOST  ACAS_DB_HOST      RDBMS-Host     x(32)  wssystem.cob:L143
-#                                                   SYSTEM-REC.RDBMS-HOST
-#   DBUSER  ACAS_DB_USER      RDBMS-User     x(12)  wssystem.cob:L138
-#                                                   SYSTEM-REC.RDBMS-USER
-#   DBPASS  ACAS_DB_PASSWORD  RDBMS-Passwd   x(12)  wssystem.cob:L139
-#                                                   SYSTEM-REC.RDBMS-PASSWD
-#   DBNAME  ACAS_DB_NAME      RDBMS-DB-Name  x(12)  wssystem.cob:L137
-#                                                   SYSTEM-REC.RDBMS-DB-NAME
-#   DBPORT  ACAS_DB_PORT      RDBMS-Port     x(5)   wssystem.cob:L142
-#                                                   SYSTEM-REC.RDBMS-PORT
-#                             carried through Ws-Mysql-Port-Number x(4)
-#                                                   mysql-variables.cpy:L91
-#   DBSOCK  ACAS_DB_SOCKET    RDBMS-Socket   x(64)  wssystem.cob:L144
-#                                                   SYSTEM-REC.RDBMS-SOCKET
+#  DBHOST  ACAS_DB_HOST      RDBMS-Host     x(32)  wssystem.cob:L143
+#  SYSTEM-REC.RDBMS-HOST
+#  DBUSER  ACAS_DB_USER      RDBMS-User     x(12)  wssystem.cob:L138
+#  SYSTEM-REC.RDBMS-USER
+#  DBPASS  ACAS_DB_PASSWORD  RDBMS-Passwd   x(12)  wssystem.cob:L139
+#  SYSTEM-REC.RDBMS-PASSWD
+#  DBNAME  ACAS_DB_NAME      RDBMS-DB-Name  x(12)  wssystem.cob:L137
+#  SYSTEM-REC.RDBMS-DB-NAME
+#  DBPORT  ACAS_DB_PORT      RDBMS-Port     x(5)   wssystem.cob:L142
+#  SYSTEM-REC.RDBMS-PORT
+#  carried through Ws-Mysql-Port-Number x(4)
+#  mysql-variables.cpy:L91
+#  DBSOCK  ACAS_DB_SOCKET    RDBMS-Socket   x(64)  wssystem.cob:L144
+#  SYSTEM-REC.RDBMS-SOCKET
 #
 # RETURN CODE -> CONSTANT      common/acas-get-params.cbl:L37-L42
-#   0  RDB_RETURN_OK           "Valid data read."
-#   1  RDB_RETURN_MALFORMED    "No valid keyword terminator i.e., = or :"
-#   8  RDB_RETURN_NO_SOURCE    "No file found."
-#   2  no counterpart          see OMISSIONS
+#  0  RDB_RETURN_OK           "Valid data read."
+#  1  RDB_RETURN_MALFORMED    "No valid keyword terminator i.e., = or :"
+#  8  RDB_RETURN_NO_SOURCE    "No file found."
+#  2  no counterpart          see OMISSIONS
 #
 # DOCUMENTED DIVERGENCES  -  two, each deliberate and each argued at the site.
 #
-#   1. THE SOURCE IS THE ENVIRONMENT, NOT `acas.param`. The frozen reader opens
-#      a file in the current directory [common/acas-get-params.cbl:L30, L103].
-#      This module reads six environment variables instead, because that is
-#      where harness/docker-compose.yml publishes the values, because
-#      harness/dump_tables.py already reads the identical six names, and
-#      because a current-directory file would make a run depend on where it was
-#      launched from - which rule R-6 forbids. The keywords, their order, their
-#      closed set and the return codes are unchanged, so the reproduction is of
-#      the program's BEHAVIOUR with a different transport, not of its file I/O.
-#      `acas.param` itself is untouched and remains the compiled oracle's own
-#      mechanism.
+#  1. THE SOURCE IS THE ENVIRONMENT, NOT `acas.param`. The frozen reader opens
+#  a file in the current directory [common/acas-get-params.cbl:L30, L103].
+#  This module reads six environment variables instead, because that is
+#  where harness/docker-compose.yml publishes the values, because
+#  harness/dump_tables.py already reads the identical six names, and
+#  because a current-directory file would make a run depend on where it was
+#  launched from - which rule R-6 forbids. The keywords, their order, their
+#  closed set and the return codes are unchanged, so the reproduction is of
+#  the program's BEHAVIOUR with a different transport, not of its file I/O.
+#  `acas.param` itself is untouched and remains the compiled oracle's own
+#  mechanism.
 #
-#   2. THE `if RDBMS-DB-Name = spaces or FS-Cobol-Files-Used` GUARD IS NOT
-#      REPRODUCED [common/glbatchLD.cbl:L238-L239]. Argued in full in
-#      `bind_rdbms_connection`: in the load programs the record has just been
-#      read from `system.dat` and may already hold settings, whereas here it is
-#      built at the record layer's declared defaults, where RDBMS-DB-Name is
-#      the literal "ACASDB" and RDBMS-Passwd is the literal "PaSsWoRd". A
-#      literal guard would therefore skip the load on every run and keep the
-#      placeholder credentials - the exact defect this module closes. The
-#      guard's intent, "load them if they are not already set", is honoured.
+#  2. THE `if RDBMS-DB-Name = spaces or FS-Cobol-Files-Used` GUARD IS NOT
+#  REPRODUCED [common/glbatchLD.cbl:L238-L239]. Argued in full in
+#  `bind_rdbms_connection`: in the load programs the record has just been
+#  read from `system.dat` and may already hold settings, whereas here it is
+#  built at the record layer's declared defaults, where RDBMS-DB-Name is
+#  the literal "ACASDB" and RDBMS-Passwd is the shipped placeholder. A
+#  literal guard would therefore skip the load on every run and keep the
+#  placeholder credentials - the exact defect this module closes. The
+#  guard's intent, "load them if they are not already set", is honoured.
 #
 # OMISSIONS  -  recorded so that a reader comparing the two trees does not
 # conclude something was lost (Agent Action Plan section 0.4.3).
 #
-#   * RETURN CODE 2, "Invalid Keyword - keyword not expected"
-#     [common/acas-get-params.cbl:L42], raised by the frozen `when other` at
-#     [common/acas-get-params.cbl:L217-L219]. It cannot arise here: this module
-#     looks up exactly six named variables and NEVER enumerates the
-#     environment, so an unrelated variable is not read, not parsed and not an
-#     error. Shipping an unreachable branch for it would be dead code.
+#  * RETURN CODE 2, "Invalid Keyword - keyword not expected"
+#  [common/acas-get-params.cbl:L42], raised by the frozen `when other` at
+#  [common/acas-get-params.cbl:L217-L219]. It cannot arise here: this module
+#  looks up exactly six named variables and NEVER enumerates the
+#  environment, so an unrelated variable is not read, not parsed and not an
+#  error. Shipping an unreachable branch for it would be dead code.
 #
-#   * THE `01 File-Info` BLOCK [common/acas-get-params.cbl:L137-L145]. The
-#     frozen program declares an eight-member file-information group for
-#     `CBL_CHECK_FILE_EXIST` and reads NOTHING out of it - only `Return-Code`
-#     is tested [L176]. There is no file here and no size or modification stamp
-#     to collect, and collecting one would be a wall-clock reading that rule
-#     R-6 forbids in any case.
+#  * THE `01 File-Info` BLOCK [common/acas-get-params.cbl:L137-L145]. The
+#  frozen program declares an eight-member file-information group for
+#  `CBL_CHECK_FILE_EXIST` and reads NOTHING out of it - only `Return-Code`
+#  is tested [L176]. There is no file here and no size or modification stamp
+#  to collect, and collecting one would be a wall-clock reading that rule
+#  R-6 forbids in any case.
 #
-#   * `01 APR-Variable-Size` [common/acas-get-params.cbl:L122-L125], which the
-#     frozen source itself annotates "Thrse are NOT used in program - just to
-#     show record layout" [L120]. A layout comment, not a construct: its
-#     content is documented in this module's header instead.
+#  * `01 APR-Variable-Size` [common/acas-get-params.cbl:L122-L125], which the
+#  frozen source itself annotates "Thrse are NOT used in program - just to
+#  show record layout" [L120]. A layout comment, not a construct: its
+#  content is documented in this module's header instead.
 #
-#   * THE DISPLAY STATEMENTS the load programs make around the call -
-#     "acas-param file NOT found - Aborted", "Invalid keyword terminator
-#     found - Aborted", "acas-param file found and being used", and the five
-#     `display "User = " RDBMS-User` echoes at
-#     [common/glbatchLD.cbl:L268-L272]. Screen output with no database effect,
-#     excluded by Agent Action Plan sections 0.2.2 and 0.3.4. The abort
-#     CONTROL FLOW those displays accompany is preserved: it becomes
-#     `RdbmsParamError`, which stops the run before anything is written. The
-#     credential echoes are not reproduced under any circumstance.
+#  * THE DISPLAY STATEMENTS the load programs make around the call -
+#  "acas-param file NOT found - Aborted", "Invalid keyword terminator
+#  found - Aborted", "acas-param file found and being used", and the five
+#  `display "User = " RDBMS-User` echoes at
+#  [common/glbatchLD.cbl:L268-L272]. Screen output with no database effect,
+#  excluded by Agent Action Plan sections 0.2.2 and 0.3.4. The abort
+#  CONTROL FLOW those displays accompany is preserved: it becomes
+#  `RdbmsParamError`, which stops the run before anything is written. The
+#  credential echoes are not reproduced under any circumstance.
 #
-# RULES  (no user rules document exists for this project; these are the Agent
-# Action Plan's own six, section 0.7.2)
-#   R-1  satisfied structurally: `acas-get-params` is reimplemented, not
-#        called. The imports of this module are `os`, `collections.abc`,
-#        `dataclasses`, `typing` and one record module - no child process, no
-#        foreign-function interface, no toolchain lookup, and no import path to
-#        the compiled comparison oracle.
-#   R-2  satisfied by type: all six values are `str`, as their `pic x(n)`
-#        declarations make them. No numeric conversion occurs here at all, so
-#        no binary-radix type can appear - the port stays text and the
-#        data-access layer converts it the way the C interface does.
-#   R-3  satisfied by scope: the six fields filled already exist in
-#        [copybooks/wssystem.cob:L137-L144] and as columns of SYSTEM-REC, so no
-#        field is added; no DDL, no SQL and no database contact occurs; no
-#        accounting value is examined, let alone validated; and execution is a
-#        single pass with no worker, pool or event loop. The width, blank and
-#        whitespace checks apply to harness CONFIGURATION before any statement
-#        with a COBOL counterpart runs, and each is a property of a frozen
-#        carrier rather than a new business rule.
-#   R-4  reproductions, each carrying its locator at the site: the six MOVEs in
-#        their frozen order with their frozen receiving widths; the port
-#        narrowing left to the data-access layer rather than "fixed" here; the
-#        return codes kept as the frozen program's own; and no malformed value
-#        silently repaired.
-#   R-5  this footer, plus the per-symbol locators throughout and the
-#        `locator` member every `ACAS_PARAM_CONTRACT` entry carries.
-#   R-6  nothing here reads a clock, an entropy source, the current directory
-#        or a process identifier; the environment is read in one pass in a
-#        fixed order; and `env` can be supplied explicitly, so two runs given
-#        the same mapping resolve byte-identically.
+# RULE COMPLIANCE (the six are the Agent Action Plan's own, section 0.7.2)
+#  R-1  satisfied structurally: `acas-get-params` is reimplemented, not
+#  called. The imports of this module are `os`, `collections.abc`,
+#  `dataclasses`, `typing` and one record module - no child process, no
+#  foreign-function interface, no toolchain lookup, and no import path to
+#  the compiled comparison oracle.
+#  R-2  satisfied by type: all six values are `str`, as their `pic x(n)`
+#  declarations make them. No numeric conversion occurs here at all, so
+#  no binary-radix type can appear - the port stays text and the
+#  data-access layer converts it the way the C interface does.
+#  R-3  satisfied by scope: the six fields filled already exist in
+#  [copybooks/wssystem.cob:L137-L144] and as columns of SYSTEM-REC, so no
+#  field is added; no DDL, no SQL and no database contact occurs; no
+#  accounting value is examined, let alone validated; and execution is a
+#  single pass with no worker, pool or event loop. The width, blank and
+#  whitespace checks apply to harness CONFIGURATION before any statement
+#  with a COBOL counterpart runs, and each is a property of a frozen
+#  carrier rather than a new business rule.
+#  R-4  reproductions, each carrying its locator at the site: the six MOVEs in
+#  their frozen order with their frozen receiving widths; the port
+#  narrowing left to the data-access layer rather than "fixed" here; the
+#  return codes kept as the frozen program's own; and no malformed value
+#  silently repaired.
+#  R-5  this footer, plus the per-symbol locators throughout and the
+#  `locator` member every `ACAS_PARAM_CONTRACT` entry carries.
+#  R-6  nothing here reads a clock, an entropy source, the current directory
+#  or a process identifier; the environment is read in one pass in a
+#  fixed order; and `env` can be supplied explicitly, so two runs given
+#  the same mapping resolve byte-identically.
 # -----------------------------------------------------------------------------
 
 
@@ -1967,7 +1956,7 @@ SYSTEM_FILE_KEY_TOTALS: Final[int] = 4  # SYSTOT-REC   - the period totals
 #  Agent Action Plan section 0.2.1.1 maps the System entity to the `SYSTEM-REC`
 #  TABLE, section 0.3.1 gives the data-access layer SQL only, and the connection
 #  parameters arrive from the deployment contract through
-#  `acas_posting/cli/`py` rather than from a file. There is
+#  SECTION 0 of this module rather than from a file. There is
 #  therefore only one store to select, and `"66"` selects it. The menus'
 #  Cobol-file arm has no counterpart and is not reproduced; see
 #  `aa010_get_system_recs` and `overrewrite`.
@@ -1987,38 +1976,38 @@ _PIC_9_CHOICES: Final[tuple[int, ...]] = tuple(range(0, 10))
 #  `88 Date-Intl value 3` [copybooks/wssystem.cob:L131], plus
 #  `88 Date-Valid-Formats values 1 2 3` [copybooks/wssystem.cob:L132].
 #
-#  ⭐ M-05.  THE DOMAIN IS THE WHOLE `pic 9`, NOT THE THREE CONDITION-NAME VALUES,
+#  THE DOMAIN IS THE WHOLE `pic 9`, NOT THE THREE CONDITION-NAME VALUES,
 #  and the difference was MEASURED against the frozen conversion section rather
-#  than inferred from the condition names. This used to be `(1, 2, 3)` on the
-#  reasoning that `Date-Valid-Formats` "is the source of these three choices".
-#  Two facts overturn that:
+#  than inferred from the condition names. `(1, 2, 3)` would follow from reading
+#  `Date-Valid-Formats` as "the source of these three choices". Two facts forbid
+#  that reading:
 #
 #  (1) `Date-Valid-Formats` IS NEVER TESTED. A census of the whole checkout finds
-#      it in exactly two places, its own declaration [copybooks/wssystem.cob:L132]
-#      and a verbatim copy of that declaration inside an out-of-scope conversion
-#      utility [common/acasconvert2.cbl:L190]. NOT ONE of the twelve in-scope
-#      programs references it. It is a declared-but-unused condition name, so
-#      deriving a command-line restriction from it invents a validation the
-#      compiled cycle does not perform (rule R-3).
+#  it in exactly two places, its own declaration [copybooks/wssystem.cob:L132]
+#  and a verbatim copy of that declaration inside an out-of-scope conversion
+#  utility [common/acasconvert2.cbl:L190]. NOT ONE of the twelve in-scope
+#  programs references it. It is a declared-but-unused condition name, so
+#  deriving a command-line restriction from it invents a validation the
+#  compiled cycle does not perform (rule R-3).
 #
 #  (2) `zz070-Convert-Date` ROUTES EVERY VALUE, and one of the values it routes it
-#      also WRITES BACK. The section appears near-identically in nine of the twelve
-#      programs; taking [general/gl070.cbl:L580-L596] as the reading:
+#  also WRITES BACK. The section appears near-identically in nine of the twelve
+#  programs; taking [general/gl070.cbl:L580-L596] as the reading:
 #
-#          L580  if       Date-Form = zero
-#          L581           move 1 to Date-Form.        *> MUTATES the record
-#          L582  if       Date-UK
-#          L583           go to zz070-Exit.           *> 1 -> UK, unchanged
-#          L584  if       Date-USA
-#          L585-L588      ...swap month and days...
-#          L589           go to zz070-Exit.           *> 2 -> USA
-#          L591  *> So its International date format
-#          L592-L595 ...                              *> EVERYTHING ELSE -> Intl
+#  L580  if       Date-Form = zero
+#  L581           move 1 to Date-Form.        *> MUTATES the record
+#  L582  if       Date-UK
+#  L583           go to zz070-Exit.           *> 1 -> UK, unchanged
+#  L584  if       Date-USA
+#  L585-L588      ...swap month and days...
+#  L589           go to zz070-Exit.           *> 2 -> USA
+#  L591  *> So its International date format
+#  L592-L595 ...                              *> EVERYTHING ELSE -> Intl
 #
-#      So zero is routed AND stored back as 1 - an observable write to the
-#      `SYSTEM-REC.DATE-FORM` column, not merely a presentation choice - and 4
-#      through 9 all fall through the two tests into the International branch.
-#      Refusing them at the command line made a reachable state unreachable.
+#  So zero is routed AND stored back as 1 - an observable write to the
+#  `SYSTEM-REC.DATE-FORM` column, not merely a presentation choice - and 4
+#  through 9 all fall through the two tests into the International branch.
+#  Refusing them at the command line made a reachable state unreachable.
 #
 #  argparse rejecting a TENTH value is a different matter and stays: `pic 9` has
 #  nowhere to put two digits, so that refusal is the field's own and not an
@@ -2100,8 +2089,8 @@ _IRS_INSTEAD_FIELD: Final[FieldDescriptor] = _field_named(
 
 #  THE THREE LINKAGE CARRIERS
 #  Each carrier holds one COBOL call shape's arguments IN THE COBOL PARAMETER
-#  ORDER, so a call site reads the way a `CALL ... USING` reads and a reviewer can
-#  diff the two argument lists line by line. `NamedTuple` rather than a frozen
+#  ORDER, so a call site reads the way a `CALL ... USING` reads and the two
+#  argument lists line up. `NamedTuple` rather than a frozen
 #  dataclass: immutable by construction, splats natively with `*link` so an arity
 #  mistake is a `TypeError` at the call site, and holds its members BY REFERENCE,
 #  which is what COBOL linkage is.
@@ -2187,12 +2176,12 @@ class IrsRouteBinding(NamedTuple):
     later compares the returned record against [irs/irs.cbl:L1011-L1029]. It is not
     a linkage operand and is not passed to `irs030`.
 
-    ⭐ WHY THE SNAPSHOT IS RETURNED RATHER THAN RE-TAKEN.  `zz090-Set-Up-IRS-System-
+    WHY THE SNAPSHOT IS RETURNED RATHER THAN RE-TAKEN.  `zz090-Set-Up-IRS-System-
     Data` is performed ONCE in the frozen menu, at [irs/irs.cbl:L556], and it both
     fills `IRS-System-Params` and captures the snapshot in that one pass. A route
     that performed it a second time to obtain the snapshot would traverse file-key 1
     again and re-run the whole remap - extra store traffic, extra log records and an
-    extra failure path that the frozen menu does not have (finding F-01). So the one
+    extra failure path that the frozen menu does not have. So the one
     pass publishes both halves, and the route reads the snapshot off this carrier.
 
     Attributes:
@@ -2294,7 +2283,7 @@ class IrsSystemSnapshot(NamedTuple):
 
     `zz090` fills them from the loaded ACAS record at the same time as it fills
     `IRS-System-Params` [irs/irs.cbl:L953-L966], and `zz095` writes a value back
-    into the ACAS record ONLY where the IRS side has since changed
+    into the ACAS record ONLY where the IRS side differs
     [irs/irs.cbl:L1011-L1027]. That "only where changed" is the whole point of
     the snapshot and is why it is a value object here: a tuple cannot be mutated
     by accident between the two, so the comparison `zz095` makes is the
@@ -2314,11 +2303,11 @@ class IrsSystemSnapshot(NamedTuple):
 #  Four fragments, one per call shape plus the calling-data group, so a route
 #  composes exactly the options its COBOL shape has and the router needs no
 #  conditionals:
-#      GL route     add_calling_data_arguments(p, default_caller=...)
-#                   add_gl_linkage_arguments(p)
-#      SL/PL route  add_calling_data_arguments(p, default_caller=...)
-#                   add_slpl_linkage_arguments(p)
-#      IRS route    add_irs_linkage_arguments(p)          <- and nothing else
+#  GL route     add_calling_data_arguments(p, default_caller=...)
+#  add_gl_linkage_arguments(p)
+#  SL/PL route  add_calling_data_arguments(p, default_caller=...)
+#  add_slpl_linkage_arguments(p)
+#  IRS route    add_irs_linkage_arguments(p)          <- and nothing else
 #  Each fragment MUTATES the parser it is given and returns None, the argparse
 #  idiom, which keeps a route's `build_parser` a flat sequence of calls. No
 #  parser is constructed at module scope: importing this module must do no work.
@@ -2632,7 +2621,7 @@ def _menu_caller_for(program_id: str) -> str:
 #  THE MENUS' DATABASE-AFFECTING RECORD PARAGRAPHS
 # =============================================================================
 #
-#  ⭐ WHY A MENU PARAGRAPH IS REPRODUCED HERE AT ALL. The five menu programs are
+#  WHY A MENU PARAGRAPH IS REPRODUCED HERE AT ALL. The five menu programs are
 #  out of scope AS PROGRAMS (Agent Action Plan section 0.2.2) - their screens,
 #  their accept loops and their dispatch tables are not migrated. But two of
 #  their paragraphs are not presentation: `aa010-Get-System-Recs` READS the
@@ -2646,26 +2635,26 @@ def _menu_caller_for(program_id: str) -> str:
 #  performs a database write is preserved. These two perform one.
 #
 #  WHAT IS *NOT* REPRODUCED, AND IS RECORDED AS AN OMISSION (rule R-5):
-#    * THE COBOL FLAT-FILE HALF. Both paragraphs work the indexed store as well
-#      as the relational one - `move zeros to File-System-Used` / `move "00" to
-#      FA-RDBMS-Flat-Statuses` [sales/sales.cbl:L354-L355, :L644-L646] - and the
-#      migration has no flat-file leg at all: every handler's flat path raises
-#      "not migrated". Only the RDB half is reproduced. This is the one point
-#      where the reading side cannot be literal, and the frozen source explains
-#      why it does not matter: the RDB block in `aa010-Get-System-Recs` is
-#      commented out under the maintainer's own heading "BY PASS THIS CODE AS THE
-#      FILE WILL ALWAYS BE CURRENT" [sales/sales.cbl:L370-L372], i.e. the two
-#      stores are held to carry the same content, and `common/masterLD.sh` seeds
-#      them from the same flat files [common/masterLD.sh:L44-L115].
-#    * `sys002` RECOVERY. Both paragraphs' callers call the setup program when
-#      the parameter file is missing [sales/sales.cbl:L344-L348, :L361-L366];
-#      `common/sys002.cbl` is out of scope (section 0.2.2, non-posting
-#      utilities), so a failing read is REPORTED and the status returned, and no
-#      record is invented to stand in for one.
-#    * THE SCREEN PATHS: the credential echoes, `display SY011`, the
-#      acknowledgement accepts, and the backup-script branch `pre-overrewrite`
-#      [sales/sales.cbl:L609-L625] whose only database effect is the
-#      `perform overrewrite` reproduced below.
+#  * THE COBOL FLAT-FILE HALF. Both paragraphs work the indexed store as well
+#  as the relational one - `move zeros to File-System-Used` / `move "00" to
+#  FA-RDBMS-Flat-Statuses` [sales/sales.cbl:L354-L355, :L644-L646] - and the
+#  migration has no flat-file leg at all: every handler's flat path raises
+#  "not migrated". Only the RDB half is reproduced. This is the one point
+#  where the reading side cannot be literal, and the frozen source explains
+#  why it does not matter: the RDB block in `aa010-Get-System-Recs` is
+#  commented out under the maintainer's own heading "BY PASS THIS CODE AS THE
+#  FILE WILL ALWAYS BE CURRENT" [sales/sales.cbl:L370-L372], i.e. the two
+#  stores are held to carry the same content, and `common/masterLD.sh` seeds
+#  them from the same flat files [common/masterLD.sh:L44-L115].
+#  * `sys002` RECOVERY. Both paragraphs' callers call the setup program when
+#  the parameter file is missing [sales/sales.cbl:L344-L348, :L361-L366];
+#  `common/sys002.cbl` is out of scope (section 0.2.2, non-posting
+#  utilities), so a failing read is REPORTED and the status returned, and no
+#  record is invented to stand in for one.
+#  * THE SCREEN PATHS: the credential echoes, `display SY011`, the
+#  acknowledgement accepts, and the backup-script branch `pre-overrewrite`
+#  [sales/sales.cbl:L609-L625] whose only database effect is the
+#  `perform overrewrite` reproduced below.
 # =============================================================================
 
 #: `88  FS-MySql-Used  value 1.` [copybooks/wssystem.cob:L114] - the value
@@ -2687,7 +2676,7 @@ def install_connection_policy(
 ) -> dal_connection.ConnectionPolicy:
     """Install the ONE connection policy of the run. THE policy boundary.
 
-    ⭐ THIS IS THE ONLY PLACE IN THE SHIPPED PACKAGE THAT DECLARES A CONNECTION
+    THIS IS THE ONLY PLACE IN THE SHIPPED PACKAGE THAT DECLARES A CONNECTION
     POLICY, and it is reached by all seven entry points because
     `_bind_system_record` calls it and all three linkage binders go through
     `_bind_system_record`. Every handler in `acas_posting/dal/` opens without a
@@ -2711,7 +2700,7 @@ def install_connection_policy(
     outside the command line [common/acas-get-params.cbl:L30], the closed list of
     settable `SYSTEM-REC` options this module publishes stays closed (rule R-3),
     and a certificate path on a command line is a process-listing leak waiting to
-    happen. `acas_posting/cli/`py` owns the reading; this function
+    happen. SECTION 0 of this module owns the reading; this function
     owns the installing.
 
     Idempotent: called once per bound linkage, and installing the same resolved
@@ -2725,7 +2714,7 @@ def install_connection_policy(
     and "nothing" installs the EXACT-PARITY policy: every target the compiled
     program would connect to, this one connects to as well, with the exposure
     reported at WARNING and by `dal.connection.audit_connection_policy` rather
-    than refused (finding F-02). A deployment that wants the refusal asks for it
+    than refused. A deployment that wants the refusal asks for it
     by name - `ACAS_DB_REQUIRE_TLS`, `ACAS_DB_REQUIRE_DECLARED_CREDENTIALS` - or
     supplies `ACAS_DB_TLS_CA` to encrypt and verify instead of refusing. A run
     made under either refusal knob is not behavioural-parity evidence, because a
@@ -2744,16 +2733,16 @@ def install_connection_policy(
     """
     declaration = resolve_transport_policy(env)
 
-    #  ⭐ THERE IS NOTHING TO OVERLAY: THE CONTRACT IS THE WHOLE DECLARATION.
-    #  An earlier revision published `--db-tls-ca`, `--db-tls-cert`, `--db-tls-key`
-    #  and `--db-allow-plaintext`, and this function then returned
-    #  `ConnectionPolicy(transport=stated)` the moment any of them was typed - which
-    #  SILENTLY DROPPED the three refusal-and-allowance knobs and the three driver
-    #  deadlines, so an operator who typed `--db-allow-plaintext` on a deployment
-    #  that had asked for `ACAS_DB_REQUIRE_TLS=1` got neither the refusal it asked
-    #  for nor any notice that the request had been discarded. Merging the two
-    #  field by field was one remediation for that; WITHDRAWING THE OPTION SURFACE
-    #  is the stronger one, and it is the one this module carries: adding a program
+    #  THERE IS NOTHING TO OVERLAY: THE CONTRACT IS THE WHOLE DECLARATION.
+    #  THE OPTION SURFACE IS DELIBERATELY WITHDRAWN. Publishing `--db-tls-ca`,
+    #  `--db-tls-cert`, `--db-tls-key` and `--db-allow-plaintext` and returning
+    #  `ConnectionPolicy(transport=stated)` as soon as one was typed would SILENTLY
+    #  DROP the three refusal-and-allowance knobs and the three driver deadlines,
+    #  so an operator typing `--db-allow-plaintext` on a deployment that had asked
+    #  for `ACAS_DB_REQUIRE_TLS=1` would get neither the refusal it asked for nor
+    #  any notice that the request had been discarded. Merging the two field by
+    #  field would answer that; withdrawing the surface answers it more simply and
+    #  is what this module does: adding a program
     #  input and two refusal outcomes the compiled program has not got is itself a
     #  behaviour change (rule R-3), and a certificate path on a command line is a
     #  process-listing leak. With no option surface there is no second side to
@@ -2788,7 +2777,7 @@ def install_connection_policy(
         ),
         #  The three driver deadlines, carried from the same contract so that the
         #  policy the data-access layer reads is the whole of the deployment's
-        #  declaration and not the transport half of it (finding F-05).
+        #  declaration and not the transport half of it.
         connect_timeout_seconds=declaration.connect_timeout_seconds,
         read_timeout_seconds=declaration.read_timeout_seconds,
         write_timeout_seconds=declaration.write_timeout_seconds,
@@ -2810,14 +2799,14 @@ def _bind_system_record(
     three come from argv and the clock: `Run-Date` from the clock always, and
     `Date-Form` and `IRS-Instead` from argv when the route offered them AND a
     value was actually supplied. The other six are the connection parameters,
-    which come from the deployment contract through
-    `acas_posting/cli/`py`. Everything else comes from the record
+    which come from the deployment contract through SECTION 0 of this
+    module. Everything else comes from the record
     handed in - or, when none is, keeps the record layer's declared default. So
     does `IRS-Instead` when the option is omitted: it is left unwritten rather
     than overwritten, because its off state is a space and a space cannot be told
     from "absent" by a truth test.
 
-    THE 160 OTHER COLUMNS BELONG TO THE STORE, NOT TO argv  (finding CLI-02)
+    THE 160 OTHER COLUMNS BELONG TO THE STORE, NOT TO argv
     ======================================================================
     The frozen menu shell READS `SYSTEM-REC` before it dispatches anything -
     `aa010-Get-System-Recs.` [general/general.cbl:L385-L460],
@@ -2850,8 +2839,8 @@ def _bind_system_record(
     `RDBMS-Host` and `RDBMS-Socket` into `RDB-Data`, reproducing
     [common/acas008.cbl:L558-L563], and hands the result to the driver. Left at
     their declared defaults [copybooks/wssystem.cob:L137-L144] those fields are
-    the copybook's own placeholders - the literal user `"ACAS-User"`, the literal
-    password `"PaSsWoRd"` and a blank host - so a run would not reach the
+    the copybook's own placeholders - the shipped placeholder user and password
+    [copybooks/wssystem.cob:L138-L139] and a blank host - so a run would not reach the
     database the operator provisioned. The frozen tree solves this the same way
     and in the same place: every `common/*LD.cbl` load program performs six
     `MOVE` statements into these very fields right after building its own system
@@ -2872,8 +2861,8 @@ def _bind_system_record(
       the machine can read it.
     * THIS MODULE ITSELF READS NOTHING FROM THE SURROUNDINGS. It touches no
       environment variable, no dotenv file and no parameter file. The six
-      connection fields are resolved by the sibling adapter
-      `acas_posting/cli/`py`, which reproduces the frozen
+      connection fields are resolved by SECTION 0 of this module, which
+      reproduces the frozen
       `common/acas-get-params.cbl` keyword contract, and only when it is called
       from here. The RUN DATE is untouched by that and still arrives only as
       `--run-date` through the pinned clock, so an ambient input can still not
@@ -2915,10 +2904,10 @@ def _bind_system_record(
             a run that has no contract at all stops before it writes anything.
             NOT raised for a contract that is merely awkward - a blank, spaced or
             over-long value is transformed exactly as the frozen reader transforms
-            it (M-06); call `audit_deployment_contract` to be warned
+            it; call `audit_deployment_contract` to be warned
             about those.
     """
-    #  ⭐ THE SUPPLIED RECORD IS THE RECORD, AND REPLACING IT WOULD BREAK COBOL
+    #  THE SUPPLIED RECORD IS THE RECORD, AND REPLACING IT WOULD BREAK COBOL
     #  LINKAGE. A COBOL `CALL ... USING` passes a group item BY REFERENCE: the
     #  callee writes into the CALLER's storage, and the menu shell holds exactly
     #  one `01 SYSTEM-REC` that its load fills, its `CALL` hands over and its
@@ -2928,7 +2917,7 @@ def _bind_system_record(
     #  would leave the object the caller still holds - and `overrewrite` still
     #  persists - unrelated to the one the callee received. So a supplied instance
     #  is MUTATED IN PLACE and returned; only its absence builds one, which is what
-    #  a caller inspecting a linkage shape without a database gets (finding CLI-02).
+    #  a caller inspecting a linkage shape without a database gets.
     if system_record is None:
         system_record = _declared_system_record()
     _apply_cli_pins(system_record, ns, pinned, env=env)
@@ -2986,9 +2975,9 @@ def _apply_cli_pins(
     #  `move 8 to LK-Return / goback` [common/acas-get-params.cbl:L174-L178] and
     #  the frozen program's only refusal this transport can express.
     #
-    #  ⭐ M-06.  IT NO LONGER FAILS FOR AN *UNUSABLE* CONTRACT, and it used to.
+    #  IT DOES NOT FAIL FOR AN *UNUSABLE* CONTRACT, only for an ABSENT one.
     #  A blank required value, a value containing whitespace and a value longer
-    #  than its carrier all raised `RdbmsParamError` from here. The frozen reader
+    #  than its carrier must NOT raise `RdbmsParamError` from here. The frozen reader
     #  refuses none of the three - it cuts at the first space
     #  [common/acas-get-params.cbl:L193-L199] and truncates at the receiving
     #  carrier [common/acas-get-params.cbl:L204-L221], both silently - so the
@@ -3028,7 +3017,7 @@ def _apply_cli_pins(
     #  write-back of zero that `zz070-Convert-Date` performs inside the callee
     #  [general/gl070.cbl:L580-L581].
     #
-    #  ⭐ M-05. STORED THROUGH THE FIELD'S OWN DESCRIPTOR, not assigned. `pic 9`
+    #  STORED THROUGH THE FIELD'S OWN DESCRIPTOR, not assigned. `pic 9`
     #  is one digit, so a value outside that width is truncated by the receiving
     #  field exactly as the frozen `MOVE` truncates it - the semantics belong to
     #  `acas_posting.cobol.move` and are delegated whole rather than restated
@@ -3057,7 +3046,7 @@ def _apply_cli_pins(
     #  "  " leaves a single space. A Python assignment left "YES" in the field
     #  instead, and every reader of the switch tests it against a one-character
     #  literal - `88 IRS-Used value "Y"` [:L180] and `88 IRS-Both-Used value "B"`
-    #  [:L181], tested at three sites in each of the four Sales and Purchase
+    #  [:L181], tested at 27 sites across the four Sales and Purchase
     #  posting programs, e.g. [sales/sl060.cbl:L1039] - so "YES" would have
     #  tested FALSE and silently suppressed the whole IRS fan-out, changing which
     #  tables a run touches (Agent Action Plan section 0.6.4).
@@ -3105,25 +3094,25 @@ def _apply_cli_pins(
     #  it reproduces, and the seven routes call them around their dispatches. The
     #  Agent Action Plan requires it and leaves no alternative:
     #
-    #    * section 0.4.1.1 derives every CLI entry point FROM a menu paragraph -
-    #      `gl_post_cycle.py` "from general/general.cbl load08", and so on for all
-    #      seven. The menus are excluded as PROGRAMS to migrate wholesale; the
-    #      dispatch behaviour the routes are built out of is the plan's own
-    #      source for those files, and the load and the persist are part of it;
-    #    * section 0.3.4 says exactly what is dropped from a menu, and it is
-    #      PRESENTATION: "Diagnostic displays with no database effect become log
-    #      records", "Accept prompts that gate a database write become explicit
-    #      CLI parameters". A statement WITH a database effect is not on that
-    #      list, and `overrewrite` is nothing but database effect;
-    #    * section 0.8.5 makes the acceptance test an EMPTY ordering-normalised
-    #      diff on the affected tables. SYSTOT-REC is affected - the nine
-    #      period-total writes mutate it and `overrewrite` is their only writer -
-    #      so a Python run that never rewrites it cannot produce an empty diff
-    #      against a COBOL run that does;
-    #    * section 0.4.3's import table bars this layer from `dal.acas*`, not
-    #      from `dal.facade`. The facade is the published seam and is what the
-    #      twelve program modules themselves use, so the load is reachable from
-    #      here without touching a handler module.
+    #  * section 0.4.1.1 derives every CLI entry point FROM a menu paragraph -
+    #  `gl_post_cycle.py` "from general/general.cbl load08", and so on for all
+    #  seven. The menus are excluded as PROGRAMS to migrate wholesale; the
+    #  dispatch behaviour the routes are built out of is the plan's own
+    #  source for those files, and the load and the persist are part of it;
+    #  * section 0.3.4 says exactly what is dropped from a menu, and it is
+    #  PRESENTATION: "Diagnostic displays with no database effect become log
+    #  records", "Accept prompts that gate a database write become explicit
+    #  CLI parameters". A statement WITH a database effect is not on that
+    #  list, and `overrewrite` is nothing but database effect;
+    #  * section 0.8.5 makes the acceptance test an EMPTY ordering-normalised
+    #  diff on the affected tables. SYSTOT-REC is affected - the nine
+    #  period-total writes mutate it and `overrewrite` is their only writer -
+    #  so a Python run that never rewrites it cannot produce an empty diff
+    #  against a COBOL run that does;
+    #  * section 0.4.3's import table bars this layer from `dal.acas*`, not
+    #  from `dal.facade`. The facade is the published seam and is what the
+    #  twelve program modules themselves use, so the load is reachable from
+    #  here without touching a handler module.
     #
     #  AND NOT IN THE PROGRAM LAYER. Putting it there instead would violate rule
     #  R-3, because the twelve frozen programs, as measured above, do not read or
@@ -3178,7 +3167,7 @@ class SystemRecordUnavailableError(RuntimeError):
     reports a serious code, `call-system-setup.` answers `stop run`
     [general/general.cbl:L630-L631].
 
-    ⛔ WHAT MUST NOT HAPPEN INSTEAD, and why this is not a new validation
+    WHAT MUST NOT HAPPEN INSTEAD, and why this is not a new validation
     (rule R-3). Continuing past a failed key-1 read hands every callee a record at
     its DECLARED DEFAULTS - accounting cycle zero, period zero, current quarter
     zero, spaces in the control accounts and a posting-key allocator at zero - and
@@ -3335,16 +3324,16 @@ _HANDLER_NAMED_SYSTEM_VERBS: Final[_SystemVerbs] = _SystemVerbs(
 #  THE MENU SHELL'S OWN acas000 TRAFFIC
 #  Four functions, each named after the paragraph it reproduces, because rule R-5
 #  requires paragraph-to-function traceability and these are menu paragraphs:
-#      aa010_get_system_recs        general/general.cbl  L398  (+ Open-System L385)
-#                                   sales/sales.cbl      L351  (+ Open-System L338)
-#                                   purchase/purchase.cbl L346 (+ Open-System L333)
-#                                   irs/irs.cbl          L507  (+ aa005-Open-System L494)
-#      overrewrite                  general/general.cbl  L656
-#                                   sales/sales.cbl      L628
-#                                   purchase/purchase.cbl L621
-#                                   irs/irs.cbl          L755  (`EOJ.`, the IRS spelling)
-#      zz090_set_up_irs_system_data irs/irs.cbl          L907
-#      zz095_restore_irs_system_data irs/irs.cbl         L1000
+#  aa010_get_system_recs        general/general.cbl  L398  (+ Open-System L385)
+#  sales/sales.cbl      L351  (+ Open-System L338)
+#  purchase/purchase.cbl L346 (+ Open-System L333)
+#  irs/irs.cbl          L507  (+ aa005-Open-System L494)
+#  overrewrite                  general/general.cbl  L656
+#  sales/sales.cbl      L628
+#  purchase/purchase.cbl L621
+#  irs/irs.cbl          L755  (`EOJ.`, the IRS spelling)
+#  zz090_set_up_irs_system_data irs/irs.cbl          L907
+#  zz095_restore_irs_system_data irs/irs.cbl         L1000
 #  All four are COMMANDS: they mutate the records and the `MenuState` they are
 #  given and return either None or a value object. None of them returns a status,
 #  because a COBOL paragraph cannot; the reply is in `MenuState.file_access`,
@@ -3410,7 +3399,7 @@ def irs_menu_state() -> MenuState:
     [irs/irs.cbl:L759-L774]. So neither a totals record nor a defaults record is
     carried, and `aa010_get_system_recs` reads neither.
 
-    ⭐ AND THE HANDLER-NAMED VOCABULARY, WHICH IS THIS FACTORY'S SECOND JOB.
+    AND THE HANDLER-NAMED VOCABULARY, WHICH IS THIS FACTORY'S SECOND JOB.
     irs/irs.cbl copies [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob]
     [irs/irs.cbl:L1035], not the entity-named copybook the other three menus copy,
     and drives the same handler through `acas000-open-Input`
@@ -3471,7 +3460,7 @@ def _select_key(file_access: FileAccess, key: int) -> None:
     """`move n to File-Key-No.` - the caller-owned key `acas000` dispatches on.
 
     `File-Key-No` lives inside the logging group of `File-Access`
-    [copybooks/wsfnctn.cob:L44-L56], which is where the migrated record layer
+    [copybooks/wsfnctn.cob:L44-L55], which is where the migrated record layer
     puts it too. Written through a named function so that the four call sites
     below read as the menus do and none of them reaches two levels into the
     record by hand.
@@ -3560,7 +3549,7 @@ def aa010_get_system_recs(
     four bridges reinterpret; here each key is given its own record and the
     handler writes straight into it. See `MenuState`'s note.
 
-    ⭐ THE KEY-1 REPLY IS TESTED, AND TESTED BEFORE THE CLOSE. All four menus
+    THE KEY-1 REPLY IS TESTED, AND TESTED BEFORE THE CLOSE. All four menus
     write the same four statements after the key-1 read -
     [general/general.cbl:L412-L418], [sales/sales.cbl:L361-L367],
     [purchase/purchase.cbl:L355-L361], [irs/irs.cbl:L513-L519] - and none of them
@@ -3617,13 +3606,13 @@ def aa010_get_system_recs(
     So in the frozen system the run date is written once at record-creation time
     and read thereafter. The migration replaces that creator with the controlled
     clock, which Agent Action Plan section 0.1.1 requires to pin BOTH observables
-    "at the CLI boundary", and the review confirms the pinning as correct. This
+    "at the CLI boundary". This
     function therefore keeps `--run-date` authoritative and re-applies it after
-    the load; a scenario must seed SYSTEM-REC.RUN-DATE to agree. Arbitrate
-    against the compiled oracle and record in
-    docs/migration/ambiguity-resolutions.md.
+    the load; a scenario must seed the `SYSTEM-REC`.`RUN-DAT` column to agree, which
+    both parity runners check rather than assume (`Q-CLI-RUNDATE-VS-ROW`, settled for
+    the semantics in docs/migration/ambiguity-resolutions.md).
 
-    ⭐ THE VERB VOCABULARY IS THE MENU'S, NOT THIS FUNCTION'S. Three of the four
+    THE VERB VOCABULARY IS THE MENU'S, NOT THIS FUNCTION'S. Three of the four
     shells drive `acas000` by its ENTITY name and the IRS shell drives it by its
     HANDLER name, and Agent Action Plan section 0.6.5 records that the difference
     is behavioural: the handler-named open family performs
@@ -3666,34 +3655,34 @@ def aa010_get_system_recs(
             [copybooks/Proc-ACAS-FH-Calls.cob:L190-L230].
         `RdbmsParamError`: from the re-application of the pins.
     """
-    #       The menu's own vocabulary, chosen once for all three verbs below.
+    #  The menu's own vocabulary, chosen once for all three verbs below.
     verbs = _system_verbs(state)
 
     #  385  Open-System.  /  494  aa005-Open-System.
-    #       `perform System-Open-Input` with key 1 - "as Input as I/o may create"
-    #       [irs/irs.cbl:L499]. The key is set before the open because `acas000`
-    #       dispatches the OPEN on it too.
+    #  `perform System-Open-Input` with key 1 - "as Input as I/o may create"
+    #  [irs/irs.cbl:L499]. The key is set before the open because `acas000`
+    #  dispatches the OPEN on it too.
     _force_rdbms_store(state.file_access)
     _select_key(state.file_access, SYSTEM_FILE_KEY_PARAMS)
     verbs.open_input(_system_context(system_record, state, file_defs))
 
     #  403  perform  System-Read-Indexed.        *> Read Cobol file sys totals
-    #       NOT TESTED, in any menu. Only key 1 is [general/general.cbl:L412].
+    #  NOT TESTED, in any menu. Only key 1 is [general/general.cbl:L412].
     if state.system_record_4 is not None:
         _select_key(state.file_access, SYSTEM_FILE_KEY_TOTALS)
         verbs.read_indexed(_system_context(state.system_record_4, state, file_defs))
 
     #  406  perform  System-Read-Indexed.        *> Read Cobol file defaults
-    #       NOT TESTED either, and the General menu is the only one that reads it.
+    #  NOT TESTED either, and the General menu is the only one that reads it.
     if state.default_record is not None:
         _select_key(state.file_access, SYSTEM_FILE_KEY_DEFAULTS)
         verbs.read_indexed(_system_context(state.default_record, state, file_defs))
 
     #  409  perform  System-Read-Indexed.        *> Read Cobol file params
-    #       LAST, as the frozen paragraph reads it. THE PAIR IS CAPTURED FROM THE
-    #       RETURN VALUE, because the close below - either the failure arm's at
-    #       L413 or the success path's at L460 - overwrites `File-Access` with its
-    #       own reply, and the reply the frozen `if` tests is THIS one.
+    #  LAST, as the frozen paragraph reads it. THE PAIR IS CAPTURED FROM THE
+    #  RETURN VALUE, because the close below - either the failure arm's at
+    #  L413 or the success path's at L460 - overwrites `File-Access` with its
+    #  own reply, and the reply the frozen `if` tests is THIS one.
     _select_key(state.file_access, SYSTEM_FILE_KEY_PARAMS)
     key_1_status = verbs.read_indexed(
         _system_context(system_record, state, file_defs)
@@ -3706,15 +3695,15 @@ def aa010_get_system_recs(
     #  416           perform System-open
     #  417           go to aa010-Get-System-Recs
     #  418  end-if.
-    #       ⭐ THE GATE. Present in all four shells and identical in all four
-    #       [general/general.cbl:L412-L418], [sales/sales.cbl:L361-L367],
-    #       [purchase/purchase.cbl:L355-L361], [irs/irs.cbl:L513-L519]. L413 IS
-    #       reproduced; L414-L417 cannot be, because `common/sys002.cbl` is an
-    #       interactive record-creation dialog and out of scope by name (Agent
-    #       Action Plan section 0.2.2), and the loop-back at L417 is meaningful
-    #       only after it. What survives is the frozen DISPOSITION: the paragraph
-    #       is never left with a bad reply, so nothing is dispatched and nothing is
-    #       written. See `SystemRecordUnavailableError`.
+    #  THE GATE. Present in all four shells and identical in all four
+    #  [general/general.cbl:L412-L418], [sales/sales.cbl:L361-L367],
+    #  [purchase/purchase.cbl:L355-L361], [irs/irs.cbl:L513-L519]. L413 IS
+    #  reproduced; L414-L417 cannot be, because `common/sys002.cbl` is an
+    #  interactive record-creation dialog and out of scope by name (Agent
+    #  Action Plan section 0.2.2), and the loop-back at L417 is meaningful
+    #  only after it. What survives is the frozen DISPOSITION: the paragraph
+    #  is never left with a bad reply, so nothing is dispatched and nothing is
+    #  written. See `SystemRecordUnavailableError`.
     if key_1_status.fs_reply != FsReply.SUCCESS:
         #  A diagnostic, at ERROR because the run stops here. The frozen paragraph
         #  displays nothing at this point - `sys002` puts up its own screens - so
@@ -3808,15 +3797,15 @@ def overrewrite(
         file_defs: `01 File-Defs.`, the fourth operand of every dispatch.
     """
     #  658-660  move "66" ... move 1 to File-Key-No ... perform System-Open.
-    #           An I-O open, not input: `System-Open` sets Access-Type 2
-    #           [copybooks/Proc-ACAS-FH-Calls.cob:L190-L195].
+    #  An I-O open, not input: `System-Open` sets Access-Type 2
+    #  [copybooks/Proc-ACAS-FH-Calls.cob:L190-L195].
     _force_rdbms_store(state.file_access)
     _select_key(state.file_access, SYSTEM_FILE_KEY_PARAMS)
     facade.system_open(_system_context(system_record, state, file_defs))
 
     #  661-663  move 1 to File-Key-No ... perform System-Rewrite.
-    #           The key is set a SECOND time, redundantly, immediately after the
-    #           open set it. Transcribed rather than tidied away (rule R-4).
+    #  The key is set a SECOND time, redundantly, immediately after the
+    #  open set it. Transcribed rather than tidied away (rule R-4).
     _select_key(state.file_access, SYSTEM_FILE_KEY_PARAMS)
     facade.system_rewrite(_system_context(system_record, state, file_defs))
 
@@ -3835,16 +3824,16 @@ def overrewrite(
         )
 
     #  670  perform  System-Close.
-    #       THE KEY IS STILL 4 HERE, and that is the frozen program's, not a slip.
-    #       Nothing between L667 and L670 resets `File-Key-No`, so the close is
-    #       issued against key 4 - the totals table - and never against key 1.
-    #       `acas000` dispatches its CLOSE on the key like every other function
-    #       [common/acas000.cbl:L574-L600], so the two are not interchangeable.
-    #       The load's close does NOT have this shape: `aa010-Get-System-Recs`
-    #       leaves the key at 1 [general/general.cbl:L408] and its close at
-    #       [general/general.cbl:L460] therefore closes key 1. The asymmetry is
-    #       transcribed, not reconciled (rule R-4). Recorded as FINDING F-A1 in
-    #       the footer.
+    #  THE KEY IS STILL 4 HERE, and that is the frozen program's, not a slip.
+    #  Nothing between L667 and L670 resets `File-Key-No`, so the close is
+    #  issued against key 4 - the totals table - and never against key 1.
+    #  `acas000` dispatches its CLOSE on the key like every other function
+    #  [common/acas000.cbl:L574-L600], so the two are not interchangeable.
+    #  The load's close does NOT have this shape: `aa010-Get-System-Recs`
+    #  leaves the key at 1 [general/general.cbl:L408] and its close at
+    #  [general/general.cbl:L460] therefore closes key 1. The asymmetry is
+    #  transcribed, not reconciled (rule R-4). Recorded as FINDING F-A1 in
+    #  the footer.
     facade.system_close(_system_context(system_record, state, file_defs))
 
 
@@ -3961,8 +3950,8 @@ def zz090_set_up_irs_system_data(
     #  941  move     Vat-Rate-1     to Vat in IRS-System-Params.
     #  942  move     Vat-Rate-2     to Vat2.
     #  943  move     Vat-Rate-3     to Vat3.
-    #       Same picture on both sides, `pic 99v99`
-    #       [copybooks/wssystem.cob:L56], [copybooks/irswssystem.cob:L27-L29].
+    #  Same picture on both sides, `pic 99v99`
+    #  [copybooks/wssystem.cob:L56], [copybooks/irswssystem.cob:L27-L29].
     irs_system_params.vat_rates.vat = data.vat_rates.vat_rate_1
     irs_system_params.vat_rates.vat2 = data.vat_rates.vat_rate_2
     irs_system_params.vat_rates.vat3 = data.vat_rates.vat_rate_3
@@ -3983,11 +3972,11 @@ def zz090_set_up_irs_system_data(
     irs_system_params.save_sequ = irs_block.save_sequ
     irs_system_params.system_work_group = irs_block.system_work_group
     irs_system_params.pl_app_created = irs_block.pl_app_created
-    #       `PL-Approp-AC` is the FIVE-digit item inside the redefinition of the
-    #       six-digit `PL-Approp-AC6` [copybooks/wssystem.cob:L322-L325] - "loose
-    #       leading char for IRS". The IRS side is `pic 9(5)`
-    #       [copybooks/irswssystem.cob:L36], so the five-digit reading is the one
-    #       that matches and the six-digit one is deliberately not used.
+    #  `PL-Approp-AC` is the FIVE-digit item inside the redefinition of the
+    #  six-digit `PL-Approp-AC6` [copybooks/wssystem.cob:L322-L325] - "loose
+    #  leading char for IRS". The IRS side is `pic 9(5)`
+    #  [copybooks/irswssystem.cob:L36], so the five-digit reading is the one
+    #  that matches and the six-digit one is deliberately not used.
     irs_system_params.pl_approp_ac = irs_block.filler_323.pl_approp_ac
     irs_system_params.first_time_flag = irs_block.first_time_flag
 
@@ -3997,13 +3986,13 @@ def zz090_set_up_irs_system_data(
     dates.maps04(conversion)
     irs_system_params.run_date = irs_run_date_x8(conversion.u_date)
 
-    #       `zz090-Proc-Start-Date` and `-End-Date` [irs/irs.cbl:L980-L991] are
-    #       the SAME two-slice `string` as `-Proc-Run-Date`, character for
-    #       character, into two receivers of the same `pic x(8)`
-    #       [copybooks/irswssystem.cob:L21-L22]. `irs_run_date_x8` is therefore
-    #       the counterpart of all three statements, not of the first alone, and
-    #       is reused rather than copied - its result is already eight characters
-    #       wide, so no further MOVE is needed to fit the receiver.
+    #  `zz090-Proc-Start-Date` and `-End-Date` [irs/irs.cbl:L980-L991] are
+    #  the SAME two-slice `string` as `-Proc-Run-Date`, character for
+    #  character, into two receivers of the same `pic x(8)`
+    #  [copybooks/irswssystem.cob:L21-L22]. `irs_run_date_x8` is therefore
+    #  the counterpart of all three statements, not of the first alone, and
+    #  is reused rather than copied - its result is already eight characters
+    #  wide, so no further MOVE is needed to fit the receiver.
     conversion.u_bin = data.start_date
     dates.maps04(conversion)
     irs_system_params.start_date = irs_run_date_x8(conversion.u_date)
@@ -4167,7 +4156,7 @@ def eoj_persist_irs_system_data(
     context = _system_context(ws_system_record, state, file_defs)
 
     #  759-762  the re-read. `move 1 to File-Key-No` is written for form; the
-    #           handler-named dispatch pins the key itself.
+    #  handler-named dispatch pins the key itself.
     _force_rdbms_store(state.file_access)
     _select_key(state.file_access, SYSTEM_FILE_KEY_PARAMS)
     facade.acas000_open(context)
@@ -4274,7 +4263,7 @@ def bind_gl_linkage(
             [general/general.cbl:L385-L460]. Mutated in place and carried into the
             linkage, exactly as the shell hands its own one record to the `CALL`.
             `None` builds one at its declared defaults - see `_bind_system_record`
-            and finding CLI-02.
+
 
     Returns:
         The four arguments in COBOL parameter order [general/gl070.cbl:L245-L248], ready
@@ -4347,6 +4336,11 @@ def bind_slpl_linkage(
             and `add_slpl_linkage_arguments`.
         called: the callee's program-id - `"sl055"`, `"sl060"`, `"sl100"`, `"pl055"`,
             `"pl060"` or `"pl100"`.
+        menu_state: the shell's own WORKING-STORAGE, when the route has one. Its
+            `system_record` and `system_record_4` are used as the fallback records so
+            that the linkage carries the SAME objects the menu holds, which is what
+            makes the callee's by-reference writes visible to `overrewrite`. `None`
+            binds from `system_record`/`system_record_4` or from declared defaults.
         env: as `bind_gl_linkage`.
         system_record: as `bind_gl_linkage`. The Sales and Purchase shells read it
             under file-key 1 [sales/sales.cbl:L359-L360],
@@ -4459,8 +4453,7 @@ def bind_irs_route(
 
     THE SIGNATURE IS THE THREE ARGUMENTS ABOVE AND NOTHING ELSE. Neither
     `WS-System-Record` nor `IRS-System-Params` is a parameter: both are BUILT
-    here, for the reason the next paragraph gives, and an earlier revision of
-    this docstring documented them as if a caller could supply them.
+    here, for the reason the next paragraph gives, so no caller can supply them.
 
     BOTH RECORDS ARE BUILT HERE, NOT PASSED IN. `WS-System-Record` is the ACAS
     system record the IRS shell reads under file-key 1 and NOTHING ELSE - `move 1
@@ -4469,12 +4462,12 @@ def bind_irs_route(
     this function is handed. `IRS-System-Params` is built at its declared
     defaults and then filled by `zz090_set_up_irs_system_data`
     [irs/irs.cbl:L907-L997] out of that loaded record; without the load it would
-    carry `Next-Post` zero and allocate posting keys from zero - finding CLI-04.
+    carry `Next-Post` zero and allocate posting keys from zero.
     Either way the eight-character run date is written into it here, because that
     is what `zz090-Proc-Run-Date.` [irs/irs.cbl:L972-L978] does and the pinned
     clock is this layer's business.
 
-    ⭐ BINDING IS NOT THE WHOLE OF SHAPE 3, AND MUST NOT BE MISTAKEN FOR IT.
+    BINDING IS NOT THE WHOLE OF SHAPE 3, AND MUST NOT BE MISTAKEN FOR IT.
     Bound WITHOUT a `menu_state` this returns the three records at their DECLARED
     DEFAULTS plus whatever argv supplies - which leaves `IRS-System-Params.Next-
     Post`, the POSTING-KEY ALLOCATOR `irs030` numbers each posting from, at ZERO.
@@ -4486,7 +4479,7 @@ def bind_irs_route(
     supplies `menu_state` - which every route does - by `aa010_get_system_recs`,
     whose key set comes from the `irs_menu_state()` block and is therefore key 1
     alone, and by `zz090_set_up_irs_system_data`. EACH RUNS EXACTLY ONCE, as the
-    frozen menu performs each exactly once (finding F-01). A caller that binds
+    frozen menu performs each exactly once. A caller that binds
     Shape 3 and dispatches without them allocates posting keys from zero and
     collides with the seed.
 
@@ -4525,7 +4518,7 @@ def bind_irs_route(
         that section once, at [irs/irs.cbl:L556], with the maintainer's reminder
         "dont forget to run zz095 after", and taking it a second time to obtain
         the snapshot would traverse file-key 1 again and add store traffic, log
-        records and a failure path the frozen menu has not got (finding F-01).
+        records and a failure path the frozen menu has not got.
     """
     pinned = resolve_clock(ns.run_date)
     ws_system_record = _bind_system_record(ns, pinned, env=env)
@@ -4554,9 +4547,9 @@ def bind_irs_route(
     #  is why both are kept - the pre-load line still serves a caller that
     #  supplies no `menu_state`.
     #
-    #  ⭐ ONCE. The load and the remap each run exactly once here, and the snapshot
+    #  ONCE. The load and the remap each run exactly once here, and the snapshot
     #  `zz090` captures on that one pass is returned rather than re-taken (finding
-    #  F-01): this block used to appear twice, so every IRS run traversed file-key 1
+    #  the block appears ONCE, so an IRS run traverses file-key 1
     #  twice, discarded the first loaded record and ran the remap on the second -
     #  and `cli/irs_post.py` then performed a third remap purely to obtain the
     #  snapshot. The frozen menu performs `aa010-Get-System-Recs` once
@@ -4581,7 +4574,7 @@ def bind_irs_route(
     #  does `irs030` observe this field at all? Left for the compiled oracle to
     #  settle (rule R-6).
     #
-    #  ⭐ STATED AFTER THE LOAD, AND IT AGREES WITH `zz090` BY CONSTRUCTION. The
+    #  STATED AFTER THE LOAD, AND IT AGREES WITH `zz090` BY CONSTRUCTION. The
     #  frozen menu derives this field from the loaded `ACAS-Run-Date`
     #  [irs/irs.cbl:L973], and `_apply_cli_pins` has already re-pinned that
     #  binary `Run-Date` from `--run-date`, so `zz090` converts the same value
@@ -4591,7 +4584,7 @@ def bind_irs_route(
     #  the clock pinned (rule R-6).
     irs_system_params.run_date = irs_run_date_x8(pinned.to_day)
 
-    #  ⭐ ONE MENU LOAD, AND ONLY ONE. The bind / `FileDefs()` /
+    #  ONE MENU LOAD, AND ONLY ONE. The bind / `FileDefs()` /
     #  `aa010_get_system_recs` / `zz090` sequence above used to appear a SECOND
     #  time here, which made every IRS bind open the system store, read key 1 and
     #  close it TWICE - a handler sequence the frozen menu performs once
@@ -4629,7 +4622,7 @@ def bind_irs_linkage(
     The linkage half of `bind_irs_route`, for a caller that has no `zz095` to
     perform - a program-level test, or a route that only needs the three operands.
     ONE implementation, so the two cannot drift: this delegates rather than
-    repeating the bind, the key-1 load or the `zz090` remap (finding F-01).
+    repeating the bind, the key-1 load or the `zz090` remap.
 
     Args:
         ns: as `bind_irs_route`.
@@ -4648,7 +4641,7 @@ def bind_irs_linkage(
     Note:
         A CALLER THAT NEEDS THE SNAPSHOT MUST USE `bind_irs_route`. Discarding it
         here and re-taking it with a second `zz090_set_up_irs_system_data` is the
-        traversal finding F-01 removed.
+        traversal.
     """
     return bind_irs_route(ns, menu_state=menu_state, env=env).linkage
 
@@ -4721,19 +4714,19 @@ def exit_status_for(term_code: int) -> int:
 
 
 #  THE ONE CONFIGURATION-FAILURE CONTRACT, SHARED BY ALL SEVEN ROUTES AND THE
-#  PACKAGE ROUTER  (finding CLI-09)
+#  PACKAGE ROUTER
 #  Before this, one route caught every `ValueError` and mapped it to 1 or 8 while
 #  the other six caught nothing and let the same missing deployment contract
 #  surface as an uncaught traceback with a generic status. One condition, seven
 #  behaviours. The contract is now written down once, here, and every `main`
 #  spells it the same way::
 #
-#      try:
-#          state = menu_state.<ledger>_get_system_recs()
-#      except args.RdbmsParamError as error:
-#          return args.report_configuration_failure(
-#              error, logger=_LOG, subject="General Ledger"
-#          )
+#  try:
+#  state = menu_state.<ledger>_get_system_recs()
+#  except args.RdbmsParamError as error:
+#  return args.report_configuration_failure(
+#  error, logger=_LOG, subject="General Ledger"
+#  )
 #
 #  THE EXACT TYPE, NOT `ValueError`. `RdbmsParamError` subclasses `ValueError`,
 #  so catching the base class also swallowed a genuine defect - a bad namespace
@@ -4789,13 +4782,13 @@ def report_configuration_failure(
         subject,
         error,
     )
-    #  ⭐ THROUGH THE ONE GUARDED HELPER, NOT `error.return_code` DIRECTLY
-    #  (finding SEC-01). `boundary_exit_status` reads the attribute and returns it
+    #  THROUGH THE ONE GUARDED HELPER, NOT `error.return_code` DIRECTLY.
+    #  `boundary_exit_status` reads the attribute and returns it
     #  only when it `isinstance(..., int)`, falling back to the smallest status the
-    #  frozen menu treats as a serious error. Reading the attribute here instead
-    #  meant an exception whose `return_code` was not an integer - which a reversed
-    #  `RdbmsParamError(message, code)` produced, silently - became a route's
-    #  return value: `SystemExit` printed the formatted text on a direct
+    #  frozen menu treats as a serious error. Reading the attribute here directly
+    #  would let an exception whose `return_code` is not an integer - which a
+    #  reversed `RdbmsParamError(message, code)` produces, silently - become a
+    #  route's return value: `SystemExit` prints the formatted text on a direct
     #  invocation, and `__main__`'s `is_serious_error(term_code)` compared a `str`
     #  against an `int` and raised, turning a configuration mistake into a
     #  traceback that discloses installation paths (CWE-209, CWE-704). The two
@@ -4826,23 +4819,23 @@ def irs_run_date_x8(to_day: str) -> str:
 #  NO COBOL COUNTERPART, AND THAT IS THE WHOLE PROBLEM IT SOLVES.
 #  The frozen bridge reaches the server through six values and nothing else:
 #
-#      call "MySQL_real_connect" using Host-Name, Implementation, Password,
-#           Base-Name, Port-Number, Socket   [copybooks/mysql-procedures.cpy:L72-L77]
+#  call "MySQL_real_connect" using Host-Name, Implementation, Password,
+#  Base-Name, Port-Number, Socket   [copybooks/mysql-procedures.cpy:L72-L77]
 #
 #  - no certificate, no key, no verification mode. Transport is compiled into
 #  `cobmysqlapi.c` and is therefore not something the COBOL can be asked about,
 #  which means the migration has to decide it somewhere.
 #
-#  ⭐ WHAT `dal/connection.py` ACTUALLY DOES, STATED AS IT IS (finding F-06).
+#  WHAT `dal/connection.py` ACTUALLY DOES, STATED AS IT IS.
 #  A Unix socket, a loopback address and a certificate-verified session are
 #  PERMITTED SILENTLY. A non-local unencrypted target with no declaration is
 #  REPORTED - one warning naming no host, no account and no schema - AND
-#  PERMITTED. It is not refused, and this text used to say it was. The reason it is
-#  not is rule R-3: `Mysql-1000-Open` has exactly two outcomes, it connects or it
+#  PERMITTED. It is NOT refused, and the reason is rule R-3:
+#  `Mysql-1000-Open` has exactly two outcomes, it connects or it
 #  reports `(FS-Reply 99, We-Error 911)` [copybooks/mysql-procedures.cpy:L127-L128],
 #  and it inspects neither where the server is nor whose credentials it was handed -
 #  so a refusal on the parity path would be a disposition the compiled program has
-#  not got (finding M-06, recorded at `dal.connection.audit_connection_policy`).
+#  not got - recorded at `dal.connection.audit_connection_policy`.
 #
 #  REFUSAL IS AVAILABLE AND IT IS OPT-IN. Setting
 #  `TRANSPORT_REQUIRE_ENCRYPTION_VARIABLE` turns that report into
@@ -4851,7 +4844,7 @@ def irs_run_date_x8(to_day: str) -> str:
 #  `--db-allow-plaintext` (or the contract's isolated-oracle variable) does not
 #  annul it: the two are merged, not chosen between.
 #
-#  ⭐ WHY THE DECLARATION BELONGS TO THE DEPLOYMENT AND NOT TO THE ROUTE.
+#  WHY THE DECLARATION BELONGS TO THE DEPLOYMENT AND NOT TO THE ROUTE.
 #  The refusal is only useful if a legitimate operator has a way to say what
 #  they meant, and there is exactly one place that may say it: the deployment
 #  contract, read once at the process boundary. Before this section existed the
@@ -4869,12 +4862,12 @@ def irs_run_date_x8(to_day: str) -> str:
 #  frozen `CALL` passes the linkage operands and the write-gating answers and
 #  nothing else. A certificate path in argv is also a process-listing leak. So
 #  deployment security lives entirely in the contract, beside the six connection
-#  parameters, and `cli/`py` is the ONE resolver.
+#  parameters, and SECTION 0 of this module is the ONE resolver.
 #
 #  ONE SPELLING PER DECLARATION, SHARED WITH THE SHELL HALF OF THE HARNESS.
 #  `harness/build_oracle.sh`, `harness/seed.sh` and `harness/docker-compose.yml`
 #  refuse a non-local target unless `ACAS_DB_TLS_CA` names a readable PEM bundle
-#  or `ACAS_DB_ALLOW_PLAINTEXT` is declared. `cli/`py` reads those
+#  or `ACAS_DB_ALLOW_PLAINTEXT` is declared. SECTION 0 reads those
 #  same names, so the shell half and the Python half of the harness obey ONE
 #  contract rather than two that can disagree.
 #
@@ -4899,7 +4892,7 @@ def irs_run_date_x8(to_day: str) -> str:
 #  layer that declares them, which is a different thing from a policy object
 #  that has no COBOL field at all.
 
-#  THE TWO VARIABLE NAMES ARE `cli/`py`'s, AND ONLY ITS.
+#  THE TWO VARIABLE NAMES ARE SECTION 0's, AND ONLY ITS.
 #  `TRANSPORT_CA_VARIABLE` and `TRANSPORT_ALLOW_PLAINTEXT_VARIABLE` are declared
 #  there, next to the six connection-parameter names, and `resolve_transport_policy`
 #  is the one function that reads them. Two constants and a second reader used to
@@ -4928,7 +4921,7 @@ def _transport_from_contract(
         declaring nothing resolves to - means the caller declares no transport
         material, which `dal/connection.py` treats as "nothing declared": a
         non-local, unencrypted target is REPORTED at WARNING and connected to,
-        as the compiled program connects to it (rule R-3, finding F-02).
+        as the compiled program connects to it (rule R-3).
 
     Raises:
         ValueError: the contract named a client certificate without its private
@@ -5025,29 +5018,29 @@ def declare_connection_policy(
 #  Two things every entry point needs and none of them should spell for itself.
 #
 #  1. AN EXPECTED FAILURE IS NOT A DEFECT, AND MUST NOT LOOK LIKE ONE.
-#     A missing connection contract, a malformed one, and a transport
-#     declaration that cannot be honoured are all CONFIGURATION failures at the
-#     process boundary. Letting one escape prints a Python traceback, which
-#     tells an operator nothing they can act on and tells anyone else the
-#     absolute paths of the installation, the module layout and the internal
-#     call chain (CWE-209). A defect INSIDE the cycle is the opposite case and
-#     keeps its traceback, because there the traceback is the only diagnostic.
+#  A missing connection contract, a malformed one, and a transport
+#  declaration that cannot be honoured are all CONFIGURATION failures at the
+#  process boundary. Letting one escape prints a Python traceback, which
+#  tells an operator nothing they can act on and tells anyone else the
+#  absolute paths of the installation, the module layout and the internal
+#  call chain (CWE-209). A defect INSIDE the cycle is the opposite case and
+#  keeps its traceback, because there the traceback is the only diagnostic.
 #
 #  2. OMISSION IS NOT CONSENT.
-#     Several prompts in the frozen source gate a database write, and Agent
-#     Action Plan section 0.3.4 turns each into "an explicit CLI parameter with
-#     the COBOL default preserved". The default IS preserved - it is what
-#     `--help` shows and what the program module still declares - but a COBOL
-#     default is the answer a HUMAN AT A TERMINAL gives by pressing Return
-#     having just READ the question. An option the operator never typed is not
-#     that: nobody was asked. `require_stated` closes exactly that gap - it
-#     asks the operator to say which answer they mean, and then the answer they
-#     chose is passed onward completely unaltered.
+#  Several prompts in the frozen source gate a database write, and Agent
+#  Action Plan section 0.3.4 turns each into "an explicit CLI parameter with
+#  the COBOL default preserved". The default IS preserved - it is what
+#  `--help` shows and what the program module still declares - but a COBOL
+#  default is the answer a HUMAN AT A TERMINAL gives by pressing Return
+#  having just READ the question. An option the operator never typed is not
+#  that: nobody was asked. `require_stated` closes exactly that gap - it
+#  asks the operator to say which answer they mean, and then the answer they
+#  chose is passed onward completely unaltered.
 #
-#     THIS CHANGES NO PROGRAM BEHAVIOUR AND NO LEGACY DEFAULT (rule R-4). The
-#     gate is at the argv boundary, which has no COBOL counterpart at all; the
-#     program modules keep their own defaults, and a library or harness caller
-#     that invokes them directly is untouched.
+#  THIS CHANGES NO PROGRAM BEHAVIOUR AND NO LEGACY DEFAULT (rule R-4). The
+#  gate is at the argv boundary, which has no COBOL counterpart at all; the
+#  program modules keep their own defaults, and a library or harness caller
+#  that invokes them directly is untouched.
 
 
 #: The exceptions an entry point should REPORT rather than propagate.
@@ -5261,464 +5254,342 @@ def require_stated(
 
 # --- traceability ------------------------------------------------------------
 #
-# MODULE -> COBOL SOURCE  (rule R-5)
-#   acas_posting/cli/args.py  <-  copybooks/wscall.cob L6-L14, plus the linkage
-#   and dispatch behaviour of copybooks/wssystem.cob, copybooks/wssys4.cob,
-#   copybooks/wsnames.cob, copybooks/irswssystem.cob,
-#   copybooks/Proc-ACAS-Mapser-RDB.cob, general/general.cbl, sales/sales.cbl,
-#   purchase/purchase.cbl, irs/irs.cbl and common/ACAS.cbl. All ten are
-#   REFERENCE only - frozen, read as specification. Any diff touching them is a
-#   defect in the migration.
+# MODULE -> COBOL SOURCE, FIELD -> COPYBOOK LINE, CONSTANT -> LOCATOR,
+# CARRIER -> CALL SHAPE, HELPER -> COBOL STATEMENT, RE-EXPORT -> COBOL PROGRAM
+# =====================================================================
+# All six tables live in docs/migration/traceability.md, and the field-level
+# mapping additionally lives in data_dictionary/acas_posting_dictionary.json,
+# which every `FieldDescriptor` below cites by key. Locally: the seven fields of
+# `01 WS-Calling-Data.` [copybooks/wscall.cob:L6] are the group, its leaves are
+# L7-L14, and the three call shapes are carried by `GlLinkage` (four parameters),
+# `SlPlLinkage` (five) and `IrsLinkage` (three, and no `to-day`).
 #
-# FIELD -> COPYBOOK LINE   `01 WS-Calling-Data.` at copybooks/wscall.cob:L6
-#   WS-Called        pic x(8)   L7   -> WsCallingData.ws_called
-#                                       set by set_called, per dispatch
-#   WS-Caller        pic x(8)   L8   -> WsCallingData.ws_caller
-#                                       --ws-caller, default _menu_caller_for
-#   WS-Del-Link      pic x(8)   L9   -> WsCallingData.ws_del_link
-#                                       --ws-del-link, default spaces
-#   WS-Term-Code     pic 99     L10  -> WsCallingData.ws_term_code
-#                                       NO option; output only; reset per call
-#   WS-Process-Func  pic 9      L12  -> WsCallingData.ws_process_func
-#                                       --ws-process-func, default 0
-#   WS-Sub-Function  pic 9      L13  -> WsCallingData.ws_sub_function
-#                                       --ws-sub-function, default 0
-#   WS-CD-Args       pic x(13)  L14  -> WsCallingData.ws_cd_args
-#                                       --ws-cd-args, default spaces
-#   (L11 is the maintainer's `*> new 18/5/13` comment between L10 and L12.)
-#
-# OTHER FIELD -> LOCATOR
-#   to-day           pic x(10)        -> GlLinkage.to_day, SlPlLinkage.to_day
-#                                       general/general.cbl:L357,
-#                                       sales/sales.cbl:L309,
-#                                       purchase/purchase.cbl:L304,
-#                                       irs/irs.cbl:L405
-#   SYSTEM-REC Run-Date  binary-long  -> _bind_system_record, from the clock
-#                                       copybooks/wssystem.cob:L67
-#   SYSTEM-REC Date-Form pic 9        -> --date-form
-#                                       copybooks/wssystem.cob:L128, condition
-#                                       names L129 L130 L131, valid-set L132
-#   SYSTEM-REC IRS-Instead pic x      -> --irs-instead
-#                                       copybooks/wssystem.cob:L179, condition
-#                                       names L180 L181
-#   IRS-System-Params run-date x(8)   -> bind_irs_linkage, via irs_run_date_x8
-#                                       copybooks/irswssystem.cob:L14 (the 01
-#                                       group is L13, renamed at irs/irs.cbl:L392)
-#   File-Defs                         -> FileDefs(), declared defaults only
-#                                       copybooks/wsnames.cob:L13, group L14,
-#                                       the two gl071 work-file names L15-L16
-#   SYSTOT-REC                        -> SystemRecord4(), declared defaults only
-#                                       copybooks/wssys4.cob
-#
-# CONSTANT -> LOCATOR
-#   RUN_DATE_FORMAT                 general/general.cbl:L357, sales/sales.cbl:L309,
-#                                   purchase/purchase.cbl:L304, irs/irs.cbl:L405;
-#                                   field order fixed by
-#                                   copybooks/Proc-ACAS-Mapser-RDB.cob:L73-L76
-#   WS_CALLER_GENERAL   "general"   general/general.cbl:L512
-#   WS_CALLER_SALES     "sales"     sales/sales.cbl:L481, also L465
-#   WS_CALLER_PURCHASE  "purchase"  purchase/purchase.cbl:L475, also L459
-#   WS_CALLER_ACAS      "ACAS"      common/ACAS.cbl:L431
-#   WS_DEL_LINK_DEFAULT spaces      general/general.cbl:L513, sales/sales.cbl:L482
-#                                   and L467, purchase/purchase.cbl:L476 and L461,
-#                                   common/ACAS.cbl:L432
-#   WS_PROCESS_FUNC_DEFAULT 0       general/general.cbl:L505, sales/sales.cbl:L474
-#                                   and L468, purchase/purchase.cbl:L468 and L462
-#   WS_SUB_FUNCTION_DEFAULT 0       the same statements; individually at
-#                                   sales/sales.cbl:L469, purchase/purchase.cbl:L463
-#   WS_CD_ARGS_DEFAULT  spaces      copybooks/wscall.cob:L14 - NEVER ASSIGNED by
-#                                   any menu shell; read only, at
-#                                   sales/sales.cbl:L463 and
-#                                   purchase/purchase.cbl:L457
-#   WS_TERM_CODE_DEFAULT 0          general/general.cbl:L714 and L730,
-#                                   sales/sales.cbl:L680 and L701,
-#                                   purchase/purchase.cbl:L673 and L694,
-#                                   common/ACAS.cbl:L576
-#   GL_ABORT_TERM_CODE  5           raised general/gl070.cbl:L289 (conditional
-#                                   L287-L290); tested general/general.cbl:L810-L811
-#   EXTRACT_MISSING_FILE_TERM_CODE 8  sales/sl055.cbl:L344 and
-#                                   purchase/pl055.cbl:L286, each followed
-#                                   immediately by `goback` (L345 / L287)
-#   SERIOUS_ERROR_THRESHOLD 7       general/general.cbl:L720 and L735,
-#                                   sales/sales.cbl:L691 and L710,
-#                                   purchase/purchase.cbl:L684 and L703,
-#                                   common/ACAS.cbl:L578
-#
-# CARRIER -> CALL SHAPE
-#   GlLinkage     4 members  general/general.cbl `load00.`  L711-L723, CALL
-#                            parameter list L715-L718; callee
-#                            general/gl070.cbl:L245-L248
-#   SlPlLinkage   5 members  sales/sales.cbl `load000.` CALL L702-L707;
-#                            purchase/purchase.cbl `load000.` CALL L695-L700;
-#                            callee sales/sl060.cbl:L395-L399
-#   IrsLinkage    3 members  irs/irs.cbl `Main-Loop.` CALL L668-L671; callee
-#                            irs/irs030.cbl:L552-L554
-#
-# HELPER -> COBOL STATEMENT
-#   reset_term_code    `move zero to ws-term-code`      general/general.cbl:L714
-#                                                       and L730,
-#                                                       sales/sales.cbl:L680 and
-#                                                       L701,
-#                                                       purchase/purchase.cbl:L673
-#                                                       and L694,
-#                                                       common/ACAS.cbl:L576
-#   set_called         `move "<prog>" to ws-called`     general/general.cbl:L808,
-#                                                       L812, L814, L820
-#   is_serious_error   `if ws-term-code > 7`            general/general.cbl:L720
-#                                                       and L735,
-#                                                       sales/sales.cbl:L691 and
-#                                                       L710,
-#                                                       purchase/purchase.cbl:L684
-#                                                       and L703,
-#                                                       common/ACAS.cbl:L578
-#   exit_status_for    no COBOL equivalent - the menus never exit with the code;
-#                                                       see Q-CLI-EXITSTATUS
-#   irs_run_date_x8    `zz090-Proc-Run-Date.`           irs/irs.cbl:L972-L978,
-#                                                       the STRING at L975-L977,
-#                                                       intent at L968-L971
-#   resolve_clock      `move zero to u-bin` / `call "maps04"` / `move u-bin to
-#                      run-date`                        copybooks/
-#                                                       Proc-ACAS-Mapser-RDB.cob:
-#                                                       L78-L80
-#   _menu_caller_for   `move "general"/"sales"/"purchase" to ws-caller`
-#                                                       general/general.cbl:L512,
-#                                                       sales/sales.cbl:L481,
-#                                                       purchase/purchase.cbl:L475
-#
-# RE-EXPORT -> COBOL PROGRAM
-#   bind_rdbms_connection   the six `MOVE ... to RDBMS-*` statements every load
-#                           program performs after `call "acas-get-params"`,
-#                           common/glbatchLD.cbl:L262-L267 and identically at
-#                           common/nominalLD.cbl:L248-L253 and
-#                           common/glpostingLD.cbl:L263-L268. Implemented in
-#                           acas_posting/cli/`py`, which reproduces
-#                           common/acas-get-params.cbl in full and carries its
-#                           own traceability footer; re-exported here because
-#                           this module is where SYSTEM-REC is bound and where
-#                           an orchestrator looks for a binder.
-#
+
 # FINDINGS IN THE FROZEN MENUS  -  reproduced, never corrected (rule R-4)
 #
-#   F-A1  `overrewrite` CLOSES KEY 4, NOT KEY 1. `acas000` dispatches every
-#         function on `File-Key-No` [common/acas000.cbl:L574-L600], and nothing
-#         between the key-4 rewrite and the close resets the key
-#         [general/general.cbl:L667-L670], [sales/sales.cbl:L639-L642],
-#         [purchase/purchase.cbl:L632-L635]. So the paragraph opens the system
-#         table under key 1 and closes the TOTALS table under key 4. The load's
-#         close is different - `aa010-Get-System-Recs` leaves the key at 1 and so
-#         closes key 1 [general/general.cbl:L408], [general/general.cbl:L460].
-#         Both are transcribed as written.
-#   F-A2  THE KEY IS SET TWICE IN A ROW at the head of `overrewrite`: `move 1 to
-#         File-Key-No` immediately before `System-Open` and again immediately
-#         after it [general/general.cbl:L659-L661]. Redundant, and kept.
-#   F-A3  THE LOAD AND THE PERSIST DISAGREE ABOUT KEY ORDER. The load reads 4, 2,
-#         1 [general/general.cbl:L402-L410]; the persist writes 1, 2, 4
-#         [general/general.cbl:L661-L669]. Neither is changed to match the other.
-#   F-A4  THE `File-System-Used NOT = zero` GATE ON THE RDB ARM CAN NEVER BE
-#         DECIDED BY THE MENU ITSELF. It is a SYSTEM-REC column, zeroed before the
-#         load [general/general.cbl:L399] and then overwritten by the key-1 read;
-#         the only code that would have set it deliberately is commented out
-#         [general/general.cbl:L428-L432]. Its value at `overrewrite` is whatever
-#         the seed stored. See `overrewrite` for why the gate is therefore not
-#         reproduced as a gate.
-#   F-A5  `zz090` AND `zz095` DISAGREE ABOUT FIELD ORDER. `zz090` fills
-#         `WS-First-Time-Flag` last [irs/irs.cbl:L965-L966]; `zz095` tests it
-#         fifth of seven [irs/irs.cbl:L1023]. Each function follows its own
-#         paragraph's order.
-#   F-A6  `zz090`'s THREE DATE CONVERSIONS SHARE ONE `maps03-ws`, so a zero
-#         Start-Date or End-Date yields the PREVIOUS conversion's text rather than
-#         a blank - `maps04` unpacks only for a positive binary and leaves
-#         `u-date` untouched on rejection [common/maps04.cbl:L146]. One
-#         `Maps03Ws` is reused for all three so the carry-over survives.
-#   F-A7  TWO OF `zz090`'s MOVES TRUNCATE: `Usera pic x(32)` into `suser pic
-#         x(24)` and `Print-Spool-Name pic x(48)` into `pic x(32)`. Both go
-#         through the MOVE layer with the receiving field's descriptor.
+#  F-A1  `overrewrite` CLOSES KEY 4, NOT KEY 1. `acas000` dispatches every
+#  function on `File-Key-No` [common/acas000.cbl:L574-L600], and nothing
+#  between the key-4 rewrite and the close resets the key
+#  [general/general.cbl:L667-L670], [sales/sales.cbl:L639-L642],
+#  [purchase/purchase.cbl:L632-L635]. So the paragraph opens the system
+#  table under key 1 and closes the TOTALS table under key 4. The load's
+#  close is different - `aa010-Get-System-Recs` leaves the key at 1 and so
+#  closes key 1 [general/general.cbl:L408], [general/general.cbl:L460].
+#  Both are transcribed as written.
+#  F-A2  THE KEY IS SET TWICE IN A ROW at the head of `overrewrite`: `move 1 to
+#  File-Key-No` immediately before `System-Open` and again immediately
+#  after it [general/general.cbl:L659-L661]. Redundant, and kept.
+#  F-A3  THE LOAD AND THE PERSIST DISAGREE ABOUT KEY ORDER. The load reads 4, 2,
+#  1 [general/general.cbl:L402-L410]; the persist writes 1, 2, 4
+#  [general/general.cbl:L661-L669]. Neither is changed to match the other.
+#  F-A4  THE `File-System-Used NOT = zero` GATE ON THE RDB ARM CAN NEVER BE
+#  DECIDED BY THE MENU ITSELF. It is a SYSTEM-REC column, zeroed before the
+#  load [general/general.cbl:L399] and then overwritten by the key-1 read;
+#  the only code that would have set it deliberately is commented out
+#  [general/general.cbl:L428-L432]. Its value at `overrewrite` is whatever
+#  the seed stored. See `overrewrite` for why the gate is therefore not
+#  reproduced as a gate.
+#  F-A5  `zz090` AND `zz095` DISAGREE ABOUT FIELD ORDER. `zz090` fills
+#  `WS-First-Time-Flag` last [irs/irs.cbl:L965-L966]; `zz095` tests it
+#  fifth of seven [irs/irs.cbl:L1023]. Each function follows its own
+#  paragraph's order.
+#  F-A6  `zz090`'s THREE DATE CONVERSIONS SHARE ONE `maps03-ws`, so a zero
+#  Start-Date or End-Date yields the PREVIOUS conversion's text rather than
+#  a blank - `maps04` unpacks only for a positive binary and leaves
+#  `u-date` untouched on rejection [common/maps04.cbl:L146]. One
+#  `Maps03Ws` is reused for all three so the carry-over survives.
+#  F-A7  TWO OF `zz090`'s MOVES TRUNCATE: `Usera pic x(32)` into `suser pic
+#  x(24)` and `Print-Spool-Name pic x(48)` into `pic x(32)`. Both go
+#  through the MOVE layer with the receiving field's descriptor.
 #
 # CORRECTIONS  -  each verified against the frozen source with a line read. DO
 # NOT "fix" these back to the values the planning documents carry.
 #
-#   1. WS-CD-Args is at copybooks/wscall.cob:L14, NOT L13, so the record block
-#      is L6-L14 and not L6-L13 as Agent Action Plan section 0.4.1.1 cites. L13
-#      is WS-Sub-Function and L11 is a comment line between L10 and L12. Every
-#      citation in this module uses L6-L14.
+#  1. WS-CD-Args is at copybooks/wscall.cob:L14, NOT L13, so the record block
+#  is L6-L14 and not L6-L13 as Agent Action Plan section 0.4.1.1 cites. L13
+#  is WS-Sub-Function and L11 is a comment line between L10 and L12. Every
+#  citation in this module uses L6-L14.
 #
-#   2. The General Ledger abort is raised at general/gl070.cbl:L289
-#      (`move 5 to ws-term-code`), inside the conditional at L287-L290. The plan
-#      cites L288, which is `perform gl060a` - a report display, not the raise.
-#   3. The Sales and Purchase shape has FIVE parameters, not the four section
-#      0.4.1.1 calls it: sales/sales.cbl:L702-L706 passes five and the callee
-#      declares five at sales/sl060.cbl:L395-L399, as does
-#      purchase/purchase.cbl:L695-L699. `SlPlLinkage` has five members.
+#  2. The General Ledger abort is raised at general/gl070.cbl:L289
+#  (`move 5 to ws-term-code`), inside the conditional at L287-L290. The plan
+#  cites L288, which is `perform gl060a` - a report display, not the raise.
+#  3. The Sales and Purchase shape has FIVE parameters, not the four section
+#  0.4.1.1 calls it: sales/sales.cbl:L702-L706 passes five and the callee
+#  declares five at sales/sl060.cbl:L395-L399, as does
+#  purchase/purchase.cbl:L695-L699. `SlPlLinkage` has five members.
 
 # OMISSIONS - recorded as omissions so a reader comparing the two trees does not
 # conclude something was lost (Agent Action Plan section 0.4.3).
-#   * ALL MENU SCREEN I/O, and the `go to load01 ... depending on z` dispatch
-#     tables: no database effect, excluded by sections 0.2.2 and 0.3.4. An
-#     `ACCEPT` that merely pauses is dropped; one that gates a database write
-#     becomes an option on the individual entry point, never on this module.
-#   * `pre-overrewrite`'s BACKUP SPOOL-OUT, and the backup arm of the IRS `EOJ.`
-#     [irs/irs.cbl:L777-L791]. Both end in `call "SYSTEM"` and are excluded
-#     twice, by section 0.2.2's spool-out exclusion and by rule R-1.
-#     `overrewrite`'s SYSTEM-RECORD PERSISTENCE IS NO LONGER OMITTED - it is
-#     reproduced by `overrewrite` and, on the IRS route, by
-#     `eoj_persist_irs_system_data`. See Q-CLI-SYSREC-LOAD for why, and the
-#     COBOL-FILE ARM bullet below for the one part of it that still is not.
-#   * THE COBOL-FILE ARM OF EVERY LOAD AND EVERY PERSIST. Each menu drives its
-#     ISAM parameter file first and the RDB second - the forced `"00"` at
-#     [general/general.cbl:L401] and the unconditional block at
-#     [general/general.cbl:L674-L691] - and the migration has no ISAM store at
-#     all. Only the RDB arm has a counterpart. See
-#     `RDBMS_STORE_SELECTOR_DIGIT`.
-#   * `Default-Record`. general/general.cbl `load000.` L727-L737 looks like the
-#     five-parameter shape but its THIRD argument is `default-record`
-#     (L731-L732), not `WS-System-Record-4`. That paragraph serves gl020 and
-#     gl050, both out of scope, so NO in-scope General Ledger route uses it and
-#     this module deliberately binds no such record. `SlPlLinkage` is the only
-#     five-member shape here, and its third member is `SYSTOT-REC`.
+#  * ALL MENU SCREEN I/O, and the `go to load01 ... depending on z` dispatch
+#  tables: no database effect, excluded by sections 0.2.2 and 0.3.4. An
+#  `ACCEPT` that merely pauses is dropped; one that gates a database write
+#  becomes an option on the individual entry point, never on this module.
+#  * `pre-overrewrite`'s BACKUP SPOOL-OUT, and the backup arm of the IRS `EOJ.`
+#  [irs/irs.cbl:L777-L791]. Both end in `call "SYSTEM"` and are excluded
+#  twice, by section 0.2.2's spool-out exclusion and by rule R-1.
+#  `overrewrite`'s SYSTEM-RECORD PERSISTENCE IS NOT OMITTED - it is
+#  reproduced by `overrewrite` and, on the IRS route, by
+#  `eoj_persist_irs_system_data`. See Q-CLI-SYSREC-LOAD for why, and the
+#  COBOL-FILE ARM bullet below for the one part of it that still is not.
+#  * THE COBOL-FILE ARM OF EVERY LOAD AND EVERY PERSIST. Each menu drives its
+#  ISAM parameter file first and the RDB second - the forced `"00"` at
+#  [general/general.cbl:L401] and the unconditional block at
+#  [general/general.cbl:L674-L691] - and the migration has no ISAM store at
+#  all. Only the RDB arm has a counterpart. See
+#  `RDBMS_STORE_SELECTOR_DIGIT`.
+#  * `Default-Record`. general/general.cbl `load000.` L727-L737 looks like the
+#  five-parameter shape but its THIRD argument is `default-record`
+#  (L731-L732), not `WS-System-Record-4`. That paragraph serves gl020 and
+#  gl050, both out of scope, so NO in-scope General Ledger route uses it and
+#  this module deliberately binds no such record. `SlPlLinkage` is the only
+#  five-member shape here, and its third member is `SYSTOT-REC`.
 #
-#   * `SYSTEM-REC` FIELDS BEYOND THE NINE BOUND. The record has 169 columns and
-#     exactly nine are set here. Three are settable from argv and the clock -
-#     Run-Date, Date-Form and IRS-Instead - and that list is closed: adding an
-#     option for any other would add an input the COBOL menus do not offer
-#     (rule R-3). Six more are filled from the deployment contract rather than
-#     from argv - RDBMS-DB-Name, RDBMS-User, RDBMS-Passwd, RDBMS-Port,
-#     RDBMS-Host and RDBMS-Socket [copybooks/wssystem.cob:L137-L144] - because
-#     they are the only carrier by which a connection parameter reaches the
-#     data-access layer [common/acas008.cbl:L558-L563] and because the frozen
-#     load programs fill exactly these six in exactly this place
-#     [common/glbatchLD.cbl:L262-L267]. They add no CLI option, so the settable
-#     list is still two. Every other field keeps the record layer's declared
-#     default.
+#  * `SYSTEM-REC` FIELDS BEYOND THE NINE BOUND. The record has 169 columns and
+#  exactly nine are set here. Three are settable from argv and the clock -
+#  Run-Date, Date-Form and IRS-Instead - and that list is closed: adding an
+#  option for any other would add an input the COBOL menus do not offer
+#  (rule R-3). Six more are filled from the deployment contract rather than
+#  from argv - RDBMS-DB-Name, RDBMS-User, RDBMS-Passwd, RDBMS-Port,
+#  RDBMS-Host and RDBMS-Socket [copybooks/wssystem.cob:L137-L144] - because
+#  they are the only carrier by which a connection parameter reaches the
+#  data-access layer [common/acas008.cbl:L558-L563] and because the frozen
+#  load programs fill exactly these six in exactly this place
+#  [common/glbatchLD.cbl:L262-L267]. They add no CLI option, so the settable
+#  list is still two. Every other field keeps the record layer's declared
+#  default.
 #
-#   * `MOVE` RECEIVING-FIELD SEMANTICS FOR THE ONE FIELD THIS MODULE STILL
-#     ASSIGNS DIRECTLY. The seven `WS-Calling-Data` fields go through
-#     `acas_posting/cobol/move.py`. `IRS-Instead` at `PIC X` does not - it is a
-#     `SYSTEM-REC` field whose value is already confined by argparse `choices` -
-#     and it is the one place where the consequence is visible rather than
-#     theoretical: passing `--irs-instead ""` stores a zero-length string where a
-#     COBOL `MOVE` would leave one space. The two are the same STATE -
-#     `is_irs_used` and `is_irs_both_used` are both false for either, so the
-#     fan-out reads off - and the sibling harness writes the empty form itself
-#     [harness/run_cobol_scenario.sh acas_resolve_pinned_values], trimming a supplied space to it
-#     [harness/run_cobol_scenario.sh acas_resolve_pinned_values]. Padding it here would apply `MOVE`
-#     semantics to a record this module has declared it binds at its declared
-#     defaults.
+#  * `MOVE` RECEIVING-FIELD SEMANTICS FOR THE ONE FIELD THIS MODULE STILL
+#  ASSIGNS DIRECTLY. The seven `WS-Calling-Data` fields go through
+#  `acas_posting/cobol/move.py`. `IRS-Instead` at `PIC X` does not - it is a
+#  `SYSTEM-REC` field whose value is already confined by argparse `choices` -
+#  and it is the one place where the consequence is visible rather than
+#  theoretical: passing `--irs-instead ""` stores a zero-length string where a
+#  COBOL `MOVE` would leave one space. The two are the same STATE -
+#  `is_irs_used` and `is_irs_both_used` are both false for either, so the
+#  fan-out reads off - and the sibling harness writes the empty form itself,
+#  trimming a supplied space to it
+#  [harness/run_cobol_scenario.sh acas_resolve_pinned_values]. Padding it here
+#  would apply `MOVE` semantics to a record this module has declared it binds at
+#  its declared defaults.
 #
-#   * THE FIVE PROMOTED CALLEE PARAMETERS. gl080's run-confirm, disk-change and
-#     archive-path; gl051's control-total inputs; sl100's post-confirm; pl100's
-#     run-confirm; irs030's clear-transfer-file decision. Each is an `ACCEPT`
-#     that gates a database write and each becomes an option on its OWN entry
-#     point, because each belongs to one route only. None is a linkage parameter
-#     and none is bound here.
+#  * THE FIVE PROMOTED CALLEE PARAMETERS. gl080's run-confirm, disk-change and
+#  archive-path; gl051's control-total inputs; sl100's post-confirm; pl100's
+#  run-confirm; irs030's clear-transfer-file decision. Each is an `ACCEPT`
+#  that gates a database write and each becomes an option on its OWN entry
+#  point, because each belongs to one route only. None is a linkage parameter
+#  and none is bound here.
 #
 # `MOVE` RECEIVING-FIELD SEMANTICS  (Agent Action Plan section 0.1.2, rule 11)
 # Applied, not omitted. Every one of the seven `WS-Calling-Data` fields is
 # written through acas_posting.cobol.move.move with that field's own descriptor,
 # taken from records.calling_data.descriptor_for so the picture is the generated
 # dictionary's and no width is transcribed here:
-#   WS-Called       pic x(8)   set_called
-#   WS-Caller       pic x(8)   bind_calling_data
-#   WS-Del-Link     pic x(8)   bind_calling_data
-#   WS-Process-Func pic 9      bind_calling_data
-#   WS-Sub-Function pic 9      bind_calling_data
-#   WS-CD-Args      pic x(13)  bind_calling_data
-#   WS-Term-Code    pic 99     reset_term_code
+#  WS-Called       pic x(8)   set_called
+#  WS-Caller       pic x(8)   bind_calling_data
+#  WS-Del-Link     pic x(8)   bind_calling_data
+#  WS-Process-Func pic 9      bind_calling_data
+#  WS-Sub-Function pic 9      bind_calling_data
+#  WS-CD-Args      pic x(13)  bind_calling_data
+#  WS-Term-Code    pic 99     reset_term_code
 #
 # The four remaining receiving fields this module writes need no widening, and
 # each reason is a fact about the field rather than a judgement:
-#   SYSTEM-REC Run-Date binary-long (copybooks/wssystem.cob:L67) takes the
-#     pinned clock's `int`, which is a day count and carries no picture width.
-#   SYSTEM-REC Date-Form pic 9 (copybooks/wssystem.cob:L128) takes either the
-#     record's own declared default or one of the three values of
-#     `88 Date-Valid-Formats` (copybooks/wssystem.cob:L132) - a single digit
-#     either way, which is the field's whole capacity.
-#   SYSTEM-REC IRS-Instead pic x (copybooks/wssystem.cob:L179) likewise takes
-#     the declared default or one of "N", "Y", "B" - one character.
-#   IRS-System-Params Run-Date pic x(8) (copybooks/irswssystem.cob:L14) is
-#     filled by irs_run_date_x8, and the COBOL verb there is STRING, not MOVE
-#     (irs/irs.cbl:L975-L978): a STRING overlays the receiver from its pointer
-#     and does NOT space-fill the remainder, and the assembled text is exactly
-#     6 + 2 = 8 characters, so the field is wholly overlaid.
+#  SYSTEM-REC Run-Date binary-long (copybooks/wssystem.cob:L67) takes the
+#  pinned clock's `int`, which is a day count and carries no picture width.
+#  SYSTEM-REC Date-Form pic 9 (copybooks/wssystem.cob:L128) takes either the
+#  record's own declared default or one of the three values of
+#  `88 Date-Valid-Formats` (copybooks/wssystem.cob:L132) - a single digit
+#  either way, which is the field's whole capacity.
+#  SYSTEM-REC IRS-Instead pic x (copybooks/wssystem.cob:L179) likewise takes
+#  the declared default or one of "N", "Y", "B" - one character.
+#  IRS-System-Params Run-Date pic x(8) (copybooks/irswssystem.cob:L14) is
+#  filled by irs_run_date_x8, and the COBOL verb there is STRING, not MOVE
+#  (irs/irs.cbl:L975-L978): a STRING overlays the receiver from its pointer
+#  and does NOT space-fill the remainder, and the assembled text is exactly
+#  6 + 2 = 8 characters, so the field is wholly overlaid.
 #
-# THE CONFIGURATION-FAILURE CONTRACT  ->  NO COBOL PARAGRAPH  (finding CLI-09)
-#   RdbmsParamError               re-exported from cli/`py`, so that
-#                                 every route main and the package router catch
-#                                 the EXACT type rather than `ValueError`.
-#   report_configuration_failure  the one message-and-status contract over it.
-#                                 The status is the frozen return code of
-#                                 common/acas-get-params.cbl:L37-L42 - 8 for an
-#                                 absent contract, 1 for an unusable one - because
-#                                 the frozen loaders abandon with a bare `goback`
-#                                 and no code of their own
-#                                 [common/glbatchLD.cbl:L245-L259], so there is
-#                                 nothing else to reproduce.
+# THE CONFIGURATION-FAILURE CONTRACT  ->  NO COBOL PARAGRAPH
+#  RdbmsParamError               declared in SECTION 0 and re-exported, so that
+#  every route main and the package router catch
+#  the EXACT type rather than `ValueError`.
+#  report_configuration_failure  the one message-and-status contract over it.
+#  The status is the frozen return code of
+#  common/acas-get-params.cbl:L37-L42 - 8 for an
+#  absent contract, 1 for an unusable one - because
+#  the frozen loaders abandon with a bare `goback`
+#  and no code of their own
+#  [common/glbatchLD.cbl:L245-L259], so there is
+#  nothing else to reproduce.
 #
-# THE PRELOADED-RECORD PARAMETERS  ->  THE MENU'S OWN `aa010` RESULT (CLI-02)
-#   _bind_system_record(..., system_record=)      general/general.cbl:L410-L412
-#   bind_gl_linkage(..., system_record=)          general/general.cbl:L399-L460
-#   bind_slpl_linkage(..., system_record=,
-#                          system_record_4=)      sales/sales.cbl:L355-L360,
-#                                                 purchase/purchase.cbl:L350-L354
-#   bind_irs_linkage(..., system_record=,
-#                         irs_system_params=)     irs/irs.cbl:L511-L512 and
-#                                                 `zz090` L907-L997
-#   Each defaults to None, which keeps the declared-default behaviour, so no
-#   existing caller changes meaning and the arithmetic tier still needs no
-#   database.
-#   A SUPPLIED INSTANCE IS THE INSTANCE (finding F4 of the B2 review). COBOL
-#   passes a group item BY REFERENCE, and a menu shell holds exactly ONE
-#   `01 SYSTEM-REC` that its load fills [general/general.cbl:L411], its `CALL`
-#   hands over [general/general.cbl:L715-L718] and its `overrewrite` writes back
-#   [general/general.cbl:L662-L663]. So `_bind_system_record` mutates and returns
-#   the record it is handed and builds one only when handed None, and both public
-#   binders forward the argument rather than shadowing it. `bind_slpl_linkage`
-#   resolves `SYSTOT-REC` in the order explicit argument, then
-#   `menu_state.system_record_4`, then a declared default - the menu's own record
-#   being what the nine period-total writes mutate and what `overrewrite`
-#   rewrites under key 4. `bind_irs_linkage` still builds both of its records, as
-#   its own docstring states and as [irs/irs.cbl:L934-L968] does.
+# THE PRELOADED-RECORD PARAMETERS  ->  THE MENU'S OWN `aa010` RESULT
+#  _bind_system_record(..., system_record=)      general/general.cbl:L410-L412
+#  bind_gl_linkage(..., system_record=)          general/general.cbl:L399-L460
+#  bind_slpl_linkage(..., system_record=,
+#  system_record_4=)      sales/sales.cbl:L355-L360,
+#  purchase/purchase.cbl:L350-L354
+#  bind_irs_linkage(..., system_record=,
+#  irs_system_params=)     irs/irs.cbl:L511-L512 and
+#  `zz090` L907-L997
+#  Each defaults to None, which keeps the declared-default behaviour, so no
+#  existing caller changes meaning and the arithmetic tier still needs no
+#  database.
+#  A SUPPLIED INSTANCE IS THE INSTANCE. COBOL
+#  passes a group item BY REFERENCE, and a menu shell holds exactly ONE
+#  `01 SYSTEM-REC` that its load fills [general/general.cbl:L411], its `CALL`
+#  hands over [general/general.cbl:L715-L718] and its `overrewrite` writes back
+#  [general/general.cbl:L662-L663]. So `_bind_system_record` mutates and returns
+#  the record it is handed and builds one only when handed None, and both public
+#  binders forward the argument rather than shadowing it. `bind_slpl_linkage`
+#  resolves `SYSTOT-REC` in the order explicit argument, then
+#  `menu_state.system_record_4`, then a declared default - the menu's own record
+#  being what the nine period-total writes mutate and what `overrewrite`
+#  rewrites under key 4. `bind_irs_linkage` still builds both of its records, as
+#  its own docstring states and as [irs/irs.cbl:L934-L968] does.
 #
-# THE KEY-1 GATE  ->  THE ONE REPLY EVERY MENU TESTS  (finding F2 of the B2 review)
-#   aa010_get_system_recs reproduces `if fs-reply not = zero` and the `perform
-#   System-close` beside it, in that order, and captures the reply from the read's
-#   own return value so the close cannot overwrite the value the test needs:
-#     general/general.cbl:L412-L413    entity-named, keys 4-2-1
-#     sales/sales.cbl:L361-L362        entity-named, keys 4-1
-#     purchase/purchase.cbl:L355-L356  entity-named, keys 4-1
-#     irs/irs.cbl:L513-L514            handler-named, key 1 only
-#   NOT reproduced: `call "sys002"` and the `go to aa010-Get-System-Recs` after it
-#   [general/general.cbl:L414-L417] - an interactive record-creation dialog, out of
-#   scope by name (Agent Action Plan section 0.2.2), so the loop it heads cannot be
-#   entered. What IS reproduced is the frozen DISPOSITION: the paragraph is never
-#   left with a bad reply, so nothing is dispatched and nothing is written.
-#   `SystemRecordUnavailableError` carries it, and the frozen menu reaches the same
-#   end by its own second route when `sys002` reports a serious code -
-#   `stop run` [general/general.cbl:L630-L631]. Keys 4 and 2 are NOT tested,
-#   because no menu tests them (rule R-4).
+# THE KEY-1 GATE  ->  THE ONE REPLY EVERY MENU TESTS
+#  aa010_get_system_recs reproduces `if fs-reply not = zero` and the `perform
+#  System-close` beside it, in that order, and captures the reply from the read's
+#  own return value so the close cannot overwrite the value the test needs:
+#  general/general.cbl:L412-L413    entity-named, keys 4-2-1
+#  sales/sales.cbl:L361-L362        entity-named, keys 4-1
+#  purchase/purchase.cbl:L355-L356  entity-named, keys 4-1
+#  irs/irs.cbl:L513-L514            handler-named, key 1 only
+#  NOT reproduced: `call "sys002"` and the `go to aa010-Get-System-Recs` after it
+#  [general/general.cbl:L414-L417] - an interactive record-creation dialog, out of
+#  scope by name (Agent Action Plan section 0.2.2), so the loop it heads cannot be
+#  entered. What IS reproduced is the frozen DISPOSITION: the paragraph is never
+#  left with a bad reply, so nothing is dispatched and nothing is written.
+#  `SystemRecordUnavailableError` carries it, and the frozen menu reaches the same
+#  end by its own second route when `sys002` reports a serious code -
+#  `stop run` [general/general.cbl:L630-L631]. Keys 4 and 2 are NOT tested,
+#  because no menu tests them (rule R-4).
 #
-# THE TWO VERB VOCABULARIES  ->  ONE LOAD  (finding F3 of the B2 review)
-#   Agent Action Plan section 0.3.3 gives the facade both name sets and section
-#   0.6.5 records that the difference is behavioural, so the load selects per menu
-#   through `MenuState.handler_named_verbs`:
-#     _ENTITY_NAMED_SYSTEM_VERBS   copybooks/Proc-ACAS-FH-Calls.cob
-#         System-Open-Input   L197-L202   general/general.cbl:L390
-#         System-Read-Indexed L217-L220   general/general.cbl:L403, L407, L411
-#         System-Close        L211-L215   general/general.cbl:L413, L460
-#         No verb in that copybook carries an error check; its callers test the
-#         reply inline, which is what the gate above does.
-#     _HANDLER_NAMED_SYSTEM_VERBS  copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob
-#         acas000-Open-Input   L98-L102   irs/irs.cbl:L499
-#         acas000-Read-Indexed L114-L117  irs/irs.cbl:L512
-#         acas000-Close        L104-L107  irs/irs.cbl:L514
-#         The open family performs acas000-Check-4-Errors L320-L325, reaching
-#         Open-Error-Continued L355-L364 and its `goback`, which the facade raises
-#         as FacadeGoback and acas_posting/cli/irs_post.py absorbs at the menu
-#         program's boundary. acas000-Open-Input performs that check BEFORE the
-#         dispatch - alone among all 42 verb paragraphs - and the facade reproduces
-#         the ordering rather than straightening it. The dispatch paragraph also
-#         pins File-Key-No to 1 [:L22-L29]; harmless here because the one menu that
-#         selects this set reads key 1 alone.
-#   `eoj_persist_irs_system_data` names the handler-named verbs directly rather
-#   than through the selector, because it reproduces one paragraph of one menu -
-#   `EOJ.` [irs/irs.cbl:L755-L775] - and `overrewrite` names the entity-named ones
-#   for the same reason.
+# THE TWO VERB VOCABULARIES  ->  ONE LOAD
+#  Agent Action Plan section 0.3.3 gives the facade both name sets and section
+#  0.6.5 records that the difference is behavioural, so the load selects per menu
+#  through `MenuState.handler_named_verbs`:
+#  _ENTITY_NAMED_SYSTEM_VERBS   copybooks/Proc-ACAS-FH-Calls.cob
+#  System-Open-Input   L197-L202   general/general.cbl:L390
+#  System-Read-Indexed L217-L220   general/general.cbl:L403, L407, L411
+#  System-Close        L211-L215   general/general.cbl:L413, L460
+#  No verb in that copybook carries an error check; its callers test the
+#  reply inline, which is what the gate above does.
+#  _HANDLER_NAMED_SYSTEM_VERBS  copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob
+#  acas000-Open-Input   L98-L102   irs/irs.cbl:L499
+#  acas000-Read-Indexed L114-L117  irs/irs.cbl:L512
+#  acas000-Close        L104-L107  irs/irs.cbl:L514
+#  The open family performs acas000-Check-4-Errors L320-L325, reaching
+#  Open-Error-Continued L355-L364 and its `goback`, which the facade raises
+#  as FacadeGoback and acas_posting/cli/irs_post.py absorbs at the menu
+#  program's boundary. acas000-Open-Input performs that check BEFORE the
+#  dispatch - alone among all 42 verb paragraphs - and the facade reproduces
+#  the ordering rather than straightening it. The dispatch paragraph also
+#  pins File-Key-No to 1 [:L22-L29]; harmless here because the one menu that
+#  selects this set reads key 1 alone.
+#  `eoj_persist_irs_system_data` names the handler-named verbs directly rather
+#  than through the selector, because it reproduces one paragraph of one menu -
+#  `EOJ.` [irs/irs.cbl:L755-L775] - and `overrewrite` names the entity-named ones
+#  for the same reason.
 #
 # AMBIGUITIES RAISED BY THIS MODULE  (rule R-6)  -  three, each marked in place
 # at the code it governs. TWO ARE NOW SETTLED, and each is settled at its own
 # site with the evidence that settles it, because that is where a reader meets
 # the decision:
 #
-#   Q-CLI-SYSREC-LOAD  in _bind_system_record  -  SETTLED, AND SETTLED THE OTHER
-#     WAY FROM AN EARLIER READING. The census stands: not one of the twelve
-#     in-scope posting programs performs any system-record or totals-record I/O,
-#     so the load and the persist belong to the MENU. What changed is where the
-#     menu's counterpart lives. Section 0.4.1.1 derives each CLI entry point FROM
-#     a menu paragraph, section 0.3.4 drops only PRESENTATION from a menu, and
-#     section 0.8.5 makes an empty diff on the affected tables the acceptance
-#     test - and SYSTOT-REC is affected, with `overrewrite` as its only writer to
-#     the store. So the route is the menu's counterpart and the route loads and
-#     persists. Section 0.4.3's import table bars this layer from `dal.acas*`,
-#     not from `dal.facade`, so it is reachable from here. Two consequences are
-#     recorded rather than hidden: the ISAM arm of both paragraphs has no
-#     counterpart (see OMISSIONS), and the pins are re-applied over the loaded
-#     row (see Q-CLI-SYSREC-PINS).
+#  Q-CLI-SYSREC-LOAD  in _bind_system_record  -  SETTLED, AND SETTLED AGAINST THE
+#  READING THAT LEAVES THE LOAD OUT. The census holds: not one of the twelve
+#  in-scope posting programs performs any system-record or totals-record I/O,
+#  so the load and the persist belong to the MENU - and the menu's counterpart
+#  lives HERE. Section 0.4.1.1 derives each CLI entry point FROM
+#  a menu paragraph, section 0.3.4 drops only PRESENTATION from a menu, and
+#  section 0.8.5 makes an empty diff on the affected tables the acceptance
+#  test - and SYSTOT-REC is affected, with `overrewrite` as its only writer to
+#  the store. So the route is the menu's counterpart and the route loads and
+#  persists. Section 0.4.3's import table bars this layer from `dal.acas*`,
+#  not from `dal.facade`, so it is reachable from here. Two consequences are
+#  recorded rather than hidden: the ISAM arm of both paragraphs has no
+#  counterpart (see OMISSIONS), and the pins are re-applied over the loaded
+#  row (see Q-CLI-SYSREC-PINS).
 #
-#   Q-CLI-SYSREC-PINS  in _bind_system_record  -  OPEN. After the load, the six
-#     connection fields and the three pinned fields are written over whatever the
-#     row held. For the connection fields that is forced - `ba010-Initialise`
-#     copies them out of this record into the connection, so the row's
-#     placeholders would BECOME the connection. For Run-Date, Date-Form and
-#     IRS-Instead it means the CLI wins over the row, so a scenario must seed
-#     those three columns to agree with the options it passes.
+#  Q-CLI-SYSREC-PINS  in _bind_system_record  -  OPEN (class A: awaiting the frozen
+#  executable; what an oracle run would show is what the row holds afterwards).
+#  The decision that executes is bounded and stated. After the load, the six
+#  connection fields and the three pinned fields are written over whatever the
+#  row held. For the connection fields that is forced - `ba010-Initialise`
+#  copies them out of this record into the connection, so the row's
+#  placeholders would BECOME the connection. For Run-Date, Date-Form and
+#  IRS-Instead it means the CLI wins over the row, so a scenario must seed
+#  those three columns to agree with the options it passes.
 #
-#   Q-CLI-SYSREC-RUNDATE  in aa010_get_system_recs  -  OPEN. The frozen menus
-#     derive `to-day` FROM the loaded row [general/general.cbl:L465-L467], and a
-#     census shows the row's RUN-DATE is written once, at record-creation time, by
-#     the out-of-scope `common/sys002.cbl` through
-#     [copybooks/Proc-ACAS-Mapser-RDB.cob:L80] - no menu ever writes it. The
-#     controlled clock replaces that creator, as sections 0.1.1 and 0.8.1 require.
+#  Q-CLI-SYSREC-RUNDATE  in aa010_get_system_recs  -  SETTLED BY CENSUS. The frozen menus
+#  derive `to-day` FROM the loaded row [general/general.cbl:L465-L467], and a
+#  census shows the row's RUN-DATE is written once, at record-creation time, by
+#  the out-of-scope `common/sys002.cbl` through
+#  [copybooks/Proc-ACAS-Mapser-RDB.cob:L80] - no menu ever writes it. The
+#  controlled clock replaces that creator, as sections 0.1.1 and 0.8.1 require.
 #
-#   Q-CLI-EXITSTATUS   in exit_status_for  -  SETTLED by establishing that THERE
-#     IS NO ORACLE OBSERVABLE. `RETURN-CODE`, the one register GnuCOBOL surfaces
-#     as a process status, is READ and never WRITTEN anywhere in the five menus or
-#     the twelve posting programs, and each menu ends with a bare `goback`. The
-#     identity mapping is therefore a boundary decision under section 0.3.4, taken
-#     on the ground that it is total and lossless over the `pic 99` domain.
+#  Q-CLI-EXITSTATUS   in exit_status_for  -  SETTLED by establishing that THERE
+#  IS NO ORACLE OBSERVABLE. `RETURN-CODE`, the one register GnuCOBOL surfaces
+#  as a process status, is READ and never WRITTEN anywhere in the five menus or
+#  the twelve posting programs, and each menu ends with a bare `goback`. The
+#  identity mapping is therefore a boundary decision under section 0.3.4, taken
+#  on the ground that it is total and lossless over the `pic 99` domain.
 #
-#   Q-CLI-RUNDATE-VS-ROW  in aa010_get_system_recs  -  STILL OPEN. The frozen
-#     menus derive the TEXT date from the row they have just read
-#     [general/general.cbl:L466-L468] and never write `RUN-DATE` back - the only
-#     writes to it anywhere in the five menus are into `u-bin` and into the IRS
-#     `pic x(8)` field - so a scenario must pin `--run-date` to the seeded
-#     `RUN-DATE` for the two cycles to be comparable at all. Nothing provisional
-#     executes: the pinned value is the observable Agent Action Plan section 0.1.1
-#     requires, and re-applying it after the read is what keeps the twelve
-#     programs on one date.
+#  Q-CLI-RUNDATE-VS-ROW  in aa010_get_system_recs  -  SETTLED for the semantics,
+#  open only for the oracle row (class A). The frozen
+#  menus derive the TEXT date from the row they have just read
+#  [general/general.cbl:L466-L468] and never write `RUN-DATE` back - the only
+#  writes to it anywhere in the five menus are into `u-bin` and into the IRS
+#  `pic x(8)` field - so a scenario must pin `--run-date` to the seeded
+#  `RUN-DATE` for the two cycles to be comparable at all. Nothing provisional
+#  executes: the pinned value is the observable Agent Action Plan section 0.1.1
+#  requires, and re-applying it after the read is what keeps the twelve
+#  programs on one date.
 #
-#   Q-CLI-OVERREWRITE-SECOND-LEG  in overrewrite  -  STILL OPEN, with the
-#     migration's position stated and its ground given. The omitted Cobol half
-#     zeroes `File-System-Used` and never restores it, which under a literal
-#     reading puts a second dispatch in the same session on the indexed leg. The
-#     migration has no indexed leg and section 0.8.5 mandates a Sales scenario
-#     that is two dispatches, so the half is omitted whole and the relational leg
-#     persists. Measure which leg the oracle's second dispatch takes.
+#  Q-CLI-OVERREWRITE-SECOND-LEG  in overrewrite  -  CLOSED ON SCOPE for the
+#  reproduction (class B), open only for the oracle observation (class A), with the
+#  migration's position stated and its ground given. The omitted Cobol half
+#  zeroes `File-System-Used` and never restores it, which under a literal
+#  reading puts a second dispatch in the same session on the indexed leg. The
+#  migration has no indexed leg and section 0.8.5 mandates a Sales scenario
+#  that is two dispatches, so the half is omitted whole and the relational leg
+#  persists. Measure which leg the oracle's second dispatch takes.
 #
-#   Q-CLI-IRS-RUNDATE  in bind_irs_linkage  -  STILL OPEN, and deliberately so.
-#     Nothing provisional executes at that site: the statement reproduces
-#     `zz090-Proc-Run-Date.` [irs/irs.cbl:L972-L978], which the menu performs
-#     before every option whether or not irs030 reads the field, so the open
-#     question cannot change it. It remains marked for the record.
+#  Q-CLI-IRS-RUNDATE  in bind_irs_linkage  -  SETTLED BY CONSTRUCTION. Inside
+#  `Ledger-Postings-Add` the posting date comes from the transfer record
+#  [irs/irs030.cbl:L1662], so the IRS `run-date` reaches no in-scope table. The
+#  statement still reproduces `zz090-Proc-Run-Date.` [irs/irs.cbl:L972-L978],
+#  which the menu performs before every option, and is kept for that reason.
 #
-# RULES  (no user rules document exists for this project; these are the Agent
-# Action Plan's own six, section 0.7.2)
-#   R-1  satisfied structurally: the imports of this module are argparse, typing
-#        and fifteen modules of this package - one of which is `dal.facade`, the
-#        data-access layer's published seam and the same one the twelve program
-#        modules use. No child process, no foreign-function interface, no
-#        toolchain lookup, and no option that reaches the compiled comparison
-#        oracle.
-#   R-2  satisfied by type: WS-Term-Code and Run-Date are `int`, to-day and the
-#        IRS run-date are `str`. No binary-radix numeric type appears in any
-#        signature, option type or expression.
-#   R-3  satisfied by omission: no run-date validation, no added record field, no
-#        DDL, no schema access, and no concurrency of any kind. The only option
-#        domains declared are the fields' own - `pic 9` gives 0-9 and
-#        `88 Date-Valid-Formats` gives 1, 2, 3. The four acas000 paragraphs this
-#        module reproduces DO reach SQL, through `dal.facade` and only through
-#        the verbs the frozen paragraphs perform; no statement is issued that a
-#        menu paragraph does not issue, and no verb is added. The ONE reply this
-#        module tests is the one all four menus test at
-#        [general/general.cbl:L412] and its three siblings, so it is a
-#        transcription and not an added check - and the alternative, continuing
-#        with a declared-default `SYSTEM-REC`, would be the added behaviour.
-#   R-4  reproductions, each carrying its locator at the site: WS-CD-Args
-#        defaulting to spaces because no menu assigns it
-#        (copybooks/wscall.cob:L14); WS-Term-Code cleared before every dispatch
-#        (general/general.cbl:L714); the `> 7` and `< 8` bands left as the two
-#        disjoint tests the menus make; and a rejected run date yielding
-#        Run-Date 0 rather than an exception (common/maps04.cbl:L146 with
-#        copybooks/Proc-ACAS-Mapser-RDB.cob:L78).
-#   R-5  this footer, plus the per-symbol locators throughout.
-#   R-6  the clock is injected and `--run-date` is required on every route that
-#        needs a date; the three open questions above are marked, not guessed.
+# RULE COMPLIANCE (the six are the Agent Action Plan's own, section 0.7.2)
+#  R-1  satisfied structurally: the imports of this module are argparse, typing
+#  and fifteen modules of this package - one of which is `dal.facade`, the
+#  data-access layer's published seam and the same one the twelve program
+#  modules use. No child process, no foreign-function interface, no
+#  toolchain lookup, and no option that reaches the compiled comparison
+#  oracle.
+#  R-2  satisfied by type: WS-Term-Code and Run-Date are `int`, to-day and the
+#  IRS run-date are `str`. No binary-radix numeric type appears in any
+#  signature, option type or expression.
+#  R-3  satisfied by omission: no run-date validation, no added record field, no
+#  DDL, no schema access, and no concurrency of any kind. The only option
+#  domains declared are the fields' own - `pic 9` gives 0-9 and
+#  `88 Date-Valid-Formats` gives 1, 2, 3. The four acas000 paragraphs this
+#  module reproduces DO reach SQL, through `dal.facade` and only through
+#  the verbs the frozen paragraphs perform; no statement is issued that a
+#  menu paragraph does not issue, and no verb is added. The ONE reply this
+#  module tests is the one all four menus test at
+#  [general/general.cbl:L412] and its three siblings, so it is a
+#  transcription and not an added check - and the alternative, continuing
+#  with a declared-default `SYSTEM-REC`, would be the added behaviour.
+#  R-4  reproductions, each carrying its locator at the site: WS-CD-Args
+#  defaulting to spaces because no menu assigns it
+#  (copybooks/wscall.cob:L14); WS-Term-Code cleared before every dispatch
+#  (general/general.cbl:L714); the `> 7` and `< 8` bands left as the two
+#  disjoint tests the menus make; and a rejected run date yielding
+#  Run-Date 0 rather than an exception (common/maps04.cbl:L146 with
+#  copybooks/Proc-ACAS-Mapser-RDB.cob:L78).
+#  R-5  this footer, plus the per-symbol locators throughout.
+#  R-6  the clock is injected and `--run-date` is required on every route that
+#  needs a date; the three open questions above are marked, not guessed.
 # -----------------------------------------------------------------------------

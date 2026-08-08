@@ -212,9 +212,8 @@ CONTROL TOTALS BALANCE BY CONSTRUCTION. [:L1118-L1121] accumulate
 why AAP section 0.6.4 records that Sales and Purchase batches balance by
 construction and the control-total-mismatch scenario is General-Ledger-specific.
 
-THE RULES THIS FILE IS HELD TO. There is no user rules document for this
-project: ``review_rules`` returns "No user rules provided." The six binding
-rules live in the AAP section 0.7.2 and are restated where they bite.
+THE RULES THIS FILE IS HELD TO - the AAP's six, section 0.7.2, restated only
+where they bite on this file.
 
 * R-1 NO COBOL AT RUNTIME. No ``subprocess``, no ``os.system``, no ``ctypes``,
   no ``cffi``, no ``cobc``, no reference to the comparison oracle. The four
@@ -597,15 +596,15 @@ _ERROR_CODE: Final[FieldDescriptor] = descriptor_for(
 # Message text only, and NOT all of it reaches a log record. Section 0.3.4
 # splits this group three ways:
 #
-#   * A DIAGNOSTIC display with no database effect becomes a log record at a
-#     matching severity - `SL130` [:L591] and `SL132` [:L1163].
-#   * A PROMPT whose only effect is to block a terminal is DROPPED, and with it
-#     the `accept` it introduces - `SL002` [:L599, L1168] and `SL003` [:L734].
-#     Both literals are nothing but the instruction to press a key, so there is
-#     no substantive half to keep.
-#   * REPORT CONTENT is out of scope entirely (section 0.2.2) - `SL133` and
-#     `SL133T` are never displayed at all: they are `move`d into `print-record`
-#     at [:L704, L706] and belong to the spool file.
+#  * A DIAGNOSTIC display with no database effect becomes a log record at a
+#  matching severity - `SL130` [:L591] and `SL132` [:L1163].
+#  * A PROMPT whose only effect is to block a terminal is DROPPED, and with it
+#  the `accept` it introduces - `SL002` [:L599, L1168] and `SL003` [:L734].
+#  Both literals are nothing but the instruction to press a key, so there is
+#  no substantive half to keep.
+#  * REPORT CONTENT is out of scope entirely (section 0.2.2) - `SL133` and
+#  `SL133T` are never displayed at all: they are `move`d into `print-record`
+#  at [:L704, L706] and belong to the spool file.
 #
 # `SL131` is the one MIXED literal and is split below. Every member of the group
 # stays DECLARED even where nothing references it, because rule R-5 maps the
@@ -853,9 +852,9 @@ def _group_move_oi_header(source: OiHeader, target: OiHeader) -> None:
 
 # The program's storage, as one object The facade's dispatch paragraphs name the
 # program's own record areas - for example ``call "acas019" using System-Record WS-
-# OTM3-Record File-Access File-Defs ACAS-DAL-Common-Data`` [copybooks/Proc-ACAS-FH-
-# Calls.cob:L132-L138] - and take no parameters, because a COBOL sub-program sees the
-# caller's storage.
+# OTM3-Record File-Access File-Defs ACAS-DAL-Common-Data``
+# [copybooks/Proc-ACAS-FH-Calls.cob:L132-L138] - and take no parameters, because a COBOL
+# sub-program sees the caller's storage.
 
 
 @dataclasses.dataclass(slots=True)
@@ -933,7 +932,7 @@ class _Sl060State:
     #: transport is compiled into ``cobmysqlapi.c`` rather than declared by the
     #: program.
     #:
-    #: ⭐ IT IS THE ONLY WAY A POLICY REACHES A HANDLER FROM HERE, and its default
+    #: IT IS THE ONLY WAY A POLICY REACHES A HANDLER FROM HERE, and its default
     #: is an empty mapping, which every handler resolves against the INSTALLED
     #: PROCESS POLICY: under the exact-parity default
     #: ``connection._require_permitted_connection`` reports an unencrypted
@@ -975,7 +974,7 @@ class _Sl060State:
         )
 
 
-#  ⭐⭐ THE ``sl055`` -> ``sl060`` HANDOFF IS ONE OBJECT, SUPPLIED BY THE CALLER.
+#  THE ``sl055`` -> ``sl060`` HANDOFF IS ONE OBJECT, SUPPLIED BY THE CALLER.
 #  ``select open-item-file-2 assign file-18`` [copybooks/seloi2.cob:L2] names a
 #  FILE, and a file OUTLIVES the program that opened it: ``sl055`` writes the
 #  extract - ``open extend`` [sales/sl055.cbl:L359], ``write oi-header``
@@ -987,7 +986,7 @@ class _Sl060State:
 #  dispatch to the next, exactly as it threads the General Ledger work files from
 #  ``gl070`` to ``gl071`` to ``gl072``.
 #
-#  ⛔ THIS WAS ONCE A MODULE-LEVEL REGISTRY keyed by the assigned name. That did
+#  THIS WAS ONCE A MODULE-LEVEL REGISTRY keyed by the assigned name. That did
 #  make ``sl055``'s extract reachable, but it shared the sequence across every run
 #  in one interpreter, and rule R-6 requires two runs of the same scenario under
 #  the same pinned clock to be byte-identical - a sequence still holding the
@@ -1033,7 +1032,7 @@ def _new_state(
         # "openitm2". The sequence is the OTM2 extract ``sl055`` wrote; it
         # reaches no schema table and appears in no table dump, and [:L677-L678]
         # TRUNCATES it once the transfer to OTM3 is complete.
-        # ⭐ SUPPLIED BY THE CALLER, NOT CONSTRUCTED HERE. A file outlives the
+        # SUPPLIED BY THE CALLER, NOT CONSTRUCTED HERE. A file outlives the
         # program that opens it, so declaring a fresh empty sequence per call
         # would make ``sl055``'s extract unreachable - see the note above
         # ``_new_state``.
@@ -1099,7 +1098,7 @@ _TOTAL_GROUP_ELEMENT_BYTES: Final[int] = (
 def _ws_data_totals_values(state: _Sl060State) -> dict[str, object]:
     """The window's current contents, keyed the way the byte layout names them.
 
-    ⭐⭐ THE SUBSCRIPT IS UNCHECKED IN THE FROZEN SOURCE, AND THAT IS WHY A BYTE
+    THE SUBSCRIPT IS UNCHECKED IN THE FROZEN SOURCE, AND THAT IS WHY A BYTE
     MODEL IS NEEDED. ``add work-vat to total-vat (a).`` [sales/sl060.cbl:L526] and
     ``add work-net to total-net (a).`` [:L527] index ``03 total-group occurs 3``
     [:L219] with ``03 a pic 9`` [:L222], loaded by ``move oi-type to a.`` [:L509].
@@ -1124,7 +1123,7 @@ def _ws_data_totals_values(state: _Sl060State) -> dict[str, object]:
                    invalid nibbles, which the compiled program decodes tolerantly
                    rather than rejecting.
 
-    ⛔ NO CLAMP, NO MODULO, NO DEFAULT OCCURRENCE, NO SKIP AND NO EXCEPTION, and
+    NO CLAMP, NO MODULO, NO DEFAULT OCCURRENCE, NO SKIP AND NO EXCEPTION, and
     in particular NOT a bare Python ``[a - 1]``: that turns ``a = 0`` into a
     silent write to the THIRD occurrence, which corresponds to nothing the
     compiled program does. ``move.subscripted_store`` performs the addressing and
@@ -1317,7 +1316,7 @@ def _add_to_turnover_quarter(state: _Sl060State, addend: Decimal) -> None:
     this module, and it writes BOTH, which is the caller-side aliasing the
     records layer deliberately left to the caller.
 
-    ⭐ FINDING 8(b) [sales/sl060.cbl:L545, :L551, :L558] - the subscript is
+    FINDING 8(b) [sales/sl060.cbl:L545, :L551, :L558] - the subscript is
     ``05 Current-Quarter pic 9.`` [copybooks/wssystem.cob:L110], a single digit
     used with NO BOUNDS CHECK against an ``occurs 4`` table. It is the same
     field anomaly A-2 concerns in ``gl080``. R-3 forbids adding the check the
@@ -1340,7 +1339,7 @@ def _add_to_turnover_quarter(state: _Sl060State, addend: Decimal) -> None:
     So unlike the print-only ``total-group`` case above, every out-of-range
     quarter here writes a persisted column, which is exactly why it is
     reproduced byte for byte through ``move.subscripted_store`` instead of being
-    approximated, clamped or refused. ⛔ A bare Python ``[quarter - 1]`` is NOT
+    approximated, clamped or refused. A bare Python ``[quarter - 1]`` is NOT
     used: it would send quarter 0 into ``Turnover-Q4``, which the oracle shows is
     not what happens.
     """
@@ -1499,7 +1498,7 @@ def run(
     """Post the sales invoice extract: ``sl060``'s two phases, in order.
 
     Args:
-        ws_calling_data: ``WS-Calling-Data`` [copybooks/wscall.cob:L6-L13]. The
+        ws_calling_data: ``WS-Calling-Data`` [copybooks/wscall.cob:L7-L14]. The
             caller's identity matters: three acknowledgement prompts are skipped
             when ``WS-Caller`` is the unattended driver [:L600, :L734, :L1167],
             and that test is PRESERVED even though the prompts themselves are
@@ -1717,24 +1716,24 @@ def _aa020_read_loop(state: _Sl060State) -> None:
         # storage silently, AND `_total_group_target` REPRODUCES THAT rather than
         # guarding it, because guarding is the fix rule R-4 forbids. It resolves
         # the subscript by BYTE ADDRESS over the work area's own declared widths:
-        #   a = 1..3 -> the three declared occurrences. Print-only accumulators
-        #              [:L616-L636], so no table column depends on them.
-        #   a  = 0   -> EXACT, and NOT print-only. The ten bytes before the table
-        #              are `work-vat` and `work-goods` [:L217-L218], so [:L526]
-        #              becomes `work-goods += work-vat` and [:L527] becomes
-        #              `work-vat += work-net`, IN THAT ORDER. Both receivers are
-        #              read immediately afterwards by statements that write
-        #              PERSISTED columns - `work-goods` at [:L545], [:L551],
-        #              [:L558] into SALEDGER-REC's turnover quarters and at
-        #              [:L826], [:L842] into the moving average that decides
-        #              SALES-AVERAGE; `work-vat` at [:L530] and at [:L552],
-        #              [:L559] into SALES-CURRENT. So a type-0 header corrupts
-        #              four persisted columns, silently. Reproduced.
-        #   a >= 4   -> NOT FIELD-ALIGNED. Subscript 4 spans `a`, `line-cnt` and
-        #              part of `ws-deduction` [:L222-L224], so no declared field
-        #              wholly receives either five-byte store. Nothing is changed
-        #              and nothing is invented; AMBIGUITY Q-SL060-SUBSCRIPT is
-        #              narrowed to exactly this band and logged when reached.
+        #  a = 1..3 -> the three declared occurrences. Print-only accumulators
+        #  [:L616-L636], so no table column depends on them.
+        #  a  = 0   -> EXACT, and NOT print-only. The ten bytes before the table
+        #  are `work-vat` and `work-goods` [:L217-L218], so [:L526]
+        #  becomes `work-goods += work-vat` and [:L527] becomes
+        #  `work-vat += work-net`, IN THAT ORDER. Both receivers are
+        #  read immediately afterwards by statements that write
+        #  PERSISTED columns - `work-goods` at [:L545], [:L551],
+        #  [:L558] into SALEDGER-REC's turnover quarters and at
+        #  [:L826], [:L842] into the moving average that decides
+        #  SALES-AVERAGE; `work-vat` at [:L530] and at [:L552],
+        #  [:L559] into SALES-CURRENT. So a type-0 header corrupts
+        #  four persisted columns, silently. Reproduced.
+        #  a >= 4   -> NOT FIELD-ALIGNED. Subscript 4 spans `a`, `line-cnt` and
+        #  part of `ws-deduction` [:L222-L224], so no declared field
+        #  wholly receives either five-byte store. Nothing is changed
+        #  and nothing is invented; AMBIGUITY Q-SL060-SUBSCRIPT is
+        #  narrowed to exactly this band and logged when reached.
         # NEITHER a Python `[a - 1]` NOR AN EXCEPTION was acceptable: the first
         # silently writes the THIRD occurrence when `a` is zero, and the second
         # refuses a store the compiled program performs.
@@ -1864,19 +1863,19 @@ def _aa020_read_loop(state: _Sl060State) -> None:
             # other two are DROPPED - deliberately, and they are the two that
             # carry data:
             #
-            #   * [:L592] `display oi3-customer` and [:L594] `display l5-nos`
-            #     (the invoice number moved in at [:L593]) are the CUSTOMER CODE
-            #     and the INVOICE NUMBER - business keys for the very row that
-            #     failed. The safe-event schema in `acas_posting/dal/status.py`
-            #     excludes record keys and identifiers from every record at every
-            #     level (CWE-532), and DEBUG is not an exemption.
-            #   * Dropping them also removes a FAILURE PATH that logging must not
-            #     add: `_oi_customer_image` and the `move` behind `l5-nos` are
-            #     `cobol.move` calls, evaluated as arguments BEFORE the logging
-            #     module decides whether the record is wanted, so a value the
-            #     receiving picture cannot hold would raise from inside a
-            #     diagnostic. Removing the operands removes the risk outright,
-            #     which no `isEnabledFor` guard can do.
+            #  * [:L592] `display oi3-customer` and [:L594] `display l5-nos`
+            #  (the invoice number moved in at [:L593]) are the CUSTOMER CODE
+            #  and the INVOICE NUMBER - business keys for the very row that
+            #  failed. The safe-event schema in `acas_posting/dal/status.py`
+            #  excludes record keys and identifiers from every record at every
+            #  level (CWE-532), and DEBUG is not an exemption.
+            #  * Dropping them also removes a FAILURE PATH that logging must not
+            #  add: `_oi_customer_image` and the `move` behind `l5-nos` are
+            #  `cobol.move` calls, evaluated as arguments BEFORE the logging
+            #  module decides whether the record is wanted, so a value the
+            #  receiving picture cannot hold would raise from inside a
+            #  diagnostic. Removing the operands removes the risk outright,
+            #  which no `isEnabledFor` guard can do.
             #
             # What remains is the message literal, the file status and the status
             # NAME. `ws-Eval-Msg` is `pic x(25)` filled ONLY by
@@ -1986,7 +1985,7 @@ def _aa050_end_loop_end(state: _Sl060State) -> None:
     system = state.system_record
 
     # [:L677] open output open-item-file-2.  *> Clear down IO2 file data now
-    #                                        *> transferred to IO3
+    #  *> transferred to IO3
     # [:L678] close open-item-file-2.
     # OPEN OUTPUT ON A SEQUENTIAL FILE DISCARDS WHAT WAS THERE, so this pair
     # TRUNCATES the OTM2 extract - the transfer to OTM3 is complete and sl055's
@@ -2678,7 +2677,7 @@ _BATCH_NOS_SCALE: Final[int] = 10**5
 def _restate_ws_batch_key9(batch: GlBatchRecord) -> None:
     """Keep ``WS-Batch-Key9`` in step with the two members it redefines.
 
-    ⭐⭐ ONE STORAGE, TWO READINGS. ``03 WS-Batch-Key.`` holds ``05 WS-Ledger pic 9.`` and
+    ONE STORAGE, TWO READINGS. ``03 WS-Batch-Key.`` holds ``05 WS-Ledger pic 9.`` and
     ``05 WS-Batch-Nos pic 9(5).``, and ``03 WS-Batch-Key9 redefines WS-Batch-Key pic
     9(6).`` [copybooks/wsbatch.cob:L14-L21] is those SAME six bytes read as a single
     number.
@@ -2714,7 +2713,7 @@ def _ca000_bl_open(state: _Sl060State) -> None:
         sending_field=_SYSTEM["next-batch"],
     )
     batch.ws_batch_key.ws_ledger = move.move_numeric(3, _BATCH["ws-ledger"])
-    # ⭐ THE REDEFINED READING IS RESTATED HERE, because the two preceding moves have
+    # THE REDEFINED READING IS RESTATED HERE, because the two preceding moves have
     # just changed the bytes it shares. See `_restate_ws_batch_key9`.
     _restate_ws_batch_key9(batch)
     # [:L1018] add 1 to next-Batch. The system record is mutated here but only persisted
@@ -3224,623 +3223,222 @@ def _maps04_exit(maps03_ws: Maps03Ws) -> None:
 # ===========================================================================
 # --- traceability ---
 #
-# Required by R-5 (full traceability) and by AAP section 0.4.3, which directs
-# that deliberate omissions be "recorded as omissions so that a reader
-# comparing the two files does not conclude something was lost". Everything
-# below is measured against the frozen source, not inferred: the label census
-# was taken by matching COBOL label lines across [sales/sl060.cbl:L395-L1301],
-# and the transfer census by matching every `go to`, `exit section` and
-# `exit program` in the same range.
+# Required by R-5 and by AAP section 0.4.3, which directs that deliberate
+# omissions be "recorded as omissions so that a reader comparing the two files
+# does not conclude something was lost". The full label -> function table, the
+# GO TO classification and the program -> module row live in
+# docs/migration/traceability.md; the anomaly text in
+# docs/migration/anomaly-log.md; the questions in
+# docs/migration/ambiguity-resolutions.md. What is kept here is what is local to
+# this file and stated nowhere else.
 #
-# 1. PROGRAM -> MODULE
-#    sales/sl060.cbl (1301 lines, whole program in scope)
-#        -> acas_posting/programs/sl060_invoice_posting.py
-#    Public API: `run` only. `__all__ == ("run",)`; every other module-level
-#    name is underscore-private, because AAP section 0.3.3 requires that
-#    "callers cannot reach into a program's internals, exactly as a COBOL CALL
-#    cannot".
+# CENSUS, measured across [sales/sl060.cbl:L395-L1301]. 1301 source lines, whole
+# program in scope. 45 labels -> 45 functions (17 sections, 28 paragraphs), plus
+# 11 support functions and `run`. 22 `GO TO` sites, all annotated at the site
+# with their class. `main-exit.` is declared SIX times, so every function name is
+# section-qualified. Public API is `run` only; `__all__ == ("run",)` and every
+# other module-level name is underscore-private, per AAP section 0.3.3.
 #
-# 2. LINKAGE -> SIGNATURE                       [sales/sl060.cbl:L395-L399]
-#        procedure division using ws-calling-data
-#                                 system-record
-#                                 system-record-4
-#                                 to-day
-#                                 file-defs.
-#    -> run(ws_calling_data, system_record, system_record_4, to_day, file_defs)
-#    The SL/PL five-parameter shape. The third parameter is spelled
-#    `system-record-4` in the source and comes from `copy "wssys4.cob"` [:L393].
-#    Not the GL four-parameter shape, and not the IRS three-parameter shape.
+# LINKAGE -> SIGNATURE                          [sales/sl060.cbl:L395-L399]
+#  using ws-calling-data system-record system-record-4 to-day file-defs
+#  -> run(ws_calling_data, system_record, system_record_4, to_day, file_defs)
+# The SL/PL FIVE-parameter shape - not the GL four-parameter shape and not the
+# IRS three-parameter shape. `system-record-4` comes from `copy "wssys4.cob"`
+# [:L393].
 #
-# 3. LABEL -> FUNCTION.  45 LABELS, 45 FUNCTIONS: 17 sections and 28
-#    paragraphs. AAP section 0.4.2's inventory for sl060 is accurate for the
-#    section heads but omits the three `ca99x-main-exit` labels, `Eval-Msg-Exit`
-#    and several paragraph exits; the census below is the measured one.
+# ANOMALIES, FINDINGS AND AMBIGUITIES. Six register entries (A-1, A-8, A-9,
+# A-10, A-17, A-18), six findings numbered 7 to 12, and nine questions Q-1 to
+# Q-9. Each is annotated at its own reproduction site with its COBOL locator,
+# and the module docstring above indexes all three sets. The register text lives
+# in docs/migration/anomaly-log.md and docs/migration/ambiguity-resolutions.md.
+# A-22 DOES NOT OCCUR HERE: the wrapper is `maps04` [:L1292] and its exit is
+# `maps04-exit` [:L1297], so the names AGREE. Two further facts are recorded at
+# their sites and nowhere else: `zz050-Validate-Date` [:L1192] is DEAD CODE in
+# this program, and the MOVE at [:L1111-L1112] has no terminating period, which
+# unlike A-1 is HARMLESS because neither statement is conditional.
 #
-#      L  402  aa000-Main-Process section.       _aa000_main_process
-#      L  483  aa020-Read-Loop.                  _aa020_read_loop
-#      L  612  aa030-Main-End.                   _aa030_main_end
-#      L  661  aa040-End-Loop.                   _aa040_end_loop
-#      L  676  aa050-End-Loop-End.               _aa050_end_loop_end
-#      L  722  aa999-Exit-Prog.                  _aa999_exit_prog
-#      L  725  ba000-Cr-Swop section.            _ba000_cr_swop
-#      L  763  main-exit.                        _ba000_cr_swop__main_exit
-#      L  766  ba000-New-Heading section.        _ba000_new_heading
-#      L  789  main-exit.                        _ba000_new_heading__main_exit
-#      L  792  ba000-Headings section.           _ba000_headings
-#      L  813  main-exit.                        _ba000_headings__main_exit
-#      L  816  ba000-Sales-Comp section.         _ba000_sales_comp
-#      L  829  main-exit.                        _ba000_sales_comp__main_exit
-#      L  832  ba000-Credit-Comp section.        _ba000_credit_comp
-#      L  845  main-exit.                        _ba000_credit_comp__main_exit
-#      L  848  ba000-CR-Notes section.           _ba000_cr_notes
-#      L  864  ba010-read-loop.                  _ba010_read_loop
-#      L  895  ba020-end-loop.                   _ba020_end_loop
-#      L  910  ba030-main-end.                   _ba030_main_end
-#      L  915  ba040-main-exit.                  _ba040_main_exit
-#      L  918  ba000-Apportion section.          _ba000_apportion
-#      L  960  ba000-Main-Rewrite.               _ba000_main_rewrite
-#      L  965  ba000-Clear-Invoice-Deduct.       _ba000_clear_invoice_deduct
-#      L  971  ba000-cid-exit.                   _ba000_cid_exit
-#      L  973  main-exit.                        _ba000_apportion__main_exit
-#      L  976  ba000-Analise-Deductions section. _ba000_analise_deductions
-#      L 1004  ba999-main-exit.                  _ba999_main_exit
-#      L 1007  ca000-BL-Open section.            _ca000_bl_open
-#      L 1055  ca997-main-exit.                  _ca997_main_exit
-#      L 1058  ca000-BL-Write section.           _ca000_bl_write
-#      L 1155  ca998-main-exit.                  _ca998_main_exit
-#      L 1158  ca000-BL-Close section.           _ca000_bl_close
-#      L 1180  ca999-main-exit.                  _ca999_main_exit
-#      L 1183  zz040-Evaluate-Message Section.   _zz040_evaluate_message
-#      L 1189  Eval-Msg-Exit.                    _eval_msg_exit
-#      L 1192  zz050-Validate-Date section.      _zz050_validate_date
-#      L 1219  zz050-test-date.                  _zz050_test_date
-#      L 1224  zz050-exit.                       _zz050_exit
-#      L 1227  zz060-Convert-Date section.       _zz060_convert_date
-#      L 1259  zz060-Exit.                       _zz060_exit
-#      L 1262  zz070-Convert-Date section.       _zz070_convert_date
-#      L 1289  zz070-Exit.                       _zz070_exit
-#      L 1292  maps04 section.                   _maps04
-#      L 1297  maps04-exit.                      _maps04_exit
+
+# STRUCTURAL NOTES - the declaration decisions, recorded in full at their own
+# marked block earlier in this file.
+#  1 `OI-Header`, `Open-Item-Record-3` and `WS-OTM3-Record` are ONE STORAGE
+#  AREA [copybooks/slwsoi3.cob:L9-L19], which is why five moves between them
+#  are commented out with `*> is redefines` [:L585], [:L666], [:L760],
+#  [:L871], [:L961] and why building the START key at [:L853-L854] and
+#  [:L902-L903] DESTROYS the header's own `oi-invoice`. One object, reached
+#  through `_Sl060State.oi_header`, which IS `ws_otm3_record`.
+#  2 `si-header` [copybooks/slwssoi.cob:L9] is a SECOND, INDEPENDENT 118 bytes
+#  of the same layout used as a save area - saved [:L851], restored [:L913] -
+#  so it is a separate instance, never an alias.
+#  3 `si-approp redefines si-net` [copybooks/slwssoi.cob:L39-L40] is never
+#  referenced by this program.
+#  4 THE OTM2 WORK SEQUENCE is the one sl055 wrote, navigated with DIRECT
+#  COBOL VERBS rather than facade verbs - `open input` [:L480], `read`
+#  [:L484], `close` [:L613], `open output` then immediate `close`
+#  [:L677-L678] - and it reaches NO SCHEMA TABLE. It lives in
+#  `acas_posting.workfiles` and not here because BOTH ends need it and
+#  section 0.4.3 forbids one `programs/` module importing another; a carrier
+#  declared in either program would leave the other opening an EMPTY file.
+#  Its layout is reached through `records.otm3.OiHeader`, the same copybook
+#  included under a different name [copybooks/slwsoi3.cob:L18-L19].
+#  5 `Sales-Turnover` is published twice by `records.sales_ledger` - four
+#  named fields and an immutable OCCURS-4 view. Only the named fields are
+#  persisted, so the subscripted add writes BOTH to keep them in step.
 #
-#    SECTION-QUALIFIED NAMES ARE MANDATORY, NOT STYLISTIC. `main-exit.` is
-#    declared SIX times - L763, L789, L813, L829, L845, L973 - so paragraph
-#    names are not globally unique in this program and a bare `_main_exit`
-#    would silently collapse six declarations into one. The `ba000-` prefix is
-#    likewise shared by seven distinct sections.
+# OMISSIONS - deliberate.
+#  (a) [:L710] `call "SYSTEM" using Print-Report.` The spool-out path, out of
+#  scope per AAP section 0.1.1; `copy "print-spool-command.cob"` [:L192]
+#  and [:L413] go with it.
+#  (b) The four `FS-Cobol-Files-Used`-gated library-call blocks [:L437-L444],
+#  [:L448-L456], [:L681-L689], [:L711-L713]. The GATES are reproduced
+#  through `condition_names` so the decision stays data-driven; the CALL
+#  BODIES are not, because `CBL_CHECK_FILE_EXIST` and `CBL_DELETE_FILE`
+#  are GnuCOBOL library routines and R-1 forbids invoking COBOL at
+#  runtime. Each gate raises `_CobolLibraryRoutineUnavailable` naming the
+#  routine, its locator and its arguments - not skipped, not stubbed, not
+#  emulated. All four are unreachable in the RDBMS configuration. Note
+#  that [:L441-L442] performs the FACADE verbs `OTM3-Open-Output` and
+#  `OTM3-Close` inside gate 1, so they sit behind the same gate. Distinct
+#  from these, [:L692], [:L695], [:L703] and [:L711] merely TEST the same
+#  condition to choose print behaviour and are reproduced normally.
+#  (c) The print file and its line layouts - `selprint` [:L179], `fdprint`
+#  [:L187], the open/close pair [:L470], [:L709], every `write
+#  print-record` and the whole `l1-*`..`l8-*` families. BUT
+#  `ba000-Headings` [:L792] and `ba000-New-Heading` [:L766] still exist as
+#  named functions (R-5), and `line-cnt` and `j` are still maintained,
+#  because [:L608], [:L621], [:L691] and [:L754] branch on them.
+#  (d) `display ... at` becomes log records, but NOT all of it. Converted:
+#  [:L418-L419], [:L471-L472], [:L591], [:L595-L598], [:L659], the
+#  substantive half of `SL131` [:L733], and [:L1163-L1166]. Not converted,
+#  each for a reason: [:L599], [:L734], [:L1168] are pure acknowledgement
+#  prompts standing before the `accept`s of (e); [:L421] displays the
+#  POSTING DATE, business data the safe-event schema in
+#  `acas_posting/dal/status.py` excludes (CWE-532); [:L592-L594] display
+#  RECORD KEYS, excluded at any level, and their renderers were eager log
+#  arguments, so removing them also removes a failure path a diagnostic
+#  must not add; [:L433] displays a SPACE. `ws-Eval-Msg` IS carried,
+#  because `zz040-Evaluate-Message` fills it only from the static table
+#  `copybooks/FileStat-Msgs.cpy` keyed on `fs-reply`.
+#  (e) `accept ws-reply` [:L601], [:L735], [:L1169] - acknowledgement pauses -
+#  are dropped, but the `WS-Caller not = "xl150"` tests around them
+#  [:L600], [:L734], [:L1167] ARE preserved: that is the codebase's own
+#  unattended-mode check.
+#  (f) `accept ws-env-lines from lines` [:L403] and the geometry arithmetic
+#  [:L404-L409]; `set ENVIRONMENT` [:L415-L416]; `copy "envdiv.cob"`
+#  [:L171]. [:L403] is a TERMINAL-GEOMETRY read, NOT a clock read, so this
+#  does not touch R-6: sl060 contains ZERO clock reads and both date
+#  observables arrive through linkage - `to-day` as a parameter and
+#  `Run-Date` [copybooks/wssystem.cob:L67] in `system-record`, used at
+#  [:L1022].
+#  (g) The message literals [:L261-L268]. `SL130`, `SL132` and the diagnostic
+#  half of `SL131` survive as log text. `SL002` and `SL003` are declared
+#  and deliberately never referenced. `SL133` and `SL133T` are never
+#  DISPLAYED at all - [:L704], [:L706] move them into `print-record`,
+#  which is report content. Every member stays declared because R-5 maps
+#  the whole `01 Error-Messages.` group.
+#  (h) [:L1079-L1080] `move oi-b-nos to k` and `move oi-b-item to i` are
+#  REPRODUCED although they are DEAD STORES - their only readers are the
+#  commented-out STRING at [:L1096-L1101] - because the moves execute.
+#  (i) [:L1011-L1014] the commented-out open-then-fallback pair is reproduced
+#  as the ABSENCE it is: a failed `GL-Batch-Open` is not recovered from.
+#  (j) sl060 has NO facade stub block, unlike [general/gl072.cbl:L134-L153],
+#  so there is no representation-only declaration to omit.
 #
-# 4. SUPPORT FUNCTIONS (not COBOL labels; 11 plus `run`)
-#    _index_descriptors            - re-key a record layout's FIELDS tree on the
-#                                    COBOL name, so descriptors are LOOKED UP
-#                                    from the published record modules rather
-#                                    than restated here.
-#    _index_published_descriptors  - the same for `sales_ledger`, which publishes
-#                                    a module-level mapping instead of per-class
-#                                    FIELDS tuples.
-#    _dataclass_leaves             - the elementary items of a layout, used to
-#                                    build and group-move OTM2 headers.
-#    _initial_oi_header            - a header at its figurative initial value.
-#    _group_move_oi_header         - `move oi-header to si-header` [:L851] and
-#                                    `move si-header to oi-header` [:L913].
-#    _new_state                    - bind linkage, build the record areas.
-#    _add_to_turnover_quarter      - the OCCURS-4 subscripted add at [:L545,
-#                                    :L551, :L558]; see STRUCTURAL NOTE 5.
-#    _initialize_ws_sales_record   - `initialize WS-Sales-Record with filler`
-#                                    [:L497], through the published primitive.
-#    _oi_customer_image            - the seven-byte `oi-customer` group image.
-#    _write_oi3_customer           - the reverse, for the two START keys.
-#    _file_status_message          - the `FileStat-Msgs.cpy` table [:L1186].
+# FACADE VERBS - 27 DISTINCT, all entity-named, because the program's last line
+# is `copy "Proc-ACAS-FH-Calls.cob"` [:L1300] and it tests `fs-reply` INLINE
+# rather than through a per-handler error-check paragraph: Sales (acas012) 5,
+# OTM3 (acas019) 7, Value (acas013) 4, GL-Batch (acas007) 3, GL-Posting
+# (acas006) 4, SPL-Posting (acas008) 4. `SPL-Posting-Open-Output` MEANS DELETE
+# EVERY ROW of PSIRSPOST-REC [common/acas008.cbl:L313-L319],
+# [common/acas008.cbl:L571-L574]; `acas008` also rejects read-indexed, rewrite,
+# start and delete UNCONDITIONALLY at entry [common/acas008.cbl:L299-L307],
+# which is anomaly A-6, and sl060 calls none of those four. Both `OTM3-Start`
+# calls are preceded by `set fn-not-less-than to true` [:L855], [:L904],
+# expressed as `AccessType.NOT_LESS_THAN` and never as a raw integer.
 #
-# 5. GO TO CENSUS - 22 SITES, ALL ANNOTATED AT THE SITE.  Classified BY SHAPE,
-#    not by matching the AAP's label list, which is explicitly not exhaustive.
-#    15 sites are realised in this module; the 7 class-3 sites are realised
-#    inside `acas_posting/dates.py`, which owns the consolidated date bodies,
-#    and are annotated in the docstrings of the sections that declare them.
+# TABLES THIS PROGRAM WRITES, and the gate that decides each.
+#  SALEDGER-REC   Write [:L581] / Rewrite [:L583]; also mutated by
+#  `ba000-Clear-Invoice-Deduct` [:L967].  UNGATED.
+#  SAITM3-REC     Write [:L586], Rewrite [:L761], [:L962].  UNGATED.
+#  VALUEANAL-REC  Rewrite [:L990], [:L1002]. Gated `total-deduct not = zero`
+#  [:L643].
+#  SYSTOT-REC     PERIOD TOTAL 3 OF 9 at [:L641] and 4 OF 9 at [:L700].
+#  [:L700] IS UNCONDITIONAL - it sits OUTSIDE the `if` at
+#  [:L695], which guards only the print line - and getting
+#  that wrong would drop a write in file mode and add one in
+#  RDBMS mode. The nine sites are the SOLE WRITERS of
+#  SYSTOT-REC in the whole migration (AAP section 0.6.4).
+#  GLBATCH-REC    Write [:L1161], reached only `if G-L` [:L649] or from the
+#  99-item cap [:L1152].
+#  GLPOSTING-REC  Write [:L1147], gated `if G-L` [:L535] then
+#  `IRS-Both-Used or G-L` [:L1144-L1145].
+#  PSIRSPOST-REC  Write [:L1142], gated `if G-L` [:L535] then `irs-used or
+#  IRS-Both-Used` [:L1126].
+#  SYSTEM-REC     via A-17 [:L1173] and [:L1018] - mutated in storage with no
+#  rewrite here; see Q-6.
+# Plus the OTM2 work sequence, which reaches no table and is TRUNCATED at
+# [:L677-L678].
 #
-#    CLASS 1 - loop-back, becomes `continue` inside `while True:`  (6 sites)
-#      L 610 -> aa020-Read-Loop      the Phase-1 posting loop
-#      L 669 -> aa040-End-Loop       skip a closed item
-#      L 674 -> aa040-End-Loop       the Phase-2 loop tail
-#      L 873 -> ba010-read-loop      skip a non-type-2 item
-#      L 878 -> ba010-read-loop      skip a closed item
-#      L 893 -> ba010-read-loop      the credit note still has value
+# THE SEVEN IRS FAN-OUT SITES, three distinct predicate shapes, all evaluated
+# through `condition_names` and never against a raw "Y"/"B"/1: [:L1039],
+# [:L1046], [:L1126], [:L1144], [:L1172], [:L1175], [:L1177] - the last nested
+# inside [:L1175] by A-1. Condition names `88 IRS-Used value "Y"` and
+# `88 IRS-Both-Used value "B"` on `05 IRS-Instead pic x`
+# [copybooks/wssystem.cob:L179-L181], and `88 G-L value 1`
+# [copybooks/wssystem.cob:L85]. THE GATING IS LAYERED: `ca000-BL-Open`,
+# `ca000-BL-Write` and `ca000-BL-Close` are each reached ONLY `if G-L` [:L466],
+# [:L535], [:L649] and only then test the IRS flags, SO IN IRS-ONLY MODE NONE OF
+# THE THREE RUNS AT ALL and no batch, GL posting or IRS posting row is written.
+# AAP section 0.6.4 records that this switch "changes which tables a run
+# touches", so a scenario must pin it explicitly.
 #
-#    CLASS 2 - forward terminator, becomes `break` PLUS the post-loop block
-#              faithfully placed  (7 sites)
-#      L 485 -> aa030-Main-End       OTM2 at end
-#      L 664 -> aa050-End-Loop-End   OTM3 at end
-#      L 858 -> ba020-end-loop       the first START failed
-#      L 869 -> ba020-end-loop       OTM3 at end
-#      L 876 -> ba020-end-loop       a different customer
-#      L 900 -> ba030-main-end       nothing left to apply, or pass two done
-#      L 907 -> ba030-main-end       the second START failed
-#    AAP section 0.6.3, verbatim, on this class: "the target label is followed
-#    by real work - closing files, printing totals, rewriting a control record -
-#    so the transformation is `break` PLUS faithful placement of that work after
-#    the loop, not `break` alone. Mis-splitting here would silently drop
-#    end-of-run processing." HERE THAT WORK IS: the three closes [:L613-L615],
-#    the three total-group blocks, PERIOD TOTAL 3 [:L641], the deductions
-#    analysis [:L643-L647], `ca000-BL-Close` [:L649-L650], the OTM2 truncation
-#    [:L677-L678], PERIOD TOTAL 4 [:L700] and the remaining closes. Mis-splitting
-#    would drop TWO OF THE NINE SYSTOT-REC writes in the whole migration.
+# ARITHMETIC - ZERO `ROUNDED` SITES IN THIS PROGRAM; the five in the whole
+# migration are [general/gl051.cbl:L791], [general/gl051.cbl:L796],
+# [general/gl080.cbl:L328], [irs/irs030.cbl:L1551] and [irs/irs030.cbl:L1562].
+# EVERY STORE HERE TRUNCATES TOWARD ZERO, the default path of
+# `acas_posting.cobol.arithmetic`; the `rounded` flag is never set in any of the
+# 93 arithmetic calls, which an AST audit over the executable code confirms
+# rather than a text search, since the token would otherwise match this
+# sentence. Zero `ON SIZE ERROR` clauses and zero `REMAINDER` phrases. Verb
+# shapes map to `multiply_by` (the three sign flips [:L571], [:L758], [:L861]),
+# `multiply_by_giving` [:L821], [:L837], `divide_into_giving` [:L827], [:L843],
+# `subtract_from`, `subtract_giving` [:L409], [:L538], [:L578], [:L1088],
+# `add_giving` (variadic, summed at intermediate precision and quantized ONCE -
+# notably the two NINE-ADDEND statements [:L728-L730], [:L921-L923]) and
+# `add_to` [:L552], [:L559], [:L884], [:L1114]. Relation-condition arithmetic
+# with NO receiver at [:L621] and [:L691] goes through
+# `arithmetic.intermediate`, so no temporary field can quantize differently.
+# Reference modification is 1-BASED through `move.ref_mod` /
+# `move.ref_mod_into`, never Python slicing - [:L1071-L1072] builds the
+# 8-character `Post-Date` from the 10-character `u-date` on BOTH sides.
+# `INITIALIZE ... WITH FILLER` [:L497], `INSPECT ... TALLYING FOR LEADING`
+# [:L1087], the edited MOVE into `pic z(7)9` [:L1085] and `STRING ... INTO ...
+# POINTER` [:L1091-L1094] all use the published `cobol.move` primitives.
 #
-#    CLASS 3 - section exit, becomes `return`  (7 sites, all inside `dates`)
-#      L1205, L1210 -> zz050-test-date  (the shared tail of zz050)
-#      L1239, L1245, L1250 -> zz060-Exit
-#      L1275, L1280 -> zz070-Exit
+# DATE SECTIONS - which consolidated body each call selects.
+#  `zz050-Validate-Date` [:L1192] -> `dates.zz050_validate_date`, the
+#  NON-gl051 variant, because gl051 carries three extra
+#  `inspect ... replacing` statements [general/gl051.cbl:L1178-L1180].
+#  `zz060-Convert-Date` [:L1227] -> `dates.zz060_convert_date` with
+#  `wrapper=_maps04`, because sl060 performs `maps04` [:L1236] where
+#  gl051 and gl070 perform `maps03` - the ONE TOKEN that differs.
+#  `zz070-Convert-Date` [:L1262] -> `dates.zz070_convert_date`, byte-identical
+#  in all ten carriers.
+#  `maps04` [:L1292] -> `dates.maps04`, the full reimplementation of
+#  `common/maps04.cbl` (R-1 forbids the `call "maps04"` at [:L1295]),
+#  including its 1600-12-31 epoch, its six-part reject test
+#  [common/maps04.cbl:L140-L146] and its LEAVING THE OUTPUT FIELD
+#  UNTOUCHED on rejection [common/maps04.cbl:L146], [common/maps04.cbl:L154]
+#  - which is why `move zero to u-bin` [:L1221] is load-bearing.
 #
-#    CLASS 4 - sibling re-dispatch, becomes a named call plus an explicit
-#              transfer; per-site proof required  (2 sites)
-#
-#      L 908 -> ba010-read-loop, FROM INSIDE ba020-end-loop.
-#        PROOF. `ba020-end-loop` is reached as a class-2 terminator from three
-#        sites, and its own last statement transfers BACKWARD into the loop it
-#        terminates. So it is simultaneously a terminator and a re-dispatcher:
-#        having set `first-pass` to "N" [:L901], rebuilt the key from the SAVED
-#        header [:L902-L903] and repositioned the cursor [:L904-L905], it runs
-#        the read loop A SECOND TIME over the same customer's open items - the
-#        first pass applying only to the invoice the credit note names
-#        [:L888], the second to any invoice [:L889]. The equivalent shape is an
-#        OUTER loop whose body dispatches on a label value: `_ba010_read_loop`
-#        and `_ba020_end_loop` each RETURN the label they transfer to, and
-#        `_ba000_cr_notes` loops until that label is `ba030-main-end`.
-#        Equivalence holds because (a) the only backward edge is this one, (b)
-#        `first-pass` is monotone "Y"->"N" so the outer loop runs at most twice,
-#        and (c) the guard at [:L898-L900] is exactly the condition under which
-#        no further pass is taken. NOT collapsed into one pass: the two passes
-#        apply DIFFERENT matching rules and both mutate OTM3.
-#
-#      L 928 -> ba000-Main-Rewrite, FROM INSIDE ba000-Apportion.
-#        PROOF. The target is a sibling PARAGRAPH of the same section that
-#        performs work - `perform OTM3-Rewrite` [:L962] - and then itself
-#        transfers control with `exit section` [:L963]. The equivalent is
-#        therefore a CALL to the named paragraph followed by a RETURN. It is not
-#        a bare `return`, because the rewrite must happen; and not a
-#        fall-through, because [:L930] onward must NOT run - in particular
-#        `ba000-Clear-Invoice-Deduct` must not, so an already-settled invoice
-#        does not take a second settlement deduction off `sales-current`.
-#
-# 6. EXIT SECTION / EXIT PROGRAM CENSUS - NOT `GO TO`s, annotated separately.
-#    21 sites. Four are called out by name because they are behavioural rather
-#    than merely terminal:
-#      L 723  `exit program.`  FINDING 7 - see below.
-#      L 931  mid-flow `exit section` in ba000-Apportion: an OVERPAID invoice
-#             leaves with NO REWRITE at all.
-#      L 983  mid-flow `exit section` in ba000-Analise-Deductions: no analysis
-#             row for the specific code, so neither block runs.
-#      L 996  mid-flow `exit section` in the same section: the SECOND read
-#             failed, so the FIRST block's rewrite has ALREADY happened - a
-#             partial effect, not a no-op.
-#    Also mid-flow: L 963 in ba000-Main-Rewrite, which is what makes
-#    ba000-cid-exit and its following main-exit dead labels.
-#    Terminal: L 764, 790, 814, 830, 846, 916, 974, 1005, 1056, 1156, 1181,
-#    1189, 1225, 1260, 1290, 1298.
-#
-# 7. PERFORM ... THRU
-#    DOES NOT OCCUR IN sl060. The four in-scope sites repository-wide are
-#    [general/gl072.cbl:L300], [general/gl072.cbl:L304], [sales/sl100.cbl:L344]
-#    and [purchase/pl100.cbl:L336]. Nothing to transform here.
-#
-# 8. FALL-THROUGH CENSUS.  The two the brief names, plus the section-into-exit
-#    fall-throughs which are recorded at each site.
-#      L 659 -> L 661   aa030-Main-End falls through into aa040-End-Loop. There
-#                       is no transfer at the end of aa030, so Phase 2 begins by
-#                       fall-through and NOT by a PERFORM. Reproduced as a
-#                       direct call at the end of `_aa030_main_end`.
-#      L 970 -> L 971 -> L 973
-#                       ba000-Clear-Invoice-Deduct falls through into the EMPTY
-#                       ba000-cid-exit, which falls through into main-exit. BOTH
-#                       ARE DEAD IN PRACTICE: the paragraph is only ever
-#                       PERFORMed [:L940, :L954] and a PERFORM of a paragraph
-#                       returns at the paragraph's end, while straight-line
-#                       arrival is impossible because ba000-Main-Rewrite ends
-#                       with `exit section` [:L963]. Both functions are retained
-#                       (R-5) with the fall-through wired and the reachability
-#                       argument recorded in `_ba000_cid_exit`'s docstring.
-#
-# 9. ANOMALIES REPRODUCED - SIX REGISTER ENTRIES, more than any other program in
-#    the migration. Every one carries an `# ANOMALY A-nn` comment at its
-#    reproduction site citing the COBOL locator, which AAP section 0.7.4 C-4
-#    prescribes as the way engineering quality is expressed here "rather than
-#    through correction".
-#
-#    A-1  [:L1172-L1178] in `_ca000_bl_close`. THE MISSING TERMINATING PERIOD,
-#         and the missing period is specifically THE ONE AFTER
-#         `perform SPL-Posting-Close` ON LINE 1176 - not a missing END-IF and
-#         not a wrong condition. It makes the `if` on [:L1177] a NESTED
-#         conditional inside the `if` on [:L1175], so in PURE-GL MODE the outer
-#         condition is false and `GL-Posting-Close` NEVER EXECUTES. The three
-#         siblings all have the period: [purchase/pl060.cbl:L1031],
-#         [sales/sl100.cbl:L694], [purchase/pl100.cbl:L675].
-#    A-8  [:L826, :L827] in `_ba000_sales_comp`. DOUBLE TRUNCATION of the moving
-#         average, caused by FIELD WIDTHS, not by arithmetic: `work-2` is
-#         `pic s9(14) comp-3` with ZERO decimal places [:L206] while
-#         `work-goods` carries two [:L218], so pence are discarded on every
-#         accumulation; then `Sales-Average` is `binary-long`
-#         [copybooks/wssl.cob:L49], an INTEGER, so the divide discards the
-#         remainder. Both truncations arise from the descriptors.
-#    A-9  [:L835-L843] in `_ba000_credit_comp`. The credit-note path has NO
-#         `add 1 to sales-activety` ANYWHERE, and wraps BOTH the accumulate and
-#         the divide in an extra outer guard `if work-2 not = zero` [:L841], so
-#         on the FIRST credit note for a customer the average is not updated at
-#         all and the note is silently dropped.
-#    A-10 [:L819, :L835, :L841] across both functions above. THREE MUTUALLY
-#         INCONSISTENT GUARDS on one idiom; variant (c) is
-#         [sales/sl100.cbl:L497-L516], whose guard is single-condition, whose
-#         counter is incremented AFTER the accumulate [:L510] and which uses a
-#         `BY` divide [:L511] rather than an `INTO`. AAP section 0.6.1, verbatim:
-#         "Normalising them into one helper would be the single easiest way to
-#         fail this migration." `_ba000_sales_comp` and `_ba000_credit_comp` are
-#         therefore two independent functions with NO shared helper, NO
-#         parameterised variant and NO call from one to the other.
-#         TECHNICAL NOTE, to prevent a future false "fix": `divide X into Y
-#         giving Z` and `divide Y by X giving Z` are ARITHMETICALLY EQUIVALENT,
-#         so sl100's operand order is a SYNTACTIC difference. The real
-#         divergences are the guard structure and the counter.
-#    A-17 [:L1173] written in `_ca000_bl_close`, [:L1037] read back in
-#         `_ca000_bl_open`. THE UNEXPLAINED MOVE, carrying the maintainer's own
-#         `*> Why ?`. It is NOT inert: `postings` is the SYSTEM-REC posting-RRN
-#         high-water mark that `add postings 1 giving Batch-start` reads to
-#         allocate the next batch's first RRN, so the pair is load-bearing and
-#         diff-visible in GLPOSTING-REC. See AMBIGUITY Q-6 and Q-9.
-#    A-18 [:L1106-L1109, :L1126-L1143] in `_ca000_bl_write`. `dr-pc` and
-#         `cr-pc` are zeroed and NEVER given a value, and are NOT carried into
-#         the IRS posting record; the IRS layout has no counterpart columns at
-#         all. The maintainer flags it five times - [:L1123-L1124], [:L1133],
-#         [:L1135] and the `*> IS IT ???` at [:L1139] against the two-receiver
-#         `move 32`, which puts an ACCOUNT NUMBER into a PERCENTAGE field.
-#         AAP CITATION CORRECTION: the AAP cites [:L1122-L1126]; the flags
-#         measured in the frozen source are at the lines just named.
-#
-#    Anomalies of OTHER programs referenced here for context only, never
-#    reproduced here: A-2 and A-3 (gl080's quarter subscript and its second
-#    rotating counter), A-6 (acas008's always-failing verbs - sl060 calls none
-#    of them), A-21 (gl070's field-name collisions, whose pattern recurs here as
-#    FINDING 11), A-22 (the wrapper/exit name disagreement, WHICH DOES NOT OCCUR
-#    HERE because `maps04` [:L1292] and `maps04-exit` [:L1297] AGREE).
-#
-# 10. FINDINGS - candidate anomaly-log additions, each with a `# FINDING`
-#     comment at its site. 7 to 11 are the five the brief names; 12 is an
-#     additional one found while transcribing.
-#     FINDING 7  [:L722-L723] `aa999-Exit-Prog.` ends with `exit program.`, NOT
-#                `goback.` - the only module in this folder to do so.
-#     FINDING 8  TWO UNBOUNDED TABLE SUBSCRIPTS, the shape of A-2 in gl080.
-#                (a) [:L509, :L526-L527] `a` is loaded from `oi-type` and used
-#                    to index a table of THREE occurrences [:L219] with no
-#                    check; the guard is UPSTREAM AND IMPLICIT, because sl055
-#                    filters proformas out [sales/sl055.cbl:L430-L431].
-#                (b) [:L545, :L551, :L558] `STurnover-Q (current-quarter)` is
-#                    subscripted by the field A-3 concerns
-#                    [copybooks/wssystem.cob:L110], also unchecked.
-#                Both left unbounded (R-3). See AMBIGUITY Q-1 and Q-4.
-#     FINDING 9  [:L702-L707] A MISSING `write` IN THE `sales-missing`
-#                DIAGNOSTIC: the period on [:L707] closes both `if`s, so the
-#                `write` belongs to the ELSE branch only and in COBOL-file mode
-#                the message is moved into the print record and never written.
-#                Print-only, so no table effect, but structurally the same class
-#                of defect as A-1.
-#     FINDING 10 [:L935-L955] THE ASYMMETRIC THREE-WAY APPORTIONMENT: the
-#                `= work-1` arm sets BOTH statuses and DOES clear the deduction;
-#                the `> work-1` arm sets ONLY `si-status` and does NOT clear;
-#                the `else` arm sets ONLY `oi-status` and DOES clear.
-#     FINDING 11 [:L1111-L1112, :L1116, :L1129-L1130] QUALIFIED REFERENCES, the
-#                field-name-collision pattern the AAP records only for gl070.
-#                `VAT-AC` and `Post-Code` are each declared in two of the
-#                records in scope, so the source qualifies them; the Python
-#                names both owners at each site so a reader sees which is meant.
-#     FINDING 12 [:L1132, :L1134, :L1136, :L1141] NARROWING MOVES INTO THE IRS
-#                POSTING RECORD that nobody flagged: `Post-DR`/`Post-CR` are
-#                `pic 9(6)` [copybooks/wspost.cob:L19, :L21] but their IRS
-#                counterparts are `pic 9(5)` [copybooks/wspost-irs.cob:L19,
-#                :L20], and `Post-Amount`/`Vat-Amount` go from ten digits to
-#                nine. High-order truncation is therefore possible on four
-#                fields of every IRS posting row. Left as written; see
-#                AMBIGUITY Q-5.
-#     Also recorded at its site, though not numbered: `zz050-Validate-Date`
-#     [:L1192] is DEAD CODE in sl060 - no statement performs it - and the MOVE
-#     at [:L1111-L1112] has NO TERMINATING PERIOD, which unlike A-1 is HARMLESS
-#     because neither statement is conditional.
-#
-# 11. AMBIGUITIES FOR THE COMPILED ORACLE (R-6).  Nine, each marked
-#     `# AMBIGUITY Q-n` at its site, and each destined for
-#     docs/migration/ambiguity-resolutions.md.
-#     Q-1 [:L509, :L526-L527] which `oi-type` values actually reach the loop,
-#         and what the compiled program stores when `a` is 0 or above 3.
-#     Q-2 [:L437-L444, :L448-L456, :L681-L689, :L711-L713] is
-#         `FS-Cobol-Files-Used` ever true in a scenario? If it is, the four
-#         library-call gates become reachable and R-1 forbids honouring them.
-#     Q-3 [:L590] the disposition of a failed OTM3-Write, which leaves
-#         SALEDGER-REC written and SAITM3-REC not.
-#     Q-4 [:L545, :L551, :L558] the reachable range of `Current-Quarter`, and
-#         what an out-of-range value writes.
-#     Q-5 [:L1132, :L1134, :L1136, :L1141] what the narrowing moves of FINDING
-#         12 actually store, including the SIGN LEADING conversion.
-#     Q-6 [:L1018, :L1173] sl060 increments `Next-Batch` and sets `Postings` but
-#         performs NO System-Rewrite; does either update survive the run?
-#     Q-7 [:L1091-L1094] the exact `Post-Legend` bytes from the edited-move,
-#         INSPECT and STRING chain, including residue from a longer preceding
-#         legend and the truncation point past 32 characters.
-#     Q-8 [:L1162] the disposition of a failed GL-Batch-Write, which leaves
-#         posting rows with no batch header.
-#     Q-9 [:L1173] `Rrn` is `pic 9(5) comp` (0..99999) but `Postings` is
-#         `binary-short` (-32768..32767), so an RRN above 32767 WRAPS NEGATIVE.
-#
-# 12. STRUCTURAL NOTES - the declaration decisions, recorded in full at their
-#     own marked block earlier in this file and summarised here.
-#     NOTE 1  The three-name redefines: `OI-Header`, `Open-Item-Record-3` and
-#             `WS-OTM3-Record` are ONE STORAGE AREA
-#             [copybooks/slwsoi3.cob:L9-L19], which is why five moves between
-#             them are commented out in the source with the maintainer's reason
-#             "*> is redefines" [:L585, :L666, :L760, :L871, :L961] and why
-#             building the START key at [:L853-L854] and [:L902-L903] DESTROYS
-#             the header's own `oi-invoice`. Modelled as one object reached
-#             through `_Sl060State.oi_header`, which IS `ws_otm3_record`.
-#     NOTE 2  `si-header` [copybooks/slwssoi.cob:L9] is a SECOND, INDEPENDENT
-#             118 bytes of the same layout, used as a save area: saved at
-#             [:L851] and restored at [:L913], bracketing `ba000-CR-Notes`.
-#             Modelled as a separate instance, never an alias.
-#     NOTE 3  `si-approp redefines si-net` [copybooks/slwssoi.cob:L39-L40] is
-#             never referenced by this program.
-#     NOTE 4  THE OTM2 WORK SEQUENCE. `open-item-file-2` is the sequence sl055
-#             wrote (`seloi2` [:L178], `fdoi2` [:L186], `slwssoi` [:L280]). It
-#             is navigated with DIRECT COBOL VERBS, not facade verbs -
-#             `open input` [:L480], `read ... at end` [:L484], `close` [:L613],
-#             `open output` then immediate `close` [:L677-L678] - and it reaches
-#             NO SCHEMA TABLE, so it appears in no table dump. Modelled with
-#             `acas_posting.workfiles.OpenItemWorkFile`, whose `open_output`
-#             discards prior content - exactly the TRUNCATION at [:L677-L678]
-#             that marks the transfer to OTM3 as complete - and whose
-#             `open_extend` is what sl055 appends through. THE FILE LIVES IN
-#             `workfiles` AND NOT HERE because it must be reachable from BOTH
-#             ends: sl055 writes it and section 0.4.3 forbids one `programs/`
-#             module from importing another, so a carrier declared in either
-#             program would leave the other opening its own EMPTY file. Both
-#             ends resolve it by the name `file-18` assigns; see `_otm2_file`.
-#             `copybooks/slwssoi.cob` has NO counterpart in AAP section 0.3.1's
-#             `records/` list, and `acas_posting/programs/` is closed at
-#             thirteen files, so no new file was created: the layout is reached
-#             through `records.otm3.OiHeader`, which is the SAME copybook
-#             included under a different name [copybooks/slwsoi3.cob:L18-L19],
-#             and its descriptors carry `copybooks/slwsoi.cob` locators.
-#     NOTE 5  `Sales-Turnover` is published twice by `records.sales_ledger` -
-#             as four named fields `quarters.turnover_q1..q4` and as an
-#             OCCURS-4 view `quarters_view.sturnover_q`, which is an IMMUTABLE
-#             tuple. Only the named fields are persisted, so the subscripted add
-#             writes BOTH representations to keep them in step.
-#
-# 13. OMISSIONS - deliberate, and recorded so that a reader comparing the two
-#     files does not conclude something was lost.
-#     (a) [:L710] `call "SYSTEM" using Print-Report.` THE SPOOL-OUT PATH, out of
-#         scope by AAP section 0.1.1, which excludes "the `call "SYSTEM" using
-#         Print-Report` spool-out path that hands a report file to the operating
-#         system". `copy "print-spool-command.cob"` [:L192] and
-#         `move Print-Spool-Name to PSN` [:L413] go with it.
-#     (b) THE FOUR `FS-Cobol-Files-Used`-GATED LIBRARY-CALL BLOCKS -
-#         [:L437-L444], [:L448-L456], [:L681-L689], [:L711-L713]. The GATES are
-#         reproduced faithfully through `condition_names`, so the decision stays
-#         data-driven exactly as the COBOL's is; the CALL BODIES are not, because
-#         `CBL_CHECK_FILE_EXIST` and `CBL_DELETE_FILE` are GnuCOBOL library
-#         routines and R-1 forbids invoking COBOL at runtime. Each gate raises
-#         `_CobolLibraryRoutineUnavailable`, naming the routine, its locator and
-#         its arguments - NOT silently skipped, NOT stubbed as a no-op, NOT
-#         emulated. All four are unreachable in the RDBMS configuration this
-#         migration targets, because `88 FS-Cobol-Files-Used value zero`
-#         [copybooks/wssystem.cob:L113] is false when
-#         `88 FS-RDBMS-Used value 1` [copybooks/wssystem.cob:L116] is true. See
-#         AMBIGUITY Q-2. NOTE that [:L441-L442] performs the FACADE verbs
-#         `OTM3-Open-Output` and `OTM3-Close` inside gate 1: those would be
-#         legitimate Python calls, but they sit behind the same gate, so the
-#         whole block is unreachable together.
-#         DISTINCT FROM THESE, and reproduced normally because they are ordinary
-#         tests rather than calls: [:L692], [:L695], [:L703] and [:L711] also
-#         TEST `FS-Cobol-Files-Used` to choose print behaviour.
-#     (c) THE ENTIRE PRINT FILE AND ITS LINE LAYOUTS - `selprint` [:L179],
-#         `fdprint` [:L187], `open output print-file` [:L470],
-#         `close print-file` [:L709], every `write print-record` ([:L606],
-#         [:L624], [:L630], [:L636], [:L640], [:L698], [:L707], [:L751],
-#         [:L774-L786], [:L800-L810]) and the whole `l1-*` to `l8-*` field
-#         families. BUT `ba000-Headings` [:L792] and `ba000-New-Heading`
-#         [:L766] STILL EXIST as named functions (R-5), and `line-cnt` and `j`
-#         are STILL MAINTAINED, because [:L608], [:L621], [:L691] and [:L754]
-#         branch on them.
-#     (d) `display ... at` OUTPUT becomes log records, BUT NOT ALL OF IT. AAP
-#         section 0.3.4 converts a DIAGNOSTIC display, which "must not alter
-#         control flow and must not appear in any table dump" - and none of these
-#         records does either.
-#         CONVERTED: [:L418-L419] the banner and title, [:L471-L472] the wait and
-#         phase-1 labels, [:L591, L595-L598] the OTM3 write-failure message with
-#         its file status and the decoded status name, [:L659] the phase-2 label,
-#         [:L733] the substantive half of `SL131`, and [:L1163-L1166] the
-#         batch-write failure with its status and decoded name.
-#         NOT CONVERTED, each for a stated reason:
-#           * [:L599], [:L734], [:L1168] - `SL002`/`SL003`, PURE ACKNOWLEDGEMENT
-#             PROMPTS standing immediately before the `accept`s of (e). The whole
-#             of each literal is the key-press instruction, so nothing substantive
-#             is lost; `SL131` [:L733] is the one MIXED literal and its diagnostic
-#             half IS kept, split at `_SL131_NOTICE`.
-#           * [:L421] - `display ws-date`. THE POSTING DATE IS BUSINESS DATA, which
-#             the safe-event schema in `acas_posting/dal/status.py` excludes from a
-#             record (CWE-532); it is a command-line INPUT that `clock.py` pins.
-#           * [:L592-L594] - `oi3-customer` and `l5-nos`. RECORD KEYS, excluded by
-#             the same schema at any level, DEBUG included - and their renderers
-#             were eager log arguments, so removing them also removes a failure
-#             path that a diagnostic must not add.
-#           * [:L433] - `display space at 0801`. Its operand is a SPACE: screen
-#             erasure with no diagnostic content to convert.
-#         `ws-Eval-Msg` IS carried, because `zz040-Evaluate-Message` fills it only
-#         from the static table `copybooks/FileStat-Msgs.cpy` keyed on `fs-reply`.
-#     (e) `accept ws-reply` [:L601], [:L735], [:L1169] - acknowledgement pauses
-#         whose only effect is to block a terminal - are DROPPED, but the
-#         `WS-Caller not = "xl150"` tests around them [:L600], [:L734],
-#         [:L1167] ARE PRESERVED, because that is the codebase's own
-#         unattended-mode check.
-#     (f) `accept ws-env-lines from lines` [:L403] and the geometry arithmetic
-#         [:L404-L409]; `set ENVIRONMENT` [:L415-L416]; `copy "envdiv.cob"`
-#         [:L171]. [:L403] IS A TERMINAL-GEOMETRY READ, NOT A CLOCK READ, so
-#         omitting it does not touch R-6: sl060 contains ZERO clock reads and
-#         both date observables arrive through linkage - `to-day` as a parameter
-#         and `Run-Date` [copybooks/wssystem.cob:L67] inside `system-record`,
-#         used at [:L1022].
-#     (g) The message literals [:L261-L268]. `SL130`, `SL132` and the diagnostic
-#         half of `SL131` survive as log text. `SL002` and `SL003` are DECLARED AND
-#         DELIBERATELY NEVER REFERENCED - the acknowledgement prompts of (d) and
-#         (e). `SL133` and `SL133T` are also declared and never referenced, because
-#         they are never DISPLAYED at all: [:L704] and [:L706] `move` them into
-#         `print-record`, which is report content and out of scope per AAP section
-#         0.2.2 (see (c)). Every member stays declared because rule R-5 maps the
-#         whole `01 Error-Messages.` group.
-#     (h) `[:L1079-L1080]` `move oi-b-nos to k` and `move oi-b-item to i` are
-#         REPRODUCED even though they are DEAD STORES - their only readers are
-#         the commented-out STRING at [:L1096-L1101] - because the moves execute.
-#     (i) `[:L1011-L1014]` the commented-out open-then-fallback pair for the
-#         batch file is reproduced as the ABSENCE it is: a failed
-#         `GL-Batch-Open` is not recovered from.
-#     (j) sl060 has NO FACADE STUB BLOCK, unlike [general/gl072.cbl:L134-L153]
-#         and gl080, so there is no representation-only declaration to omit.
-#
-# 14. FACADE VERBS - 27 DISTINCT, all entity-named, because the program's last
-#     line is `copy "Proc-ACAS-FH-Calls.cob"` [:L1300] and it tests `fs-reply`
-#     INLINE rather than through a per-handler error-check paragraph.
-#       Sales       (acas012): Open [:L469], Read-Indexed [:L491], Write
-#                              [:L581], Rewrite [:L583], Close [:L615]
-#       OTM3        (acas019): Open [:L481, :L656], Open-Output [:L441],
-#                              Write [:L586], Read-Next [:L662, :L867],
-#                              Start [:L856, :L905], Rewrite [:L761, :L962],
-#                              Close [:L442, :L614, :L679]
-#       Value       (acas013): Open [:L644], Read-Indexed [:L981, :L994],
-#                              Rewrite [:L990, :L1002], Close [:L646]
-#       GL-Batch    (acas007): Open [:L1010], Write [:L1161], Close [:L1174]
-#       GL-Posting  (acas006): Open [:L1047], Open-Output [:L1050],
-#                              Write [:L1147], Close [:L1049, :L1178]
-#       SPL-Posting (acas008): Open-Extend [:L1040], Open-Output [:L1043],
-#                              Write [:L1142], Close [:L1042, :L1176]
-#     `OTM3-Open-Output` is called only inside R-1 gate 1, so it appears in the
-#     source and in the gate's comment but not as an executed call.
-#     `SPL-Posting-Open-Output` MEANS DELETE EVERY ROW of PSIRSPOST-REC
-#     [common/acas008.cbl:L313-L319, :L571-L574]. `acas008` also rejects
-#     read-indexed, rewrite, start and delete UNCONDITIONALLY at entry
-#     [common/acas008.cbl:L299-L307] - anomaly A-6 - and sl060 calls none of
-#     those four.
-#     Both `OTM3-Start` calls are preceded by `set fn-not-less-than to true`
-#     [:L855, :L904], expressed as `AccessType.NOT_LESS_THAN`, never as a raw
-#     integer. `move 1 to File-Key-No` appears at [:L422], [:L980] and [:L993].
-#
-# 15. TABLES THIS PROGRAM WRITES, and the gate that decides each.
-#       SALEDGER-REC   Sales-Write [:L581] / Sales-Rewrite [:L583]; also
-#                      mutated by `ba000-Clear-Invoice-Deduct` [:L967].
-#                      UNGATED.
-#       SAITM3-REC     OTM3-Write [:L586], OTM3-Rewrite [:L761, :L962].
-#                      UNGATED.
-#       VALUEANAL-REC  Value-Rewrite [:L990, :L1002]. Gated on
-#                      `total-deduct not = zero` [:L643].
-#       SYSTOT-REC     the two period-total adds - PERIOD TOTAL 3 OF 9 at
-#                      [:L641] into `sl-credit-deductions`, and PERIOD TOTAL 4
-#                      OF 9 at [:L700] into `sl-cn-unappl-this-month`. [:L700]
-#                      IS UNCONDITIONAL - it sits OUTSIDE the `if` at [:L695]
-#                      that guards only the print line - and getting that wrong
-#                      would drop a SYSTOT-REC write in file mode and add one in
-#                      RDBMS mode. These nine sites are the SOLE WRITERS of
-#                      SYSTOT-REC in the whole migration (AAP section 0.6.4).
-#       GLBATCH-REC    GL-Batch-Write [:L1161], reached only `if G-L` [:L649]
-#                      or from the 99-item cap [:L1152].
-#       GLPOSTING-REC  GL-Posting-Write [:L1147], gated `if G-L` [:L535] and
-#                      then `IRS-Both-Used or G-L` [:L1144-L1145].
-#       PSIRSPOST-REC  SPL-Posting-Write [:L1142], gated `if G-L` [:L535] and
-#                      then `irs-used or IRS-Both-Used` [:L1126].
-#       SYSTEM-REC     via A-17 [:L1173] `postings` and [:L1018] `Next-Batch` -
-#                      mutated in storage, with no rewrite performed here; see
-#                      AMBIGUITY Q-6.
-#     Plus the OTM2 WORK SEQUENCE, which reaches no table and is TRUNCATED at
-#     [:L677-L678].
-#
-#     THE SEVEN IRS FAN-OUT SITES, with their three distinct predicate shapes,
-#     all evaluated through `condition_names` and never against a raw "Y"/"B"/1:
-#       1 [:L1039] irs-used OR IRS-Both-Used     6 [:L1175] IRS-Used OR IRS-Both-Used
-#       2 [:L1046] IRS-Both-Used or G-L          7 [:L1177] IRS-Both-Used or G-L
-#       3 [:L1126] irs-used or IRS-Both-Used         (nested inside 6 - A-1)
-#       4 [:L1144] IRS-Both-Used or G-L
-#       5 [:L1172] IRS-Both-Used OR G-L
-#     Condition names: `88 IRS-Used value "Y"` and `88 IRS-Both-Used value "B"`
-#     on `05 IRS-Instead pic x` [copybooks/wssystem.cob:L179-L181]; `88 G-L
-#     value 1` [copybooks/wssystem.cob:L85]. AAP section 0.6.4 records that this
-#     switch's state "changes which tables a run touches", so a scenario must
-#     pin it explicitly.
-#     THE GATING IS LAYERED: `ca000-BL-Open`, `ca000-BL-Write` and
-#     `ca000-BL-Close` are each reached ONLY `if G-L` [:L466, :L535, :L649], and
-#     only then test the IRS flags internally. SO IN IRS-ONLY MODE NONE OF THE
-#     THREE RUNS AT ALL and no batch, GL posting or IRS posting row is written.
-#
-# 16. ARITHMETIC - ZERO `ROUNDED` SITES IN THIS PROGRAM. The five in the whole
-#     migration are [general/gl051.cbl:L791], [general/gl051.cbl:L796],
-#     [general/gl080.cbl:L328], [irs/irs030.cbl:L1551] and
-#     [irs/irs030.cbl:L1562]. EVERY STORE HERE TRUNCATES TOWARD ZERO, which is
-#     the default path of `acas_posting.cobol.arithmetic`. The `rounded` flag of
-#     every primitive is left at its default and is NEVER SET ANYWHERE in this
-#     file - not once, in any of the 93 arithmetic calls - which an AST audit
-#     over the executable code confirms rather than a text search, since the
-#     token would otherwise match this very sentence. There are also ZERO
-#     `ON SIZE ERROR` clauses and ZERO `REMAINDER` phrases.
-#     Verb shapes, each mapped to the primitive that reproduces it:
-#       `MULTIPLY a BY b` no GIVING, receiver SECOND -> `multiply_by`
-#           the three sign flips at [:L571], [:L758], [:L861]
-#       `MULTIPLY a BY b GIVING c`                   -> `multiply_by_giving`
-#           [:L821], [:L837]
-#       `DIVIDE a INTO b GIVING c`, i.e. c = b / a   -> `divide_into_giving`
-#           [:L827], [:L843]
-#       `SUBTRACT a FROM b` no GIVING                -> `subtract_from`
-#       `SUBTRACT a FROM b GIVING c`                 -> `subtract_giving`
-#           [:L409], [:L538], [:L578], [:L1088]
-#       `ADD ... GIVING x`, variadic, summed at intermediate precision and
-#           quantized ONCE                           -> `add_giving`
-#           notably the TWO NINE-ADDEND statements at [:L728-L730] and
-#           [:L921-L923], and the four/two/five-addend statements at [:L520],
-#           [:L521], [:L523]
-#       `ADD a b TO c`, multi-source into one receiver -> `add_to`
-#           [:L552], [:L559], [:L884], and the three-source [:L1114]
-#     RELATION-CONDITION ARITHMETIC WITH NO RECEIVER at [:L621] and [:L691]
-#     (`line-cnt > Page-Lines - 7` and `... - 6`) is evaluated at intermediate
-#     precision through `arithmetic.intermediate`, with no temporary field that
-#     could quantize differently.
-#     REFERENCE MODIFICATION is 1-BASED and goes through `move.ref_mod` /
-#     `move.ref_mod_into`, never Python slicing - [:L1071-L1072] builds the
-#     8-character `Post-Date` from the 10-character `u-date` on BOTH sides.
-#     `INITIALIZE ... WITH FILLER` [:L497], `INSPECT ... TALLYING FOR LEADING`
-#     [:L1087], the edited MOVE into `pic z(7)9` [:L1085] and `STRING ... INTO
-#     ... POINTER` [:L1091-L1094] all use the published `cobol.move` primitives,
-#     per AAP section 0.3.1: "`cobol/` contains no business logic and
-#     `programs/` contains no numeric primitives."
-#
-# 17. DATE SECTIONS - which consolidated body each call selects.
-#     `zz050-Validate-Date` [:L1192] -> `dates.zz050_validate_date`, THE
-#         NON-gl051 VARIANT, because gl051 carries three extra
-#         `inspect ... replacing` statements [general/gl051.cbl:L1178-L1180]
-#         that sl060 omits entirely. (Dead code in sl060; retained per R-5.)
-#     `zz060-Convert-Date` [:L1227] -> `dates.zz060_convert_date` with
-#         `wrapper=_maps04`, because sl060 performs `maps04` [:L1236] where
-#         gl051 and gl070 perform `maps03` - the ONE TOKEN that differs across
-#         the six carriers.
-#     `zz070-Convert-Date` [:L1262] -> `dates.zz070_convert_date`, the
-#         consolidated form, BYTE-IDENTICAL in all ten carriers.
-#     `maps04` [:L1292] -> `dates.maps04`, the full reimplementation of
-#         `common/maps04.cbl` (R-1 forbids the `call "maps04"` at [:L1295]),
-#         including its 1600-12-31 epoch, its six-part reject test
-#         [common/maps04.cbl:L140-L146] and its behaviour of LEAVING THE OUTPUT
-#         FIELD UNTOUCHED on rejection [common/maps04.cbl:L146, :L154] - which
-#         is why `move zero to u-bin` [:L1221] is load-bearing.
-#     A-22 DOES NOT OCCUR HERE: the wrapper section is `maps04` and its exit is
-#     `maps04-exit`, so THE NAMES AGREE. A-22 is confined to
-#     [general/gl070.cbl:L603-L609] and [general/gl051.cbl:L1273-L1278].
-#
-# 18. LAYERING (AAP section 0.4.3). This module imports only `acas_posting`'s
-#     `records.*`, `dal.facade`, `dal.status`, `cobol.arithmetic`, `cobol.move`,
-#     `cobol.condition_names`, `cobol.field`, `cobol.picture`, `dates`,
-#     `workfiles` and the standard library. It imports NO `cli`, NO
-#     `dal.acas*`, NO `dal.connection`, NO `dal.cursor_state`, NO `clock`, NO
-#     `harness`, NO `dictionary.generate` and NO OTHER `programs.*` module -
-#     including NOT `programs.sl055_invoice_extract_analysis`, even though sl055
-#     produces the OTM2 sequence this program consumes. The handoff is through
-#     the work sequence, exactly as in COBOL, and the CLI sequences the two
-#     calls: `acas_posting/cli/sl_invoice_post.py` dispatches sl055 then sl060,
-#     gating on `if ws-term-code not = zero` [sales/sales.cbl:L759-L768] - which
-#     is the SALES gate, different from the GL's `= 5` test and from Purchase,
-#     which has no gate at all.
+# LAYERING (AAP section 0.4.3). Imports only `records.*`, `dal.facade`,
+# `dal.status`, `cobol.arithmetic`, `cobol.move`, `cobol.condition_names`,
+# `cobol.field`, `cobol.picture`, `dates`, `workfiles` and the standard library.
+# NO `cli`, NO `dal.acas*`, NO `dal.connection`, NO `dal.cursor_state`, NO
+# `clock`, NO `harness`, NO `dictionary.generate` and NO other `programs.*` -
+# including NOT `programs.sl055_invoice_extract_analysis`, even though sl055
+# produces the OTM2 sequence this program consumes. The handoff is through the
+# work sequence, exactly as in COBOL, and the CLI sequences the two calls:
+# `acas_posting/cli/sl_invoice_post.py` dispatches sl055 then sl060, gating on
+# `if ws-term-code not = zero` [sales/sales.cbl:L759-L768] - the SALES gate,
+# different from the GL's `= 5` test and from Purchase, which has no gate.
 # ===========================================================================

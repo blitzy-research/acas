@@ -126,7 +126,7 @@
     },
     "handlerName": {
       "type": "string",
-      "description": "The numbered COBOL file-handler program that a posting program CALLs to reach the table, which in turn CALLs the bridge. Two families exist: acasNNN for the General, Sales and Purchase side and acasirsubN for the IRS side. acas000 is a four-way dispatcher keyed by file-key number rather than a single-table handler, so four different tables legitimately name it.",
+      "description": "The numbered COBOL file-handler program that a posting program CALLs to reach the table, which in turn CALLs the bridge. Two families exist: acasNNN for the General, Sales and Purchase side and acasirsubN for the IRS side. acas000 is a five-way dispatcher keyed by file-key number rather than a single-table handler [common/acas000.cbl:L574-L600], so four different in-scope tables legitimately name it; its fifth key aliases the first.",
       "pattern": "^(acas[0-9]{3}|acasirsub[0-9])$",
       "examples": [
         "acas006",
@@ -382,7 +382,7 @@
         },
         "usage_group_source": {
           "$ref": "#/$defs/sourceLocatorOrNull",
-          "description": "The line that declares the inherited USAGE clause, or null when nothing is inherited. Citing the group line separately from the field line is what lets a reviewer confirm the inheritance rather than take it on trust."
+          "description": "The line that declares the inherited USAGE clause, or null when nothing is inherited. Citing the group line separately from the field line is what lets a reader confirm the inheritance rather than take it on trust."
         },
         "signed": {
           "type": "boolean",
@@ -957,10 +957,10 @@
         },
         "notes": {
           "type": "array",
-          "description": "Observations about this entry, order significant, may be empty. A note may state that a value is inconsistent; it never proposes correcting it.",
+          "description": "Observations about this entry, order significant, may be empty - and empty for most entries. A note is emitted ONLY where it carries a fact no structured member of the entry already carries, so no note restates presence, the copybook-only taxonomy (read is_filler, redefines - directly or through the parent_group chain - and is_group), inherited storage (read usage_declared_at, usage_inherited_from and usage_group_source) or the 88-level condition names (read condition_names, which carries a locator per name). Every general derivation rule is stated once in meta.derivation_rules and never once per entry. A note may state that a value is inconsistent; it never proposes correcting it.",
           "items": {
             "type": "string",
-            "description": "One observation about this field, stated as a fact about the frozen source. A note may record that a value is inconsistent; it never proposes correcting it.",
+            "description": "One observation about this field, stated as a fact about the frozen source and specific to this entry: its drift, its derivation, a load or unload the bridge omits, a DDL comment or column default, the maintainer's own words, or an anomaly this field carries. A note may record that a value is inconsistent; it never proposes correcting it.",
             "minLength": 1
           }
         },
@@ -1431,7 +1431,7 @@
     },
     "programSourceRecord": {
       "type": "object",
-      "description": "One record a posting PROGRAM declares inline in its own FILE SECTION rather than by COPY: the General Ledger work files. copybooks/wsnames.cob:L14-L17 names pretrans.tmp and postrans.tmp; no copybook declares their LAYOUT. They reach no table, but their widths are load-bearing (A-14). gl071 and gl072 declare post-trans-record differently; neither is harmonised (R-4).",
+      "description": "One record a posting PROGRAM declares inline in its own FILE SECTION rather than by COPY: the General Ledger work files. copybooks/wsnames.cob:L15-L16 names pretrans.tmp and postrans.tmp; no copybook declares their LAYOUT. They reach no table, but their widths are load-bearing (A-14). gl071 and gl072 declare post-trans-record differently; neither is harmonised (R-4).",
       "required": [
         "path",
         "record_name",
@@ -1615,7 +1615,7 @@
         },
         "copybook_declarations_covered": {
           "type": "integer",
-          "description": "DISTINCT PHYSICAL DECLARATIONS in the frozen copybooks that at least one entry cites, counted by (source locator, name) pair so an OCCURS item bound by six columns counts once. This is the figure rule R-5's field-level closure is about, and it is published separately from copybook_fields_covered precisely because the two can disagree: an entry tally can look complete while two entries cite one declaration and another declaration has none, which is the defect finding M-18 recorded. The generator refuses to emit a document in which any parsed declaration is uncited, so a reader comparing this figure against the declaration count of the copybook closure is checking a guarantee rather than a hope.",
+          "description": "DISTINCT PHYSICAL DECLARATIONS in the frozen copybooks that at least one entry cites, counted by (source locator, name) pair so an OCCURS item bound by six columns counts once. This is the figure rule R-5's field-level closure is about, and it is published separately from copybook_fields_covered precisely because the two can disagree: an entry tally can look complete while two entries cite one declaration and another declaration has none, which is the defect this separate figure exists to expose. The generator refuses to emit a document in which any parsed declaration is uncited, so a reader comparing this figure against the declaration count of the copybook closure is checking a guarantee rather than a hope.",
           "minimum": 0
         },
         "program_source_fields_covered": {

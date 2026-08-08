@@ -1,6 +1,6 @@
 """The two General Ledger work files, as ordered in-process sequences.
 
-`pretrans.tmp` and `postrans.tmp` [copybooks/wsnames.cob:L14-L17] carry the
+`pretrans.tmp` and `postrans.tmp` [copybooks/wsnames.cob:L15-L16] carry the
 General Ledger transaction stream between the cycle's phases: gl070 writes the
 pre-transaction stream, gl071 sorts it, gl072 consumes the sorted stream. This
 module models the two files, the sort work description between them, and the
@@ -43,20 +43,9 @@ sequential`; `sort-trans` is an `sd` declaring none of the three. One class
 models all three, because the layouts are identical and the verbs are the same.
 
 THE WORK-RECORD LAYOUT  [general/gl071.cbl:L112-L144]
-Eight fields, seventy characters, declared once per file description and byte
-for byte the same each time. `acas_posting.records.work_records` OWNS the
-layout; the widths here are prose so a reader need not open another file.
-
-    offset  field       picture         width
-     1      -batch      pic 9(5)          5
-     6      -post       pic 9(5)          5
-    11      -code       pic xx            2
-    13      -date       pic x(8)          8   DD/MM/YY - EIGHT characters
-    21      -ac         pic 9(6)          6
-    27      -pc         pic 99            2
-    29      -amount     pic s9(8)v99     10   signed, sign trailing included
-    39      -legend     pic x(32)        32   -> 70 characters in total
-
+Eight fields, seventy characters, declared once per file description and byte for
+byte the same each time. `acas_posting.records.work_records` OWNS the layout,
+dictionary-backed field by field; two of its consequences govern this module.
 `-date` is EIGHT characters, not the ten-character `DD/MM/CCYY` of `to-day`
 [general/gl071.cbl:L159], which never reaches a work record; the eight come from
 `Post-Date pic x(8)` by an eight-to-eight move [general/gl070.cbl:L498], so rule
@@ -89,8 +78,6 @@ The verbs published below are exactly those and no others: `OPEN OUTPUT`,
 `OPEN INPUT`, `WRITE`, `READ ... AT END`, `CLOSE` and `SORT ... USING ...
 GIVING`. No `open i-o`, `rewrite`, `delete`, `start` or `open extend`, because
 no phase of this cycle uses one on a work file.
-
-THE ORDERING CONTRACT - THE MOST IMPORTANT PARAGRAPH IN THIS FILE
 """
 
 from __future__ import annotations
@@ -211,7 +198,7 @@ OPEN_ITEM_2_NAME: Final[str] = "openitm2"
 #: its own SELECT `*> Temp file only for i/p to pl060.`
 #: [purchase/pl055.cbl:L109].
 #:
-#: ⭐ ITS RECORD AREA IS 113 BYTES, NOT 118. `01 open-item-record-4 pic x(113)`
+#: ITS RECORD AREA IS 113 BYTES, NOT 118. `01 open-item-record-4 pic x(113)`
 #: [copybooks/fdoi4.cob:L10] against the sales file's `pic x(118)`
 #: [copybooks/fdoi2.cob:L11], even though both hold an open-item header and the
 #: purchase copybook's own comment says the width was set "to match invoice
@@ -272,10 +259,10 @@ class OpenMode(enum.StrEnum):
     EXTEND = "EXTEND"
     """`OPEN EXTEND` - open for writing with the existing records PRESERVED and
     the write position after the last one. [sales/sl055.cbl:L359],
-    [purchase/pl055.cbl:L301]. The mode that made both producers declare a
-    module-private work file of their own before `OpenItemWorkFile` existed.
+    [purchase/pl055.cbl:L301]. The mode that separates the two extract producers
+    from the General Ledger phases, which never extend.
 
-    ⭐ THE MODE THAT DISTINGUISHES THE TWO EXTRACT FILES FROM THE GENERAL LEDGER
+    THE MODE THAT DISTINGUISHES THE TWO EXTRACT FILES FROM THE GENERAL LEDGER
     WORK FILES, and the reason it is not interchangeable with OUTPUT: OUTPUT
     truncates and EXTEND appends. Both extract programs try EXTEND FIRST and
     fall back to OUTPUT only when it fails [sales/sl055.cbl:L359-L362],
@@ -341,19 +328,19 @@ class LineSequentialWorkFile(Generic[RecordT]):
     same class, its layout [general/gl071.cbl:L136-L144] being field-identical.
 
     IN MEMORY, NEVER ON DISK. Agent Action Plan section 0.3.1: these are
-    "in-process sequences, not tables and not temporary files". No instance of
-    this class touches a filesystem or a database, holds a descriptor or a
-    handle, or leaves anything behind when the process ends.
+    "in-process sequences, not tables and not temporary files". No instance touches
+    a filesystem or a database, holds a descriptor or a handle, or leaves anything
+    behind when the process ends.
 
-    ORDER IS THE WHOLE POINT. Records are held in a list and appended to; they
-    are read back by advancing an integer. Nothing sorts, groups,
-    de-duplicates, hashes or re-associates them, and no unordered container
-    appears anywhere in this class. Agent Action Plan section 0.6.4: "Any
-    change in sort stability or key composition produces silent misposting - no
-    error, no diagnostic, wrong balances" - the read itself being the guarded
-    `perform GL-Nominal-Read-Next` at [general/gl072.cbl:L407-L408], which the
-    plan cites as [general/gl072.cbl:L410-L412]. A reordering introduced here
-    would be exactly as silent.
+    ORDER IS THE WHOLE POINT. Records are held in a list, appended to, and read
+    back by advancing an integer; nothing sorts, groups, de-duplicates, hashes or
+    re-associates them, and no unordered container appears in this class. Agent
+    Action Plan section 0.6.4 states the stake - "Any change in sort stability or
+    key composition produces silent misposting - no error, no diagnostic, wrong
+    balances" - and the read that depends on it is the guarded `perform
+    GL-Nominal-Read-Next` at [general/gl072.cbl:L407-L408], cited in the planning
+    material as [general/gl072.cbl:L410-L412]. A reordering introduced here would
+    be exactly as silent.
 
     THE RECORD AREA IS CROSSED BY VALUE, IN BOTH DIRECTIONS. A COBOL `WRITE`
     moves the record area's current bytes into the file and a `READ` fills the
@@ -366,16 +353,13 @@ class LineSequentialWorkFile(Generic[RecordT]):
     value-added-tax legs of a posting [general/gl070.cbl:L495-L532].
     `_record_area_snapshot` carries the mechanism and the proof.
 
-    NO KEYED ACCESS (Agent Action Plan section 0.8.4). There is no `find`, no
-    index, no key-to-record mapping and no search. `records` exposes the stored
-    order for inspection and for the ordering assertions the verification suite
-    makes; walking it is a sequential walk, which is what the compiled program
-    does.
-
-    NOT THREAD-SAFE, AND DELIBERATELY SO (rule R-3). Execution is strictly
-    sequential, matching the single-threaded COBOL, so there is no guard of any
-    kind around the pointer or the record list. A guard would imply a
-    concurrency this migration does not have.
+    NO KEYED ACCESS (Agent Action Plan section 0.8.4) and NO THREAD SAFETY (rule
+    R-3). There is no `find`, no index, no key-to-record mapping and no search;
+    `records` exposes the stored order for inspection and for the verification
+    suite's ordering assertions, and walking it is the sequential walk the compiled
+    program performs. Nothing guards the pointer or the record list either, because
+    execution is strictly sequential like the single-threaded COBOL and a guard
+    would imply a concurrency this migration does not have.
 
     Typical use - the exact `gl070` to `gl071` to `gl072` handoff:
 
@@ -605,7 +589,7 @@ class LineSequentialWorkFile(Generic[RecordT]):
 
 #  THE OPEN-ITEM WORK FILE  -  ONE CARRIER, TWO PROGRAMS, FOUR CALL SITES
 #
-# ⭐⭐ WHY THIS CLASS EXISTS AT ALL. The open-item work file is the CHANNEL
+# WHY THIS CLASS EXISTS AT ALL. The open-item work file is the CHANNEL
 # between a producer and a consumer, and a channel that is not one object is not
 # a channel. `sl055` opens `open-item-file-2` for EXTEND [sales/sl055.cbl:L359],
 # writes a header per invoice [sales/sl055.cbl:L681] and closes it
@@ -621,16 +605,15 @@ class LineSequentialWorkFile(Generic[RecordT]):
 # each `CALL`, exactly as `GeneralLedgerWorkFiles` is for the three General
 # Ledger phases - and for the same reason, stated in that class's own docstring.
 #
-# WHAT THIS REPLACES. Both producers previously declared a module-private work
-# file, and each said in its own docstring that it had to, because
-# `LineSequentialWorkFile` published no `EXTEND` and its only writable mode
-# truncated. That reasoning was correct about the class as it stood and wrong
-# about the conclusion: the answer is to publish the mode here, once, rather than
-# to declare the file twice and leave the consumers reading a different object
-# from the one the producers wrote. `OpenMode.EXTEND` and
-# `FS_REPLY_OPEN_NOT_FOUND` above are that mode and its status.
+# WHY THE MODE IS PUBLISHED HERE. Without an `EXTEND` mode on
+# `LineSequentialWorkFile` each producer would have to declare a module-private
+# work file, because the only other writable mode truncates. That would declare
+# the file twice and leave the consumers reading a different object from the one
+# the producers wrote. Publishing the mode here, once, is the answer:
+# `OpenMode.EXTEND` and `FS_REPLY_OPEN_NOT_FOUND` above are that mode and its
+# status.
 #
-# ⛔ AND NOT A MODULE-LEVEL REGISTRY. Both consumers previously reached a
+# AND NOT A MODULE-LEVEL REGISTRY. Both consumers previously reached a
 # sequence through a dict keyed by the assigned name at module scope, which made
 # the extract reachable but shared it across every run in one interpreter. Rule
 # R-6 requires two runs of the same scenario under the same pinned clock to be
@@ -691,7 +674,7 @@ class OpenItemWorkFile(Generic[RecordT]):
     files (section 0.3.1): an ordered sequence with the same record layout and
     the same ordering guarantee, and nothing else.
 
-    ⛔ NO VERB RAISES ON A STATUS. Every verb reports through `fs-reply` and
+    NO VERB RAISES ON A STATUS. Every verb reports through `fs-reply` and
     returns, because that is what the compiled program does - the producers test
     the field after the `OPEN` and after the `WRITE` rather than being aborted by
     the runtime. Raising would invent a control-flow path the frozen source does
@@ -893,10 +876,10 @@ def open_item_work_file(
 # `SORT sort-trans ... USING pre-trans GIVING post-trans`
 # [general/gl071.cbl:L172-L178] moves a seventy-character record area into
 # another at each boundary:
-#     pre-trans-record   [general/gl071.cbl:L112-L120]
-#         -> sort-trans-record  [general/gl071.cbl:L136-L144]   the USING side
-#     sort-trans-record
-#         -> post-trans-record  [general/gl071.cbl:L124-L132]   the GIVING side
+#  pre-trans-record   [general/gl071.cbl:L112-L120]
+#  -> sort-trans-record  [general/gl071.cbl:L136-L144]   the USING side
+#  sort-trans-record
+#  -> post-trans-record  [general/gl071.cbl:L124-L132]   the GIVING side
 # The three descriptions are field-identical - same eight items, pictures, order
 # and widths, differing only in the name prefix - so no value is converted,
 # truncated, padded, re-scaled or re-signed across the sort. What follows is

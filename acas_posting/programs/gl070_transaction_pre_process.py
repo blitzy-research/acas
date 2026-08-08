@@ -10,7 +10,7 @@ Phase 1 walks the batch file filtering on the accounting cycle
 and returns [general/general.cbl:L810-L811], so gl071 and gl072 never run.
 
 Phase 2 walks the batch file AGAIN, and the second pass adds status conditions
-the first does not [general/gl070.cbl:L455-L459]. Collapsing the two passes into
+the first does not [general/gl070.cbl:L460-L463]. Collapsing the two passes into
 one would change which batches are pre-processed, so both are kept.
 
 Each accepted transaction explodes into up to three legs
@@ -350,7 +350,7 @@ def _init01_menu_input2(store: _WorkingStorage) -> None:
     """`menu-input2.` - THE PHASE DRIVER AND THE ABORT.
 
     [general/gl070.cbl:L157] carries no VALUE clause, and `move zero to a`
-    [general/gl070.cbl:L283] is what makes the detector per-run rather than per-load.
+    [general/gl070.cbl:L284] is what makes the detector per-run rather than per-load.
 
     Args:
         store: the run's working storage. `ws_calling_data.ws_term_code` is written here
@@ -1134,12 +1134,12 @@ def run(
             The BATCH handler takes no such argument, so it is not offered one.
 
     Note:
-        ⭐ THERE IS NO `transport` PARAMETER, AND ITS REMOVAL IS THE POINT. An
-        earlier revision accepted one and forwarded it to the POSTING context
-        only, because `acas007` takes no such argument - so half of this
-        program's two tables ran under the caller's declaration and half under
-        whatever the data-access layer defaulted to. The connection policy is one
-        deployment decision shared by every handler connection, so it belongs
+        THERE IS NO `transport` PARAMETER, AND ITS ABSENCE IS DELIBERATE.
+        Accepting one here could only forward it to the POSTING context, because
+        `acas007` takes no such argument - so half of this program's two tables
+        would run under the caller's declaration and half under whatever the
+        data-access layer defaulted to. The connection policy is one deployment
+        decision shared by every handler connection, so it belongs
         to the deployment and is installed once at the entry point
         through `acas_posting.dal.connection.set_connection_policy`; every open
         this program causes then resolves to that one policy, both tables alike.
@@ -1194,7 +1194,7 @@ def run(
         pre_trans_record=PreTransRecord(),
         maps03_ws=Maps03Ws(),
         ws=WsDateFormats(),
-        # `move zero to a.` [general/gl070.cbl:L283] resets the detector at the head of
+        # `move zero to a.` [general/gl070.cbl:L284] resets the detector at the head of
         # the phase driver.
         detector=_DETECTOR_CLEAR,
         work_files=resolved_work_files,

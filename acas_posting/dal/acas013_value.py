@@ -1568,10 +1568,10 @@ def ba020_process_open(
     rdb: RdbData = file_access.rdb_data
     # [:L406-L429] the six `delimited by space` marshalled values are built by the
     # shared opener rather than repeated here; only their CLASS is recorded.
-    #  THE ENDPOINT IS CLASSIFIED, NOT NAMED. This record used to carry the
-    #  schema, the host, the user, the port and the socket path - the deployment's
-    #  own identity, useful to an attacker and useless to an operator, and
-    #  identical on every run only by accident (CWE-532). `transport_category`
+    #  THE ENDPOINT IS CLASSIFIED, NOT NAMED. The frozen record names the schema,
+    #  the host, the user, the port and the socket path - the deployment's own
+    #  identity, useful to an attacker and useless to an operator, and identical on
+    #  every run only by accident (CWE-532). `transport_category`
     #  answers the one question a log has to answer about a connect target - can
     #  the credentials and the posted figures be read off the wire - with one of
     #  five fixed tokens. The password was never among the logged fields and
@@ -1887,7 +1887,7 @@ def ba070_process_write(
 ) -> None:
     """``ba070-Process-Write.`` [common/valueMT.cbl:L809].
 
-    ⭐ ``We-Error`` IS NEVER WRITTEN ON THE FAILURE PATH. It stays at the zero from
+    ``We-Error`` IS NEVER WRITTEN ON THE FAILURE PATH. It stays at the zero from
     [:L812], so a failed write reports ``FS-Reply`` 99 with ``We-Error`` 0 - the
     handler's ``994``/``995`` pattern is absent here. Preserved.
     """
@@ -1922,7 +1922,7 @@ def ba080_process_delete(
 ) -> None:
     """``ba080-Process-Delete.`` [common/valueMT.cbl:L836].
 
-    ⭐ THE DELETE CARRIES NO SEMICOLON. [:L869] terminates with ``X"00"`` alone, where
+    THE DELETE CARRIES NO SEMICOLON. [:L869] terminates with ``X"00"`` alone, where
     every ``SELECT``, ``INSERT`` and ``UPDATE`` in this bridge appends ``";"`` first
     [:L499, :L635, :L767, :L1245, :L1398].
     """
@@ -1956,7 +1956,7 @@ def ba085_process_delete_all(
 ) -> None:
     """``ba085-Process-Delete-All.`` [common/valueMT.cbl:L891].
 
-    ⭐ N-deleteall-zzz. [:L913] ``move "ZZZ" to WS-VA-Code. *> as its the last rec``
+    N-deleteall-zzz. [:L913] ``move "ZZZ" to WS-VA-Code. *> as its the last rec``
     OVERWRITES THE CALLER'S KEY FIELD IN PLACE, and the clause is then built from that
     mutated record with ``<`` [:L921-L929], giving ``` `VA-CODE`<"ZZZ" ```.
     """
@@ -2205,7 +2205,7 @@ def aa010_main(
 ) -> None:
     """``aa010-main.`` [common/acas013.cbl:L294] - the handler's mainline.
 
-    ⭐ THIS IS THE MIGRATED PATH AND IT RETURNS HERE. Everything after [:L325] is
+    THIS IS THE MIGRATED PATH AND IT RETURNS HERE. Everything after [:L325] is
     indexed-file work that a relational installation never reaches.
 
     Args:
@@ -2368,7 +2368,7 @@ def aa040_process_read_next(
 ) -> None:
     """``aa040-Process-Read-Next.`` [common/acas013.cbl:L419].
 
-    ⭐ N-stopliteral. ``stop "Cobol File EOF"`` IS AN OPERATOR PAUSE, not a program
+    N-stopliteral. ``stop "Cobol File EOF"`` IS AN OPERATOR PAUSE, not a program
     termination: the obsolete ``STOP`` literal form displays its literal and suspends
     until the operator resumes.
 
@@ -2410,7 +2410,7 @@ def aa050_process_read_indexed(
 ) -> None:
     """``aa050-Process-Read-Indexed.`` [common/acas013.cbl:L470].
 
-    ⭐ ``move 21 to we-error fs-reply`` puts 21 IN BOTH FIELDS. Twenty-one is an ``FS-
+    ``move 21 to we-error fs-reply`` puts 21 IN BOTH FIELDS. Twenty-one is an ``FS-
     Reply`` value.
 
     Raises:
@@ -2461,7 +2461,7 @@ def aa070_process_write(
 ) -> None:
     """``aa070-Process-Write.`` [common/acas013.cbl:L538].
 
-    ⭐ N-writenokey. IT NEVER PERFORMS ``aa045-Eval-Keys``, even though that paragraph
+    N-writenokey. IT NEVER PERFORMS ``aa045-Eval-Keys``, even though that paragraph
     lists ``when 5 *> fn-write`` among its arms [:L455].
 
     Raises:
@@ -2494,7 +2494,7 @@ def aa090_process_rewrite(
 ) -> None:
     """``aa090-Process-Rewrite.`` [common/acas013.cbl:L558].
 
-    ⭐ [:L566]'s ``end-rewrite`` CARRIES NO PERIOD, unlike the ``end-write.`` of [:L545]
+    [:L566]'s ``end-rewrite`` CARRIES NO PERIOD, unlike the ``end-write.`` of [:L545]
     and the ``end-delete.`` of [:L555].
 
     Raises:
@@ -2512,7 +2512,7 @@ def aa100_bad_function(
 ) -> None:
     """``aa100-Bad-Function.`` [common/acas013.cbl:L569].
 
-    ⭐ IT ENDS WITHOUT A ``GO TO``, so control FALLS THROUGH into ``aa999-main-exit``
+    IT ENDS WITHOUT A ``GO TO``, so control FALLS THROUGH into ``aa999-main-exit``
     [:L576] and the log record is written. Reproduced as an explicit call, because the
     fall-through is the only way the log happens.
     """
@@ -2586,7 +2586,7 @@ def ba_process_rdbms(
 def ba010_test_ws_rec_size(file_access: FileAccess) -> None:
     """``ba010-Test-WS-Rec-Size.`` [common/acas013.cbl:L596].
 
-    ⭐⭐ N-log, THE MECHANISM. ``13`` was written at [:L299] for every call; ``23`` is
+    N-log, THE MECHANISM. ``13`` was written at [:L299] for every call; ``23`` is
     written here, on the relational path only, because the flat path performs ``ba012``
     directly at [:L329] and jumps over this paragraph entirely.
     """
@@ -2634,7 +2634,7 @@ def ba012_test_ws_rec_size_2(
         # [:L630] `accept Accept-Reply at 2433` - DROPPED.
         return True
     # [:L638-L643] the six credential moves - schema, user, password, port, host, socket
-    # - delegated to the shared loader so that all twenty handler modules share one
+    # - delegated to the shared loader so that all seventeen handler modules share one
     # reading of "hopefully once is enough :)" [:L636].
     load_rdb_data_once(system)
     _SYSTEM_FOR_OPEN = system
@@ -2714,12 +2714,12 @@ def ca_process_logs(
     arguments; the two ``ca-Exit`` paragraphs are likewise one :func:`ca_exit`.
     """
     logging_data = file_access.logging_data
-    #  ONE ADAPTER FOR ALL TWENTY HANDLERS.
+    #  ONE ADAPTER FOR ALL SEVENTEEN HANDLER MODULES.
     # :func:`acas_posting.dal.status.log_file_handler_record` is the single
     # stand-in for `call "fhlogger"`; before it existed each handler wrote its own
     # field list at its own level, so the one legacy log this cycle produces was
     # unreadable as a whole. It advances `Log-File-Rec-Written` modulo one million,
-    # the range of the frozen `pic 9(6)` [copybooks/Test-Data-Flags.cob:L20], which
+    # the range of the frozen `pic 9(6)` [copybooks/Test-Data-Flags.cob:L18], which
     # this paragraph did not advance at all.
     # `WS-File-Key` is WITHHELD: for this table it is the analysis code, a business
     # key (CWE-532). So are `WS-Log-Where` and `SQL-Msg`. The password was never

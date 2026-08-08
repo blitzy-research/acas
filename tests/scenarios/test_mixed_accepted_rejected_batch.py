@@ -13,11 +13,9 @@ shift the sequential nominal cursor, because if it had, the survivors' balances 
 have landed in the wrong accounts.
 
 RULES PROVENANCE, STATED PLAINLY
-`review_rules` reports that NO user rules document was provided for this project, so
-there is no on-disk rules file to consult and none should be looked for. The six binding
-rules R-1 to R-6 live in the requirements themselves (Agent Action Plan section 0.7.2)
-and their exact wording is retrievable there, never through `review_rules`. Where they
-are silent, enterprise-standard best practice applies and NOTHING is invented.
+The six binding rules R-1 to R-6 live in the requirements themselves (Agent Action Plan
+section 0.7.2) and their exact wording is retrievable there. Where they are silent,
+enterprise-standard best practice applies.
 
 THE INVERTED PREMISE, AND WHAT IT FORBIDS THIS FILE FROM ASSERTING
 Agent Action Plan section 0.8.2, verbatim: "There is no test suite: compiled COBOL
@@ -226,7 +224,7 @@ visible at [general/gl070.cbl:L497], [general/gl070.cbl:L521] and
 
 gl072 MUTATES EXACTLY TWO TABLES -- A MEASURED VERB CENSUS, NOT AN INFERENCE
 gl072 issues exactly eight facade verbs: `GL-Batch-Open` [general/gl072.cbl:L276],
-`GL-Nominal-Open` [general/gl072.cbl:L277], `GL-Batch-Rewrite` [general/gl072.cbl:L377],
+`GL-Nominal-Open` [general/gl072.cbl:L274], `GL-Batch-Rewrite` [general/gl072.cbl:L377],
 `GL-Nominal-Rewrite` [general/gl072.cbl:L382], `GL-Nominal-Read-Next`
 [general/gl072.cbl:L408], `GL-Batch-Close` [general/gl072.cbl:L441], `GL-Nominal-Close`
 [general/gl072.cbl:L442] and `GL-Batch-Read-Next` [general/gl072.cbl:L454] -- and ZERO
@@ -349,7 +347,7 @@ this description cannot drift away from the fixture:
   `ledger.dat`, FIVE nominal accounts across four account numbers and two profit
     centres - 1000/0, 1000/1, 2000/0, 2200/0 and 3000/0.
 
-⭐ WHAT THIS FIXTURE REACHES, AND WHAT IT DOES NOT - AND THE ANSWER IS SMALLER THAN THE
+WHAT THIS FIXTURE REACHES, AND WHAT IT DOES NOT - AND THE ANSWER IS SMALLER THAN THE
 SEED SUGGESTS. Compiled measurement recorded as `Q-9` in
 docs/migration/ambiguity-resolutions.md established that the bridge's host-variable load
 NEVER LOADS `HV-POST-RRN`, THE TABLE'S PRIMARY KEY [mysql/ACASDB.sql:L169], so a seeded
@@ -707,7 +705,7 @@ def parity(protocol: object, _parity_cache: dict[str, object]) -> object:
     # `reference_only` keeps the Python side's status a behavioural question owned by a
     # test body, while the fault refusal - a runner exiting in its own documented band,
     # or on `argparse` usage exit 2 - stays here where it reads as an ERROR.
-    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST (finding F-12). The
+    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST. The
     #  comparison below is between one COBOL run and one Python run, and it means
     #  nothing unless the two drove the same work in the same order - an empty diff
     #  between a short run and a full one being the most dangerous false pass this tier
@@ -898,11 +896,11 @@ def test_scenario_definition_preconditions(
     [general/gl070.cbl:L312-L313] and [general/gl070.cbl:L457-L458] skip the batch and
     the run posts nothing at all. `period` is INERT on this route,
     because only `gl_end_of_cycle` consumes it. NO committed scenario drives that
-    operation: a dedicated `end_of_cycle_gl` definition observed the period boundary and
-    the quarter rollover and was removed by findings M-09 and M-17, which hold the tree
-    to the Agent Action Plan's eight. Appending it to THIS scenario was separately
-    considered and DECLINED on six recorded grounds, none of which the removal touches,
-    and that decision is oracle-reversible in
+    operation, so no table-state witness observes the period boundary or the quarter
+    rollover; the Agent Action Plan's inventory names eight scenarios and none of them is
+    an end-of-cycle definition. Appending the operation to THIS scenario was separately
+    considered and DECLINED on six recorded grounds, and that decision is
+    oracle-reversible in
     `docs/migration/ambiguity-resolutions.md` rather than re-litigated.
 
     NO MONETARY OR QUANTITY VALUE IS READ FROM THE YAML AND NONE COULD BE (R-2): YAML
@@ -1050,8 +1048,7 @@ def test_scenario_definition_preconditions(
         f"finding."
     )
     # DECLARED AND INERT: this route never reaches gl080, so nothing reads `period`
-    # here, and no committed scenario drives that operation at all (the `end_of_cycle_gl`
-    # definition that did was removed by findings M-09 and M-17).
+    # here, and no committed scenario drives that operation at all.
     # Its presence is asserted; its value is not interpreted, because
     # interpreting a declared value and judging it would be the added validation R-3
     # forbids.
@@ -1108,10 +1105,10 @@ def test_scenario_definition_preconditions(
 
     # 3.7 THE SEED'S ACTUAL SHAPE, READ OUT OF `seed_records` AND ASSERTED. This module's
     # docstring describes the fixture in prose; these assertions are what stop the prose
-    # from describing a fixture that is not there. An earlier draft claimed three batches
-    # and three kinds of posting row, which `seed_records` has never declared - and that
-    # discrepancy is exactly what let two tests in this file read as anomaly locks while
-    # the branches they name were never reached. Every number below is read from the
+    # from describing a fixture that is not there. Claiming three batches and three kinds
+    # of posting row, which `seed_records` does NOT declare, is exactly the discrepancy
+    # that lets a test in this file read as an anomaly lock while the branch it names is
+    # never reached. Every number below is read from the
     # definition, so extending the fixture fails here first and the prose gets updated
     # with it.
     assert "batch.dat" in expected_files and "posting.dat" in expected_files, (
@@ -1217,6 +1214,9 @@ def test_affected_tables_are_in_scope_and_alphabetical(
             host, and the protocol object applies the stack skip guard.
         in_scope_table_names: The twenty-two in-scope names, ascending, from the
         harness.
+        vocabulary: The shared stack-free vocabulary bundle - the operation names both
+            runners accept, the term codes, the scenario keys and the pinned clock pair
+            - so this test reaches them without an `import conftest`.
     """
     declared = list(scenario_loader(SCENARIO)["affected_tables"])
     in_scope = tuple(in_scope_table_names)
@@ -1434,10 +1434,10 @@ def test_a13_non_numeric_batch_number_skipped_silently(
     counter, no trace. The Python equivalent must be equally silent; adding a warning
     would be an added behavior." SO THIS TEST ASSERTS NO WARNING, NO COUNTER AND NO LOG
     LINE. Demanding one would be demanding an added behaviour, which R-3 forbids and R-4
-    makes a failure - and it would additionally be observable in a log a reviewer might
+    makes a failure - and it would additionally be observable in a log a reader might
     diff.
 
-    ⭐ WHAT THIS TEST DOES NOT PROVE, STATED BEFORE WHAT IT DOES. IT DOES NOT PROVE THE
+    WHAT THIS TEST DOES NOT PROVE, STATED BEFORE WHAT IT DOES. IT DOES NOT PROVE THE
     BRANCH EXECUTED. `post-batch pic 9(5)` [general/gl072.cbl:L111] is filled by gl070 at
     [general/gl070.cbl:L495] from a group that the frozen schema holds as ONE NUMERIC
     column, `POST-KEY bigint(10) unsigned` [mysql/ACASDB.sql:L156], carried as
@@ -1554,7 +1554,7 @@ def test_a13_we_error_999_record_skipped_silently(
     is `not waiting`, so any posting referencing it would set `we-error` to 999 and
     vanish silently at L306-L307. One seeded field is the entire mechanism.
 
-    ⭐ AND ON THIS FIXTURE THE MECHANISM IS NOT FIRED, WHICH THIS TEST SAYS RATHER THAN
+    AND ON THIS FIXTURE THE MECHANISM IS NOT FIRED, WHICH THIS TEST SAYS RATHER THAN
     IMPLIES. `get-batch` is performed only from `headings` [general/gl072.cbl:L346], and
     `headings` is reached only for a batch that has a record in the sorted work file.
     Batch B is seeded with `Items` 0 and `posting.dat` declares NO row for it, so gl072
@@ -1665,12 +1665,12 @@ def test_the_run_reproduced_the_measured_no_op_rather_than_posting(
 ) -> None:
     """THE DISCRIMINATION, AND IT POINTS THE OPPOSITE WAY FROM INTUITION.
 
-    ⭐ WHY THIS TEST EXISTS. Every other assertion in this file is an AGREEMENT claim:
+    WHY THIS TEST EXISTS. Every other assertion in this file is an AGREEMENT claim:
     the two sides' tables must match. Agreement is necessary and it is not sufficient,
     because TWO CYCLES THAT BOTH DID THE SAME THING AGREE PERFECTLY WHATEVER THAT THING
     WAS. This test is the one that says WHICH thing, and it names a value.
 
-    ⭐ AND THE VALUE IS "NOTHING CHANGED", WHICH IS NOT WHAT THE SEED PREDICTS. Batch 1
+    AND THE VALUE IS "NOTHING CHANGED", WHICH IS NOT WHAT THE SEED PREDICTS. Batch 1
     is seeded `Cleared-Status` 0 - the condition name `Waiting`
     [copybooks/wsbatch.cob:L29-L30] - closed, a GL batch, with `Bcycle` equal to the
     pinned `Cyclea`, so phase two's filter [general/gl070.cbl:L460-L463] DOES select it,
@@ -1689,11 +1689,11 @@ def test_the_run_reproduced_the_measured_no_op_rather_than_posting(
     perfectly self-consistent database and would satisfy every agreement assertion in
     this file - and it would be a FAILURE, because a defect fixed is a failure (R-4).
     This test fails for it, and for nothing else fails. It is deliberately NOT written
-    the other way round: an earlier draft of it asserted `CLEARED-STATUS` 1 and
-    `POSTED` = the pinned run date on the waiting batch, which is what the frozen
-    statements [general/gl072.cbl:L375-L376] say unconditionally AND is unreachable on
-    this fixture - it would have demanded the repair rather than the reproduction, which
-    is precisely inverted (R-6).
+    the other way round. Asserting `CLEARED-STATUS` 1 and `POSTED` = the pinned run date
+    on the waiting batch - which is what the frozen statements
+    [general/gl072.cbl:L375-L376] say unconditionally AND is unreachable on this fixture -
+    would demand the repair rather than the reproduction, which is precisely inverted
+    (R-6).
 
     IT ASSERTS TWO THINGS.
 
@@ -1721,6 +1721,8 @@ def test_the_run_reproduced_the_measured_no_op_rather_than_posting(
         protocol: The protocol bundle, for the per-side pre/post comparison.
         scenario_loader: The definition, for the seeded values claim two compares to.
         harness: The three harness modules, for the side labels and for `render`.
+        withheld: The value-free stand-in for a dumped cell, so a failure message can
+            name a column without reproducing an accounting figure.
 
     Raises:
         Skipped: The Compose stack is unusable.
@@ -1932,7 +1934,7 @@ def test_skipped_postings_do_not_perturb_sequential_nominal_cursor(
         f"GLLEDGER-REC's LEDGER-KEY set differs between {sides[0]} and {sides[1]}: "
         f"{keys[0]!r} against {keys[1]!r}. gl072 issues only GL-Nominal-Open, "
         f"GL-Nominal-Read-Next, GL-Nominal-Rewrite and GL-Nominal-Close "
-        f"[general/gl072.cbl:L277], [general/gl072.cbl:L408], "
+        f"[general/gl072.cbl:L274], [general/gl072.cbl:L408], "
         f"[general/gl072.cbl:L382], [general/gl072.cbl:L442] - no write and no delete "
         f"- so neither side may add or lose an account."
     )
@@ -1967,8 +1969,8 @@ def test_skipped_postings_do_not_perturb_sequential_nominal_cursor(
         f"about a SORT TIE rather than a skip, that is `Q-SORT-TIE-ORDER` in "
         f"docs/migration/ambiguity-resolutions.md, which the oracle ANSWERED: the "
         f"compiled sort preserves input order for equal keys, so a tie should NOT "
-        f"produce a difference here and one that appears is a real divergence rather "
-        f"than the open question it used to be.\n{parity.diagnose()}"
+        f"produce a difference here, so one that appears is a real divergence and not an "
+        f"open question.\n{parity.diagnose()}"
     )
 
 
@@ -1979,7 +1981,7 @@ def test_batch_stamp_columns_agree_on_both_sides(
 ) -> None:
     """`end-batch`'s two stamp columns AGREE ON BOTH SIDES.
 
-    ⭐ RENAMED, BECAUSE THE OLD NAME ASSERTED SOMETHING MEASUREMENT REFUTED. This test
+    RENAMED, BECAUSE THE OLD NAME ASSERTED SOMETHING MEASUREMENT REFUTED. This test
     was called `test_accepted_batch_is_stamped_cleared_and_posted` and opened by
     saying "`end-batch` stamps the accepted batch". NO BATCH IS STAMPED BY THIS RUN.
     The body was always framed as agreement and so always passed, which is exactly the
@@ -1987,8 +1989,7 @@ def test_batch_stamp_columns_agree_on_both_sides(
     is under ANOMALY N-KEY in `harness/scenarios/mixed_accepted_rejected.yaml`, and the
     unchanged-relative-to-the-seed facts are asserted by
     `test_every_bounded_row_is_unchanged_relative_to_the_declared_seed` below. This
-    test keeps its agreement claim, which remains worth making, and no longer claims a
-    stamp.
+    test makes its agreement claim, which is worth making, and claims no stamp.
 
     [general/gl072.cbl:L372-L377] verbatim:
 
@@ -2166,7 +2167,7 @@ def test_unwaiting_batch_is_not_stamped(
 # ---------------------------------------------------------------------------
 #  THE SEED-RELATIVE PROBE  -  what distinguishes a skip from a posting
 #
-#  ⭐ EVERY OTHER ASSERTION IN THIS FILE COMPARES THE TWO SIDES TO EACH OTHER, AND
+#  EVERY OTHER ASSERTION IN THIS FILE COMPARES THE TWO SIDES TO EACH OTHER, AND
 #  THAT IS NOT ENOUGH ON ITS OWN. Two implementations that both do nothing agree
 #  perfectly, so side-to-side agreement cannot tell "correctly skipped" from "never
 #  posted anything". The three tests below compare each side to THE DECLARED SEED
@@ -2234,6 +2235,8 @@ def test_no_work_record_is_emitted_so_nothing_can_post(
         column_by_key: The projector, keyed on `BATCH-KEY`.
         harness: The harness modules, for the side labels and `render`.
         scenario_loader: Loads the parsed scenario document, for the declared seed.
+        withheld: The value-free stand-in for a dumped cell, so a failure message can
+            name a column without reproducing an accounting figure.
     """
     declared = _declared_batch_rows(scenario_loader(SCENARIO))
     assert declared, "the scenario declares no batch.dat records - a HARNESS FAULT"
@@ -2282,7 +2285,7 @@ def test_every_bounded_row_is_unchanged_relative_to_the_declared_seed(
     Asserted per account against the declared `ledger.dat` value, on each side
     separately, so neither side can be excused by the other's agreement.
 
-    ⭐ ONE SEEDED VALUE IS DELIBERATELY NEGATIVE AND ITS STORED FORM IS NOT. Account
+    ONE SEEDED VALUE IS DELIBERATELY NEGATIVE AND ITS STORED FORM IS NOT. Account
     2000 is declared `-8765.43` and the column holds `8765.43`, which is ANOMALY
     N-EDIT and not a defect in this comparison: the bridge renders through
     `01 WS-MYSQL-EDIT PIC -Z(18)9.9(9)` whose sign occupies position 1, while every
@@ -2298,6 +2301,8 @@ def test_every_bounded_row_is_unchanged_relative_to_the_declared_seed(
         column_by_key: The projector, keyed on `LEDGER-KEY`.
         harness: The harness modules.
         scenario_loader: Loads the parsed scenario document.
+        withheld: The value-free stand-in for a dumped cell, so a failure message can
+            name a column without reproducing an accounting figure.
     """
     import decimal
 
@@ -2423,7 +2428,7 @@ def test_glposting_rec_is_an_unchanged_witness(
 
     THE VERB CENSUS, MEASURED RATHER THAN INFERRED. gl072 issues exactly EIGHT facade
     verbs and not one of them is a `GL-Posting-*` verb: `GL-Batch-Open`
-    [general/gl072.cbl:L276], `GL-Nominal-Open` [general/gl072.cbl:L277],
+    [general/gl072.cbl:L276], `GL-Nominal-Open` [general/gl072.cbl:L274],
     `GL-Batch-Rewrite` [general/gl072.cbl:L377], `GL-Nominal-Rewrite`
     [general/gl072.cbl:L382], `GL-Nominal-Read-Next` [general/gl072.cbl:L408],
     `GL-Batch-Close` [general/gl072.cbl:L441], `GL-Nominal-Close`
@@ -2529,7 +2534,7 @@ def test_diff_exit_contract_is_honoured(
     AVAILABLE IN THIS TREE, so the mapping is exercised rather than trusted. Rule R-6
     makes an empty diff the pass condition ONLY when a comparison actually happened.
 
-    ⭐ DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
+    DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
     `tests/conftest.py`'s `assert_diff_exit_contract` publishes two synthetic sides with
     `harness/dump_tables.py`'s own writer, canonicalises them with `harness/normalize.py`
     and compares them with `harness/diff_states.py` - once for each of the four cases.
@@ -2540,7 +2545,7 @@ def test_diff_exit_contract_is_honoured(
     checked here, but only as a cheap corroboration of a contract the helper has just
     exercised end to end, over THIS scenario's own three-table bound.
     It matters particularly here, where the two silent skips leave NO message, NO
-    counter and no trace [general/gl072.cbl:L289-L290, L303-L304], so the diff is the
+    counter and no trace [general/gl072.cbl:L291-L292, L303-L304], so the diff is the
     only instrument that can see them and a comparison that refused to run must never
     read as agreement.
 
@@ -2645,6 +2650,8 @@ def test_dump_is_wellformed_on_both_sides(
         The
             file is READ and never written; any diff against it is a defect in the
             migration (Agent Action Plan section 0.8.1).
+        withheld: The value-free stand-in for a dumped cell, so a failure message can
+            name a column without reproducing an accounting figure.
     """
     dump_keys = tuple(harness.dump_tables.DUMP_KEYS)
     diff_states = harness.diff_states
@@ -2757,9 +2764,8 @@ def test_dump_is_wellformed_on_both_sides(
 def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, protocol: object) -> None:
     """THE PARAMETER ROW IS BOUNDED TWICE - by the dump, and by a digest of it.
 
-    WHAT THIS CLOSES. An earlier draft kept `SYSTEM-REC` off every scenario's
-    `affected_tables` and justified that by claiming no side writes it. That claim is
-    FALSE:
+    WHAT THIS CLOSES. The tempting shortcut is to keep `SYSTEM-REC` off every scenario's
+    `affected_tables` on the ground that no side writes it. THAT GROUND IS FALSE:
     `acas_posting/cli/args.py`'s `overrewrite` reproduces
     [general/general.cbl:L656-L672] and every one of the seven routes calls it, so the
     parameter row is written on BOTH sides of every scenario. Until this assertion
@@ -2794,11 +2800,10 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
-    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
-    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
-    counter -- that scenario has since been removed (findings M-09 and M-17), and the
-    observation is recorded because it is what established that half.
+    over the eight committed scenarios, which is all four `unchanged` ones. THE `changed`
+    HALF IS NOT COVERED BY ANY COMMITTED SCENARIO: it was established on a definition that
+    declared `changed` and moved the row by construction, its Phase 5 advancing the cycle
+    and rotating the quarter counter, and no scenario in `harness/scenarios/` does that.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 

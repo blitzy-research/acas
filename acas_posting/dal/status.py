@@ -26,7 +26,10 @@ The SQLSTATE mapping and the lock-retry ladder are here too, because a handler
 reports a relational failure through the same two fields an indexed-file failure
 uses; a caller therefore cannot tell which store answered, which is the point.
 
-WHY IT EXISTS AT ALL: THE TWO-WAY SPLIT OF ONE COPYBOOK
+The split of that one copybook is therefore two-way and deliberate: the record
+LAYOUT lives in `acas_posting.records.file_access`, which is a leaf, and the
+operation VOCABULARY lives here, where both the handlers and the programs may
+reach it.
 """
 
 from __future__ import annotations
@@ -794,9 +797,9 @@ def redact_for_log(text: str, *, limit: int = LOG_FIELD_MAX_CHARS) -> str:
         limit: as :func:`sanitise_for_log`.
 
     Returns:
-        The redacted, sanitised rendering. >>> redact_for_log( ... "Access denied for
-            user 'ACAS-User'@'localhost' " ... "(using password: YES)" ... ) 'Access
-            denied for user [redacted] (using password.
+        The redacted, sanitised rendering: the driver's "Access denied for user
+            '<account>'@'<host>' (using password: YES)" becomes "Access denied for user
+            [redacted] (using password".
     """
     redacted = text
     for pattern, replacement in _REDACTION_RULES:
@@ -872,7 +875,7 @@ def db_error_log_category(errno: int | str, sql_state: str = "") -> str:
 #: The modulus that keeps ``Log-File-Rec-Written`` inside its picture.
 #:
 #: ``03  Log-File-Rec-Written     pic 9(6) value zero.``
-#: [copybooks/Test-Data-Flags.cob:L20] - six digits, so the field wraps at a
+#: [copybooks/Test-Data-Flags.cob:L18] - six digits, so the field wraps at a
 #: million rather than growing without bound. ``common/fhlogger.cbl`` owns the
 #: counter and is out of scope (Agent Action Plan section 0.2.2), so the wrap is
 #: reproduced here, in the one adapter that stands in for it, rather than
@@ -963,7 +966,7 @@ def log_file_handler_record(
     ``WS-Count-Rows`` [:L54] belongs to ``Delete-All`` reporting rather than to
     the trace, so neither appears in the parameter list.
 
-    THE COUNTER. ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L20]
+    THE COUNTER. ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L18]
     advances by one, modulo :data:`FH_LOG_REC_MODULUS`, exactly once per call -
     that is, once per record the frozen source would have appended. It is
     advanced BEFORE the emit and independently of ``logger``'s effective level,
@@ -1408,8 +1411,8 @@ def is_lock_errno(errno: str) -> bool:
         errno: The driver's error number as text.
 
     Returns:
-        ``True`` for ``"1027"``, ``"1036"`` or ``"1099"`` [copybooks/mysql-
-            procedures.cpy:L218-L220].
+        ``True`` for ``"1027"``, ``"1036"`` or ``"1099"``
+            [copybooks/mysql-procedures.cpy:L218-L220].
     """
     return errno in LOCK_ERRNOS
 
@@ -1427,8 +1430,8 @@ def mysql_1300_db_error(
     Args:
         errno: The driver's error number as text, standing in for the result of ``call
             "MySQL_errno"`` at [:L217].
-        time_step: The current ``WS-Mysql-Time-Step`` [copybooks/mysql-
-            variables.cpy:L105]. Zero on a fresh connection.
+        time_step: The current ``WS-Mysql-Time-Step``
+            [copybooks/mysql-variables.cpy:L105]. Zero on a fresh connection.
 
     Returns:
         A triple ``(next_time_step, rung, exhausted_status)``: * ``next_time_step`` -
@@ -1602,17 +1605,17 @@ class ConnectStep(enum.IntEnum):
     field undisturbed.
     """
 
-    #: `MySQL_init` failed - `move 101 to Ws-No-Paragraph` [copybooks/mysql-
-    #: procedures.cpy:L68], guarded by the return-code test at [:L67]. The driver could
-    #: not be initialised at all.
+    #: `MySQL_init` failed - `move 101 to Ws-No-Paragraph`
+    #: [copybooks/mysql-procedures.cpy:L68], guarded by the return-code test at [:L67]. The
+    #: driver could not be initialised at all.
     INIT = 101
 
-    #: `MySQL_real_connect` failed - `move 102 to Ws-No-Paragraph` [copybooks/mysql-
-    #: procedures.cpy:L79], guarded by [:L78]. Host, user, password, port or socket is
-    #: wrong, or the server is unreachable.
+    #: `MySQL_real_connect` failed - `move 102 to Ws-No-Paragraph`
+    #: [copybooks/mysql-procedures.cpy:L79], guarded by [:L78]. Host, user, password, port or
+    #: socket is wrong, or the server is unreachable.
     REAL_CONNECT = 102
 
-    #: `MySQL_selectdb` failed - `move 103 to Ws-No-Paragraph` [copybooks/mysql-
-    #: procedures.cpy:L84], guarded by [:L83]. Connected, but the schema named in `DB-
-    #: Schema` could not be selected.
+    #: `MySQL_selectdb` failed - `move 103 to Ws-No-Paragraph`
+    #: [copybooks/mysql-procedures.cpy:L84], guarded by [:L83]. Connected, but the schema named
+    #: in `DB- Schema` could not be selected.
     SELECT_DB = 103

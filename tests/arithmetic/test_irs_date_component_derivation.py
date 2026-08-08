@@ -159,11 +159,9 @@ THE `Q-` REGISTRY OF THIS FILE.
     are checked here for SIGN POSITION and SPELLING ONLY - their `byte_length` is
     deliberately NOT asserted here.
 
-PROVENANCE OF THE RULES. `review_rules` reports that NO user rules document was
-provided for this project, so there is no on-disk rules file to consult. The six
-rules above are the requirement-embedded rules of Technical Specification section
-0.7.2 and are treated as binding. Where they are silent, enterprise-standard best
-practice applies and nothing is invented.
+PROVENANCE OF THE RULES. The six rules above are the requirement-embedded rules of
+Technical Specification section 0.7.2 and are treated as binding. Where they are
+silent, enterprise-standard best practice applies.
 
 THREE CITATION CORRECTIONS, recorded rather than silently absorbed, each checked line
 by line against the frozen checkout and each agreeing with the generated dictionary
@@ -257,8 +255,8 @@ _TEN_CHARACTER_DATE = "21/09/2025"
 _BLANK_POST_DATE = " " * 8
 
 
-#: ⭐ EVERY PRODUCER OF THE EIGHT-CHARACTER DATE IN THE FROZEN CHECKOUT - the census
-#: that settles question Q-25 (finding F-19). Q-25 asks which callers put a two-digit
+#: EVERY PRODUCER OF THE EIGHT-CHARACTER DATE IN THE FROZEN CHECKOUT - the census
+#: that settles question Q-25. Q-25 asks which callers put a two-digit
 #: YEAR in `Post-Date (7:2)` and which put a CENTURY. It is NOT a question a compiled
 #: probe can answer, because the answer is not a runtime value: it is which statements
 #: exist. So it is answered by censusing them, and the frozen sources cannot move
@@ -268,9 +266,9 @@ _BLANK_POST_DATE = " " * 8
 #: Each entry is `(producer, locator, what it composes, how it reaches Post-Date)`.
 _POST_DATE_WINDOW_CENSUS: Final[tuple[tuple[str, str, str, str], ...]] = (
     #  A.  THE FOUR IN-SCOPE SL/PL POSTING PROGRAMS. Each composes the GL posting
-    #      record's `Post-Date` from `(1:6)` plus `(9:2)` of the ten-character form -
-    #      so a two-digit YEAR - and then moves that whole eight-character value into
-    #      the SL/PL-to-IRS transfer record [copybooks/wspost-irs.cob:L17].
+    #  record's `Post-Date` from `(1:6)` plus `(9:2)` of the ten-character form -
+    #  so a two-digit YEAR - and then moves that whole eight-character value into
+    #  the SL/PL-to-IRS transfer record [copybooks/wspost-irs.cob:L17].
     (
         "sl060",
         "sales/sl060.cbl:L1071-L1072",
@@ -296,8 +294,8 @@ _POST_DATE_WINDOW_CENSUS: Final[tuple[tuple[str, str, str, str], ...]] = (
         "move post-date to WS-IRS-post-date [purchase/pl100.cbl:L633]",
     ),
     #  B.  ONE OUT-OF-SCOPE PROGRAM COMPOSES IT THE SAME WAY. Listed because a census
-    #      that stopped at the scope boundary would not answer the question asked -
-    #      Q-25 is about every caller of the bridge, not every migrated caller.
+    #  that stopped at the scope boundary would not answer the question asked -
+    #  Q-25 is about every caller of the bridge, not every migrated caller.
     (
         "pl950",
         "purchase/pl950.cbl:L639-L640",
@@ -305,10 +303,10 @@ _POST_DATE_WINDOW_CENSUS: Final[tuple[tuple[str, str, str, str], ...]] = (
         "move post-date to WS-IRS-Post-date [purchase/pl950.cbl:L680]",
     ),
     #  C.  THE IRS SIDE. `irs030` moves the transfer record's date straight through in
-    #      the in-scope posting section, and elsewhere moves its own `u-date`, whose
-    #      `(7:2)` window IS `u-year` BY DECLARATION - `03 u-date pic x(8)` redefined
-    #      as `u-days`/`u-month`/`u-year` [irs/irs030.cbl:L311-L318]. So the IRS side
-    #      cannot put a century there without contradicting its own layout.
+    #  the in-scope posting section, and elsewhere moves its own `u-date`, whose
+    #  `(7:2)` window IS `u-year` BY DECLARATION - `03 u-date pic x(8)` redefined
+    #  as `u-days`/`u-month`/`u-year` [irs/irs030.cbl:L311-L318]. So the IRS side
+    #  cannot put a century there without contradicting its own layout.
     (
         "irs030 posting section",
         "irs/irs030.cbl:L1662",
@@ -343,8 +341,8 @@ _POST_DATE_WINDOW_CENSUS: Final[tuple[tuple[str, str, str, str], ...]] = (
         "[irs/irs070.cbl:L176-L183]",
     ),
     #  D.  THE READ-BACK PATH. The bridge's own unload moves the stored column text
-    #      back into the transfer record, so it carries whatever A composed - it
-    #      cannot introduce a century of its own.
+    #  back into the transfer record, so it carries whatever A composed - it
+    #  cannot introduce a century of its own.
     (
         "slpostingMT unload",
         "common/slpostingMT.cbl:L1031",
@@ -477,7 +475,7 @@ def _store_component(
 #  THE RULE UNDER TEST  -  ANOMALY A-7  [common/irspostingMT.cbl:L966-L987]
 # ---------------------------------------------------------------------------
 #
-# ⭐ REPRODUCTION SITE. Anomaly A-7. This is the load paragraph's date handling and
+# REPRODUCTION SITE. Anomaly A-7. This is the load paragraph's date handling and
 # nothing else: the group initialise at [common/irspostingMT.cbl:L966], the
 # unconditional raw-text move at [common/irspostingMT.cbl:L969], and the three
 # independent guards at [common/irspostingMT.cbl:L982-L987]. It is composed here from
@@ -487,22 +485,22 @@ def _store_component(
 # created there: the COBOL-semantics layer holds no business logic (plan section
 # 0.3.1).
 #
-# ⛔ WHAT IS DELIBERATELY ABSENT, and each absence is rule R-3 or R-4:
-#   * NO all-or-nothing wrapper. Three separate `if`s, no `else`, no shared flag.
-#   * NO whole-date validation. The bridge tests two characters at a time and never
-#     asks whether the date is a real calendar date; the six-part calendar reject test
-#     lives in `common/maps04.cbl` and is a DIFFERENT program on a different path.
-#   * NO rejection of a partially derived row. The row is written as it stands.
-#   * NO `NULL` substitution for a failed guard. Zero, because of the initialise.
-#   * NO bounds check on the reference modification. See question Q-10.
-#   * NO reconciliation of the components with the raw text. Drift is exposed as it
-#     stands and is never arbitrated here.
+# WHAT IS DELIBERATELY ABSENT, and each absence is rule R-3 or R-4:
+#  * NO all-or-nothing wrapper. Three separate `if`s, no `else`, no shared flag.
+#  * NO whole-date validation. The bridge tests two characters at a time and never
+#  asks whether the date is a real calendar date; the six-part calendar reject test
+#  lives in `common/maps04.cbl` and is a DIFFERENT program on a different path.
+#  * NO rejection of a partially derived row. The row is written as it stands.
+#  * NO `NULL` substitution for a failed guard. Zero, because of the initialise.
+#  * NO bounds check on the reference modification. See question Q-10.
+#  * NO reconciliation of the components with the raw text. Drift is exposed as it
+#  stands and is never arbitrated here.
 
 
 def _load_host_variables(post_date_text: str) -> dict[str, object]:
     """Reproduce the date handling of `bb000-HV-Load` for one `Post-Date` value.
 
-    ⭐ ANOMALY A-7, reproduced not repaired [common/irspostingMT.cbl:L966-L987].
+    ANOMALY A-7, reproduced not repaired [common/irspostingMT.cbl:L966-L987].
 
     Args:
         post_date_text: What `03 Post-Date pic x(8).`
@@ -634,7 +632,7 @@ def _sales_path_post_date(ten_character_date: str) -> str:
 #: copybook declares them, in declaration order, each with the entry key it reaches
 #: through and its own locator. Transcribed from the frozen copybook once, here, so
 #: that the dictionary and the copybook are compared rather than assumed equal.
-#: ⚠️ `Vat-Amount` is at :L18. The specification body cites :L19; :L19 is a comment.
+#:  `Vat-Amount` is at :L18. The specification body cites :L19; :L19 is a comment.
 _COPYBOOK_FIELDS = (
     ("KEY-4", "Post-Key", "9(5)", "copybooks/irswspost.cob:L9"),
     ("POST4-CODE", "Post-Code", "xx", "copybooks/irswspost.cob:L10"),
@@ -729,14 +727,14 @@ def test_each_copybook_field_keeps_the_shape_its_copybook_declares(
 #  2. THE EIGHT COMBINATIONS  -  three independent guards, no `else`
 # ===========================================================================
 #
-# ⭐ ANOMALY A-7. [common/irspostingMT.cbl:L982-L987] is three separate `if`s with no
+# ANOMALY A-7. [common/irspostingMT.cbl:L982-L987] is three separate `if`s with no
 # `else` and no shared condition, so all eight combinations of (day-numeric,
 # month-numeric, year-numeric) are reachable. [common/irspostingMT.cbl:L969] stores
 # the raw text unconditionally, so rows 2 to 8 below are each provably internally
 # inconsistent: the text says one thing and the components say another, and BOTH are
 # written to the same row.
 #
-# ⛔ Covering only rows 1 and 8 - the all-pass and the all-fail - would miss the
+# Covering only rows 1 and 8 - the all-pass and the all-fail - would miss the
 # anomaly entirely, because partial derivation is the anomaly.
 
 #: `(Post-Date, expected POST4-DAY, expected POST4-MONTH, expected POST4-YEAR)` for
@@ -763,7 +761,7 @@ _EIGHT_COMBINATIONS = (
 def test_three_independent_guards_reach_all_eight_combinations(
     post_date_text: str, day: int, month: int, year: int
 ) -> None:
-    """⭐ A-7 [common/irspostingMT.cbl:L982-L987] - partial derivation is reachable.
+    """A-7 [common/irspostingMT.cbl:L982-L987] - partial derivation is reachable.
 
     Args:
         post_date_text: The eight-character `Post-Date` value.
@@ -775,7 +773,7 @@ def test_three_independent_guards_reach_all_eight_combinations(
 
     assert _components_of(loaded) == (day, month, year)
 
-    # ⭐ THE RAW TEXT IS STORED INTACT IN EVERY ONE OF THE EIGHT CASES, because
+    # THE RAW TEXT IS STORED INTACT IN EVERY ONE OF THE EIGHT CASES, because
     # [common/irspostingMT.cbl:L969] is unconditional. A-7.
     assert loaded[_POST_DATE_COLUMN] == post_date_text
 
@@ -796,7 +794,7 @@ def test_three_independent_guards_reach_all_eight_combinations(
 def test_a_failed_guard_leaves_a_row_that_contradicts_its_own_raw_text(
     post_date_text: str, day: int, month: int, year: int
 ) -> None:
-    """⭐ A-7 - the seven rows where the components and the text DISAGREE.
+    """A-7 - the seven rows where the components and the text DISAGREE.
 
     Rule R-4's corollary in its sharpest form. Asserting that the components agree
     with the raw text would be asserting correct accounting rather than observed
@@ -860,7 +858,7 @@ def test_the_inconsistency_does_not_depend_on_statement_order() -> None:
 
 
 def test_an_all_spaces_date_derives_nothing_and_still_stores_eight_spaces() -> None:
-    """⭐ A-7 - `initialize Posting-Record.` leaves spaces, and spaces are not numeric.
+    """A-7 - `initialize Posting-Record.` leaves spaces, and spaces are not numeric.
 
     A space fails COBOL's numeric class condition, so all three guards fail and all
     three components stay at the zero the group initialise left
@@ -876,7 +874,7 @@ def test_an_all_spaces_date_derives_nothing_and_still_stores_eight_spaces() -> N
 
 
 def test_a_partially_spaced_date_derives_only_its_numeric_windows() -> None:
-    """⭐ A-7 - the guards are per-window, so a blanked month costs only the month.
+    """A-7 - the guards are per-window, so a blanked month costs only the month.
 
     `"21/  /25"` reaches the bridge with a two-space month. The first and third guards
     hold and the second fails, which is row 3 of the eight-combination table reached
@@ -896,7 +894,7 @@ def test_a_partially_spaced_date_derives_only_its_numeric_windows() -> None:
 def test_separators_are_irrelevant_because_the_guards_test_only_the_windows(
     post_date_text: str,
 ) -> None:
-    """⭐ A-7 - the three guards never look at positions 3 and 6.
+    """A-7 - the three guards never look at positions 3 and 6.
 
     [common/irspostingMT.cbl:L982-L987] tests `(1:2)`, `(4:2)` and `(7:2)` and nothing
     else, so whatever sits between them is not part of the derivation.
@@ -937,7 +935,7 @@ def test_reference_modification_is_one_based_on_the_sending_side() -> None:
     assert cobol_move.ref_mod(_NUMERIC_DATE, 4, 2) == "09"
     assert cobol_move.ref_mod(_NUMERIC_DATE, 7, 2) == "25"
 
-    # ⭐ THE COUNTER-ASSERTION that proves the convention rather than assuming it: a
+    # THE COUNTER-ASSERTION that proves the convention rather than assuming it: a
     # 0-based Python slice at the same numbers reads the WRONG characters. Getting
     # this backwards would derive a day of "1/" - which is not numeric, so the guard
     # would fail and the column would silently hold zero. A-7 makes that
@@ -994,7 +992,7 @@ def test_a_range_past_the_end_of_post_date_yields_the_neighbours_bytes() -> None
     real pair in the census with 16 uses, but every one of them is on a ten-character
     date; on this eight-character item it runs off the end.
 
-    THE MEASUREMENT (finding F-19). Question Q-10 is owned by
+    THE MEASUREMENT. Question Q-10 is owned by
     `acas_posting/cobol/move.py` and locked primarily by
     `tests/arithmetic/test_move_truncation.py`; this file cross-references it because
     the overrunning range is on the very item the derivation reads. GnuCOBOL 3.2.0 was
@@ -1020,7 +1018,7 @@ def test_a_range_past_the_end_of_post_date_yields_the_neighbours_bytes() -> None
     consequently described a CLOSED decision as a pending question and promised an
     alarm that could not ring.
 
-    ⛔ NO BOUNDS CHECK IS ADDED and none is removed. The refusal itself is asserted by
+    NO BOUNDS CHECK IS ADDED and none is removed. The refusal itself is asserted by
     `test_a_range_past_the_end_is_reported_rather_than_invented`; what THIS test adds is
     the reading that makes the refusal correct rather than merely conservative.
     """
@@ -1086,17 +1084,17 @@ def test_a_range_past_the_end_is_reported_rather_than_invented() -> None:
 #  5. `IS NUMERIC` IS A TEST, NOT A VALIDATION
 # ===========================================================================
 #
-# ⭐⭐ This is the mechanism by which a failed guard produces a SILENT zero rather
+# This is the mechanism by which a failed guard produces a SILENT zero rather
 # than an error. The class condition yields true or false and never aborts, so a
 # non-numeric window leaves its column at zero with no message, no counter and no
 # trace - the same silence as gl072's two skips (anomaly A-13, primary lock
-# tests/arithmetic/test_move_truncation.py). ⚠️ The specification body cites those two
-# at [general/gl072.cbl:L289-L290] and [general/gl072.cbl:L303-L304]; in the frozen
+# tests/arithmetic/test_move_truncation.py).  The specification body cites those two
+# at [general/gl072.cbl:L291-L292] and [general/gl072.cbl:L306-L307]; in the frozen
 # checkout they are `if post-batch not numeric / go to loop.` at
 # [general/gl072.cbl:L291-L292] and `if we-error equal 999 / go to loop.` at
 # [general/gl072.cbl:L306-L307], which is also what the semantics layer cites.
 #
-# ⛔ `pytest.raises` is used NOWHERE for `is_numeric_class` in this file. Asserting
+# `pytest.raises` is used NOWHERE for `is_numeric_class` in this file. Asserting
 # that it raises would be asserting the opposite of the frozen behaviour.
 
 #: Every two-character window of every parametrized date in this file, plus the two
@@ -1163,7 +1161,7 @@ def test_the_numeric_class_condition_answers_true_or_false(
 
 
 def test_the_numeric_class_condition_never_raises_for_any_tested_window() -> None:
-    """⭐ A-7 - a failed guard is silent, so the test itself must never abort.
+    """A-7 - a failed guard is silent, so the test itself must never abort.
 
     Every window every date in this file presents, plus a wholly non-numeric string
     and the empty string, is put through the class condition and only the RETURN is
@@ -1188,7 +1186,7 @@ def test_the_numeric_class_condition_never_raises_for_any_tested_window() -> Non
 
 
 def test_the_guards_are_recorded_exactly_as_the_bridge_writes_them() -> None:
-    """⭐ A-7 - three guards, three sources, no shared condition and no `else`.
+    """A-7 - three guards, three sources, no shared condition and no `else`.
 
     Read from the generated dictionary rather than from the bridge, because the
     dictionary is what this migration derives field facts from (rule R-5). The
@@ -1235,7 +1233,7 @@ def test_the_guards_are_recorded_exactly_as_the_bridge_writes_them() -> None:
 #  6. THE THREE BRIDGE-ONLY COLUMNS  -  read from the generated dictionary
 # ===========================================================================
 #
-# ⭐⭐ THE PROOF OF THE METHOD. A migration driven from the copybooks alone would
+# THE PROOF OF THE METHOD. A migration driven from the copybooks alone would
 # silently omit three columns of a posting table. Every fact below comes from
 # `data_dictionary/acas_posting_dictionary.json`, which the generator builds from the
 # copybook, the bridge host-variable group and the `CREATE TABLE` statement.
@@ -1304,14 +1302,14 @@ def test_each_derived_component_is_bridge_only_and_interleaved(
     hv_locator: str,
     column_locator: str,
 ) -> None:
-    """⭐⭐ A-7 - no copybook counterpart, `tinyint(2) unsigned NOT NULL`, ordinal 4-6.
+    """A-7 - no copybook counterpart, `tinyint(2) unsigned NOT NULL`, ordinal 4-6.
 
     THE ORDINALS ARE INTERLEAVED, not appended: the three sit between `POST4-DAT` at 3
     and `POST4-DR` at 7. A reading that assumed new columns are appended would mis-map
     every column after the third, which is the concrete cost of taking the copybook
     rather than the bridge as the mapping this migration follows.
 
-    ⚠️ The specification body cites these three at [mysql/ACASDB.sql:L277-L279]; :L277
+     The specification body cites these three at [mysql/ACASDB.sql:L277-L279]; :L277
     is `POST4-DAT` and the three components are at :L278, :L279 and :L280, which is
     what the checkout and the generated dictionary both say.
 
@@ -1375,7 +1373,7 @@ def test_each_derived_component_is_bridge_only_and_interleaved(
 
 
 def test_a_bridge_only_column_has_no_field_descriptor_at_all() -> None:
-    """⭐⭐ A-7 - the descriptor factory refuses the three by name.
+    """A-7 - the descriptor factory refuses the three by name.
 
     A `FieldDescriptor` describes COBOL-side storage, and a column no copybook
     declares has none. The refusal is the point: it is impossible to write a record
@@ -1415,7 +1413,7 @@ def test_every_other_column_of_the_table_does_have_a_copybook_counterpart() -> N
 
 
 def test_the_copybook_declares_ten_fields_and_none_of_the_three() -> None:
-    """⭐⭐ `01 Posting-Record.` [copybooks/irswspost.cob:L8-L18] - ten fields.
+    """`01 Posting-Record.` [copybooks/irswspost.cob:L8-L18] - ten fields.
 
           8:  01  Posting-Record.
           9:      03  Post-Key        pic 9(5).
@@ -1453,7 +1451,7 @@ def test_the_copybook_declares_ten_fields_and_none_of_the_three() -> None:
     ]
     assert {entry.copybook.level for entry in elementary} == {"03"}
 
-    # ⭐ NOT ONE of them is a date component.
+    # NOT ONE of them is a date component.
     for entry in elementary:
         name = entry.copybook.name.upper()
         assert not name.endswith("-DAY")
@@ -1495,7 +1493,7 @@ def test_the_dictionary_covers_every_in_scope_column_including_these_three() -> 
 
 
 def test_the_carrier_of_a_derived_component_is_an_integer_and_never_null() -> None:
-    """⭐ A-7 - zero, an `int`, and `None` unreachable.
+    """A-7 - zero, an `int`, and `None` unreachable.
 
     The entry's own `cobol_python_storage` is NONE, and that is not a contradiction:
     there is no COBOL-side storage to name, because no copybook declares the field.
@@ -1545,16 +1543,16 @@ def test_the_carrier_of_a_derived_component_is_an_integer_and_never_null() -> No
 #  7. TABLE-QUALIFIED KEYS  -  the two posting records collide by meaning
 # ===========================================================================
 #
-# ⭐⭐ `PSIRSPOST-REC` and `IRSPOSTING-REC` describe the same ten logical fields - a
+# `PSIRSPOST-REC` and `IRSPOSTING-REC` describe the same ten logical fields - a
 # key, a code, an eight-character date, a debit, a credit, an amount, a legend, a VAT
 # account default, a VAT side and a VAT amount - through two different copybooks, two
 # different bridges and two different handlers. The frozen source itself warns about
 # the confusion, verbatim [copybooks/wspost-irs.cob:L6-L7]:
 #
-#       6: *> This is NOT the same as the internal IRS *
-#       7: *>   posting file                           *
+#  6: *> This is NOT the same as the internal IRS *
+#  7: *>   posting file                           *
 #
-# ⛔ So nothing here is keyed by a bare field name. Every lookup is qualified, and a
+# So nothing here is keyed by a bare field name. Every lookup is qualified, and a
 # test below shows that a bare name is not a key at all rather than a key that
 # silently picks one of the two.
 
@@ -1628,7 +1626,7 @@ def test_the_same_logical_field_is_two_entries_under_two_tables(
 
 
 def test_a_bare_field_name_is_not_a_dictionary_key_at_all() -> None:
-    """⛔ The loader will not guess a table for you.
+    """The loader will not guess a table for you.
 
     THE BEHAVIOUR THIS LOADER IMPLEMENTS, recorded as this file's specification asks:
     `find_entry` returns `None` for an unqualified name - it does not pick a table and
@@ -1653,7 +1651,7 @@ def test_a_bare_field_name_is_not_a_dictionary_key_at_all() -> None:
 
 
 def test_the_ledger_side_posting_table_has_no_date_components() -> None:
-    """⭐ The three derived columns are unique to the INTERNAL IRS posting table.
+    """The three derived columns are unique to the INTERNAL IRS posting table.
 
     `PSIRSPOST-REC` [mysql/ACASDB.sql:L366] carries the same eight-character date in
     `IRS-POST-DAT` and derives nothing from it: its bridge, `slpostingMT`, has no
@@ -1699,13 +1697,13 @@ def test_the_ledger_side_posting_table_has_no_date_components() -> None:
 #  8. THE `(7:2)` WINDOW  -  a year at every producer in the checkout (Q-25, settled)
 # ===========================================================================
 #
-# ⭐ `Post-Date` is `pic x(8)` [copybooks/irswspost.cob:L11], so `(7:2)` is two
+# `Post-Date` is `pic x(8)` [copybooks/irswspost.cob:L11], so `(7:2)` is two
 # characters and no more. What those two characters MEAN is the caller's doing, and on
 # the Sales path the question is closed by construction, verbatim
 # [sales/sl060.cbl:L1071-L1072]:
 #
-#     1071:      move     u-date (1:6) to post-date (1:6).
-#     1072:      move     u-date (9:2) to post-date (7:2).
+#  1071:      move     u-date (1:6) to post-date (1:6).
+#  1072:      move     u-date (9:2) to post-date (7:2).
 #
 # The caller takes characters 1 to 6 of the ten-character form - `"DD/MM/"` - and
 # characters 9 to 10 - the last two digits of the four-digit year - so `(7:2)` is
@@ -1751,7 +1749,7 @@ def test_the_sales_path_composition_derives_all_three_components() -> None:
 
 
 def test_a_caller_that_truncated_the_ten_character_form_would_store_a_century() -> None:
-    """⭐ A-7 - the guard cannot tell a century from a year, because both are numeric.
+    """A-7 - the guard cannot tell a century from a year, because both are numeric.
 
     Taking characters 1 to 8 of `"21/09/2025"` gives `"21/09/20"`, whose `(7:2)` is the
     CENTURY. The third guard holds - "20" is numeric - so `POST4-YEAR` is stored as 20
@@ -1811,20 +1809,20 @@ def test_q25_is_settled_by_census_every_producer_composes_a_two_digit_year() -> 
 
     SO THE CENTURY READING HAS NO PRODUCER. It arises only from a hypothetical caller
     that truncated `x(10)` to `x(8)`, and no statement in the checkout performs that
-    truncation. The former `xfail(strict=True)` asserted that the year-reading and the
+    truncation. An `xfail(strict=True)` here would assert that the year-reading and the
     century-reading AGREE; they do not - 25 against 20 - and for one calendar date they
     cannot, that being static arithmetic over two different eight-character windows
-    rather than anything an oracle answer could change. So the marker asserted a
+    rather than anything an oracle answer could change. Such a marker would assert a
     permanent falsehood while describing Q-25 as pending, and its promised "unexpected
-    pass when the question is answered" could never have happened. The disagreement is
-    now asserted as the positive result, because it is what proves the two compositions
-    are genuinely different and that only one of them is ever executed.
+    pass when the question is answered" could never happen. The disagreement is
+    asserted as the positive result instead, because it is what proves the two
+    compositions are genuinely different and that only one of them is ever executed.
 
     THE COMPLEMENTARY HALF IS THE NEXT TEST: once stored, the column cannot say WHICH
     reading produced it. The two together are the whole of Q-25's bite - the same date
     can reach the same column as two different numbers, and nothing downstream can tell.
 
-    ⛔ NOTHING IS REPAIRED (rules R-3, R-4). No caller is corralled, no range is
+    NOTHING IS REPAIRED (rules R-3, R-4). No caller is corralled, no range is
     bounds-checked and no century is restored. Anomaly A-7's silence stands: the guard
     still cannot tell a century from a year, and `test_a_caller_that_truncated_the_ten_
     character_form_would_store_a_century` keeps that reachable-in-principle case
@@ -1914,7 +1912,7 @@ def test_the_two_readings_are_indistinguishable_once_stored() -> None:
 #  9. THE TWO `sign is leading` MONEY FIELDS  -  spelling and position only
 # ===========================================================================
 #
-# ⛔ THE BYTE WIDTH OF A LEADING-SIGN DISPLAY ITEM IS NOT ASSERTED HERE. That is
+# THE BYTE WIDTH OF A LEADING-SIGN DISPLAY ITEM IS NOT ASSERTED HERE. That is
 # question Q-5.2, settled in `acas_posting/cobol/usage.py` and locked by
 # tests/arithmetic/test_sign_leading_display.py. Duplicating it here would put a second
 # lock on someone else's question; what this file needs from those two fields is only
@@ -1935,7 +1933,7 @@ def test_the_money_fields_keep_the_sign_is_leading_spelling(
 ) -> None:
     """`pic s9(7)v99  sign is leading.` - the spelling with the `is`.
 
-    ⚠️ `Vat-Amount` is at [copybooks/irswspost.cob:L18]. The specification body cites
+     `Vat-Amount` is at [copybooks/irswspost.cob:L18]. The specification body cites
     :L19, which in the frozen checkout is a comment line; the checkout and the
     generated dictionary agree on :L18.
 
@@ -1956,7 +1954,7 @@ def test_the_money_fields_keep_the_sign_is_leading_spelling(
     # The spelling is preserved as written, not normalised to the shorter form.
     assert descriptor.sign_clause_text == "sign is leading"
     assert descriptor.sign_clause_text in cobol_usage.SIGN_LEADING_SPELLINGS
-    # ⛔ `descriptor.byte_length` is deliberately NOT asserted - question Q-5.2.
+    # `descriptor.byte_length` is deliberately NOT asserted - question Q-5.2.
 
 
 def test_both_leading_sign_spellings_occur_and_are_kept_apart() -> None:
@@ -2060,7 +2058,7 @@ def test_the_derived_component_store_is_un_rounded() -> None:
 
 
 def test_the_group_initialise_is_what_makes_a_failed_guard_zero() -> None:
-    """⭐ A-7 - `initialize TD-IRSPOSTING-REC.` [common/irspostingMT.cbl:L966].
+    """A-7 - `initialize TD-IRSPOSTING-REC.` [common/irspostingMT.cbl:L966].
 
     The dictionary records, per component, that its host variable's group is
     initialised before the load. That single fact is the whole reason the anomaly
@@ -2132,13 +2130,13 @@ def test_the_load_and_unload_paragraphs_are_a_one_way_pair_for_the_three() -> No
 #  and is NOT undone. What is added here is the smallest possible extra reach,
 #  because two binding requirements cannot be met without it:
 #
-#    * rule R-4 requires the anomaly-locking tests to exist "so that a future
-#      well-intentioned correction fails the suite rather than passing unnoticed",
-#      and A-7 is one of the daggered anomalies in Agent Action Plan section 0.6.7 -
-#      a correction of the shipped guards is precisely the correction R-4 names;
-#    * the checkpoint's own mutation requirement is that a critical test must FAIL
-#      under the corresponding wrong behaviour, and no test that avoids the shipped
-#      function can fail when that function changes.
+#  * rule R-4 requires the anomaly-locking tests to exist "so that a future
+#  well-intentioned correction fails the suite rather than passing unnoticed",
+#  and A-7 is one of the daggered anomalies in Agent Action Plan section 0.6.7 -
+#  a correction of the shipped guards is precisely the correction R-4 names;
+#  * the checkpoint's own mutation requirement is that a critical test must FAIL
+#  under the corresponding wrong behaviour, and no test that avoids the shipped
+#  function can fail when that function changes.
 #
 #  Agent Action Plan section 0.4.3's row for this tier forbids `dal` and "any
 #  database", and gives the table's purpose as keeping "the dependency graph acyclic
@@ -2192,12 +2190,12 @@ def _is_tier_isolated_name(name: str) -> bool:
 def _shipped_acasirsub4() -> Iterator[types.ModuleType]:
     """Import the IRS posting handler for one test, leaving `sys.modules` as found.
 
-    ⭐ THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
+    THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
 
-    NOT OPTIONAL. `pytest.importorskip` stood here, and it turned the one failure this
-    section exists to catch into a PASS. A shipped module that cannot be imported at
-    all - a syntax error, a circular import, a name it imports that no longer exists -
-    produced a SKIP, and a skipped test reads as green. The pinned MySQL driver the
+    NOT OPTIONAL. `pytest.importorskip` here would turn the one failure this section exists
+    to catch into a PASS: a shipped module that cannot be imported at all - a syntax error,
+    a circular import, a name it imports that no longer exists - would produce a SKIP, and
+    a skipped test reads as green. The pinned MySQL driver the
     reason text blamed is a hard requirement of `requirements.txt`, so its absence is a
     broken environment and not a supported configuration.
 
@@ -2341,7 +2339,7 @@ def test_the_shipped_guard_primitive_is_a_test_and_never_a_validation() -> None:
     The COBOL `numeric` class condition is a test, not a validation: it answers true
     or false and never aborts. That is the mechanism by which a failed guard produces
     a SILENT zero rather than an error - the same silence as the two skips at
-    [general/gl072.cbl:L289-L290] and [general/gl072.cbl:L303-L304] (A-13).
+    [general/gl072.cbl:L291-L292] and [general/gl072.cbl:L306-L307] (A-13).
 
     Gutting the primitive to `return True` is the mutation this test kills, and it is
     killed for the intended reason: the primitive itself is asserted to answer False
@@ -2441,11 +2439,11 @@ def test_the_shipped_derivation_metadata_matches_the_dictionary() -> None:
 def test_the_shipped_derivation_leaves_no_driver_loaded() -> None:
     """Rule R-1 holds even though this section reaches the handler module.
 
-    ⭐ AND THE IMPORT REALLY HAPPENS, which is what makes the claim worth making. The
-    loader used to memoise, so this guard imported nothing: the module was already
-    resident from an earlier test, the purge removed nothing, and "leaves no driver
-    loaded" was a statement about a module that had never left. The loader no longer
-    caches, so each `with` below performs a genuine import - asserted INSIDE the block
+    AND THE IMPORT REALLY HAPPENS, which is what makes the claim worth making. The
+    loader MUST NOT memoise, or this guard would import nothing: the module would already
+    be resident from an earlier test, the purge would remove nothing, and "leaves no driver
+    loaded" would be a statement about a module that had never left. The loader does not
+    cache, so each `with` below performs a genuine import - asserted INSIDE the block
     by reading live `sys.modules` - and the delta afterwards is a real measurement of
     what the purge removed.
     """
@@ -2498,7 +2496,7 @@ def test_the_shipped_derivation_leaves_no_driver_loaded() -> None:
 
 # ===========================================================================
 # Q-1 -- THE DATE MODULE'S REJECT CONTRACT, MEASURED BY CALLING THE COMPILED
-#        MODULE  (R-6)
+#  MODULE  (R-6)
 #
 # `common/maps04.cbl` is the date specification for the whole migration, and its
 # executable statements and its own remarks block disagree about what a rejected
@@ -2511,7 +2509,7 @@ def test_the_shipped_derivation_leaves_no_driver_loaded() -> None:
 # the block every in-scope caller passes [common/maps04.cbl:L122] - once per
 # reject clause, so no composite bad date could mask which clause fired.
 #
-# ⭐ THE MEASUREMENT ANSWERED A SECOND QUESTION NOBODY HAD ASKED, and it is the
+# THE MEASUREMENT ANSWERED A SECOND QUESTION NOBODY HAD ASKED, and it is the
 # more consequential of the two. [common/maps04.cbl:L128-L129] is
 # `if A-Bin > zero go to WS-Unpack`, so the module is BIDIRECTIONAL and a
 # non-zero `A-Bin` on entry selects the REVERSE conversion - binary to text -

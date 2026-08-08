@@ -2,7 +2,7 @@
 
 Reproduces the option `"4"` branch of `irs/irs.cbl` `Main-Loop.`, whose whole
 body is one `CALL` [irs/irs.cbl:L666-L672], and dispatches irs030's
-`Ledger-Postings-Add` section [irs/irs030.cbl:L1569-L1733] - 165 lines of a
+`Ledger-Postings-Add` section [irs/irs030.cbl:L1569-L1730] - 165 lines of a
 1,733-line file, the rest of which is interactive and out of scope.
 
 The linkage is three parameters: `IRS-System-Params`, `WS-System-Record`,
@@ -23,7 +23,7 @@ the accept on the next line carries no `WITH UPDATE`, `WS-Reply` is never set to
 nor `N` straight back to the prompt, so a bare Enter RE-PROMPTS rather than
 clearing. Both spellings are published so that the answer, either answer, is
 always something the caller said. Reading that `[Y]` as a pre-filled default was
-finding CLI-05: it invented a default the program has not got, and the one it
+a default the program has not got would be an invention, and the one it
 invented was the destructive answer.
 
     L552  procedure division using IRS-System-Params
@@ -52,8 +52,8 @@ not one".
              [irs/irs030.cbl:L552-L554]
 
 `acas_posting.cli.args.IrsLinkage` is the carrier for Shape 3 and holds the
-three members in that exact COBOL order, so a reviewer can diff the argument
-list of `main_loop_option_4` against L668-L670 line for line.
+three members in that exact COBOL order, so the argument list of
+`main_loop_option_4` lines up against L668-L670 member for member.
 
 THERE IS NO TERM-CODE GATE ON THIS ROUTE - AND THAT IS REPRODUCED, NOT LOST
 The IRS menu has none of the General, Sales and Purchase dispatch machinery: no
@@ -86,7 +86,7 @@ is looking at a faithful reproduction (rule R-4), not at an omission.
 
 THE MIGRATION BOUNDARY - 165 LINES OF A 1,733-LINE FILE
 Agent Action Plan section 0.2.1.1 marks `irs/irs030.cbl` PARTIAL: only
-`Ledger-Postings-Add` [irs/irs030.cbl:L1569-L1733] is migrated, plus the two
+`Ledger-Postings-Add` [irs/irs030.cbl:L1569-L1730] is migrated, plus the two
 `ROUNDED` VAT computes of `Net` [irs/irs030.cbl:L1544] and `Gross`
 [irs/irs030.cbl:L1556] that the posting path consumes. Everything else in that
 file - the screen sections, `Init-Main` at L557, `Input-Headings` at L1239,
@@ -109,7 +109,7 @@ reaches the field; `WS-Reply pic x` [irs/irs030.cbl:L230] is never given the val
 "Y" anywhere in the program; and any reply that is neither `Y` nor `N` goes
 straight back to the prompt [irs/irs030.cbl:L1718-L1719]. A bare Enter therefore
 RE-PROMPTS - it does not clear. Reading the `[Y]` as a pre-filled default was
-finding CLI-05, and it invented the destructive answer. `Y` performs
+and it would invent the destructive answer. `Y` performs
 `acas008-Open-Output` [irs/irs030.cbl:L1723] followed by `acas008-Close`
 [irs/irs030.cbl:L1724]. For that handler an open-for-output is not a file
 operation at all - it is a mass delete: `if fn-Open and fn-output and not
@@ -159,7 +159,7 @@ It reads no clock, no environment variable, no file and no database. It performs
 no validation of any kind - a run date the legacy `maps04` rejects yields
 `Run-Date` 0 and no exception [common/maps04.cbl:L146], [common/maps04.cbl:L154]
 with the caller pre-zero at [copybooks/Proc-ACAS-Mapser-RDB.cob:L78], which is
-anomaly 16 of the register, reproduced rather than corrected. It contains no
+anomaly A-16 of the register, reproduced rather than corrected. It contains no
 error handling that has no frozen counterpart: the per-handler error checks of
 [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob] belong to the data-access facade, and
 the ONE condition `main` absorbs is that copybook's own `goback`
@@ -251,11 +251,11 @@ _PROGRAM_ID: Final[str] = "irs030"
 #  [irs/irs030.cbl:L582], [:L732], [:L829], [:L848], [:L883] and [:L1015] - so the
 #  maintainer had the construct to hand and did not use it here.
 #
-#  WHY THE PREVIOUS DEFAULT OF `True` WAS WRONG (finding CLI-05). An earlier draft
-#  read the `[Y]` as a pre-fill "into an `UPPER` update field" and defaulted the
-#  switch to clearing, describing it as reproducing the original's default under
-#  rule R-4. There was no such default to reproduce: the misreading invented one,
-#  and it invented THE DESTRUCTIVE ANSWER. `Y` reaches `acas008-Open-Output`
+#  WHY A DEFAULT OF `True` WOULD BE WRONG. Reading the `[Y]` as a pre-fill "into an
+#  `UPPER` update field" and defaulting the switch to clearing would look like
+#  reproducing the original's default under rule R-4. There is no such default to
+#  reproduce: that reading invents one, and it invents THE DESTRUCTIVE ANSWER. `Y`
+#  reaches `acas008-Open-Output`
 #  [irs/irs030.cbl:L1723], which for this handler DELETES EVERY ROW of
 #  `PSIRSPOST-REC` [common/acas008.cbl:L313-L319], [common/acas008.cbl:L571-L574].
 #  So an operator who said nothing would have emptied a table (rule R-3).
@@ -265,9 +265,9 @@ _PROGRAM_ID: Final[str] = "irs030"
 #  "with the COBOL default preserved"; where the COBOL has none there is nothing to
 #  preserve, and a usage error is the only headless analogue of a prompt that will
 #  not accept a blank. Resolution by oracle (rule R-6) is unavailable: the frozen
-#  archive is missing copybooks/ACAS-SQLstate-error-list.cob, which 44 frozen files
-#  COPY, so 22 of the 29 bridges do not compile, and fabricating it would breach
-#  R-3 and R-4. Requiring the input pre-judges neither answer.
+#  archive is missing copybooks/ACAS-SQLstate-error-list.cob, so 22 of the 28
+#  generated bridges do not compile, and fabricating it would breach R-3 and R-4.
+#  Requiring the input pre-judges neither answer.
 
 #  The switch pair, spelled once. `argparse.BooleanOptionalAction` publishes
 #  BOTH `--clear-posting-file` and `--no-clear-posting-file` from this single
@@ -290,7 +290,7 @@ _DESCRIPTION: Final[str] = (
     "Post the SL/PL transfer file to the IRS nominal ledger.\n"
     "\n"
     "Reproduces irs030's Ledger-Postings-Add section\n"
-    "[irs/irs030.cbl:L1569-L1733], reached in the frozen system through the\n"
+    "[irs/irs030.cbl:L1569-L1730], reached in the frozen system through the\n"
     'option "4" branch of irs/irs.cbl Main-Loop. [irs/irs.cbl:L666-L672].\n'
     "\n"
     "This is the THIRD of the migration's three linkage shapes: three\n"
@@ -418,9 +418,13 @@ def main_loop_option_4(
         clear_posting_file: the answer to the end-of-job question
             [irs/irs030.cbl:L1715-L1724]. KEYWORD-ONLY and REQUIRED, with no
             default anywhere on the path from argv to here - THE FROZEN PROMPT HAS
-            NONE, so inventing one would invent the destructive answer (finding
-            CLI-05). `True` DELETES EVERY ROW of `PSIRSPOST-REC`
+            NONE, so inventing one would invent the destructive answer. `True` DELETES EVERY ROW of `PSIRSPOST-REC`
             [common/acas008.cbl:L313-L319].
+        dal_options: the caller's keyword-only declarations, transport policy among
+            them, carried to every facade context `irs030` builds. NOT a COBOL
+            operand - the frozen `CALL` [irs/irs.cbl:L668-L671] passes three things
+            and no fourth. `None` means "use the one policy
+            `args.install_connection_policy` installed".
 
     Returns:
         Nothing. `irs030` communicates entirely through the database, through its `File-
@@ -448,7 +452,7 @@ def main_loop_option_4(
     #  THE IRS SHELL HAS NO `overrewrite` PARAGRAPH AND NO PER-BRANCH REWRITE -
     #  it persists at `EOJ.` instead [irs/irs.cbl:L755-L775], once for the whole
     #  session, and this route reproduces that in `main` rather than here (findings
-    #  CLI-02 and CLI-04). The shape of the IRS persistence is materially different
+    #  The shape of the IRS persistence is materially different
     #  from the other three shells and the difference is preserved: it RE-READS
     #  file-key 1 before writing [irs/irs.cbl:L759-L762], so its rewrite discards
     #  every in-memory change OUTSIDE the IRS block, where General, Sales and
@@ -601,7 +605,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     menu_state = args.irs_menu_state()
 
     try:
-        #  ONE BIND, ONE KEY-1 LOAD, ONE `zz090` (finding F-01). The binder returns
+        #  ONE BIND, ONE KEY-1 LOAD, ONE `zz090`. The binder returns
         #  both halves of what the frozen menu holds at its `CALL`: the three
         #  operands and the snapshot its single `zz090-Set-Up-IRS-System-Data`
         #  [irs/irs.cbl:L556] captured. Re-taking the snapshot here meant a second
@@ -686,7 +690,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
     except args.RdbmsParamError as error:
-        #  THE EXACT TYPE IS CAUGHT, NOT `ValueError` (finding CLI-09). The
+        #  THE EXACT TYPE IS CAUGHT, NOT `ValueError`. The
         #  deployment contract for the six connection parameters is resolved
         #  inside `bind_irs_route`, before the store is opened, so a failure
         #  here has touched nothing: no database contacted, no file opened, no
@@ -700,7 +704,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     #  755  EOJ.
-    #  THE COPY-BACK AND THE PERSIST, in the frozen order (findings CLI-02, CLI-04),
+    #  THE COPY-BACK AND THE PERSIST, in the frozen order,
     #  performed inside the block above rather than here - see the
     #  `args.eoj_persist_irs_system_data` call, which sits inside the `goback`
     #  boundary because every verb it issues can reach one.
@@ -758,403 +762,291 @@ if __name__ == "__main__":
 
 # --- traceability ------------------------------------------------------------
 #
-# FUNCTION -> PARAGRAPH  (rule R-5)
-#   main_loop_option_4  <-  irs/irs.cbl  `Main-Loop.`  L637, option "4" branch
-#                           L666-L672. The branch in full: the menu test at
-#                           L666-L667 (dropped, screen input), the three-operand
-#                           `CALL` at L668-L670 with `end-call` at L671
-#                           (reproduced exactly), and `go to main-loop.` at L672.
-#   main                <-  no paragraph. The CLI boundary itself: argparse
-#                           replaces the menu's screen paint and `ACCEPT`
-#                           (irs/irs.cbl L638-L644), which have no database
-#                           effect and are excluded by Agent Action Plan
-#                           section 0.3.4.
-#   _build_parser       <-  no paragraph. Composes `args.add_irs_linkage_
-#                           arguments` (Shape 3's linkage options) and declares
-#                           the one promoted `ACCEPT` of
-#                           irs/irs030.cbl `EOJ-q1.` L1715-L1724.
+# Rule R-5's record for this route. Every span was MEASURED against the frozen
+# source, which is REFERENCE only (Agent Action Plan section 0.8.1).
 #
-# PROGRAM -> MODULE  (rule R-5)
+# MODULE -> COBOL SOURCE
+#   acas_posting/cli/irs_post.py  <-  irs/irs.cbl (the option "4" dispatch),
+#   irs/irs030.cbl (the callee's linkage and its one promoted `ACCEPT`),
+#   common/acas008.cbl (what "clear" means), copybooks/irswssystem.cob,
+#   copybooks/wssystem.cob and copybooks/wsnames.cob (the record identities).
+#
+# FUNCTION -> PARAGRAPH
+#   main_loop_option_4  <-  irs/irs.cbl `Main-Loop.` L637, option "4" branch
+#                           L666-L672: the menu test L666-L667 (dropped, screen
+#                           input), the three-operand `CALL` L668-L670 with
+#                           `end-call` L671 (reproduced exactly), and
+#                           `go to main-loop.` L672.
+#   main                <-  no paragraph. The CLI boundary: argparse replaces the
+#                           menu's paint and `ACCEPT` (irs/irs.cbl L638-L644),
+#                           which have no database effect (AAP 0.3.4).
+#   _build_parser       <-  no paragraph. Composes
+#                           `args.add_irs_linkage_arguments` and declares the one
+#                           promoted `ACCEPT` of irs/irs030.cbl `EOJ-q1.`
+#                           L1715-L1724.
+#
+# PROGRAM -> MODULE
 #   irs030  ->  acas_posting/programs/irs030_posting.py
-#               linkage       irs/irs030.cbl:L552-L554
-#                             (IRS-System-Params, WS-System-Record, File-Defs)
-#               in scope      `Ledger-Postings-Add section.`
-#                             irs/irs030.cbl:L1569-L1733, plus the two ROUNDED
-#                             VAT computes of `Net section.` L1544 (compute at
-#                             L1551) and `Gross section.` L1556 (compute at
+#               linkage       irs/irs030.cbl:L552-L554 (IRS-System-Params,
+#                             WS-System-Record, File-Defs)
+#               in scope      `Ledger-Postings-Add section.` L1569-L1730, plus the
+#                             two ROUNDED VAT computes of `Net section.` L1544
+#                             (compute L1551) and `Gross section.` L1556 (compute
 #                             L1562) that the posting path consumes
-#               out of scope  everything else in the 1,733-line file
-#                             (Agent Action Plan section 0.2.1.1)
+#               out of scope  everything else in the 1,733-line file (AAP 0.2.1.1)
 #
 # PROMOTED PARAMETER -> LOCATOR  (Agent Action Plan section 0.3.4)
 #   clear_posting_file  <-  irs/irs030.cbl `EOJ-q1.` L1715-L1727
-#     L1716  the question, displayed with the literal `[Y]`   <- AN OPERATOR HINT
+#     L1716  the question, displayed with the literal `[Y]`  <- AN OPERATOR HINT
 #            INSIDE THE DISPLAY TEXT, not a value moved into the accept field
-#     L1717  `accept WS-Reply at 1440 ... UPPER`              <- NO `with update`
-#            (which occurs once in this program, at L717), and `03 WS-Reply pic
-#            x.` L230 declares no VALUE
-#     L1718-L1719  re-prompt unless the reply is Y or N       <- GO TO class 1,
-#            and the reason there is NO DEFAULT: a space cannot get past it
-#     L1720  `if WS-Reply = "Y"`
-#     L1723  `perform acas008-Open-Output`  *> the comment on this very line
-#            reads "performs a acas008-Delete-All"
-#     L1724  `perform acas008-Close.`
-#     L1725-L1727  the acknowledgement pause                  <- DROPPED
-#     effect via common/acas008.cbl:L313-L319 (fn-Open + fn-output + not
-#     FS-Cobol-Files-Used -> set fn-delete-all -> perform ba-Process-RDBMS) and
-#     common/acas008.cbl:L571-L574 (`ba015-Test-Ends.` forcing the same),
-#     so the answer DELETES EVERY ROW of PSIRSPOST-REC.
-#     NO DEFAULT: the switch pair is `required=True`. The frozen prompt has no
-#     default - the [Y] at L1716 is display text, L1717 carries no WITH UPDATE,
-#     WS-Reply is never set to Y, and L1718-L1719 re-prompt on anything else - so
-#     there is nothing to preserve and a default would be an invention (CLI-05).
+#     L1717  `accept WS-Reply at 1440 ... UPPER`  <- NO `with update` (which the
+#            program does use, at L717 among others), and `03 WS-Reply pic x.`
+#            L230 declares no VALUE
+#     L1718-L1719  re-prompt unless the reply is Y or N  <- GO TO class 1, and the
+#            reason there is NO DEFAULT: a space cannot get past it
+#     L1720  `if WS-Reply = "Y"`;  L1723 `perform acas008-Open-Output` - the
+#            comment on that very line reads "performs a acas008-Delete-All";
+#            L1724 `perform acas008-Close.`;  L1725-L1727 the pause, DROPPED
+#     Effect via common/acas008.cbl:L313-L319 and :L571-L574, so the answer
+#     DELETES EVERY ROW of PSIRSPOST-REC. The switch pair is `required=True`:
+#     the frozen prompt has no default, so there is nothing to preserve and a
+#     default would be an invention.
 #
 # RECORD IDENTITIES  -  the three linkage parameters, in COBOL order
 #   1  IRS-System-Params  =  copybooks/irswssystem.cob `01 system-record.` L13,
 #      renamed by `copy "irswssystem.cob" replacing system-record by
 #      IRS-System-Params.` at irs/irs.cbl:L391-L392. `03 run-date pic x(8).` at
-#      copybooks/irswssystem.cob:L14 - TEXT, dd/mm/yy, NOT the binary field.
-#      NOT copybooks/wssystem.cob: a different and much smaller record (256
-#      bytes per its own header note at copybooks/irswssystem.cob:L10), so
-#      binding the ACAS system record into parameter 1 would be wrong in both
-#      layout and width. Modelled by acas_posting/records/irs_system.py.
-#      Its `03 system-ops pic x.` at copybooks/irswssystem.cob:L23 carries one
-#      extra space of indentation relative to its siblings - a cosmetic
-#      irregularity of the frozen source, noted and not corrected.
+#      copybooks/irswssystem.cob:L14 - TEXT, dd/mm/yy, NOT the binary field. NOT
+#      copybooks/wssystem.cob: a different and much smaller record (256 bytes per
+#      its own header note at copybooks/irswssystem.cob:L10), so binding the ACAS
+#      system record into parameter 1 would be wrong in layout and width.
+#      Modelled by acas_posting/records/irs_system.py. Its `03 system-ops pic x.`
+#      L23 carries one extra space of indentation relative to its siblings - a
+#      cosmetic irregularity of the frozen source, noted and not corrected.
 #   2  WS-System-Record   =  copybooks/wssystem.cob, the 169-column ACAS system
-#      record, as the maintainer's own comment `*> ACAS system rec.` at the call
-#      site says (irs/irs.cbl:L669). `05 Run-Date binary-long.` at
-#      copybooks/wssystem.cob:L67 - the binary day count, and a column of a
-#      compared table. Also the sole carrier of the six RDBMS connection fields
-#      (copybooks/wssystem.cob:L137-L144) to the data-access layer
-#      (common/acas008.cbl:L558-L563).
-#   3  File-Defs         =  copybooks/wsnames.cob `01 File-Defs.` L13. Entirely
+#      record, as the maintainer's `*> ACAS system rec.` at the call site says
+#      (irs/irs.cbl:L669). `05 Run-Date binary-long.` L67 - the binary day count,
+#      and a column of a compared table. Also the sole carrier of the six RDBMS
+#      connection fields (copybooks/wssystem.cob:L137-L144) to the data-access
+#      layer (common/acas008.cbl:L558-L563).
+#   3  File-Defs          =  copybooks/wsnames.cob `01 File-Defs.` L13. Entirely
 #      `VALUE`-initialised in the copybook, so its declared defaults already are
 #      the COBOL state and it needs no CLI option.
 #
-# `GO TO` CLASSES  (Agent Action Plan section 0.4.2 taxonomy)
-#   irs/irs.cbl:L672        `go to main-loop.`  -  Class 1 (loop-back).
-#     Annotated at the end of `main_loop_option_4`. One CLI invocation is one
-#     iteration of the menu loop; the loop itself is screen-driven and dropped.
-#   irs/irs030.cbl:L1718-L1719  `go to EOJ-q1.`  -  Class 1 (loop-back),
-#     DROPPED. It re-prompts after an unrecognised reply, so its only effect is
-#     to block a terminal; it has no database effect and no control transfer to
-#     preserve (Agent Action Plan section 0.3.4). The DECISION it guards is
-#     preserved, as `clear_posting_file`.
+# `GO TO` CLASSES  (Agent Action Plan section 0.4.2)
+#   irs/irs.cbl:L672  `go to main-loop.`  CLASS 1 (loop-back), annotated at the end
+#     of `main_loop_option_4`. One CLI invocation is one iteration of the menu
+#     loop; the loop itself is screen-driven and dropped.
+#   irs/irs030.cbl:L1718-L1719  `go to EOJ-q1.`  CLASS 1, DROPPED. It re-prompts
+#     after an unrecognised reply, so its only effect is to block a terminal - no
+#     database effect and no control transfer to preserve (AAP 0.3.4). The
+#     DECISION it guards survives as `clear_posting_file`.
 #   No Class 2, 3 or 4 site exists on this route.
 #
-# CORRECTIONS  -  each verified against the frozen source with a line read. DO
-# NOT "fix" these back to the values the planning documents carry.
-#
-#   1. irs/irs.cbl's dispatching paragraph is `Main-Loop.` at L637, with the
-#      option "4" `CALL` inline at L666-L672. There is NO `load00` / `load000`
-#      equivalent anywhere on the IRS side: irs/irs.cbl has no dispatch wrapper
-#      paragraph at all, and `procedure division.` at L470 takes no `USING`, so
+# CORRECTIONS  -  verified with a line read. DO NOT "fix" these back to the values
+# the planning documents carry.
+#   1. irs/irs.cbl's dispatching paragraph is `Main-Loop.` L637 with the option "4"
+#      `CALL` inline at L666-L672. There is NO `load00` / `load000` equivalent on
+#      the IRS side at all, and `procedure division.` L470 takes no `USING`, so
 #      irs/irs.cbl is a MAIN program while all twelve migrated programs are
 #      `CALL`ed sub-programs.
+#   2. The Sales / Purchase shape has FIVE parameters, not the four AAP 0.4.1.1's
+#      phrasing implies; section 0.1.1 and sales/sl060.cbl:L395-L399 agree on five.
+#   3. `WS-CD-Args` is at copybooks/wscall.cob:L14, not the L13 AAP 0.4.1.1 cites
+#      (L13 is `WS-Sub-Function`, L11 a comment). Recorded for the folder's record
+#      only - Shape 3 has no calling-data block.
+#   4. AAP 0.1.1 calls copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80 "the single read
+#      in the whole call chain". A census finds FOURTEEN ambient date and time
+#      reads across six files, this menu's own at irs/irs.cbl:L480 among them;
+#      `acas_posting/clock.py` carries the site list. The plan's CONCLUSION
+#      nonetheless holds exactly, because every one of the fourteen is in an
+#      out-of-scope menu shell or the date-service copybook those shells COPY and
+#      all twelve in-scope programs contain zero: pinning the two observables at
+#      the CLI boundary is sufficient.
+#   5. The `acas008-Open-Output` perform is at irs/irs030.cbl:L1723, not L1722:
+#      L1721-L1722 are the maintainer's commented-out `open output` / `close` pair
+#      kept above the live `perform`. Every citation here uses L1723.
+#   6. `programs.irs030_posting.run` takes TWO keyword-only parameters beyond the
+#      three positional ones and `clear_posting_file` - `file_access` and
+#      `dal_common`, both defaulting to `None`. `clear_posting_file` itself is
+#      keyword-only WITH NO DEFAULT, so neither layer can supply the destructive
+#      answer on a caller's behalf. This module requires the switch, so it always
+#      has an answer to pass.
 #
-#   2. The Sales / Purchase linkage shape has FIVE parameters, not the four Agent
-#      Action Plan section 0.4.1.1's phrasing implies. Section 0.1.1 and the
-#      source agree on five: sales/sl060.cbl:L395-L399. `args.SlPlLinkage` has
-#      five members.
-#
-#   3. `WS-CD-Args` is at copybooks/wscall.cob:L14, not the L13 Agent Action Plan
-#      section 0.4.1.1 cites (L13 is `WS-Sub-Function`, and L11 is a comment line
-#      between L10 and L12). Recorded for the folder's record only - Shape 3 has
-#      no calling-data block, so the field is not used on this route at all.
-#
-#   4. Agent Action Plan section 0.1.1 calls
-#      copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80 "the single read in the whole
-#      call chain". A grep census finds FOURTEEN ambient date and time reads
-#      across six files - common/ACAS.cbl L353, L470, L478;
-#      general/general.cbl L371, L551, L559; sales/sales.cbl L323, L520, L528;
-#      purchase/purchase.cbl L318, L514, L522; irs/irs.cbl L480 (this route's own,
-#      `move function current-date to wse-date-block.`); and the copybook's at
-#      L72. That is six `FUNCTION CURRENT-DATE`, four `accept ... from time` and
-#      four `accept ... from date`; this comment is where the census itself is
-#      recorded, `acas_posting/clock.py` carrying its CONCLUSION - "none of the
-#      twelve migrated posting programs contains a clock read at all" - rather
-#      than the site list. BUT every one of the FOURTEEN is in an
-#      out-of-scope MENU SHELL or in the date-service copybook those shells COPY,
-#      and all twelve in-scope posting programs contain zero, so the plan's
-#      CONCLUSION holds exactly: pinning the two observables at the CLI boundary
-#      is sufficient. Note also that the copybook read sits on the FIRST-TIME
-#      capture path `ba010-Capture-Data`, so a normal run does not reach even
-#      that one - the shells derive their text date from the STORED `Run-Date`.
-#
-#   5. The `acas008-Open-Output` perform is at irs/irs030.cbl:L1723, not the
-#      L1722 the file brief cites: L1721-L1722 are the maintainer's commented-out
-#      `open output irs-post-file` / `close irs-post-file` pair, kept above the
-#      live `perform`. Every citation in this module uses L1723.
-#
-#   6. `acas_posting.programs.irs030_posting.run` takes TWO keyword-only
-#      parameters beyond the three positional ones and `clear_posting_file`:
-#      `file_access` and `dal_common`, both defaulting to `None`. The file brief
-#      quotes the signature without them. The MODULE is followed, not the brief.
-#      ⭐ The brief also gives `clear_posting_file` a `True` default and the module
-#      does NOT: it is keyword-only with no default, so the program module cannot
-#      be called without an answer either. That is the correct shape for the reason
-#      finding CLI-05 gives -- the frozen prompt has no default to reproduce -- and
-#      it means neither layer can supply the destructive answer on a caller's
-#      behalf. This module requires the switch, so it always has an answer to pass.
-#      See OMISSIONS.
-#
-# OMISSIONS  -  recorded as omissions so that a reader comparing the two trees
-# does not conclude something was lost (Agent Action Plan section 0.4.3).
-#
-#   * irs/irs.cbl'S ENTIRE MENU. The screen section and its paint (L638-L642),
-#     the `accept Menu-Screen-1` (L643), the `Param-Restrict` erase (L641-L642),
-#     and every option other than "4": "1" -> irs000 (L645-L652), "2" -> irs010
-#     (L653-L658), "3" -> irs020 (L659-L665), "5" -> irs040 (L673-L679) and each
-#     later option. NOT ROUTED. Agent Action Plan section 0.2.2 places irs000,
-#     irs010, irs020 and irs070 out of scope as interactive programs and irs040,
-#     irs050, irs060 and irs090 out of scope as report programs; only option "4"
-#     reaches an in-scope program. `irs-main section.` L473 onwards - the
-#     environment set-up at L478-L479, the terminal-size checks at L483-L486 and
-#     the program-argument scan `zz020-Get-Program-Args` at L481 - is likewise
-#     not reproduced.
-#   * irs/irs.cbl `zz090-Proc-Run-Date.` L972-L978 AND its two siblings
-#     `zz090-Proc-Start-Date.` L980 and `zz090-Proc-End-Date.` L987. All three are
-#     reproduced ONCE, inside `args.zz090_set_up_irs_system_data`, which shares one
+# OMISSIONS  -  recorded so a reader comparing the two trees does not conclude
+# something was lost (Agent Action Plan section 0.4.3)
+#   * irs/irs.cbl'S ENTIRE MENU: the screen section and its paint (L638-L642), the
+#     `accept Menu-Screen-1` (L643), the `Param-Restrict` erase (L641-L642), and
+#     every option other than "4" - "1" irs000 (L645-L652), "2" irs010
+#     (L653-L658), "3" irs020 (L659-L665), "5" irs040 (L673-L679) and later ones.
+#     AAP 0.2.2 places irs000/irs010/irs020/irs070 out of scope as interactive and
+#     irs040/irs050/irs060/irs090 as report programs; only option "4" reaches an
+#     in-scope program. `irs-main section.` L473 onwards - the environment set-up
+#     L478-L479, the terminal-size checks L483-L486 and the program-argument scan
+#     L481 - is likewise not reproduced.
+#   * irs/irs.cbl `zz090-Proc-Run-Date.` L972-L978 and its siblings
+#     `zz090-Proc-Start-Date.` L980 and `zz090-Proc-End-Date.` L987, all three
+#     reproduced ONCE inside `args.zz090_set_up_irs_system_data`, which shares one
 #     `Maps03Ws` across them exactly as the frozen section shares one `maps03-ws`.
-#     No date logic is held here: `main` calls that function and reads nothing out
-#     of it but the snapshot. See Q-CLI-IRS-RUNDATE.
-#   * irs/irs.cbl:L480, THIS MENU'S OWN CLOCK READ - one of FOURTEEN in the frozen
-#     call chain, not the only one; the full census is in acas_posting/clock.py
-#     and is restated at item 4 of the DIVERGENCES above
-#     (`move function current-date to wse-date-block.`) and the binary-to-text
-#     conversion it feeds at L632-L634. Replaced by the REQUIRED `--run-date`
-#     argument, which is what makes two runs byte-identical (rule R-6, Agent
-#     Action Plan section 0.8.5). This module reads no clock by any route.
-#   * irs/irs030.cbl:L1713-L1714, the `display space` and the
-#     `display "Processing Complete on " Post-Record-Cnt " records"` count
-#     report; and irs/irs030.cbl:L1725-L1727, the "Note counts and any messages"
-#     acknowledgement pause. Both are presentation with no database effect: the
-#     count display is a diagnostic at most and the pause exists only to block a
-#     terminal, so it is dropped entirely (Agent Action Plan section 0.3.4).
-#     Neither may alter control flow and neither appears in any table dump.
-#   * EVERYTHING IN irs/irs030.cbl OUTSIDE `Ledger-Postings-Add` L1569-L1733,
-#     except the `Net` L1544 and `Gross` L1556 VAT computes the posting path
-#     consumes. `Init-Main` L557, `Main-Loop.` L571, `Input-Headings` L1239,
-#     `Date-Validate` L1285, `Initialise-Main` L1402, `Show-Default` L1504 and
-#     `file-init` L1518 are all out of scope, and none of them is reachable from
-#     this module.
-#   * THE PER-HANDLER ERROR CHECKS OF copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob,
-#     copied by irs030 at irs/irs030.cbl:L1732. They belong to
-#     `acas_posting/dal/facade.py`, which publishes both the entity-named and the
-#     handler-named vocabularies over one implementation. This module adds no
-#     error handling of its own beyond the ONE disposition the copybook gives it:
-#     the `goback` at copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L364, absorbed in
-#     `main` because irs/irs.cbl copies that copybook itself (irs/irs.cbl:L1035)
-#     and so owns that termination. No retry and no fallback anywhere.
-#   * THE CALLEE'S `file_access` AND `dal_common` PARAMETERS. Both are `irs030`'s
-#     own WORKING-STORAGE rather than linkage - `File-Access` at
-#     irs/irs030.cbl:L285 and `ACAS-DAL-Common-data` at irs/irs030.cbl:L298 - and
-#     the frozen program populates them in `Init-Main` / `file-init`, which are
-#     out of scope. They are left at their `None` defaults, so the callee builds
-#     fresh blocks. Two reasons, and either alone is sufficient: they are not
-#     among the three parameters irs/irs.cbl:L668-L670 passes, so supplying them
-#     from a CLI would invent an input (rule R-3); and constructing one would
-#     require importing `acas_posting.records.*`, which Agent Action Plan section
-#     0.4.3's import table bars `cli/*.py` from doing. The connection parameters
-#     the handlers need do NOT travel that way in any case - they travel in
-#     `WS-System-Record`, which this module does pass
-#     (common/acas008.cbl:L558-L563).
+#     No date logic is held here. See Q-CLI-IRS-RUNDATE.
+#   * irs/irs.cbl:L480, THIS MENU'S OWN CLOCK READ, and the binary-to-text
+#     conversion it feeds at L632-L634. Replaced by the REQUIRED `--run-date`,
+#     which is what makes two runs byte-identical (R-6, AAP 0.8.5).
+#   * irs/irs030.cbl:L1713-L1714, the `display space` and the record-count report,
+#     and :L1725-L1727, the acknowledgement pause. Presentation with no database
+#     effect (AAP 0.3.4); neither may alter control flow or reach a table dump.
+#   * EVERYTHING IN irs/irs030.cbl OUTSIDE `Ledger-Postings-Add` L1569-L1733
+#     except the `Net` L1544 and `Gross` L1556 VAT computes: `Init-Main` L557,
+#     `Main-Loop.` L571, `Input-Headings` L1239, `Date-Validate` L1285,
+#     `Initialise-Main` L1402, `Show-Default` L1504 and `file-init` L1518 are all
+#     out of scope and none is reachable from this module.
+#   * THE PER-HANDLER ERROR CHECKS of copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob,
+#     copied by irs030 at irs/irs030.cbl:L1732. They belong to `dal/facade.py`,
+#     which publishes both vocabularies over one implementation. This module adds
+#     no error handling beyond the ONE disposition the copybook gives it - the
+#     `goback` at Proc-ZZ100-ACAS-IRS-Calls.cob:L364, absorbed in `main` because
+#     irs/irs.cbl copies that copybook itself (irs/irs.cbl:L1035) and so owns that
+#     termination. No retry and no fallback anywhere.
+#   * THE CALLEE'S `file_access` AND `dal_common` PARAMETERS. Both are irs030's own
+#     WORKING-STORAGE rather than linkage - irs/irs030.cbl:L285 and :L298 - and the
+#     frozen program populates them in the out-of-scope `Init-Main` / `file-init`.
+#     Left at `None`, so the callee builds fresh blocks. Two sufficient reasons:
+#     they are not among the three parameters irs/irs.cbl:L668-L670 passes, so
+#     supplying them would invent an input (R-3); and constructing one would
+#     require importing `acas_posting.records.*`, which AAP 0.4.3's import table
+#     bars `cli/*.py` from. The connection parameters travel in `WS-System-Record`
+#     instead, which this module does pass (common/acas008.cbl:L558-L563).
 #   * `args.reset_term_code`, `args.set_called`, `args.is_serious_error` and
-#     `args.exit_status_for`. All four are helpers for the term-code protocol,
-#     and Shape 3 has no `WS-Term-Code` (irs/irs030.cbl:L552-L554). Not called,
-#     and calling any of them would imply a field this route has not got.
-#   * THE OTHER MENUS' `overrewrite` PARAGRAPH. irs/irs.cbl has none: its
-#     persistence is `EOJ.` L755-L775 and it fires when the operator leaves the
-#     menu, not after a dispatch. That paragraph IS reproduced, by
+#     `args.exit_status_for`: all four serve the term-code protocol, and Shape 3
+#     has no `WS-Term-Code` (irs/irs030.cbl:L552-L554). Calling any would imply a
+#     field this route has not got.
+#   * THE OTHER MENUS' `overrewrite`. irs/irs.cbl has none: its persistence is
+#     `EOJ.` L755-L775, firing when the operator leaves the menu rather than after
+#     a dispatch. That paragraph IS reproduced, by
 #     `args.eoj_persist_irs_system_data`, called from `main` after the dispatch -
-#     which is where a single-operation CLI's "leaving the menu" falls. Only its
-#     backup-script arm L777-L791 is omitted, by Agent Action Plan section 0.2.2's
-#     spool-out exclusion and by rule R-1. See Q-CLI-SYSREC-LOAD in `args.py`.
+#     where a single-operation CLI's "leaving the menu" falls. Only its
+#     backup-script arm L777-L791 is omitted, by AAP 0.2.2's spool-out exclusion
+#     and by R-1. See Q-CLI-SYSREC-LOAD in args.py.
 #
-# ANOMALIES REPRODUCED DOWNSTREAM  -  listed for the reader, and compensated for
-# by NOTHING here (rule R-4: "A defect reproduced is correct; a defect fixed is a
-# failure"). This module adds no retry, no rollback, no validation and no warning
+# ANOMALIES REPRODUCED DOWNSTREAM  -  listed for the reader and compensated for by
+# NOTHING here (R-4). This module adds no retry, rollback, validation or warning
 # for any of them, and passes no flag that would suppress one.
-#   * THE HALF-POSTED DOUBLE ENTRY. The debit is rewritten before the credit
-#     account is even looked up, so a missing credit account leaves a posted
-#     debit with no balancing credit and no posting record
-#     [irs/irs030.cbl:L1635-L1652]. Reproduced in
-#     `programs/irs030_posting.py`. Anomaly 4 of the register.
-#   * THE LOST UPDATE ON THE TWO VAT CONTROL ACCOUNTS. They are read into
-#     pre-loop snapshots [irs/irs030.cbl:L1602], [irs/irs030.cbl:L1612] and
-#     rewritten from those snapshots at end of job
-#     [irs/irs030.cbl:L1704-L1708], so any in-loop rewrite of the same accounts
-#     is silently discarded. Anomaly 5.
-#   * THE WRITE-FAILURE JUMP TO END OF JOB. A failure writing the posting record
-#     jumps straight to `EOJ` [irs/irs030.cbl:L1673-L1678], which still performs
-#     the two snapshot rewrites and the closes - so the partial state is
-#     committed, not rolled back. NOTE that this path still reaches `EOJ-q1.`,
-#     which means `clear_posting_file` still applies after a write failure. That
-#     is the frozen behaviour and it is preserved.
-#   * THE ALWAYS-FAILING REWRITE VERB. The transfer-file handler rejects
-#     read-indexed, rewrite, start and delete UNCONDITIONALLY at entry, with
+#   * A-4  THE HALF-POSTED DOUBLE ENTRY: the debit is rewritten before the credit
+#     account is looked up, so a missing credit leaves a posted debit with no
+#     balancing credit and no posting record [irs/irs030.cbl:L1635-L1652].
+#     Reproduced in programs/irs030_posting.py.
+#   * A-5  THE LOST UPDATE ON THE TWO VAT CONTROL ACCOUNTS: read into pre-loop
+#     snapshots [irs/irs030.cbl:L1602], [:L1612] and rewritten from those
+#     snapshots at end of job [:L1704-L1708], so any in-loop rewrite of the same
+#     accounts is silently discarded.
+#   * THE WRITE-FAILURE JUMP TO END OF JOB [irs/irs030.cbl:L1673-L1678], which
+#     still performs the two snapshot rewrites and the closes, so the partial
+#     state is committed rather than rolled back. That path still reaches
+#     `EOJ-q1.`, so `clear_posting_file` still applies after a write failure -
+#     frozen behaviour, preserved.
+#   * A-6  THE ALWAYS-FAILING REWRITE VERB: the transfer-file handler rejects
+#     read-indexed, rewrite, start and delete UNCONDITIONALLY at entry with
 #     WE-Error 988 and fs-reply 99 [common/acas008.cbl:L299-L307], because the
-#     underlying file is sequential - yet the facade still publishes Rewrite, so
-#     a caller invoking it always fails. Reproduced in
-#     `dal/acas008_spl_posting.py`. Anomaly 6.
-#   * THE BRIDGE-ONLY DERIVED DATE COLUMNS. `POST4-DAY`, `POST4-MONTH` and
-#     `POST4-YEAR` exist in no copybook; the bridge derives them from a date
-#     string under a guard, and when the guard fails they stay zero while the raw
-#     date text is still stored [common/irspostingMT.cbl:L982-L987]. Reproduced
-#     in `dal/acasirsub4_irs_posting.py`. Anomaly 7.
-#   * ANOMALY 16, WHICH THIS MODULE IS ON THE PATH OF. `maps04` leaves its output
-#     field untouched on a rejected date [common/maps04.cbl:L146],
-#     [common/maps04.cbl:L154] and the documented "errors return zero" contract
-#     holds only because callers pre-zero it
-#     [copybooks/Proc-ACAS-Mapser-RDB.cob:L78]. So a `--run-date` the legacy
-#     module rejects yields `Run-Date` 0 and NO exception. This module adds no
-#     check and no message: validating would add a validation the COBOL has not
-#     got (R-3) and correcting a defect is a failure (R-4).
+#     underlying file is sequential - yet the facade still publishes Rewrite.
+#     Reproduced in dal/acas008_spl_posting.py.
+#   * A-7  THE BRIDGE-ONLY DERIVED DATE COLUMNS `POST4-DAY`, `POST4-MONTH` and
+#     `POST4-YEAR`, in no copybook, derived under a guard that leaves them zero
+#     while the raw date text is still stored [common/irspostingMT.cbl:L982-L987].
+#     Reproduced in dal/acasirsub4_irs_posting.py.
+#   * A-16  ON WHOSE PATH THIS MODULE SITS: `maps04` leaves its output field
+#     untouched on a rejected date [common/maps04.cbl:L146], [:L154] and the
+#     documented "errors return zero" contract holds only because callers pre-zero
+#     it [copybooks/Proc-ACAS-Mapser-RDB.cob:L78]. So a `--run-date` the legacy
+#     module rejects yields `Run-Date` 0 and NO exception. No check and no message
+#     is added: validating would add a validation the COBOL has not got (R-3) and
+#     correcting a defect is a failure (R-4).
 #
 # OUT-OF-SCOPE FINDING, RECORDED AND NOT ACTED ON  -  `File-System-Used`
-# [copybooks/wssystem.cob:L112-L113]. Observed while validating this route with a
-# real invocation: the record `args.bind_irs_route` hands over carries the
-# copybook's own declared default of ZERO, which is the `88 FS-Cobol-Files-Used`
-# condition, so a live run reaches the data-access layer's Cobol flat-file leg
-# rather than its RDB leg. That layer's own docstring states the model it was
-# written to - "unreachable in normal operation, because `FS-Cobol-Files-Used` is
-# false for every migrated run" - so three AAP-created files hold three
-# consistent-in-isolation positions and the boundary between them is not settled
-# by any of them:
-#     records/system_record.py  reproduces the copybook default 0 faithfully, and
-#                               must: SYSTEM-REC is one of the 22 compared tables,
-#                               so its declared default is diff-visible (R-4);
-#     cli/args.py               builds the record at its declared defaults plus a
-#                               list of nine fields it declares CLOSED, and
-#                               settles Q-CLI-SYSREC-LOAD by recording that the
-#                               seeded state and the scenario driver own the rest;
-#     dal/*                     branches on the field and expects the RDB leg.
-# NOT FIXED HERE, and every available fix inside this file's boundary would break
-# a rule: this module may not import `acas_posting.records.*` (Agent Action Plan
-# section 0.4.3's import table) nor construct or mutate a linkage record; adding a
-# `--file-system-used` option would add a CLI input the frozen menus do not offer
-# (R-3), which is the same ground on which args.py closed its own option list; and
-# forcing the value silently would overwrite a declared default that is a column
-# of a compared table (R-4). The field's value comes from the SYSTEM-REC row in
-# the COBOL, so its owner is the seeded state, and the seed is placed by the
-# scenario driver the Agent Action Plan puts under `harness/` - a sibling tree
-# this checkout does not carry, and one rule R-1 keeps on the far side of the
-# package boundary in any case. The finding is package-wide, not specific to this
-# route: all seven entry points bind through the same binder. Recorded here so
-# that whoever drives a scenario meets it.
+# [copybooks/wssystem.cob:L112-L113]. The record `args.bind_irs_route` builds at
+# the copybook's declared defaults carries ZERO, which is the
+# `88 FS-Cobol-Files-Used` condition, while `dal/*` branches on the field and
+# expects the RDB leg. Three AAP-created files hold three consistent-in-isolation
+# positions - records/system_record.py must reproduce the copybook default,
+# SYSTEM-REC being one of the 22 compared tables (R-4); cli/args.py builds at the
+# declared defaults and settles Q-CLI-SYSREC-LOAD by recording that the seeded
+# state owns the rest; dal/* expects the RDB leg - and no fix available inside this
+# file's boundary keeps every rule: this module may not import
+# `acas_posting.records.*` (AAP 0.4.3) nor construct or mutate a linkage record,
+# a `--file-system-used` option would add a CLI input the frozen menus do not
+# offer (R-3), and forcing the value silently would overwrite a declared default
+# that is a column of a compared table (R-4). The field's owner is therefore the
+# seeded state, placed by `harness/seed.sh`. The finding is package-wide rather
+# than specific to this route: all seven entry points bind through the same binder.
 #
-# AMBIGUITIES RAISED BY THIS MODULE  (rule R-6)  -  three, each marked in place
-# at the code it governs, and each to be recorded in
-# docs/migration/ambiguity-resolutions.md.
+# AMBIGUITIES RAISED BY THIS MODULE  (rule R-6)  -  three, each marked in place at
+# the code it governs and recorded in docs/migration/ambiguity-resolutions.md
 #   Q-CLI-IRS-RUNDATE  in `main`, at the `bind_irs_route` call. Whether irs030
 #     observes `IRS-System-Params.run-date pic x(8)` at all, and if so what value
-#     the option "4" route presents it with, given that
-#     `zz090-Proc-Run-Date.` [irs/irs.cbl:L972-L978] is performed on the option
-#     "1" branch [irs/irs.cbl:L651] and that [irs/irs.cbl:L636] comments "menu
-#     uses the irs param file dates". STILL OPEN, and marked in `args.py` too,
-#     where the single derivation lives. Nothing provisional executes: the
-#     binder reproduces the frozen `STRING` either way.
+#     the option "4" route presents it with, given that `zz090-Proc-Run-Date.`
+#     [irs/irs.cbl:L972-L978] is performed on the option "1" branch
+#     [irs/irs.cbl:L651] and that [irs/irs.cbl:L636] comments "menu uses the irs
+#     param file dates". STILL OPEN, and marked in args.py too, where the single
+#     derivation lives. Nothing provisional executes: the binder reproduces the
+#     frozen `STRING` either way.
 #   Q-CLI-EXITSTATUS  in `main`, at the `return 0`. Shape 3 carries no
 #     `WS-Term-Code`, so the process exit status has no COBOL counterpart on this
 #     route at all. `args.exit_status_for` settles the general question by
-#     establishing that there is no oracle observable - `RETURN-CODE` is read and
-#     never written in the five menus and the twelve programs - and on this route
-#     there is not even a code to map, so completion is all there is to report.
-#   Q-CLI-CLEARFILE  RESOLVED, and resolved by reading the frozen source rather
-#     than the prompt's appearance. The earlier reading - that the `[Y]` literal
-#     [irs/irs030.cbl:L1716] pre-fills an update field and so makes `Y` the
-#     effective default - IS WRONG (finding CLI-05). The accept at L1717 carries no
-#     `WITH UPDATE` phrase, so the literal stays in the prompt text; `WS-Reply
-#     pic x` [irs/irs030.cbl:L230] is never given the value "Y" anywhere in the
-#     program (the moves into it are `space` [:L1512] and `spaces` [:L1521], and
-#     the `move "Z"` at [:L1530] is commented out); and L1718-L1719 send anything
-#     that is neither "Y" nor "N" back to the prompt. A bare Enter therefore
-#     re-prompts rather than clearing. That the missing `WITH UPDATE` is deliberate
-#     shows in the same file, which uses the phrase at six other accepts -
-#     [:L582], [:L732], [:L829], [:L848], [:L883], [:L1015]. THE ANSWER IS
-#     THEREFORE REQUIRED on the command line; no default is supplied, because
-#     there is none to preserve (AAP 0.8.1). Oracle arbitration is unavailable -
-#     the frozen archive is missing copybooks/ACAS-SQLstate-error-list.cob - and
-#     requiring the input pre-judges neither answer.
+#     establishing there is no oracle observable - `RETURN-CODE` is read and never
+#     written in the five menus and the twelve programs - and here there is not
+#     even a code to map, so completion is all there is to report.
+#   Q-CLI-CLEARFILE  RESOLVED by reading the frozen source rather than the
+#     prompt's appearance. The `[Y]` literal [irs/irs030.cbl:L1716] does NOT
+#     pre-fill an update field: the accept at L1717 carries no `WITH UPDATE`, so
+#     the literal stays in the prompt text; `WS-Reply pic x` [:L230] is never given
+#     "Y" anywhere in the program (the moves into it are `space` [:L1512] and
+#     `spaces` [:L1521], and the `move "Z"` at [:L1530] is commented out); and
+#     L1718-L1719 send anything that is neither "Y" nor "N" back to the prompt, so
+#     a bare Enter re-prompts rather than clearing. That the missing `WITH UPDATE`
+#     is deliberate shows in the same file, which uses the phrase at six other
+#     accepts - [:L582], [:L732], [:L829], [:L848], [:L883], [:L1015]. THE ANSWER
+#     IS THEREFORE REQUIRED on the command line, no default being available to
+#     preserve (AAP 0.8.1). Arbitration against the FROZEN build is unavailable -
+#     it does not compile, copybooks/ACAS-SQLstate-error-list.cob being absent
+#     while 22 of the 28 generated bridges COPY it - and requiring the input
+#     pre-judges neither answer.
 #
-# RULES  -  there is NO user rules document for this project: `review_rules`
-# returns "No user rules provided.", and a full paging read returns the same one
-# line. These six are the Agent Action Plan's own, section 0.7.2, and enterprise-
-# standard best practice applies wherever they are silent.
-#   R-1  NO COBOL AT RUNTIME. Satisfied structurally. The whole import list is
-#        `argparse`, `logging`, `collections.abc.Sequence`, `typing.Final`,
-#        `acas_posting.cli.args` and `acas_posting.programs.irs030_posting`. No
-#        `subprocess`, no `os.system` / `popen` / `exec*` / `spawn*`, no
-#        `ctypes`, no `cffi`, no `shutil.which`, no `cobc` / `cobcrun` /
-#        `presql2` / `cobmysqlapi`, and no import of `harness` - so there is no
-#        import path from the shipped package to the comparison oracle. No
-#        `--use-oracle`, `--compare`, `--cobol` or `--oracle` option exists. The
-#        harness drives THIS module from the outside; the dependency runs one
-#        way.
-#   R-2  ZERO BINARY FLOATING POINT. Satisfied by type. The only values this
-#        module handles are `bool` (`clear_posting_file`), `str` (`--run-date`
-#        text and the program id) and `int` (the exit status and the binary
-#        `Run-Date` it logs). No `float` appears in any signature, any
-#        annotation, any option `type=` or any expression; there is no float
-#        literal anywhere; and NO ARITHMETIC IS PERFORMED AT ALL. Checked
-#        mechanically over the syntax tree, which contains exactly one `BinOp`
-#        and zero `AugAssign`: that `BinOp` is `Sequence[str] | None`, the
-#        `main` signature's PEP 604 type union, whose operator is `BitOr` on two
-#        types rather than on two numbers. The two `ROUNDED` VAT computes of
-#        [irs/irs030.cbl:L1551] and [irs/irs030.cbl:L1562], two of only five
-#        `ROUNDED` sites in the whole in-scope cycle, live in
-#        `programs/irs030_posting.py`.
-#   R-3  NO NEW VALIDATIONS, FIELDS OR SCHEMA; NO CONCURRENCY. Satisfied by
-#        omission. No validation of `--run-date` (see anomaly 16 above), no
-#        validation of the linkage records, no field added to any record, no SQL
-#        and no DDL. The option set is closed at two - the required `--run-date`
-#        that `args` owns, and the one promoted `ACCEPT` of
-#        [irs/irs030.cbl:L1715-L1724] - and no third option is offered, in
-#        particular no `--irs-instead`, which `irs030` never reads. No
-#        `threading`, `asyncio`, `multiprocessing` or `concurrent.futures`, and
-#        no `--parallel` / `--jobs` / `--workers` / `--threads`: execution is
-#        strictly sequential, matching the single-threaded COBOL. No web tier, no
-#        API, no GUI, no ORM entity layer, no queue and no cache.
-#   R-4  ANOMALIES REPRODUCED, NEVER FIXED. Three reproductions in this module,
-#        each carrying its locator at the site, per Agent Action Plan section
-#        0.7.4 C-4: the THREE-PARAMETER SHAPE with no calling-data block and no
-#        `to-day` [irs/irs.cbl:L666-L672], [irs/irs030.cbl:L552-L554]; the
-#        ABSENCE OF ANY TERM-CODE GATE OR DISPATCH WRAPPER on this route, left
-#        absent rather than harmonised with the other three ledgers
-#        [irs/irs.cbl:L672]; and the MASS-DELETE ANSWER to the end-of-job
-#        question [irs/irs030.cbl:L1716], whose effect is the truncation of the
-#        transfer table [irs/irs030.cbl:L1720-L1724],
-#        [common/acas008.cbl:L313-L319] - reproduced in full, and reachable by
-#        naming `--clear-posting-file`, which is exactly as reachable as `Y` is in
-#        the frozen program. What is NOT reproduced is a DEFAULT for that answer,
-#        because the frozen prompt has none: `[Y]` is display text, the accept
-#        carries no `with update`, `WS-Reply` has no `VALUE`, and L1718-L1719
-#        re-prompts. Inventing one would have been the added behaviour rule R-3
-#        forbids, and inventing it in the destructive direction would have made an
-#        omitted argument delete rows. The five downstream anomalies above are
-#        listed and compensated for by nothing.
-#   R-5  FULL TRACEABILITY. This footer, the paragraph-named dispatch function
-#        `main_loop_option_4`, a `# GO TO class N` annotation at every transfer
-#        site, and a `[path:Lnnn]` locator on every claim about the frozen
-#        source. Deliberate omissions are recorded as omissions above rather than
-#        left silent.
-#   R-6  COMPILED BEHAVIOUR IS THE TIE-BREAKER. The clock is pinned at this
-#        boundary and nowhere else: `--run-date` is REQUIRED, has no default and
-#        no fallback, and this module reads no clock, no environment variable, no
-#        random source and no host identity - even the log format carries no
-#        timestamp. Two runs of one scenario under the same `--run-date` bind
-#        byte-identical records (Agent Action Plan section 0.8.5). The three open
-#        questions above are marked for oracle arbitration, not guessed.
-#
-# MODULE -> COBOL SOURCE  (rule R-5)
-#   acas_posting/cli/irs_post.py  <-  irs/irs.cbl (the option "4" dispatch),
-#   irs/irs030.cbl (the callee's linkage and its one promoted `ACCEPT`),
-#   common/acas008.cbl (what "clear" means), copybooks/irswssystem.cob,
-#   copybooks/wssystem.cob and copybooks/wsnames.cob (the three record
-#   identities). ALL SIX ARE REFERENCE ONLY - frozen, read as specification,
-#   never modified. Agent Action Plan section 0.8.1: any diff touching
-#   `common/*.cbl`, `common/*.scb`, `copybooks/*.cob`, `general/*.cbl`,
-#   `sales/*.cbl`, `purchase/*.cbl`, `irs/*.cbl` or `mysql/ACASDB.sql` "is a
-#   defect in the migration, regardless of how harmless it appears."
+# RULE COMPLIANCE, FILE-SPECIFIC FACTS ONLY (the six are Agent Action Plan 0.7.2;
+# README-python-migration.md states them once)
+#   R-1  The whole import list is `argparse`, `logging`,
+#        `collections.abc.Sequence`, `typing.Final`, `acas_posting.cli.args` and
+#        `acas_posting.programs.irs030_posting` - no process spawn, no foreign
+#        library, no toolchain reference and no import of the oracle's tree, and no
+#        option that selects, invokes or diffs against it. The harness drives THIS
+#        module from outside; the dependency runs one way.
+#   R-2  The only values handled are `bool` (`clear_posting_file`), `str`
+#        (`--run-date` text and the program id) and `int` (the exit status and the
+#        binary `Run-Date` it logs). No float in any signature, annotation, option
+#        `type=` or expression, and NO ARITHMETIC AT ALL - the syntax tree contains
+#        exactly one `BinOp`, `Sequence[str] | None`, whose operator is `BitOr` on
+#        two types. The two `ROUNDED` VAT computes [irs/irs030.cbl:L1551], [:L1562]
+#        live in programs/irs030_posting.py.
+#   R-3  No validation of `--run-date` (see A-16 above) or of the linkage records,
+#        no field added, no SQL, no DDL. The option set is CLOSED AT TWO - the
+#        required `--run-date` that args owns, and the one promoted `ACCEPT` - and
+#        in particular there is no `--irs-instead`, which irs030 never reads. No
+#        concurrency primitive and no `--parallel` / `--jobs` / `--workers`.
+#   R-4  Three reproductions here, each carrying its locator at the site (AAP
+#        0.7.4 C-4): the THREE-PARAMETER SHAPE with no calling-data block and no
+#        `to-day` [irs/irs.cbl:L666-L672], [irs/irs030.cbl:L552-L554]; the ABSENCE
+#        OF ANY TERM-CODE GATE OR DISPATCH WRAPPER, left absent rather than
+#        harmonised with the other three ledgers [irs/irs.cbl:L672]; and the
+#        MASS-DELETE ANSWER [irs/irs030.cbl:L1716] whose effect is truncation of
+#        the transfer table [:L1720-L1724], [common/acas008.cbl:L313-L319] -
+#        reproduced in full and reachable by naming `--clear-posting-file`, exactly
+#        as reachable as `Y` is in the frozen program. What is NOT reproduced is a
+#        DEFAULT for that answer, because the frozen prompt has none; inventing one
+#        in the destructive direction would have made an omitted argument delete
+#        rows.
+#   R-5  This footer, the paragraph-named `main_loop_option_4`, a `# GO TO class N`
+#        annotation at every transfer site, and a `[path:Lnnn]` locator on every
+#        claim about the frozen source.
+#   R-6  `--run-date` is REQUIRED with no default and no fallback, and this module
+#        reads no clock, environment variable, random source or host identity -
+#        even the log format carries no timestamp. Two runs under the same
+#        `--run-date` bind byte-identical records (AAP 0.8.5).
 # -----------------------------------------------------------------------------

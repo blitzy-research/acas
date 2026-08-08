@@ -32,23 +32,14 @@ the version is in working storage. Every locator below was read at that release.
 
 **There is no user rules document for this project, and there is no such file anywhere in the
 checkout.** That is a fact about the repository, checkable at any time: no rules document exists under
-any path, and the Agent Action Plan records the same absence in its own §0.7.1.
+any path, and the Agent Action Plan records the same absence in its own §0.7.1. Do not go looking for
+one: **enterprise-standard best practice applies wherever the Agent Action Plan is silent**, nothing
+has been invented to fill the gap, and the absence is not treated as permission to lower the bar.
 
-Do not go looking for a rules file. There is none. Stated plainly, as the absence requires: this
-project has no rules document, and **enterprise-standard best practice therefore applies wherever
-the Agent Action Plan is silent**. Nothing has been invented to fill the gap, and the absence is
-not treated as permission to lower the bar.
-
-The six binding rules of this engagement — **R-1 … R-6** — nevertheless exist. They live in the
-**Agent Action Plan itself, §0.7.2**, as a labelled rules block inside the user's requirements, and
-their exact wording is retrievable via **`review_prompt`**, *not* via `review_rules`.
-Quoting AAP §0.7.1: *"downstream execution agents that need the exact wording must read it there."*
-
-The reason both facts are recorded rather than one of them quietly dropped is AAP §0.7.4 **C-5**. Its
-resolution is quoted here verbatim, picked up from the point at which it names the temptation —
-ignoring the requirement-embedded rules block:
-
-> *"because it arrived in the requirements rather than in a rules document would discard six binding constraints on a technicality. Equally, claiming a rules document exists when it does not would send downstream agents to an empty source. Recording both facts is the only resolution that misleads no one."*
+The six binding rules — **R-1 … R-6** — nevertheless exist, in the **Agent Action Plan itself, §0.7.2**,
+as a labelled rules block inside the user's requirements, retrievable via **`review_prompt`** and not
+via `review_rules`. Recording both facts rather than dropping one is AAP §0.7.4 **C-5**'s resolution;
+[`ambiguity-resolutions.md`](ambiguity-resolutions.md) §1 quotes it in full.
 
 ---
 
@@ -57,7 +48,7 @@ ignoring the requirement-embedded rules block:
 Sections 2.1 to 2.6 restate each governing rule and say how this document honours it. Rule text is
 quoted verbatim where the Agent Action Plan requires it; nothing is paraphrased into a weaker form.
 
-### 2.1 R-4 — Legacy anomalies reproduced, never fixed ★ primary owner of this document
+### 2.1 R-4 — Legacy anomalies reproduced, never fixed primary owner of this document
 
 > *"Defects present in the compiled behavior are part of the specification. A defect reproduced is a success; a defect fixed is a failure."*
 
@@ -78,7 +69,9 @@ register cites, so that a reader who arrives from either direction lands on the 
 
 ### 2.2 R-1 — No COBOL at runtime
 
-> *"The Python implementation must not execute, embed, or shell out to the COBOL programs. COBOL is the specification for the migration, not a runtime dependency of the result. The shipped artifact must run on a host with no COBOL compiler and no COBOL runtime present."*
+R-1 forbids the Python implementation to execute, embed or shell out to the COBOL programs, and
+requires the shipped artifact to run on a host with no COBOL compiler and no COBOL runtime present;
+[`traceability.md`](traceability.md) §2.2 quotes it verbatim and carries the two structural proofs.
 
 Nothing in this document instructs or implies that the shipped package invokes COBOL. Where the
 oracle is mentioned it is located in `harness/` and characterised as **out of process**. AAP §0.7.4
@@ -99,7 +92,7 @@ explicitly withdrawn:
 - A search of `harness/*.py` for `import acas_posting` or `from acas_posting` returns **zero** hits, so
   the dependency does not run in the other direction either. This is the import-direction half of the
   proof and it is measured, not asserted.
-- ⚠️ **What is deliberately NOT offered as a proof: the absence of `harness/__init__.py`.** An earlier
+- **What is deliberately NOT offered as a proof: the absence of `harness/__init__.py`.** An earlier
   revision of this section argued that because the directory has no `__init__.py` "there is no import
   path into it at all". That argument is invalid — PEP 420 makes a directory without `__init__.py` an
   implicit namespace package, so `import harness.diff_states` would resolve perfectly well from a
@@ -160,7 +153,7 @@ this prose. §10 quotes those counts where they are load-bearing.
 An anomaly can have a *shape* that is settled by reading the frozen source and a *stored value* that
 is not. Where a stored value is still unmeasured the entry says
 **`PENDING — AWAITING ORACLE EXECUTION`** and points at the matching `Q-` entry in
-[`ambiguity-resolutions.md`](ambiguity-resolutions.md). Where the value has since been watched on the
+[`ambiguity-resolutions.md`](ambiguity-resolutions.md). Where the value has been watched on the
 compiled oracle the entry says **`REPRODUCED — VALUE MEASURED`** and the companion `Q-` entry carries the
 observation in full. No stored value is guessed anywhere in this document, and no `Q-` identifier is
 invented: the ones cited are the identifiers already emitted by
@@ -192,15 +185,15 @@ Three commitments follow, and all three are kept literally.
 
 **No empty diff is claimed that was not observed, and no experiment is claimed
 that was not performed.** AAP §0.6.9 records the limitations of the original
-authoring host. QA remediation later supplied the writable Compose harness,
-completed the strict build, and observed the **eight** mandated parity journeys
-on 2026-08-04. A ninth scenario, `end_of_cycle_gl`, was added afterwards to reach
-`gl080`, and on **2026-08-07 all nine** journeys were observed with empty diffs. ⚠️ That
-ninth definition and its test have since been **removed** (findings M-09 and M-17),
-which holds the tree to the Agent Action Plan's eight; the measurement stands as
-measured, and eight of those nine journeys are re-runnable from the committed set.
+authoring host; the writable Compose harness of `harness/` lifts them, and against
+the completed strict build the **eight** mandated parity journeys were observed on
+2026-08-04. A ninth scenario, `end_of_cycle_gl`, was driven afterwards to reach
+`gl080`, and on **2026-08-07 all nine** journeys were observed with empty diffs. That
+ninth definition and its test are **not committed**, which holds the tree to the Agent
+Action Plan's eight; the measurement stands as measured, and eight of those nine
+journeys are re-runnable from the committed set.
 
-⚠️ **AND EVERY ONE OF THOSE DIFFS IS AGAINST THE DISCLOSED-TRANSFORMED DIAGNOSTIC
+**AND EVERY ONE OF THOSE DIFFS IS AGAINST THE DISCLOSED-TRANSFORMED DIAGNOSTIC
 ORACLE, NOT THE FROZEN ONE.** It has to be said here rather than only in the evidence
 register, because a reader arriving at an anomaly's `REPRODUCED` status through this
 sentence would otherwise take it for frozen parity. The frozen sources do not compile
@@ -225,7 +218,7 @@ oracle showed, the evidence it cites is
 [`scenario-diff-evidence.md`](scenario-diff-evidence.md) — which carries the per-scenario manifest
 SHA-256 digests, the affected-table lists, the row counts and the artifact layout, all committed to
 this repository — and, where relevant, the assertion-owning test that re-establishes the same fact on
-demand. Console logs written to a temporary directory during a remediation session are **not** cited as
+demand. Console logs written to a session-scoped temporary directory are **not** cited as
 evidence: they do not survive the session, a later reader cannot open them, and a claim whose only
 support has evaporated is indistinguishable from an unsupported one. Where a value was measured but no
 durable artifact retains it, this register says so in those words and labels the value an **unverified
@@ -288,7 +281,7 @@ Each canonical entry in §10 carries six things, always in the same order:
 | **locator(s)** | One or more `[path:locator]` citations into the frozen source, all verified. |
 | **reproducing module** | The Python module that carries the defect forward, per R-5. |
 | **test-locked** | Yes plus the named locking test, or No plus the reason none applies. |
-| **status** | `REPRODUCED` when the behaviour is fully determined by the frozen source; `PENDING — AWAITING ORACLE EXECUTION` plus a `Q-` cross-reference when the stored value is not yet measured; `REPRODUCED — VALUE MEASURED` when it has since been watched — **five** entries carry that today, A-2, A-11, A-14, A-15 and A-17, and **none** is still pending. That third value is the one to read carefully: it means the defect is still reproduced and still not repaired, and only the value it produces became known. A promoted entry keeps its `Q-` cross-reference, because the measurement lives there. An anomaly never moves to a status that implies it was fixed, because R-4 does not permit fixing one. |
+| **status** | `REPRODUCED` when the behaviour is fully determined by the frozen source; `PENDING — AWAITING ORACLE EXECUTION` plus a `Q-` cross-reference when the stored value is not yet measured; `REPRODUCED — VALUE MEASURED` when the stored value has been watched — **five** entries carry that today, A-2, A-11, A-14, A-15 and A-17, and **none** is still pending. That third value is the one to read carefully: it means the defect is still reproduced and still not repaired, and only the value it produces became known. A promoted entry keeps its `Q-` cross-reference, because the measurement lives there. An anomaly never moves to a status that implies it was fixed, because R-4 does not permit fixing one. |
 
 "Test-locked" means a test asserts the defective behaviour, **so that a future well-meaning "fix"
 fails the suite** rather than passing unnoticed. Fifteen of the twenty-two are locked; §11 maps
@@ -313,7 +306,7 @@ Two conventions worth stating because they recur:
 
 ## 8. Corrected locators
 
-⚠️ **Several locators in the Agent Action Plan are wrong, and this document uses the verified
+**Several locators in the Agent Action Plan are wrong, and this document uses the verified
 values.** A citation that does not resolve defeats the entire convention in §7, so each correction
 is listed here rather than applied silently.
 
@@ -414,10 +407,10 @@ test exercising only the IRS states would pass against both and prove nothing. V
 construction — adding the missing period was tried, and the truth table failed on exactly that one
 row.
 
-⚠️ **The lock moved here, and the reason is worth stating (finding MJ-07).** An earlier revision named
+**THE LOCK IS HERE AND NOT AT THE SCENARIO TIER, and the reason is worth stating.** Naming
 `tests/scenarios/test_clean_batch_post_sl.py::test_a1_missing_period_gl_posting_close_not_executed` as
-the primary lock, on the ground that it "demands that `GLPOSTING-REC` show the unclosed-file state on
-both sides". **There is no such state.** `GL-Posting-Close` is a pure lifecycle call: it writes
+the primary lock would rest on `GLPOSTING-REC` showing the unclosed-file state on both sides.
+**There is no such state.** `GL-Posting-Close` is a pure lifecycle call: it writes
 nothing, mutates no record area, and closing a file leaves no row behind. Adding the missing period
 therefore produces an identical dump and that test passes either way — measured, not reasoned. A
 state comparison could never have owned this defect.
@@ -594,10 +587,10 @@ are data-driven, from `HANDLER_REJECTED_FUNCTIONS` in `acas_posting/dal/cursor_s
 table and then by `File-Function`.
 
 **Test-locked.** **Yes**, in two halves, because the anomaly has two observables and no single tier
-can see both. This entry previously said *no*, on the reasoning that the verb's failure is a status
-pair returned to a caller rather than a table state and so no scenario diff can see it. The first
-half of that is true and the conclusion did not follow: a status pair is not observable from a table
-dump, but it *is* observable from a call.
+can see both. Answering *no* is the tempting reading, on the reasoning that the verb's failure is a
+status pair returned to a caller rather than a table state and so no scenario diff can see it. The
+first half of that is true and the conclusion does not follow: a status pair is not observable from a
+table dump, but it *is* observable from a call.
 
 The **behaviour lock** is at the arithmetic tier, which calls the handler directly: seven tests in
 `tests/arithmetic/test_comp_binary.py` drive the refused verbs and assert
@@ -731,7 +724,7 @@ for arithmetic parity.
 field `Sales-Average` is declared `binary-long` at `[copybooks/wssl.cob:L49]` and is therefore an
 integer. The Purchase mirror is `[purchase/pl060.cbl:L200]` with the same shape.
 
-⚠️ The *double* truncation is specific to `sl060` and `pl060`. The cash and payment programs have
+The *double* truncation is specific to `sl060` and `pl060`. The cash and payment programs have
 **no `work-2` at all** — `[sales/sl100.cbl:L181]` and `[purchase/pl100.cbl:L174]` declare only
 `work-1 pic s9(7)v99 comp-3`, and their payment-days accumulator and operand are both `binary-long`
 at `[sales/sl100.cbl:L182-L183]` and `[purchase/pl100.cbl:L175-L176]`. Their average therefore
@@ -799,7 +792,7 @@ The genuine divergences, verified site by site:
 `[sales/sl100.cbl:L504]` and its increment `[sales/sl100.cbl:L510]`; the `pl100` equivalents are
 `[purchase/pl100.cbl:L495]` and `[purchase/pl100.cbl:L501]`.
 
-⚠️ **The divide direction is a lexical difference only.** `divide X into Y giving Z` and `divide Y
+**The divide direction is a lexical difference only.** `divide X into Y giving Z` and `divide Y
 by X giving Z` compute the **same quotient**. `[sales/sl060.cbl:L827]` uses the `into` form and
 `[sales/sl100.cbl:L511]` the `by` form, and they differ in spelling, not in arithmetic. Normalising
 the three instances into one helper would be the single easiest way to fail this migration — but the
@@ -834,11 +827,11 @@ field-uniformly and must be driven from the dictionary field by field.
 - nine **unsigned** `PIC 9(10) COMP` host variables at `[common/salesMT.cbl:L304-L312]`;
 - nine `int(8) unsigned NOT NULL` columns, of which `SALES-AVERAGE` is `[mysql/ACASDB.sql:L969]`.
 
-⚠️ There are **eleven narrowings in that bridge, not nine**: `Sales-Late-Min` and `Sales-Late-Max`
+There are **eleven narrowings in that bridge, not nine**: `Sales-Late-Min` and `Sales-Late-Max`
 are `binary-short` at `[copybooks/wssl.cob:L43-L44]` and become unsigned `PIC 9(05) COMP` at
 `[common/salesMT.cbl:L302-L303]`.
 
-⚠️ A **second instance the Agent Action Plan does not record** sits in the General Ledger batch
+A **second instance the Agent Action Plan does not record** sits in the General Ledger batch
 record: `Entered`, `Proofed`, `Posted` and `Stored` are `binary-long` at
 `[copybooks/wsbatch.cob:L36-L39]`, become `PIC 9(10) COMP` at `[common/glbatchMT.cbl:L287-L290]`, and
 land in `int(8) unsigned` columns at `[mysql/ACASDB.sql:L86-L89]`.
@@ -854,7 +847,7 @@ field entries across eleven in-scope tables** — `SYSTEM-REC` 41, `PULEDGER-REC
 11, `PUINVOICE-REC` 5, `SAINVOICE-REC` 5, `GLBATCH-REC` 4, `PUITM5-REC` 4, `SAITM3-REC` 4,
 `VALUEANAL-REC` 3, `PUINV-LINES-REC` 1 and `SAINV-LINES-REC` 1.
 
-⚠️ Those 91 entries **no longer** carry `Q-3` in `ambiguity_refs`, and the change is load-bearing rather
+Those 91 entries **no longer** carry `Q-3` in `ambiguity_refs`, and the change is load-bearing rather
 than cosmetic: the question is answered, so the tag was dropped, while the 91 `A-11` references stayed
 exactly as they were. The count of one going to zero while the count of the other holds at 91 is what
 demonstrates that answering the question did not repair the anomaly.
@@ -896,7 +889,7 @@ the property that matters: dropping the question did not drop the anomaly. And
 `acas_posting/dal/acas012_sales.py`'s import-time guard was INVERTED: it now requires the measurement note
 and REFUSES any entry that still publishes `Q-3`, so the artifact cannot silently regress to the open state.
 
-⚠️ **Measuring it did not repair it, and that is why this entry stays.** Every one of those statistics
+**Measuring it did not repair it, and that is why this entry stays.** Every one of those statistics
 still arrives at the database with its debit-versus-credit sense destroyed. What the measurement settled
 is *what the column holds*, not *whether the defect is present* — and rule R-4 forbids fixing the latter.
 
@@ -913,7 +906,7 @@ Python data-access layer writing the padded record field would store them *padde
 compare unequal byte for byte while representing the same COBOL value.
 
 **This is the empirical reason `harness/normalize.py` has a trailing-space job**, and that reasoning
-appears nowhere in the Agent Action Plan. Without it, a reviewer would read the normaliser's first
+appears nowhere in the Agent Action Plan. Without it, a reader would read the normaliser's first
 job as defensive tidying rather than as the reproduction of a specific bridge behaviour.
 
 **Locators.** The ledger-name instance: `Ledger-Name pic x(24)` at `[copybooks/wsledger.cob:L27]`
@@ -923,7 +916,7 @@ statement fragment with `FUNCTION TRIM (HV-LEDGER-NAME,TRAILING)`. The behaviour
 than incidental: there are **23** `FUNCTION TRIM` sites in `common/nominalMT.cbl` and **29** in
 `common/glpostingMT.cbl`.
 
-⚠️ A **second instance the Agent Action Plan does not record**, recovered from the generated
+A **second instance the Agent Action Plan does not record**, recovered from the generated
 dictionary and then verified in the frozen source: `OI-Description pic x(25)` at
 `[copybooks/slwsoi.cob:L32]` becomes `HV-OI3-DESCRIPTION PIC X(32)` at `[common/otm3MT.cbl:L310]` and
 `OI3-DESCRIPTION char(32)` at `[mysql/ACASDB.sql:L905]` — a 25 to 32 drift rather than 24 to 32. The
@@ -950,14 +943,14 @@ and a record for which the handler returned a specific error is skipped. Both si
 
 The obligation here is unusual and worth stating explicitly: the Python reproduction must be
 **equally silent**. Adding a warning would be adding behaviour, which R-3 forbids and R-4 makes a
-failure — and it would also be observable in a log a reviewer might diff.
+failure — and it would also be observable in a log a reader might diff.
 
-**Locators.** ⚠️ The corrected sites are `[general/gl072.cbl:L291-L292]` — `if post-batch not
+**Locators.** The corrected sites are `[general/gl072.cbl:L291-L292]` — `if post-batch not
 numeric` at L291 and `go to loop.` at L292 — and `[general/gl072.cbl:L306-L307]` — `if we-error
 equal 999` at L306 and `go to loop.` at L307. The Agent Action Plan's L289-L290 and L303-L304 do not
 resolve to these statements; §8 records the correction.
 
-⭐ There is a **second `we-error = 999` site the Agent Action Plan omits**, at
+There is a **second `we-error = 999` site the Agent Action Plan omits**, at
 `[general/gl072.cbl:L348-L349]`, inside the headings paragraph: `if we-error equal 999` then `go to
 headings-end.` Its disposition differs from the loop sites — it abandons the *headings* rather than
 the *record* — so it is a third silent path, not a duplicate of the second.
@@ -1004,7 +997,7 @@ the wrong account**. No error, no diagnostic, wrong balances.
 This is the entry that turns a sorting detail into a correctness requirement, and it is why the
 migration's sort primitive guarantees stability rather than merely being convenient.
 
-**Locators.** ⚠️ The read is `[general/gl072.cbl:L408]` — `perform GL-Nominal-Read-Next.` with the
+**Locators.** The read is `[general/gl072.cbl:L408]` — `perform GL-Nominal-Read-Next.` with the
 maintainer's comment `*> read  ledger-file  record.` The key move that precedes it is
 `[general/gl072.cbl:L405]` and the guard on the read is `[general/gl072.cbl:L407]`. The
 `if read-ledger not = "R"` at `[general/gl072.cbl:L410-L411]` comes **after** the read and is a
@@ -1097,7 +1090,7 @@ re-opened. See **`Q-4`** in [`ambiguity-resolutions.md`](ambiguity-resolutions.m
 the full byte attribution; the dictionary continues to emit `Q-4` on **28 field entries**, which is
 correct — the identifier now points at a resolved entry rather than an open one.
 
-⚠️ **One probe hazard worth passing on**, because it produced a wrong answer before it produced the
+**One probe hazard worth passing on**, because it produced a wrong answer before it produced the
 right one. The first run located `Description` by scanning for its fill character `D`, having filled
 `Actual-Vat` with `444444444.44` — whose packed bytes are `0x44`, which *is* ASCII `D`. The scan
 found the amount, at byte 47, and would have been read as a six-byte displacement. `Q-4`'s own
@@ -1122,9 +1115,9 @@ The caller's pre-zero is `[copybooks/Proc-ACAS-Mapser-RDB.cob:L78]` — `move ze
 immediately before the call at L79 and the unconditional `move u-bin to run-date.` at L80. The clock
 read that supplies the date is L72 of the same copybook.
 
-⚠️ **THE CLOCK-READ CENSUS, CORRECTED.** That read is **not** the only one in the call chain, and an
-earlier revision of this register said it was. The accurate statement, measured over the frozen tree
-rather than carried over from the Agent Action Plan's phrasing:
+**THE CLOCK-READ CENSUS.** That read is **not** the only one in the call chain. The accurate
+statement, measured over the frozen tree rather than carried over from the Agent Action Plan's
+phrasing:
 
 - **All twelve in-scope posting programs contain ZERO clock reads.** `function current-date` appears in
   none of `gl051`, `gl070`, `gl071`, `gl072`, `gl080`, `sl055`, `sl060`, `sl100`, `pl055`, `pl060`,
@@ -1283,7 +1276,7 @@ amount that continues.
 compute spans `[irs/irs030.cbl:L1562-L1563]`, followed by the destructive
 `[irs/irs030.cbl:L1564]` — `subtract vat-amount from post-amount.`
 
-⭐ The maintainer's flagged-but-unacted concern sits directly above the from-net compute at
+The maintainer's flagged-but-unacted concern sits directly above the from-net compute at
 `[irs/irs030.cbl:L1547-L1548]`: *"Calculate vat from net  - THIS MAY NEED A TEST FOR ONLY NON ZERO
 VAT RATES"* and *"before compute but look like comes to zero ?"*. It is recorded because it is a
 change the maintainer considered and did not make — and under R-4 the not-making is the
@@ -1339,18 +1332,18 @@ within a few lines of each other. Neither spelling is wrong; the inconsistency i
 is preserved because a paragraph-to-function traceability reader comparing the two files needs to see
 the same shape on both sides.
 
-**Locators.** ⚠️ The verified sites in `gl070` are `[general/gl070.cbl:L497]` — `move post-code in
+**Locators.** The verified sites in `gl070` are `[general/gl070.cbl:L497]` — `move post-code in
 WS-Posting-Record   to  pre-code.`, the **`in`** form — and `[general/gl070.cbl:L521]` — `if vat-ac
 of WS-Posting-Record = zero` — and `[general/gl070.cbl:L525]` — `move vat-ac of WS-Posting-Record  to
 pre-ac.`, both the **`of`** form. The Agent Action Plan's `L510` is **wrong**: that line is an
 ordinary unqualified `move post-cr to pre-ac.` §8 records the correction.
 
-⭐ The collision source is `[copybooks/wspost.cob:L12-L15]`: `01 WS-Posting-Record.` at L12 contains
+The collision source is `[copybooks/wspost.cob:L12-L15]`: `01 WS-Posting-Record.` at L12 contains
 the group `WS-Post-Key.` at L14, whose first leaf is an **unqualified item named `Batch`** at L15 —
 `05 Batch pic 9(5).` — while `copybooks/wsbatch.cob` carries its own batch fields in the same
 program.
 
-⭐ **A-21 also extends to `gl080`**, at `[general/gl080.cbl:L467]` (the `in` form),
+**A-21 also extends to `gl080`**, at `[general/gl080.cbl:L467]` (the `in` form),
 `[general/gl080.cbl:L497]` and `[general/gl080.cbl:L501]` (both the `of` form) — the same mixed
 spelling, in the archive-write path rather than the pre-process path.
 
@@ -1375,7 +1368,7 @@ paragraph-to-function correspondence is not left wondering which name was droppe
 **Locators.** `[general/gl070.cbl:L603-L609]`: `maps03 section.` at L603, `call "maps04" using
 maps03-ws.` at L606, and `maps04-exit.` at L608.
 
-⭐ **Two occurrences, not one.** The same pairing appears in `gl051` at
+**Two occurrences, not one.** The same pairing appears in `gl051` at
 `[general/gl051.cbl:L1273]` — `maps03 section.` — with the call at `[general/gl051.cbl:L1276]` and
 the exit at `[general/gl051.cbl:L1278]`.
 
@@ -1395,7 +1388,7 @@ the exit at `[general/gl051.cbl:L1278]`.
 **Fifteen** of the twenty-two entries carry a **behaviour lock** — a test that asserts the defect
 itself, **so that a future well-meaning "fix" fails the suite** instead of passing unnoticed. Three more
 carry a weaker guarantee and four carry none; the reconciled census is at the end of this section, and
-it distinguishes four relationships that an earlier revision of this table blurred into one.
+it distinguishes four relationships that are easily blurred into one.
 
 This is the ownership map. The "primary lock" column is the test that owns the assertion; the "also
 cites" column was recovered by reading every test file in this checkout, so that a reader chasing an
@@ -1405,12 +1398,12 @@ and no GnuCOBOL, and fourteen is exactly the set AAP §0.4.1.7 names. (Fifteen i
 ANOMALIES carrying a behaviour lock, not the number of files: several files lock more than one, and
 several of the fourteen lock none because they are structural rather than arithmetic.)
 
-⚠️ **The directory once held twenty files, and this table's count chased it upward — fourteen rows for
-fifteen files at one revision, then fifteen, sixteen, eighteen and twenty.** Six of those files were
-groups that had been added during QA remediation without a home in the planned inventory: the
-shared-storage and dispatch-boundary group, the deployment-contract group, the gl080 end-of-cycle
-group, the gl072 silent-skip group, the CLI-seam group and the close-and-rejection group. Each has
-since been **merged, verbatim, into the planned file that owns its subject** — respectively
+**THE DIRECTORY HOLDS FOURTEEN FILES AND THIS TABLE HAS FOURTEEN ROWS; a count that chases the
+directory upward is the failure mode to avoid.** Six further groups have no home in the planned
+inventory of their own: the shared-storage and dispatch-boundary group, the deployment-contract group,
+the gl080 end-of-cycle group, the gl072 silent-skip group, the CLI-seam group and the
+close-and-rejection group. Each is **merged, verbatim, into the planned file that owns its subject** —
+respectively
 `test_comp_binary.py`, `test_pic_field_descriptors.py`, `test_gl080_cycle_divide_rounded.py`,
 `test_ledger_balance_accumulation.py`, `test_control_total_comparison.py` and
 `test_double_entry_explosion.py` — so the directory is the fourteen AAP names again and **no
@@ -1432,8 +1425,8 @@ count rather than a reader noticing.
   a mention to an arithmetic test and found no assertion had been sent to the wrong file.
 
 **The arithmetic tier — fourteen files**, all present, all passing on a bare host with no Docker, no
-MariaDB and no GnuCOBOL, and fourteen is exactly the AAP §0.4.1.7 set: the six groups added during QA
-remediation were merged into the planned files that own their subjects, as recorded above. The table
+MariaDB and no GnuCOBOL, and fourteen is exactly the AAP §0.4.1.7 set: the six further groups are
+merged into the planned files that own their subjects, as recorded above. The table
 immediately below carries a row for the fourteen that own an anomaly relationship; the second table in
 this section carries a row for **every** file, which is the one to read for completeness.
 
@@ -1483,11 +1476,11 @@ observable is end state rather than a computed value:
   boundary, not an arithmetic one, so no arithmetic-tier assertion can distinguish it.
 - **A-4** is additionally exercised end-to-end by the scenario tier named in the same section, because
   a half-posted double entry shows up as table state: the debit is written and nothing balances it.
-- **A-1** is **not**, and the distinction matters (finding MJ-07). A file left unclosed shows up in **no**
+- **A-1** is **not**, and the distinction matters. A file left unclosed shows up in **no**
   table — `GL-Posting-Close` writes nothing — so the scenario tier is A-1's **state witness** and its
   **primary lock** is `tests/arithmetic/test_double_entry_explosion.py`, which drives the
-  shipped paragraph and asserts the verb sequence. An earlier revision of this bullet paired A-1 with
-  A-4 as though both were observable in state; they are not, and A-1's own entry records the correction.
+  shipped paragraph and asserts the verb sequence. Pairing A-1 with A-4 as though both were observable
+  in state would be wrong; A-1's own entry says why.
 - **A-6**'s state half lives in the IRS scenario file, which compares the transfer table's pre-run
   digest against its post-run digest per side. The mechanism half is in the arithmetic tier above,
   where the handler can be called directly; neither half claims the other's ground.
@@ -1502,8 +1495,8 @@ conclusion: a status pair cannot be seen from a dump, but it is exactly what a d
 data-access layer can assert.
 
 **AND THE SAME MAP FROM THE OTHER DIRECTION, for the five entries whose observable is END STATE
-rather than a computed value.** An earlier revision of this section named a test for three of them
-that does not assert them, so each row below was re-verified by opening the test:
+rather than a computed value.** Every row below was verified by opening the test named, because a
+plausible-looking name is not evidence that the test asserts the entry:
 
 | Entry | Primary lock | Why the observable is a state |
 | --- | --- | --- |
@@ -1528,8 +1521,8 @@ caller that has not been proven for every caller** (A-16). Each of the seven is 
 its reproduction site by a comment citing the same locator this register cites, which is the third of
 C-3's three places where engineering quality lives.
 
-**THE CENSUS, RECONCILED, because an earlier revision of this section contradicted the register's own
-per-entry `Test-locked` fields.** Four relationships exist and they are not interchangeable:
+**THE CENSUS, RECONCILED AGAINST THE REGISTER'S OWN per-entry `Test-locked` fields.** Four
+relationships exist and they are not interchangeable:
 
 | Relationship | Entries | Count |
 | --- | --- | ---: |
@@ -1539,7 +1532,7 @@ per-entry `Test-locked` fields.** Four relationships exist and they are not inte
 
 15 + 3 + 4 = **22**, with no entry counted twice.
 
-⚠️ **This census read `14 + 1 + 3 + 4` at one revision, with A-6 in a `state-level lock only` row of its
+**This census read `14 + 1 + 3 + 4` at one revision, with A-6 in a `state-level lock only` row of its
 own.** That was true of a tree in which the only A-6 assertion was the scenario tier's no-change claim.
 It is not true of this one: `tests/arithmetic/test_comp_binary.py` now calls
 the migrated `acas008` directly and asserts the measured `WE-Error 988` / `FS-Reply 99` pair seven ways,
@@ -1601,7 +1594,7 @@ Three independent reasons, in ascending order of finality:
    TESTED` under a rule of carets. The `Changelog` corroborates it verbatim at
    `[Changelog:L21-L22]`: *"Revised scripts masterUNL.sh, masterRES.sh & / masterLD and so far only
    tested masterUNL."*
-3. ⭐ It ends with an **interactive pager** — `[common/masterLD.sh:L119-L123]` closes with `less
+3. It ends with an **interactive pager** — `[common/masterLD.sh:L119-L123]` closes with `less
    SYS-DISPLAY.log`, which would block a test run forever even if the syntax were repaired.
 
 Two facts about its contract survive and are reproduced by `harness/seed.sh`. The loaders' exit
@@ -1617,7 +1610,7 @@ places, all of them **changelog comments**: `[common/comp-common.sh:L8]`,
 `[common/comp-common2.sh:L8]` and `[common/comp-common-no-rdbms-diags.sh:L9]`. It appears in **no
 actual `cobc` invocation anywhere**.
 
-⚠️ Correction to the received brief: the flag does **not** appear in `README.TXT` either.
+Correction to the received brief: the flag does **not** appear in `README.TXT` either.
 `[README.TXT:L204-L207]` narrates the compiler warning about inter-section `GO TO` in prose, and
 `[README.TXT:L208-L210]` claims *"an extra element is added to the compile commands in the scripts
 for both with and without rdbms"* — a documentation-versus-code contradiction in its own right, and
@@ -1629,7 +1622,7 @@ the right approach.
 `[common/comp-common.sh:L11]` records *"Added to all comps  -fdump=all"*, yet **no live line in that
 file carries `-fdump` at all**; the only occurrence of the string in the file is that comment.
 
-⚠️ Correction to the received brief: the live `cobc` invocations in that file are at **L18, L21, L23,
+Correction to the received brief: the live `cobc` invocations in that file are at **L18, L21, L23,
 L26, L29, L32, L34, L36, L40, L41, L42, L45, L51, L54 and L57** — fifteen lines. The brief's list
 omits L18 (the `accept_numeric.c` compile) and L54 (the `*UNL.cbl` loop). Separately, the
 per-directory scripts that *do* carry a dump flag carry `-fdump=ws`, not `-fdump=all`:
@@ -1639,7 +1632,7 @@ per-directory scripts that *do* carry a dump flag carry `-fdump=ws`, not `-fdump
 the divergence: `[sales/comp-sales.sh:L2]` — *"Removed all references to accept_numeric -- too many
 problems."* — and the `accept_numeric` variants are commented out at L5, L11, L13 and L20.
 
-⚠️ Correction to the received brief: the file has **three** live `cobc` lines, not one —
+Correction to the received brief: the file has **three** live `cobc` lines, not one —
 `[sales/comp-sales.sh:L7]` (the `sl*.cbl` loop), `[sales/comp-sales.sh:L9]` (`cobc -x sales.cbl`) and
 `[sales/comp-sales.sh:L18]` (`cobc -m sales.cbl`). L7 is the only one that compiles the `sl*`
 programs. The finding stands and is in fact stronger: **none** of the three carries `-fdump` or
@@ -1648,7 +1641,7 @@ therefore compiled with a different flag set from their siblings, and the harnes
 rather than levelling it.
 
 **13.7 — the bridge trims trailing spaces.** See **A-12**. Recorded again here because it is the
-empirical origin of `harness/normalize.py`'s first job, and because a reviewer who meets the
+empirical origin of `harness/normalize.py`'s first job, and because a reader who meets the
 normaliser before the anomaly would otherwise read that job as defensive tidying.
 
 **13.8 — a binary day-number column declared with a display width of one.**
@@ -1681,7 +1674,7 @@ superseded variants `presql2-package/old-apis/cobmysqlapi.005.c` and
 `presql2-package/old-apis/cobmysqlapi3.c` must **not** be used. See AAP §0.5.2 and §0.8.7.
 
 **13.12 — the translator needs a parameter file that is not present as a loose file.**
-⚠️ Correction to the received brief, in the direction of accuracy rather than of severity: `find .
+Correction to the received brief, in the direction of accuracy rather than of severity: `find .
 -name "*.param"` over the checkout returns **empty**, but the vendored archive **does** ship a
 template at `presql2-package/presql2.param`. The defect is therefore not that the file does not
 exist anywhere — it is that the checkout as delivered cannot run `presql2` until the archive is
@@ -1771,10 +1764,10 @@ adopts its framing rather than adjudicating it:
   `[copybooks/wspost.cob:L27-L28]`. An included sign costs nothing there, twice, which makes the
   one-byte-per-field history of the *leading* case a real question rather than a typo.
 
-`tests/arithmetic/test_sign_leading_display.py` held the question open with a strict expected failure until
-the width was measured. It has since been measured — `function length` of a `pic s9(7)v99 sign is leading`
-item is **9**, the same as its digit count, and the sign is overpunched onto the leading digit as `0x70` for
-negative and `0x30` for positive — so that file now asserts the width and the overpunch bytes as facts.
+`tests/arithmetic/test_sign_leading_display.py` asserts the width and the overpunch bytes as facts,
+because the width is measured: `function length` of a `pic s9(7)v99 sign is leading` item is **9**, the
+same as its digit count, and the sign is overpunched onto the leading digit as `0x70` for negative and
+`0x30` for positive.
 Sibling 1 is consequently **explained AND resolved**: the maintainer named the cause and question
 **`Q-5.2`**, which owns the width, carries the measurement.
 
@@ -1872,7 +1865,7 @@ that the schema does evolve.
 
 ## 15. Candidates beyond the canonical register
 
-⚠️ **This section is separate from §10 on purpose.** These are **candidates discovered during
+**This section is separate from §10 on purpose.** These are **candidates discovered during
 planning and implementation, additional to the AAP §0.6.7 register of twenty-two.** They are not
 canonical entries, they do not renumber anything, and they use their own `A-NEW-<n>` identifiers —
 several of which are already cited by the reproducing modules, so the numbering here is fixed by the
@@ -1902,7 +1895,7 @@ of read off the comments. Strengthens the date-contract question in
 **A-NEW-3 — a handler left open, and a comment asserting the opposite.** `irs030`'s posting section
 never closes `acasirsub1`, the IRS nominal-ledger handler, when it returns. The commented-out close
 at `[irs/irs030.cbl:L1710]` carries the maintainer's `*> Closed at EOJ` assertion, which is not what
-happens. ⚠️ The live closes are **two, not three** — `[irs/irs030.cbl:L1711]` for `acasirsub4` and
+happens. The live closes are **two, not three** — `[irs/irs030.cbl:L1711]` for `acasirsub4` and
 `[irs/irs030.cbl:L1712]` for `acas008` — correcting the received brief.
 
 **A-NEW-4 — VAT silently discarded for any account-and-side pair outside the four handled.**
@@ -1914,7 +1907,7 @@ VAT side: 31 with CR at L1687, 31 with DR at L1691, 32 with CR at L1695, 32 with
 codes with a side that is neither `DR` nor `CR` — loses its VAT with no trace. The zero gate that
 precedes the chain is `[irs/irs030.cbl:L1682-L1683]`.
 
-⚠️ The condition must be stated as the **pair**, not as the account code alone: account 31 with an
+The condition must be stated as the **pair**, not as the account code alone: account 31 with an
 unexpected side falls through just as an unknown account does, and describing the gap as "an unknown
 VAT account" would miss half of it.
 
@@ -1929,18 +1922,18 @@ layer, because the three sub systems diverge three ways on the same guard:
 
 In Purchase, both the autogen call and the term-code gate are **entirely commented out** at
 `[purchase/purchase.cbl:L755-L758]`, so `pl055` runs at L759-L760 and `pl060` at L761-L762 with
-nothing between them. ⭐ Even the dead code diverges: the commented-out Purchase line at
+nothing between them. Even the dead code diverges: the commented-out Purchase line at
 `[purchase/purchase.cbl:L756]` reads `perform load000` where the live Sales line at
 `[sales/sales.cbl:L760]` reads `perform load00`. The migration's Purchase entry point therefore has
 **no** gate, its Sales entry point has **two**, and its General entry point has **one** with a
 different predicate — three shapes, preserved as three.
 
-⚠️ **Reproducing module:** the three shapes live in the three CLI entry points —
+**Reproducing module:** the three shapes live in the three CLI entry points —
 `acas_posting/cli/pl_order_post.py` has no gate, `acas_posting/cli/sl_invoice_post.py` has two and
-`acas_posting/cli/gl_post_cycle.py` has one with the `= 5` predicate. An earlier revision of this entry
-claimed it was "already named `A-NEW-5` by `acas_posting/programs/pl100_payment_posting.py`". **That was
-false.** That module's local `A-NEW-5` was a different defect entirely — a mutually exclusive `IF/ELSE`
-in its `bl-open` — and it now carries the globally unique name `A-PL100-A`. See §15.1.
+`acas_posting/cli/gl_post_cycle.py` has one with the `= 5` predicate. **THIS IS NOT the `A-NEW-5` of
+`acas_posting/programs/pl100_payment_posting.py`**, which is a different defect entirely — a mutually
+exclusive `IF/ELSE` in its `bl-open` — and which carries the globally unique name `A-PL100-A`. See
+§15.1.
 
 **A-NEW-6 — the `gl080` divide-by-zero is reachable.** The guard that protects the cycle-to-period
 divide is `[general/gl080.cbl:L324-L326]` — `if a = 9 or scycle < period go to main-end.` The second
@@ -1950,10 +1943,9 @@ though it protects the divide and does not. Cross-referenced to the division-by-
 [`ambiguity-resolutions.md`](ambiguity-resolutions.md); the resulting behaviour is a property of the
 compiled program and is not guessed here.
 
-⚠️ **Reproducing module:** `acas_posting/programs/gl080_end_of_cycle.py`, which leaves the guard exactly
-as written. An earlier revision claimed this was "already named `A-NEW-6` by
-`acas_posting/programs/pl100_payment_posting.py`". **That was false** — that module's local `A-NEW-6`
-was "no supplier is ever created", and it now carries the globally unique name `A-PL100-B`. See §15.1.
+**Reproducing module:** `acas_posting/programs/gl080_end_of_cycle.py`, which leaves the guard exactly
+as written. **THIS IS NOT the `A-NEW-6` of `acas_posting/programs/pl100_payment_posting.py`**, which is
+"no supplier is ever created" and carries the globally unique name `A-PL100-B`. See §15.1.
 
 **A-NEW-7 — a comment naming a field that does not exist.** `[copybooks/wspost.cob:L10]` records
 *"Added WS-P-rrn to replace relative processing"*, but the field declared at
@@ -1961,10 +1953,9 @@ was "no supplier is ever created", and it now carries the globally unique name `
 appears nowhere in the copybook. Same class as **A-22** — a name that misdirects a reader navigating
 by name — and, like A-22, preserved.
 
-⚠️ `acas_posting/records/gl_posting.py` carries the note at the field it belongs to. An earlier revision
-claimed this was "already named `A-NEW-7` by `acas_posting/programs/pl100_payment_posting.py`"; **that
-was false** — that module's local `A-NEW-7` was the deduction reversal gated on `t-deduct` alone, and it
-now carries the globally unique name `A-PL100-C`. See §15.1.
+`acas_posting/records/gl_posting.py` carries the note at the field it belongs to. **THIS IS NOT the
+`A-NEW-7` of `acas_posting/programs/pl100_payment_posting.py`**, which is the deduction reversal gated
+on `t-deduct` alone and carries the globally unique name `A-PL100-C`. See §15.1.
 
 **A-NEW-8 — `acas007` and `acas008` disagree about whether `Open-Output` truncates.** The two
 handlers carry the same special-case block, and one of them has two of its lines commented out:
@@ -2037,9 +2028,9 @@ fatal diagnostics and produced all 29 expected `*MT` bridge artifacts and all
 comment-only text into the disposable build tree, re-reads the file it wrote and fails the build if any
 line is neither blank nor a `*>` comment — so a reader can confirm from the script that no data item or
 statement is supplied. `[harness/build_oracle.sh acas_explain_missing_sqlstate_copybook]` is where the
-script detects the absence and explains it. ⚠️ **An earlier revision cited a committed shim at
-`harness/copybook-shims/ACAS-SQLstate-error-list.cob`; it is gone** (finding M-03) — the include is
-generated, never tracked, and the frozen `copybooks/` tree is still never written to. The build result — 29/29 bridges, 28/28 loaders, all
+script detects the absence and explains it. **THERE IS NO COMMITTED SHIM at
+`harness/copybook-shims/ACAS-SQLstate-error-list.cob`** — the include is generated, never tracked, and
+the frozen `copybooks/` tree is never written to. The build result — 29/29 bridges, 28/28 loaders, all
 twelve in-scope programs and all seventeen handlers — is recorded in
 [`scenario-diff-evidence.md`](scenario-diff-evidence.md) §3, alongside the manifest digests of the runs
 that build produced.
@@ -2057,7 +2048,7 @@ docker compose -f harness/docker-compose.yml run --rm -T gnucobol \
     /repo/harness/build_oracle.sh < /dev/null
 ```
 
-⚠️ The console log of the remediation build itself was captured to a session-scoped file under `/tmp`,
+The console log of the diagnostic build itself was captured to a session-scoped file under `/tmp`,
 which does **not** survive the session, and it is deliberately not cited here as though a reader could
 open it: a citation a reader cannot open is not evidence. The committed shim, the §3 digests, and the
 command above with the transcripts it leaves in the named volume are the citation, because those are
@@ -2118,15 +2109,14 @@ scenario end to end — the ten protocol stages over `harness/scenarios/clean_ba
 `verdict.json` records `identical` over the four IRS tables and whose
 `<ACAS_OUT>/run-logs/clean_batch_irs/cobol.log` carries the facade call sequence — and by
 `tests/scenarios/test_clean_batch_post_irs.py`, which asserts the reproduction against the compared
-state. ⚠️ An earlier revision cited a session-scoped `/tmp` log that does not outlive its session; the
-retained artifacts, the scenario and the test are cited instead because all three persist and all
-three re-run on demand. The frozen ownership defect is
+state. A session-scoped `/tmp` log would not outlive its session, so the retained artifacts, the
+scenario and the test are cited instead: all three persist and all three re-run on demand. The frozen ownership defect is
 preserved as the specification; the shims make the compiled comparison
 executable without pretending the API supplies per-facade handles.
 
 **Evidential status, stated exactly.** The false key-not-found and the killed delete-all were
-**observed** during the remediation session, but the only record of that observation was a console log
-in a temporary directory and it has not survived — so the measurement is carried here as an
+**observed**, but the only record of that observation was a console log in a session-scoped temporary
+directory and it has not survived — so the measurement is carried here as an
 **unverified report** rather than as a finding, and nothing in the migration depends on it being taken
 on trust. What *is* durable, and what a reader can check now: the shim's effect is visible in
 `harness/build_oracle.sh`, the reproduction is exercised on every run of
@@ -2159,7 +2149,7 @@ recorded here because it is a defect of the frozen system, it governs what four
 scenarios can observe, and a defect that is only derived in passing is a defect
 nobody can cite. **The alias `N-KEY` is retained** because
 `harness/scenarios/mixed_accepted_rejected.yaml`,
-the since-removed `harness/scenarios/end_of_cycle_gl.yaml`,
+the uncommitted `harness/scenarios/end_of_cycle_gl.yaml`,
 `tests/arithmetic/test_comp_binary.py`,
 `tests/scenarios/test_mixed_accepted_rejected_batch.py` and
 `acas_posting/dal/acas006_gl_posting.py` already cite that name, and §5's rule is
@@ -2197,12 +2187,12 @@ that identifiers are never renumbered.
 **One frozen defect with three faces, which is why it is one entry and not three.**
 First, it starves `gl070` → `gl071` → `gl072`: the cycle runs to completion, exits
 zero, and posts nothing. Second, it is why **`gl080`'s deletion phase deletes
-nothing**, measured independently by the `end_of_cycle_gl` scenario — since removed
-(findings M-09, M-17), so that measurement is history rather than a re-runnable check. Third, it makes
+nothing**, measured independently by the `end_of_cycle_gl` scenario — which is not committed, so that
+measurement is a retained report rather than a re-runnable check. Third, it makes
 **A-13's two silent skips unreachable by any seed** — the non-numeric value genuinely
 exists, but `gl070` discards the row one layer above, before `gl072` can ever see it.
-That third face corrected an earlier claim in this project's own records which named
-the right corruption and the wrong program.
+That third face is easy to attribute to the wrong program: the corruption is real and it is `gl070`,
+not `gl072`, that discards the row.
 
 **Reproduced, not repaired (R-4).** `acas_posting/dal/acas006_gl_posting.py`
 reproduces the round trip, including `_split_post_key`, which was added after
@@ -2213,7 +2203,7 @@ why no seed reaches either skip, and §22, which pins the byte-level round trip.
 The consequence — that no batch is stamped — is asserted against the declared seed
 by `tests/scenarios/test_mixed_accepted_rejected_batch.py`.
 
-⚠️ **What this entry does not claim.** It does not claim the migration is unable to
+**What this entry does not claim.** It does not claim the migration is unable to
 post; it claims the *frozen system* cannot post a **seeded** posting row, because a
 seeded row's key makes the round trip that corrupts it. A posting row created within
 a run does not travel that path. The distinction matters because an empty diff over
@@ -2225,7 +2215,7 @@ themselves.
 
 ### 15.1 The six program-scoped candidates, and the old-to-new identifier map
 
-⚠️ **A candidate number used to mean two different defects depending on which file you were reading,
+**A candidate number used to mean two different defects depending on which file you were reading,
 and that is now fixed.** Two program modules had each opened a candidate register of their own and
 numbered it `A-NEW-<n>` from 1, at the same time as this register was numbering its own candidates from
 1. There was no shared allocation point, so six numbers collided: `A-NEW-2`, `A-NEW-3` and `A-NEW-4`
@@ -2267,15 +2257,65 @@ was checked one identifier at a time and uses **this register's** meaning, so no
 changing and nothing dangles. Each owning module also carries the map at the head of its own anomaly
 footer, so a grep for an old number lands on an explanation rather than on nothing.
 
+**Three further program-scoped families are registered here too, by family rather than row by row.**
+Three program modules keep a register of frozen-source candidates that this document does not carry, and
+each already uses the program-scoped form the rule above requires, so none of them can collide with an
+`A-<n>`, an `A-NEW-<n>` or with each other:
+
+| Family | Entries | Owning module, which carries each entry's text and locators |
+| --- | ---: | --- |
+| **`F-IRS030-1` … `F-IRS030-18`** | 18 | `acas_posting/programs/irs030_posting.py` |
+| **`F-GL051-1` … `F-GL051-7`** | 7 | `acas_posting/programs/gl051_batch_control_check.py` |
+| **`F-PL100-1` … `F-PL100-19`** | 19 | `acas_posting/programs/pl100_payment_posting.py` |
+
+**Forty-four entries, and they are registered rather than transcribed.** Each entry's statement, its
+frozen locators and its disposition live at the head of its owning module's finding block, which is the
+one place they can be kept correct; copying forty-four rows here would create a second copy to drift
+against the first, which is the failure §5 exists to prevent. What this section owns is the *namespace*:
+the three families are declared, their counts are fixed, and their sole owning module is named, so a
+reader meeting `F-PL100-12` knows immediately that it is a frozen-source candidate scoped to one program
+and where to read it. A bare `F-<n>` is not an identifier this project allocates in either direction.
+
+**A fourth family, `N-<mnemonic>`, is registered here on the same terms — with one difference that
+matters when you grep for one.** The twelve data-access modules each keep a register of handler- and
+bridge-level observations, tagged `N-` followed by a lower-case mnemonic rather than a number:
+**251 distinct tags, 480 occurrences, across `acas_posting/dal/` only.**
+
+| Owning module | Distinct `N-` tags | Owning module | Distinct `N-` tags |
+| --- | ---: | --- | ---: |
+| `acas015_analysis.py` | 61 | `acas016_invoice.py` | 25 |
+| `acas026_pinvoice.py` | 49 | `acas007_gl_batch.py` | 20 |
+| `acas022_purch.py` | 43 | `acas000_system.py` | 8 |
+| `acas019_otm3.py` | 34 | `acas006_gl_posting.py` | 2 |
+| `acas013_value.py` | 29 | `facade.py` | 2 |
+| `acas012_sales.py` | 27 | `acas029_otm5.py` | 1 |
+
+**The difference: an `N-` tag is scoped to its module and is NOT globally unique.** Twenty-six of the
+251 deliberately recur across modules — `N-log` appears in nine of them and `N-initialize` in seven —
+because each names *that module's* instance of a shared observation, and the readings differ. `N-log` in
+`acas012_sales.py` is not `N-log` in `acas019_otm3.py`. So an `N-` tag must always be read with its
+owning module, and it is never a substitute for an `A-<n>`: nothing in this register, in
+`harness/scenarios/`, or in `tests/` cites one, and nothing should start. Do not read the field name
+`N-KEY`, which appears in the frozen copybooks and in this document, as a member of this family.
+
+**Why these are registered by family and not promoted.** They are observations about the handler and
+bridge layer — a dead `evaluate` arm, a duplicated comment, a capitalisation flip between a label and
+its `perform` — recorded at the site that reproduces them so that a later reader does not mistake a
+faithful reproduction for a mistake. Their text and locators live in their owning module, which is the
+one place they can be kept correct. What this section owns is the namespace: the family is declared, its
+size is fixed, its twelve owning modules are named, and its module-local scoping is stated, so a reader
+meeting `N-deadbranches` knows what kind of thing it is and where the one authoritative copy sits.
+
 **The rule from here.** Any candidate opened from now on either takes the next free number **in this
-register** or uses a name that cannot collide — a program-scoped letter, as above, or a mnemonic. A bare
-`A-NEW-<n>` allocated inside a single module is no longer an acceptable identifier.
+register** or uses a name that cannot collide — a program-scoped letter or a program-scoped
+`F-<PROGRAM>-<n>`, as above, or a mnemonic. A bare `A-NEW-<n>` or bare `F-<n>` allocated inside a single
+module is not an acceptable identifier.
 
 ---
 
 ## 16. Self-audit
 
-Recorded so that a reviewer can confirm what was and was not established, rather than inferring it.
+Recorded so that a reader can confirm what was and was not established, rather than inferring it.
 
 **What was verified.** Every `[path:locator]` citation in this document was resolved by reading the
 frozen file at that line in this checkout. Every census figure — the five `ROUNDED` sites, the 17
@@ -2284,7 +2324,7 @@ sources, the numeric and character column censuses, the 24 malformed loader line
 `cobmysqlapi.o` link sites, the 44 `COPY` references to the missing copybook — was produced by
 enumeration over the frozen files, not recalled. The `bash -n` failure on `common/masterLD.sh` was
 observed. All twenty `tests/arithmetic/` files were read to build §11's map, including the
-shared-storage, dispatch-boundary and cross-file-reference coverage added during QA remediation. The infrastructure-free
+shared-storage, dispatch-boundary and cross-file-reference coverage. The infrastructure-free
 tier was run independently of the Compose stack. The per-field `anomaly_refs` and
 `ambiguity_refs` counts quoted for A-7, A-11, A-12, A-14, A-15 and A-20 were read out of the committed
 `data_dictionary/acas_posting_dictionary.json`.
@@ -2295,9 +2335,9 @@ protocol with observed empty diffs, and the scenario tier passed 93 tests in bot
 reverse file order. On **2026-08-07**, after `end_of_cycle_gl` was added, **all nine** journeys
 completed the same ten stages with observed empty diffs, and the scenario tier — **107** tests as
 selected by `pytest -m scenario`, the growth being the ninth file's eleven plus the seed-relative
-tests added to the eight — passed in the containerised run. ⚠️ The ninth definition and its eleven
-tests were **removed** afterwards by findings M-09 and M-17, so a `pytest -m scenario` run today
-selects fewer; the figure is left as it was measured rather than adjusted by arithmetic. The measurements added to A-13 and
+tests added to the eight — passed in the containerised run. The ninth definition and its eleven
+tests are **not committed**, so a `pytest -m scenario` run selects fewer; the figure is left as it was
+measured rather than adjusted by arithmetic. The measurements added to A-13 and
 A-NEW-13 through A-NEW-17 are therefore runtime findings, not source-reading predictions.
 **[`scenario-diff-evidence.md`](scenario-diff-evidence.md) is the authority for which run produced
 which verdict**, and it carries the manifest digests; this document deliberately does not restate
@@ -2326,9 +2366,9 @@ lookup). All five entries remain, for the reasons §2.6 gives.
 passed — the rule that produced the honest `PENDING`s in the first place is the rule that made these
 promotions worth something.
 
-**⚠️ Two of those measurements have no durable artifact, and are labelled accordingly in place.** The
+**Two of those measurements have no durable artifact, and are labelled accordingly in place.** The
 strict-build console output behind `A-NEW-13` and the handle-sharing probe behind `A-NEW-16` were
-written to a temporary directory during a remediation session and have not survived, so the first cites
+written to a session-scoped temporary directory and have not survived, so the first cites
 the committed shim and the build script instead and the second is carried as an **unverified report**.
 No session log is cited anywhere in this register as though a reader could open it.
 
@@ -2343,7 +2383,7 @@ verified by OPENING the test rather than by trusting the field. Three earlier at
 survive that verification and were corrected: A-1 named an arithmetic test that only mentions it, A-4
 named an arithmetic test that only cites it, and A-13 named one file where the two skips are in fact
 locked by two separate scenario tests. §11 additionally separates a **record lock** from a behaviour
-lock, because conflating them was what let the false attributions stand. ⚠️ This count read "Fourteen"
+lock, because conflating them was what let the false attributions stand. This count read "Fourteen"
 and omitted **A-6** until this revision, while A-6's own summary row already carried the dagger and §11
 already counted fifteen: the register disagreed with itself in three places at once. A-6 became locked
 when `tests/arithmetic/test_comp_binary.py` §20 began driving the migrated

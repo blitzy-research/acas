@@ -37,7 +37,7 @@ shopt -s nullglob
 umask 077
 
 # ---------------------------------------------------------------------------
-#  DROP THE ADMINISTRATIVE CREDENTIAL BEFORE ANYTHING IS SPAWNED (finding SEC-04)
+#  DROP THE ADMINISTRATIVE CREDENTIAL BEFORE ANYTHING IS SPAWNED
 #
 #  `harness/docker-compose.yml` puts ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD in
 #  the `gnucobol` service environment because protocol stages 1 and 5 -- and only
@@ -85,7 +85,7 @@ readonly ACAS_PRESQL2_ARCHIVE_ROOT='presql2-package'
 # THE FOUR MEMBER DIGESTS -- SO THAT A REUSED PACKAGE IS AS PROVABLE AS AN UNPACKED
 # ONE
 #
-# ⭐ WHAT THIS CLOSES. Step 1 verified the vendored archive's digest and then audited
+# WHAT THIS CLOSES. Step 1 verified the vendored archive's digest and then audited
 # it member by member -- but ONLY on the branch that unpacks it. The other branch
 # reuses an already-unpacked directory, and that branch is the DEFAULT: the image
 # unpacks to /opt/presql2-package at build time, so an ordinary run never reached the
@@ -158,12 +158,12 @@ ACAS_REFRESH_TREE=1                 # refresh $ACAS_BUILD before step 1
 ACAS_RUN_PREFLIGHT_LINK=1           # reproduce the vendored worked example
 
 # ---------------------------------------------------------------------------
-#  THE FROZEN BUILD IS THE DEFAULT (finding SEC-02)
+#  THE FROZEN BUILD IS THE DEFAULT
 #
-#  This script used to apply the whole source-transform block unconditionally, so
-#  EVERY oracle was built from 41 modified frozen files and no invocation existed that
-#  could produce an unmodified one. The transforms were disclosed in the attestation,
-#  which is necessary but not sufficient: rule R-6 makes the COMPILED PROGRAM the
+#  Applying the whole source-transform block unconditionally would build EVERY oracle
+#  from 41 modified frozen files and leave no invocation able to produce an unmodified
+#  one. Disclosing the transforms in the attestation is necessary but not
+#  sufficient: rule R-6 makes the COMPILED PROGRAM the
 #  specification, and rule R-4 requires its defects to be reproduced rather than
 #  repaired. A build that repairs IF scope, connection lifetime and stale reply status
 #  in the oracle has repaired the specification, so an empty diff against it is not
@@ -173,7 +173,7 @@ ACAS_RUN_PREFLIGHT_LINK=1           # reproduce the vendored worked example
 #  0 = FROZEN. Not one byte of the build copy differs from the checkout, and the
 #      attestation records `oracle-source-is-frozen yes`. This is the ONLY mode whose
 #      output `harness/reset_db.sh` will accept as evidence -- it reads this attestation
-#      before stage 1 drops a table (finding M-06 moved that gate there).
+#      before stage 1 drops a table.
 #  1 = TRANSFORMED. The catalogued transforms are applied. Must be asked for
 #      explicitly, by `--transformed-oracle` or ACAS_ORACLE_ALLOW_TRANSFORMS=1, and the
 #      resulting oracle is a diagnostic tool rather than a specification.
@@ -235,7 +235,7 @@ acas_have() {
 }
 
 # ---------------------------------------------------------------------------
-#  THE CLIENT-DIAGNOSTIC SUMMARY  (OBS-008)
+#  THE CLIENT-DIAGNOSTIC SUMMARY
 #
 #  A database client's diagnostic is text the SERVER supplied, captured here with
 #  `2>&1`, and it is NOT safe to replay:
@@ -391,7 +391,7 @@ acas_join_re() {
 }
 
 # ---------------------------------------------------------------------------
-#  THE TARGET, DESCRIBED WITHOUT NAMING IT (finding F-39)
+#  THE TARGET, DESCRIBED WITHOUT NAMING IT
 #
 #  This script's transcripts are retained evidence: they are read by operators,
 #  attached to reports and, on the Python side, replayed to a container log. A line
@@ -407,8 +407,8 @@ acas_join_re() {
 #  digits of a SHA-256 over `host:port/schema` - never the password and never the
 #  account name, neither of which is in the digest at all - so two runs against one
 #  target print the same value and a run against a different target prints a
-#  different one, while the value itself discloses no name. The full values remain in the environment, where the tools that
-#  need them read them.
+#  different one, while the value itself discloses no name. The full values remain
+#  in the environment, where the tools that need them read them.
 # ---------------------------------------------------------------------------
 acas_target_category() {
   local host="${ACAS_DB_HOST-}" socket="${ACAS_DB_SOCKET-}"
@@ -635,7 +635,7 @@ acas_run_deadline() {
 
   acas_deadline_prefix "$budget"
 
-  # STDIN IS CLOSED FOR EVERY DELEGATED CHILD (finding F-30)
+  # STDIN IS CLOSED FOR EVERY DELEGATED CHILD
   #
   # This script is run non-interactively -- from harness/docker-compose.yml, from a
   # `docker compose run -T', from tests/conftest.py -- and it delegates to programs
@@ -1311,7 +1311,7 @@ the commonest reason is the provenance guard that stands in front of the
 recursive clear. That clear is admitted for an EMPTY tree, for a tree holding
 DIRECTORIES ONLY at every depth -- which is what the /build volume of the
 shipped Compose topology hands over, and which contains no data by construction
--- and for a tree this script previously marked as its own. A tree that already
+-- and for a tree this script has already marked as its own. A tree that holds
 holds FILES is refused, and the refusal names the first few of them; clear it,
 point ACAS_BUILD elsewhere, pass --no-refresh to build in place, or create the
 marker by hand to say you meant it.
@@ -1338,7 +1338,7 @@ acas_parse_args() {
   #  The environment route, read BEFORE the command line so an explicit
   #  `--frozen-oracle` still wins over an inherited variable. Only the exact string
   #  `1` enables it: a truthy-looking value such as `false` or `no` must not quietly
-  #  turn on a mode whose output cannot be used as evidence (finding SEC-02).
+  #  turn on a mode whose output cannot be used as evidence.
   if [[ "${ACAS_ORACLE_ALLOW_TRANSFORMS-}" == '1' ]]; then
     ACAS_ALLOW_SOURCE_TRANSFORMS=1
   fi
@@ -1564,7 +1564,7 @@ acas_assert_environment() {
   acas_log "ACAS_BUILD = $ACAS_BUILD (writable build tree; every artifact lands here)"
   acas_log "ACAS_DATA  = $ACAS_DATA"
   acas_log "ACAS_OUT   = $ACAS_OUT"
-  # A CATEGORY and a FINGERPRINT, never the topology (F-39). See
+  # A CATEGORY and a FINGERPRINT, never the topology. See
   # acas_target_description: the transcript of a build is retained evidence, and a
   # topology triple in it is a map of the deployment plus half a credential.
   acas_log "database   = $(acas_target_description)"
@@ -1579,7 +1579,7 @@ acas_assert_environment() {
   acas_note 'the password is never printed, never logged and never passed in argv'
 }
 
-# ⭐ M-08.  THE BUILD TREE'S OWN MARKER.  Written by acas_prepare_build_tree
+# THE BUILD TREE'S OWN MARKER.  Written by acas_prepare_build_tree
 # immediately after a successful copy, and required by
 # acas_assert_clearable_build_tree before any recursive clear of a directory that
 # HOLDS DATA - that is, one containing a non-directory entry at any depth. A tree
@@ -1599,7 +1599,7 @@ acas_assert_safe_build_path() {
   path_real="$(readlink -f "$path" 2>/dev/null || printf '%s' "$path")"
   repo_real="$(readlink -f "$ACAS_REPO" 2>/dev/null || printf '%s' "$ACAS_REPO")"
 
-  # ⭐ M-08.  THE RAW VALUE, not only the resolved one. `readlink -f' canonicalises
+  # THE RAW VALUE, not only the resolved one. `readlink -f' canonicalises
   # a relative path against the CURRENT directory, so `ACAS_BUILD=build' arrives
   # here as an absolute $path_real and satisfied this test - while the recursive
   # clear in acas_prepare_build_tree targets the UNRESOLVED "$ACAS_BUILD". The
@@ -1631,10 +1631,9 @@ acas_assert_safe_build_path() {
   #      filesystem; and
   #   2. it is not one of the distribution's own top-level directories.
   # Every other guard in this function still applies unchanged.
-  # ⭐ M-08 (CWE-73).  THE OTHER DECLARED MOUNTS ARE REFUSED BY IDENTITY, FIRST.
-  # This check used to be absent, and its absence was the finding: the top-level
-  # exception below accepts ANY dedicated mount point that is not a distribution
-  # directory, and harness/docker-compose.yml mounts THREE such volumes on this
+  # CWE-73.  THE OTHER DECLARED MOUNTS ARE REFUSED BY IDENTITY, FIRST.
+  # WITHOUT this check the top-level exception below accepts ANY dedicated mount point
+  # that is not a distribution directory, and harness/docker-compose.yml mounts THREE such volumes on this
   # service - `acas_build:/build', `acas_data:/data' and `acas_out:/out'
   # [harness/docker-compose.yml "/repo is READ-ONLY"] - all four paths being
   # exported as environment variables side by side, under that file's
@@ -1685,7 +1684,7 @@ acas_assert_safe_build_path() {
       'dedicated volume is mounted there, as harness/docker-compose.yml does for' \
       '/build. Either mount a volume at that path or use a deeper one.'
 
-    # ⭐ M-08.  A DEDICATED MOUNT POINT IS NOT ENOUGH ON ITS OWN, which is the
+    # A DEDICATED MOUNT POINT IS NOT ENOUGH ON ITS OWN, which is the
     # other half of the finding. Being a mount point says only that a volume is
     # there; it says nothing about WHOSE. A top-level path is therefore accepted
     # only when it is the one THE TOPOLOGY ITSELF DECLARES as the build tree, so
@@ -1713,7 +1712,7 @@ acas_assert_safe_build_path() {
     'Clearing the build tree would delete the checkout.'
 }
 
-# ⭐ M-08.  THE GATE THAT STANDS IMMEDIATELY BEFORE THE RECURSIVE CLEAR, and the
+# THE GATE THAT STANDS IMMEDIATELY BEFORE THE RECURSIVE CLEAR, and the
 # only one that asks WHOSE directory this is rather than what shape it has.
 #
 # acas_assert_safe_build_path establishes that the path is absolute, is not the
@@ -1736,7 +1735,7 @@ acas_assert_safe_build_path() {
 #     and only after a copy of the frozen checkout has succeeded.
 # Anything else is refused with an exit code and an instruction, never cleared.
 #
-# ⭐ WHY "DIRECTORIES ONLY" IS ADMITTED, AND WHY IT DOES NOT WEAKEN THE RULE.
+# WHY "DIRECTORIES ONLY" IS ADMITTED, AND WHY IT DOES NOT WEAKEN THE RULE.
 # The rule this guard enforces is that no DATA is destroyed in a tree whose
 # provenance the harness cannot establish. A directory with no non-directory
 # entry at any depth contains no data by construction: removing it destroys
@@ -1861,7 +1860,7 @@ acas_build_tree_occupants() {
   done
 }
 
-# ⭐ M-08.  THE ONE PLACE A BUILD-TREE SCRATCH DIRECTORY IS REMOVED.
+# THE ONE PLACE A BUILD-TREE SCRATCH DIRECTORY IS REMOVED.
 #
 # Four steps each keep a scratch directory inside the build tree and clear it
 # before use - the unpacked preSQL package, the two compile working directories
@@ -2141,7 +2140,7 @@ acas_assert_transport_policy() {
 # toolchain assertion and needs no client binary or credentials.
 acas_db_tcp_probe() {
   # The port range is asserted in acas_assert_environment, before anything
-  # connects, so `int(sys.argv[2])' here can no longer receive 99999 and fail
+  # connects, so `int(sys.argv[2])' here cannot receive 99999 and fail
   # with an OverflowError that names neither the variable nor the value.
   acas_deadline_prefix "$ACAS_TIMEOUT_PROBE"
   "${ACAS_DEADLINE_ARGV[@]}" python3 - "$ACAS_DB_HOST" "$ACAS_DB_PORT" <<'PY'
@@ -2290,7 +2289,7 @@ acas_wait_for_database() {
     if (( elapsed >= timeout )); then
       acas_die "$EX_DATABASE" \
         "the $(acas_target_description) database did not accept a TCP connection within ${timeout}s." \
-        'The host and port are deliberately not printed (F-39): read them from' \
+        'The host and port are deliberately not printed: read them from' \
         'ACAS_DB_HOST and ACAS_DB_PORT in this environment.' \
         'Step 4 cannot run without it: [common/comp-common.sh:L25] invokes presql2,' \
         'which opens a live connection at [presql2-latest.zip:presql2-package/presql2.cbl:L784].' \
@@ -2339,7 +2338,7 @@ acas_wait_for_database() {
             '[presql2-latest.zip:presql2-package/cobmysqlapi38.c:L114-L176], so step 4 would fail on every' \
             "one of the 28 bridges in [common/comp-common.sh:L25]." \
             "Check ACAS_DB_USER and ACAS_DB_PASSWORD in this environment -- neither is" \
-            "printed here (F-39) -- and that the account is granted access to" \
+            "printed here -- and that the account is granted access to" \
             "${ACAS_PRESQL2_DBNAME:-information_schema} and to the target schema." \
             "$(acas_diag_summary "$ACAS_DB_PROBE_DIAG")"
         fi
@@ -2375,13 +2374,13 @@ acas_wait_for_database() {
 # The WHOLE checkout is copied, and that is the safe choice.
 
 # =============================================================================
-# ⭐ THE SOURCE-TRANSFORMATION REGISTER (finding CR-01)
+# THE SOURCE-TRANSFORMATION REGISTER
 #
 # NINE SHIMS BELOW EDIT THE BUILD COPY OF FROZEN SOURCES, and this register is what
-# makes that a DISCLOSED fact rather than a hidden one. The attestation used to
-# describe only the two identity substitutions -- a replacement preSQL archive and a
-# redirected cobmysqlapi.o -- and published `overrides-used no' for a build whose
-# compiled COBOL differed from the checkout in nine places. An empty diff drawn
+# makes that a DISCLOSED fact rather than a hidden one. An attestation describing only
+# the two identity substitutions -- a replacement preSQL archive and a redirected
+# cobmysqlapi.o -- would publish `overrides-used no' for a build whose compiled COBOL
+# differs from the checkout in nine places. An empty diff drawn
 # against such a build compares Python to a PATCHED oracle, and calling that "the
 # frozen behavioural specification" is the one claim this project must never make.
 #
@@ -2426,7 +2425,7 @@ readonly -a ACAS_SOURCE_TRANSFORMS=(
   'irs/irs030.cbl|retains the shared connection until the end-of-job transfer cleanup, which the frozen EOJ closes first'
   # The 25 numbered file handlers, each carrying BOTH handler shims: the connection
   # refresh and the reply-pair reset. `acas000.cbl` takes only the second, because it
-  # is the four-way dispatcher and copies no credentials of its own.
+  # is the five-way dispatcher and copies no credentials of its own.
   'common/acas000.cbl|resets the FS-Reply/We-Error pair before each dispatch, so a caller cannot read the previous call reply'
   'common/acas004.cbl|refreshes the six DB-Data fields from the current caller on every RDBMS dispatch, which the frozen one-time guard leaves blank for a second caller, and resets the reply pair before each dispatch'
   'common/acas005.cbl|refreshes DB-Data per caller and resets the reply pair before each dispatch'
@@ -2527,7 +2526,7 @@ acas_assert_transform_register_complete() {
       "  $(printf '%s ' "${unregistered[@]}")" \
       'Every source transformation must be REGISTERED, because the attestation' \
       'publishes the register and a transformation missing from it is an undisclosed' \
-      'behavioural patch in the oracle (findings CR-01, SEC-02). Add the path and its' \
+      'behavioural patch in the oracle. Add the path and its' \
       'reason to ACAS_SOURCE_TRANSFORMS.' \
       'IF THIS IS A FROZEN BUILD the register is empty by design and ANY change is' \
       'unregistered: something modified the build copy outside the shim block, and a' \
@@ -2558,10 +2557,10 @@ acas_assert_transform_register_complete() {
 # presql2-latest.zip alike, so no bridge compiles without something at that name and
 # the default frozen build fails with exit 74 (README section 8.7).
 #
-# ⭐ IT IS NOT A REPOSITORY FILE, AND MUST NOT BECOME ONE (finding M-03; rules R-3,
-# R-4 and AAP section 0.8.1). It used to be committed as
-# `harness/copybook-shims/ACAS-SQLstate-error-list.cob', which the Agent Action Plan's
-# harness inventory does not name; the text is now EMITTED here, at build time,
+# IT IS NOT A REPOSITORY FILE, AND MUST NOT BECOME ONE (rules R-3,
+# R-4 and AAP section 0.8.1). Committing it as
+# `harness/copybook-shims/ACAS-SQLstate-error-list.cob' would add a file the Agent Action
+# Plan's harness inventory does not name, so the text is EMITTED here, at build time,
 # straight into the writable build copy under $ACAS_BUILD. Two properties follow, and
 # both are the point rather than a side effect:
 #
@@ -3219,7 +3218,7 @@ acas_prepare_build_tree() {
   acas_assert_safe_build_path "$ACAS_BUILD"
 
   if (( ACAS_REFRESH_TREE )); then
-    # ⭐ M-08.  AND THE PROVENANCE GATE, re-evaluated here rather than earlier, so
+    # AND THE PROVENANCE GATE, re-evaluated here rather than earlier, so
     # that a value or a directory that changed between the preconditions and this
     # moment is caught. It re-runs the shape guard itself, so the two cannot drift
     # apart, and it refuses a non-empty directory that this harness cannot show it
@@ -3244,7 +3243,7 @@ acas_prepare_build_tree() {
         'The build must run in a copy: [common/comp-common.sh:L25] regenerates' \
         'every common/*MT.cbl, and those files are the frozen data dictionary.'
 
-    # ⭐ M-08.  CLAIM THE TREE, and only now: the marker means "this harness built
+    # CLAIM THE TREE, and only now: the marker means "this harness built
     # here and a subsequent run may clear it", so writing it before the copy had
     # succeeded would licence clearing a directory that was never a build tree.
     # A failure to write it is not fatal - the next run simply refuses to clear a
@@ -3308,7 +3307,7 @@ acas_prepare_build_tree() {
       "could not digest the build-tree sources into $before_listing."
   fi
 
-  #  THE TRANSFORMS ARE APPLIED ONLY WHEN ASKED FOR (finding SEC-02). In the default
+  #  THE TRANSFORMS ARE APPLIED ONLY WHEN ASKED FOR. In the default
   #  frozen mode the applied register stays EMPTY, so the attestation reports
   #  `oracle-source-is-frozen yes` because nothing was changed - not because the check
   #  was skipped. Both facts are then measured on either side of this block.
@@ -3447,7 +3446,7 @@ acas_explain_missing_sqlstate_copybook() {
          requested --transformed-oracle build GENERATES the comment-only
          compatibility include, and only into the writable build copy at
          $ACAS_BUILD/copybooks -- it is not a repository file and the frozen
-         copybooks/ tree is never written to (finding M-03). Its CONTENT provably does not matter: compiling
+         copybooks/ tree is never written to. Its CONTENT provably does not matter: compiling
          glpostingMT.cbl to C (cobc -C) with the comment-only shim, with a
          zero-byte member, and with arbitrary different comment text yields a
          BYTE-IDENTICAL translation in all three cases. Only the COPY resolving
@@ -3840,7 +3839,7 @@ acas_write_presql2_param() {
   acas_log "wrote $target (0600, six cards in the order read_params requires)"
   # The CARD NAMES and their PRESENCE are what a reader has to be able to check --
   # read_params is positional, so a missing or reordered card is the failure mode.
-  # The VALUES are the deployment's identity and are not printed (F-39): the file
+  # The VALUES are the deployment's identity and are not printed: the file
   # itself is 0600 and is shredded by the EXIT trap, and the values come from the
   # environment, where anyone entitled to them already has them.
   acas_log '  cards: DBHOST DBUSER DBPASSWD DBNAME DBPORT DBSOCKET (all six, in that order)'
@@ -4028,7 +4027,7 @@ acas_step4_comp_common() {
   acas_deadline_prefix "$ACAS_TIMEOUT_BUILD"
   started="$SECONDS"
   # `< /dev/null' -- see acas_run_deadline for why every delegated child gets it
-  # (F-30). It matters most HERE: this frozen script invokes presql2 28 times
+  #. It matters most HERE: this frozen script invokes presql2 28 times
   # [common/comp-common.sh:L25] and presql2 prompts for a parameter it cannot
   # resolve, so an inherited stdin turns the longest step in the build into a hang.
   (
@@ -4088,7 +4087,7 @@ acas_step5_comp_all() {
   local rc=0 started elapsed
   acas_deadline_prefix "$ACAS_TIMEOUT_BUILD"
   started="$SECONDS"
-  # `< /dev/null' -- see acas_run_deadline (F-30). comp-all.sh compiles every
+  # `< /dev/null' -- see acas_run_deadline. comp-all.sh compiles every
   # application directory, so a single cobc that decides to read stdin would stall
   # the whole step.
   (
@@ -4317,7 +4316,7 @@ acas_finalise() {
 # by a shell script with `while IFS=', so it needs no parser and cannot fail on a
 # quoting subtlety at the exact moment it is meant to be establishing trust.
 # =============================================================================
-# VERSION 2 ADDS THE SOURCE-TRANSFORMATION DISCLOSURE (finding CR-01). A version 1
+# VERSION 2 ADDS THE SOURCE-TRANSFORMATION DISCLOSURE. A version 1
 # attestation described only the two IDENTITY substitutions and said nothing about the
 # nine shims that edit the build copy of frozen sources, so `overrides-used no' read as
 # "this is the unmodified oracle" for a build that was not. Version 2 publishes the
@@ -4532,7 +4531,7 @@ acas_publish_attestation() {
 ' "$module_digest"
     printf 'overrides-used	%s
 ' "$overrides"
-    #  ⭐ THE SOURCE-TRANSFORMATION DISCLOSURE (finding CR-01). Published
+    #  THE SOURCE-TRANSFORMATION DISCLOSURE. Published
     #  UNCONDITIONALLY, so an attestation can never be silent about it: a reader who
     #  finds no `source-transform' record knows there were none, rather than not
     #  knowing whether the producer looked.

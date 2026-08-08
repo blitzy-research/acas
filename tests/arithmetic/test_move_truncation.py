@@ -20,11 +20,9 @@ numeric class condition is a plain predicate that never raises.
 ------------------------------------------------------------------------------------
 PROVENANCE OF THE RULES
 ------------------------------------------------------------------------------------
-**There is no user rules document for this project.** ``review_rules`` reports that no
-user rules were provided, so there is no on-disk rules file to consult and nothing here
-was invented to fill the gap. The six binding rules **R-1 ... R-6** live in the
-Technical Specification section 0.7.2 and are restated below as they bear on this file;
-where the specification is silent, enterprise-standard best practice applies.
+The six binding rules **R-1 ... R-6** live in the Technical Specification section 0.7.2
+and are restated below as they bear on this file; where the specification is silent,
+enterprise-standard best practice applies.
 
 **R-1 - no COBOL at runtime.** ``tests/arithmetic/*`` touch neither COBOL nor a
 database. This file imports only ``acas_posting.cobol`` and ``acas_posting.dictionary``,
@@ -41,7 +39,7 @@ below is exact equality. The ambient ``decimal`` context is never read and never
 - the descriptors carry their own precision, and ``acas_posting.cobol.arithmetic``
 supplies its own context - so nothing here can perturb another test.
 
-⚠️ EVERY ``Decimal`` BELOW IS CONSTRUCTED FROM A STRING, uniformly and on purpose,
+ EVERY ``Decimal`` BELOW IS CONSTRUCTED FROM A STRING, uniformly and on purpose,
 as the migrated modules themselves do. A linter will offer to shorten the
 integer-valued ones to a bare numeric literal; do not accept it. The value of the
 convention is that it
@@ -73,9 +71,9 @@ semantics layer, which in turn records what was measured against the compiled or
 Where a question has no compiled answer the assertion is marked
 ``xfail(strict=True)`` against a NAMED question id, so the suite stays green while the
 question is open and turns RED the moment somebody makes the un-arbitrated reading come
-true. Every question this file names has since been measured, so the policy is recorded
-here and no longer exercised: what stands in its place is an assertion of the reading the
-compiler produced, plus an assertion AGAINST the one it refuted.
+true. Every question this file names IS measured, so the policy is recorded here rather
+than exercised: what stands in its place is an assertion of the reading the compiler
+produced, plus an assertion AGAINST the one it refuted.
 
 Section 0.8.4 also binds: there is no timing assertion and no performance measurement
 anywhere in this file.
@@ -83,14 +81,13 @@ anywhere in this file.
 ------------------------------------------------------------------------------------
 THE FOUR QUESTION IDS THIS FILE OWNS, ALL FOUR NOW MEASURED
 ------------------------------------------------------------------------------------
-Each id is the one ``acas_posting.cobol.move`` itself publishes, not a new label. Each
-used to be asserted as its NAIVE reading under ``xfail(strict=True)`` - what an engineer
-would guess before consulting the compiler - so that the suite could stay green while
-the question was open. All four have since been measured on GnuCOBOL 3.2.0 (finding
-F-19), THE NAIVE READING WAS REFUTED IN EVERY CASE, and each test now asserts the
-measurement and the refutation. There is no ``xfail`` left in this file, and a change
-back towards a naive reading fails by name rather than passing unnoticed. That is the
-same R-4/R-6 lock, working from the answer rather than from the question.
+Each id is the one ``acas_posting.cobol.move`` itself publishes, not a new label. All
+four are MEASURED on GnuCOBOL 3.2.0, and in every case the measurement REFUTED the naive
+reading - what an engineer would guess before consulting the compiler - so each test
+asserts the measurement and the refutation rather than the guess. There is no ``xfail``
+in this file, and a change back towards a naive reading fails by name rather than passing
+unnoticed. That is the same R-4/R-6 lock, working from the answer rather than from the
+question.
 
 * **Q-9  - ``MOVE SPACE`` into a numeric receiver.** INEXPRESSIBLE: measured as a
   GnuCOBOL 3.2 compile error, so the statement cannot exist in the compiled system and
@@ -184,13 +181,13 @@ pytestmark = pytest.mark.arithmetic
 #
 # Two routes, and which one a field takes is not a matter of taste (R-5):
 #
-#   * A field the generated dictionary catalogues arrives by its DICTIONARY KEY, so the
-#     assertion is traceable to the copybook declaration, the bridge host variable and
-#     the MySQL column all three - `loader.cite` prints that triple.
-#   * A field that never reaches a table - program-local working storage and print-line
-#     items - has no dictionary key, so it arrives through the picture parser carrying a
-#     SOURCE LOCATOR. `FieldDescriptor.__post_init__` rejects a descriptor with neither,
-#     which is the invariant that makes an untraceable assertion impossible to write.
+#  * A field the generated dictionary catalogues arrives by its DICTIONARY KEY, so the
+#  assertion is traceable to the copybook declaration, the bridge host variable and
+#  the MySQL column all three - `loader.cite` prints that triple.
+#  * A field that never reaches a table - program-local working storage and print-line
+#  items - has no dictionary key, so it arrives through the picture parser carrying a
+#  SOURCE LOCATOR. `FieldDescriptor.__post_init__` rejects a descriptor with neither,
+#  which is the invariant that makes an untraceable assertion impossible to write.
 #
 # Every locator below was read from the frozen file and verified to declare exactly the
 # picture it is cited for. Nothing under common/, copybooks/, general/, sales/,
@@ -458,7 +455,7 @@ class TestAlphanumericMoveTruncatesAndPadsOnTheRight:
 
 # ---------------------------------------------------------------------------
 #  4.2  NUMERIC MOVE - aligns on the implied decimal point, then truncates or
-#       zero-pads at BOTH ends
+#  zero-pads at BOTH ends
 # ---------------------------------------------------------------------------
 
 
@@ -633,7 +630,7 @@ class TestMultipleReceiversEachApplyTheirOwnRules:
     """
 
     def test_results_come_back_as_a_tuple_in_receiver_order(self) -> None:
-        # [general/gl051.cbl:L1017]. The order is the statement's order, so a reviewer
+        # [general/gl051.cbl:L1017]. The order is the statement's order, so a reader
         # can diff the two argument lists position by position.
         stored = move.move_to_all(
             Decimal("42"), (L4_BATCH, SAVE_BATCH, WS_BATCH_NOS)
@@ -676,7 +673,7 @@ class TestMultipleReceiversEachApplyTheirOwnRules:
     def test_a_figurative_constant_reaches_every_receiver(self) -> None:
         # Verbatim, [general/gl072.cbl:L411]::
         #
-        #     move  zero   to  tot-dr  tot-cr.
+        #  move  zero   to  tot-dr  tot-cr.
         #
         # Multiple receivers combined with a figurative sender. Both receivers are
         # `pic 9(8)v99` [general/gl072.cbl:L165-L166] - note they are UNSIGNED DISPLAY
@@ -801,7 +798,7 @@ class TestReferenceModificationIsOneBasedOnBothSides:
         # its own span and does not spill into the neighbouring positions.
         assert move.ref_mod_into("ABCDEFGH", 3, 4, "XY") == "ABXY  GH"
 
-    #  Q-10 IS MEASURED, AND THE MEASUREMENT CONFIRMS THE REFUSAL (finding F-19).
+    #  Q-10 IS MEASURED, AND THE MEASUREMENT CONFIRMS THE REFUSAL.
     #
     #  It was recorded as unreproducible on the reasoning that a computed out-of-range
     #  range "reads ADJACENT STORAGE, which a Python str does not have". A focused probe
@@ -809,14 +806,14 @@ class TestReferenceModificationIsOneBasedOnBothSides:
     #  flags (so no `-fec=bound-ref-mod` runtime check), with a sentinel placed
     #  immediately after the item in the SAME group so the adjacency is known:
     #
-    #      01 the-group.
-    #         05 src-text  pic x(10) value "ABCDEFGHIJ".
-    #         05 sentinel  pic x(10) value "##########".
+    #  01 the-group.
+    #  05 src-text  pic x(10) value "ABCDEFGHIJ".
+    #  05 sentinel  pic x(10) value "##########".
     #
-    #      src-text(8:5)  -> H I J # #     <- two bytes of the SENTINEL
-    #      src-text(9:4)  -> I J # #       <- two bytes of the SENTINEL
-    #      src-text(11:2) -> # #           <- entirely inside the SENTINEL
-    #      src-text(0:3)  -> NUL A B       <- one byte BEFORE the item
+    #  src-text(8:5)  -> H I J # #     <- two bytes of the SENTINEL
+    #  src-text(9:4)  -> I J # #       <- two bytes of the SENTINEL
+    #  src-text(11:2) -> # #           <- entirely inside the SENTINEL
+    #  src-text(0:3)  -> NUL A B       <- one byte BEFORE the item
     #
     #  So the value is whatever the program's storage layout happens to place next to the
     #  item - not a clamp, not spaces, and not an error. It is unreproducible in a Python
@@ -994,7 +991,7 @@ class TestFigurativeConstants:
     def test_space_into_a_numeric_display_receiver_is_refused_q9(self) -> None:
         """Q-9 is SETTLED BY THE COMPILER: the statement cannot be compiled at all.
 
-        MEASURED (finding F-19). GnuCOBOL 3.2.0 was given the statement directly:
+        MEASURED. GnuCOBOL 3.2.0 was given the statement directly:
 
             01 num-disp pic 9(5) value 12345.
             ...
@@ -1356,7 +1353,7 @@ class TestEditedValueReachingARealColumn:
 
         Two statements, and they must not be conflated.
 
-        FIRST, THE MEASUREMENT (finding F-19). Q-14 was recorded as unobservable on the
+        FIRST, THE MEASUREMENT. Q-14 was recorded as unobservable on the
         reasoning that the only observable this migration has is table state and every
         such picture receives into a print line. That is true of the SCENARIO tier but
         not of the compiler: a focused probe can render the picture and print the
@@ -1426,7 +1423,7 @@ class TestEditedValueReachingARealColumn:
 class TestStringShapesAreNotUnified:
     """Two ways of building the same 32-character legend, kept apart on purpose.
 
-    ⛔ DO NOT UNIFY THESE INTO ONE HELPER. The frozen sources build `Post-Legend` two
+    DO NOT UNIFY THESE INTO ONE HELPER. The frozen sources build `Post-Legend` two
     different ways, and the maintainer knew: [sales/sl100.cbl:L618] carries his own
     comment, verbatim::
 
@@ -1597,7 +1594,7 @@ class TestStringShapesAreNotUnified:
         because the pointer feeds the next STRING statement, so an advancing pointer
         would shift everything after it.
 
-        THE MEASUREMENT (finding F-19). GnuCOBOL 3.2.0, `cobc -x -free`, default flags,
+        THE MEASUREMENT. GnuCOBOL 3.2.0, `cobc -x -free`, default flags,
         `01 recv pic x(5)` pre-filled with `-----`:
 
             move 9 to ptr;  string "XY" ... into recv with pointer ptr

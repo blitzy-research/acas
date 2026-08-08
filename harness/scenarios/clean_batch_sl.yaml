@@ -8,7 +8,7 @@
 # harness/scenarios/clean_batch_pl.yaml: the two scenarios differ only in the
 # subsystem they drive, which is exactly what turns ONE MISSING TERMINATING
 # PERIOD at [sales/sl060.cbl:L1176] into an observable behavioural difference
-# rather than a reading of the source. The nine scenarios the protocol
+# rather than a reading of the source. The eight scenarios the protocol
 # expects, per Agent Action Plan section 0.8.5 and
 # [harness/docker-compose.yml "STAGES."], are: clean_batch_gl, clean_batch_sl,
 # clean_batch_pl, clean_batch_irs, mixed_accepted_rejected, period_end_totals,
@@ -38,7 +38,7 @@
 # table, a column, an index or a constraint. operations is a strictly ordered
 # list and its steps run one at a time, matching the single-threaded COBOL.
 #
-# KEYS APPEAR IN A FIXED ORDER, identically in all nine scenario files, and
+# KEYS APPEAR IN A FIXED ORDER, identically in all eight scenario files, and
 # the file is UTF-8, ASCII-only, LF-terminated, two-space indented and free of
 # tabs. It carries no wall-clock reading, no host identity, no process id, no
 # random value and no absolute host path, so two captures of one scenario are
@@ -192,7 +192,7 @@ description: |
        pinned to a space so that the out-of-scope program the menu dispatches
        first is a provable no-op -- see the next section.
   The remaining four are INERT on this route and are present only so that all
-  nine scenario files share one system block and so the seeded system record
+  eight scenario files share one system block and so the seeded system record
   is fully determined:
     period -- the cycles-per-quarter divisor, used only by gl080
       [copybooks/wssystem.cob:L64], and no scenario in this harness drives it.
@@ -373,13 +373,13 @@ description: |
   were never observed by any declared effect.
 
   TWO CELLS OF SYSTEM-REC ARE WITHHELD FROM THE CAPTURE, AND ONLY TWO.
-  `RDBMS-Passwd pic x(12)' [copybooks/wssystem.cob:L139] and the frozen schema's
-  shorter PASS-WORD column are the database's own password as seeded, and a dump
-  is SELECT *, so harness/dump_tables.py's REDACTED_COLUMNS replaces exactly
-  those two cells, on BOTH sides, with one fixed marker -- which is why this file
-  declares neither field. The row is still dumped and still diffed, every other
-  column byte for byte, so this is not an ignore-list, and withholding a secret
-  symmetrically cannot conceal a difference in anything the cycle computes.
+  `RDBMS-Passwd' [copybooks/wssystem.cob:L139] and the frozen schema's shorter
+  PASS-WORD column are the seeded database password, and a dump is SELECT *, so
+  harness/dump_tables.py's REDACTED_COLUMNS replaces those two cells, on BOTH
+  sides, with one fixed marker -- which is why this file declares neither field.
+  The row is still dumped and still diffed, every other column byte for byte, so
+  this is not an ignore-list, and an ignore-list in the diff stage remains
+  forbidden outright.
   THE ROW IS ALSO FINGERPRINTED, ON EVERY SCENARIO AND ON BOTH SIDES:
   acas_resolve_fingerprint_tables appends it when a scenario has not declared it,
   and tests/conftest.py's `assert_system_record_parity' compares the two sides'
@@ -738,27 +738,16 @@ description: |
     invoking it.
 
   THE ACCEPTANCE PROTOCOL
-  TEN stages, in this order, one scenario at a time and nothing
-  alongside it. harness/normalize.py is the single registry and
-  `harness/normalize.py --print-stages' prints it, so this list is a restatement
-  and never the authority:
-    1 reset the schema and seed the scenario
-    2 run the compiled COBOL cycle
-    3 dump the COBOL state
-    4 normalise the COBOL dump
-    5 reset the schema and RE-SEED THE SAME SCENARIO -- the same fixture bytes, so
-      the Python cycle starts from the state the COBOL cycle started from and not
-      the state it left
-    6 run the migrated Python cycle
-    7 dump the Python state
-    8 normalise the Python dump
-    9 verify both captures are published -- BEFORE a single row is compared,
-      because two PARTIAL captures can produce an empty diff and so pass a
-      comparison that compared nothing
-    10 diff the two normalised trees
-  harness/build_oracle.sh and harness/seed.sh --build-fixtures come before stage 1 and are
-  not stages: the first runs once per image, the second once per change to a
-  scenario's seed records.
+  TEN stages, one scenario at a time and nothing alongside it.
+  `harness/normalize.py --print-stages' is the registry and the authority. The
+  two stages a reader would not guess are stage 5, which re-seeds THE SAME
+  FIXTURE BYTES so the Python cycle starts from the state the COBOL cycle
+  started from rather than the state it left, and stage 9, which verifies both
+  captures are published BEFORE a single row is compared, because two PARTIAL
+  captures produce an empty diff and so pass a comparison that compared nothing.
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures precede stage 1
+  and are not stages: the first runs once per image, the second once per change
+  to a scenario's seed records.
   AN EMPTY NORMALISED DIFF IS THE ONLY PASS CONDITION; a stage that exits
   non-zero has produced no evidence rather than weaker evidence, so the
   protocol is restarted from the seed rather than carried forward. The
@@ -768,14 +757,13 @@ description: |
   it.
   Two runs of this scenario under the same pinned clock must additionally
   produce byte-identical dumps; that is what the determinism suite asserts.
-  This file's consumers are all present in the checkout:
-  the four documents under docs/migration/, the eight modules under
-  tests/scenarios/ (one per scenario), and harness/run_python_scenario.sh.
-  The seed FLAT FILES are deliberately not in the
-  checkout: the records are declared above under seed_records and
-  harness/seed.sh --build-fixtures builds the files from them inside the image, because
-  fifteen of the seventeen frozen loaders read ORGANIZATION INDEXED or RELATIVE
-  files whose on-disk form belongs to the Berkeley DB version that image carries.
+  This file's consumers are all in the checkout: the four documents under
+  docs/migration/, the eight modules under tests/scenarios/ and
+  harness/run_python_scenario.sh. Its seed FLAT FILES are not: the records are
+  declared above under seed_records and harness/seed.sh --build-fixtures builds
+  the files inside the image, because fifteen of the seventeen frozen loaders
+  read ORGANIZATION INDEXED or RELATIVE files whose on-disk form belongs to the
+  Berkeley DB version that image carries.
 
   THE CONSUMER CONTRACT -- WHY SOME VALUES APPEAR UNDER TWO KEYS
   This file serves consumers with two different reading strategies, so a few
@@ -816,25 +804,11 @@ description: |
   table, which is why none of them is an input here.
 
   LOCATOR PROVENANCE
-  Every line number cited above was read directly out of the frozen source in
-  this checkout rather than copied from a plan, and several planning citations
-  were found to be off. The ones corrected here are worth knowing when
-  cross-reading: the commented-out Purchase autogen call and gate are at
-  [purchase/purchase.cbl:L755-L758] and not the four lines above them; the
-  credential copy in the customer handler spans
-  [common/acas012.cbl:L640-L645], of which the user field is only the second
-  line; the batch loader's autocommit caveat is
-  [common/glbatchLD.cbl:L9-L12]; the third apparent open-item rewrite in sl060
-  at [sales/sl060.cbl:L603] and the batch-file recovery open at
-  [sales/sl060.cbl:L1011-L1014] are BOTH COMMENTED OUT and are therefore not
-  verbs; and G-L is a condition name on the installed-ledger level byte at
-  [copybooks/wssystem.cob:L85], NOT on the fan-out switch at
-  [copybooks/wssystem.cob:L179-L181], which is the correction that produced
-  the two-field statement of pure General Ledger mode above.
-  THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common,
-  copybooks, general, sales, purchase, irs, stock or mysql is a defect in the
-  migration however harmless it looks.
-
+  Every line number cited above was read out of the frozen source in this
+  checkout; docs/migration/traceability.md carries the corrected-locator record.
+  THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common, copybooks,
+  general, sales, purchase, irs, stock or mysql is a defect in the migration
+  however harmless it looks.
 subsystem: sales
 
 # Read by the oracle-side runner as the default for its --operation option; it

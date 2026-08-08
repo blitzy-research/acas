@@ -362,10 +362,10 @@ class _Pl100State:
     def ctx(self, record: object) -> facade.FacadeContext:
         """Build the facade context for one entity's record.
 
-        Mirrors the handler `CALL` argument list of `[copybooks/Proc-ACAS-FH-
-        Calls.cob:L51-L57]` - ``call "acas0NN" using System-Record <entity-record> File-
-        Access File-Defs ACAS-DAL-Common-Data`` - with the parameter order preserved.
-        """
+        Mirrors the handler `CALL` argument list of `
+        [copybooks/Proc-ACAS-FH-Calls.cob:L51-L57]` - ``call "acas0NN" using System-Record
+        <entity-record> File- Access File-Defs ACAS-DAL-Common-Data`` - with the parameter order
+        preserved. """
         return facade.FacadeContext(
             system=self.system_record,
             record=record,
@@ -469,16 +469,16 @@ def _init01(state: _Pl100State) -> None:
         # [L290]  display PL137 at 2301.  A DIAGNOSTIC with no database effect
         # becomes a log record (plan section 0.3.4).  THE RECORD IS THE LITERAL
         # AND NOTHING ELSE:
-        #   * [L291] `display PL002` and [L292] `accept ws-reply` are DROPPED
-        #     together.  "PL002 Note error and hit return" is nothing but the
-        #     instruction to press the key the `accept` reads, so there is no
-        #     substantive half to keep and a headless run has no operator to
-        #     instruct.
-        #   * `P-Flag-P` ITSELF IS NOT LOGGED.  The frozen display shows the
-        #     literal alone; the flag's value is a SYSTEM-REC host-variable
-        #     value, which the safe-event schema in `acas_posting/dal/status.py`
-        #     excludes from a record (CWE-532), and narrating it would also state
-        #     more than the compiled program does.
+        #  * [L291] `display PL002` and [L292] `accept ws-reply` are DROPPED
+        #  together.  "PL002 Note error and hit return" is nothing but the
+        #  instruction to press the key the `accept` reads, so there is no
+        #  substantive half to keep and a headless run has no operator to
+        #  instruct.
+        #  * `P-Flag-P` ITSELF IS NOT LOGGED.  The frozen display shows the
+        #  literal alone; the flag's value is a SYSTEM-REC host-variable
+        #  value, which the safe-event schema in `acas_posting/dal/status.py`
+        #  excludes from a record (CWE-532), and narrating it would also state
+        #  more than the compiled program does.
         # The TRANSFER below is not dropped.
         _LOG.warning("%s: %s", _PROG_NAME, _PL137)
         # [L293]  go to menu-exit.        # GO TO class 3 -> menu-exit [L467]
@@ -540,7 +540,7 @@ def _init01__acpt_xrply(state: _Pl100State) -> None:
 
     if _is_g_l(state):
         _bl_open(state)
-    # NOTE (FINDING F-17), and it is the outer frame A-PL100-A sits inside: `bl-open` runs
+    # NOTE (FINDING F-PL100-17), and it is the outer frame A-PL100-A sits inside: `bl-open` runs
     # ONLY under `G-L`, and so do `bl-write` [L409-L410] and `bl-close` [L454-L455].
 
     state.j = movelib.move_figurative(movelib.ZERO, _D_J)
@@ -992,7 +992,7 @@ _BATCH_NOS_SCALE: Final[int] = 10**5
 def _restate_ws_batch_key9(batch: GlBatchRecord) -> None:
     """Keep ``WS-Batch-Key9`` in step with the two members it redefines.
 
-    ⭐⭐ ONE STORAGE, TWO READINGS. ``03 WS-Batch-Key.`` holds ``05 WS-Ledger pic 9.`` and
+    ONE STORAGE, TWO READINGS. ``03 WS-Batch-Key.`` holds ``05 WS-Ledger pic 9.`` and
     ``05 WS-Batch-Nos pic 9(5).``, and ``03 WS-Batch-Key9 redefines WS-Batch-Key pic
     9(6).`` [copybooks/wsbatch.cob:L14-L21] is those SAME six bytes read as one number.
 
@@ -1480,7 +1480,7 @@ def run(
     Both linkage records are MUTATED IN PLACE, and that is the whole point.
 
     Args:
-        ws_calling_data: `WS-Calling-Data` [copybooks/wscall.cob:L6-L13].
+        ws_calling_data: `WS-Calling-Data` [copybooks/wscall.cob:L7-L14].
         system_record: `System-Record` [copybooks/wssystem.cob]. Supplies the pinned
             `Run-Date` [copybooks/wssystem.cob:L67], the `P-Flag-P` one-shot latch, the
             IRS three-state switch and the GL/PL control accounts; receives the four
@@ -1491,6 +1491,12 @@ def run(
             the presentation the `Date-Form` selects. The first of the two controlled-
             clock observables.
         file_defs: `File-Defs` [copybooks/wsnames.cob].
+        dal_options: keyword-only, and NOT one of the five linkage operands. Forwarded
+            to every facade `PERFORM` this program issues, carrying the caller's
+            transport-security declaration. The frozen program has no counterpart
+            because its bridge has none. `None` - the default - declares nothing,
+            which every handler resolves FAIL-CLOSED. It changes no status, no
+            statement, no arithmetic and no write order.
         ok_to_post: The `[L302-L311]` run-confirm, "OK to post payment
             transactions (YES/NO) ?".  Plan section 0.3.4 requires that
             "accept prompts that gate a database write become explicit CLI
@@ -1498,25 +1504,23 @@ def run(
             EVERY write the program makes: answering NO transfers to
             `menu-exit` [L309] having opened nothing and written nothing at
             all.  `True` corresponds to the COBOL's `"YES"`, the only reply
-            that proceeds.  ⛔ REQUIRED, WITH NO DEFAULT: there is no COBOL
+            that proceeds.  REQUIRED, WITH NO DEFAULT: there is no COBOL
             default for section 0.3.4 to preserve, because `wx-reply` is
             `pic xxx value spaces` [L157], [L305] moves spaces into it again
             immediately before the accept so that [L306]'s `update` pre-fills
             blanks, and [L310-L311] re-asks on a blank.  A keyword default
             would invent an answer the frozen program has not got, and the
-            affirmative one writes to the database; an earlier draft defaulted
-            this to `True`.  The COBOL upper-cases the reply
+            affirmative one writes to the database.  The COBOL upper-cases the reply
             (`function upper-case`, [L307]) and re-asks on anything other than
             `"YES"` or `"NO"` [L310-L311]; with a boolean the re-ask collapses,
             which is a consequence of removing the presentation layer and NOT
             a behaviour change - see the Class 4 proof on
             `_init01__acpt_xrply`.
 
-            ⭐ REQUIRED, WITH NO DEFAULT (M-09, CWE-636).  It defaulted to
-            `True`, on the reasoning that `"YES"` is "the only reply that
-            proceeds".  That reasoning is sound and it does not yield a
-            default, because a default is what the program does when the
-            operator supplies NOTHING and this program then does neither.
+            REQUIRED, WITH NO DEFAULT (CWE-636).  `"YES"` is indeed the only
+            reply that proceeds, but that does not yield a default of `True`:
+            a default is what the program does when the operator supplies
+            NOTHING, and this program then does neither.
             `wx-reply` is `pic xxx value spaces` [purchase/pl100.cbl:L157] and
             [L305] re-fills it with spaces immediately before the accept, so
             pressing return leaves it blank, [L310-L311] fires and control
@@ -1575,343 +1579,238 @@ def run(
 # `return`", and that deliberate omissions be "recorded as omissions ... so
 # that a reader comparing the two files does not conclude something was lost".
 #
-# PROGRAM -> MODULE
-#   purchase/pl100.cbl  ->  acas_posting/programs/pl100_payment_posting.py
-#   Boundary: THE WHOLE PROGRAM (unlike gl051 and irs030, which are partial).
+# PROGRAM -> MODULE, LABEL -> FUNCTION, FALL-THROUGHS
+# ===================================================
+# Both tables live in docs/migration/traceability.md. Locally: 29 labels, 29
+# functions, and because `main-exit.` occurs FIVE times every function name is
+# SECTION-QUALIFIED. Two fall-throughs are reproduced as explicit calls and
+# recorded at their sites, because COBOL fall-through is invisible in the source.
+# Public API is `run` alone.
 #
-# --------------------------------------------------------------------------
-# LABEL -> FUNCTION.  29 labels, 29 functions.  `main-exit.` occurs FIVE
-# times, so every name is SECTION-QUALIFIED - paragraph names are not
-# globally unique in this codebase.
-# --------------------------------------------------------------------------
-#   L272  init01 section.              -> _init01
-#   L296  menu-return.                 -> _init01__menu_return
-#   L302  acpt-xrply.                  -> _init01__acpt_xrply
-#   L323  loop.                        -> _init01__loop
-#   L349  cust-update.                 -> _init01__cust_update
-#   L427  main-end.                    -> _init01__main_end
-#   L467  menu-exit.                   -> _init01__menu_exit
-#   L470  headings.                    -> _init01__headings          (PERFORM-only)
-#   L488  compute-purch-pay.           -> _init01__compute_purch_pay (PERFORM-only)
-#   L507  csp-exit.                    -> _init01__csp_exit          (PERFORM-only)
-#   L510  analise-deductions section.  -> _analise_deductions
-#   L539  main-exit.        (1 of 5)    -> _analise_deductions__main_exit
-#   L541  bl-open section.             -> _bl_open
-#   L574  main-exit.        (2 of 5)    -> _bl_open__main_exit
-#   L577  bl-write section.            -> _bl_write
-#   L657  main-exit.        (3 of 5)    -> _bl_write__main_exit
-#   L660  bl-close section.            -> _bl_close
-#   L679  main-exit.        (4 of 5)    -> _bl_close__main_exit
-#   L681  Eval-Status section.         -> _eval_status
-#   L687  main-exit.        (5 of 5)    -> _eval_status__main_exit
-#   L689  zz050-Validate-Date section. -> _zz050_validate_date       (NEVER performed)
-#   L716  zz050-test-date.             -> _zz050_test_date           (NEVER performed)
-#   L721  zz050-exit.                  -> _zz050_exit                (NEVER performed)
-#   L724  zz060-Convert-Date section.  -> _zz060_convert_date
-#   L756  zz060-Exit.                  -> _zz060_exit
-#   L759  zz070-Convert-Date section.  -> _zz070_convert_date
-#   L786  zz070-Exit.                  -> _zz070_exit
-#   L789  maps04 section.              -> _maps04
-#   L794  maps04-exit.                 -> _maps04_exit
-#   -- public entry --                 -> run   (the only exported name)
-#   -- support, no COBOL label --      -> _local, _alpha_eq, _initial,
-#      _fresh_oi_header, _is_g_l, _is_irs_used, _is_irs_both_used,
-#      _oi_supplier_image, _maps04_wrapper, _Pl100State
-#
-# --------------------------------------------------------------------------
-# `GO TO` CLASSIFICATION - 19 SITES, MEASURED.  Classified by SHAPE, per the
-# four-class taxonomy of plan section 0.4.2, not by matching a label list.
-# --------------------------------------------------------------------------
-#   CLASS 1 - loop-back -> `continue` inside `while True:`   (5 sites)
-#     L331 -> loop L323   the type filter rejects the record
-#     L340 -> loop L323   after the type-2 average + OTM5 rewrite
-#     L344 -> loop L323   supplier closed, or type 2
-#     L347 -> loop L323   no batch linkage
-#     L425 -> loop L323   end of a posted item
-#   CLASS 2 - forward terminator -> `break` PLUS the post-loop block  (1 site)
-#     L326 -> main-end L427   on `fs-reply = 10` (end of the OTM5 walk).
-#     Plan section 0.6.3: the transformation is "`break` PLUS faithful
-#     placement of that work after the loop, not `break` alone.  Mis-splitting
-#     here would silently drop end-of-run processing."  The post-loop work at
-#     [L430-L465] contains BOTH file closes, the [L448] total merge, the
-#     ENTIRE deduction reversal, `bl-close`, and TWO `SYSTEM-REC` writes -
-#     every one a real database effect.
-#   CLASS 3 - section/paragraph exit -> `return`             (9 sites)
-#     L293 -> menu-exit L467          the p-flag-p latch refusal
-#     L309 -> menu-exit L467          the run-confirm answered NO
-#     L492 -> csp-exit L507           oi-date-cleared is zero
-#     L517 -> main-exit L539          "Pzb" not found
-#     L531 -> main-exit L539          "Pz " not found
-#     L736 -> zz060-Exit L756         u-date is spaces
-#     L742 -> zz060-Exit L756         Date-UK short-circuit
-#     L747 -> zz060-Exit L756         after the USA swap
-#     L772 -> zz070-Exit L786         Date-UK short-circuit
-#     L777 -> zz070-Exit L786         after the USA swap
-#     (L736/L742/L747 and L772/L777 are reproduced inside the consolidated
-#      `dates` helpers, which the wrapper sections delegate to.)
-#   CLASS 4 - sibling re-dispatch -> named call + explicit transfer  (3 sites)
-#     L311 -> acpt-xrply L302   PER-SITE PROOF: the target re-asks the
-#       run-confirm, and the confirm GATES EVERY DATABASE WRITE, so the site
-#       is inside the migrated surface rather than out of scope.  The COBOL
-#       loops until the reply is exactly "YES" or "NO"; the reply becomes the
-#       `ok_to_post` parameter, whose domain is already exactly those two
-#       outcomes, so the retry has no reachable iteration and collapses.  The
-#       collapse is a PRESENTATION-REMOVAL CONSEQUENCE, not a behaviour
-#       change: for every input the COBOL could terminate on, the Python takes
-#       the same branch, performs the same opens, and writes the same rows.
-#       The `while True:` shape is retained in `_init01__acpt_xrply` so the
-#       transfer remains visible.
-#     L702 -> zz050-test-date L716   Date-UK reaches the shared tail
-#     L707 -> zz050-test-date L716   the USA swap reaches the shared tail
-#       (both inside the consolidated `dates.zz050_validate_date`, which calls
-#        `dates.zz050_test_date` for that tail)
-#
-# FALL-THROUGHS - reproduced as explicit calls, both recorded because COBOL
-# paragraph fall-through is invisible at the call site:
-#   [L294] end of the latch gate -> menu-return.  L296
-#   [L347] end of the filter cascade -> cust-update.  L349
-#   (also, within sections: L537->L539, L572->L574, L655->L657, L677->L679,
-#    L685->L687, L465->L467, L505->L507)
-#
-# `PERFORM ... THRU` - ONE OF ONLY FOUR IN-SCOPE SITES REPO-WIDE.  The others
-# are [general/gl072.cbl:L300], [general/gl072.cbl:L304] and
-# [sales/sl100.cbl:L344].  (The plan says seven; four is the measured
-# in-scope count - gl051 L504/L955 and irs030 L813/L831/L832 fall outside the
-# migrated boundaries.)  Plan section 0.4.2: "each is transformed by hand into
-# an explicit sequence of calls and verified individually, with no
-# pattern-matching shortcut."
-#   [L336]  perform compute-purch-pay thru csp-exit
-#     span   = [L488] compute-purch-pay.  ->  [L507] csp-exit.
-#     labels = exactly two, so the expansion is:
-#                  _init01__compute_purch_pay(state)
-#                  _init01__csp_exit(state)
-#              in that order, with [L492]'s `go to csp-exit` becoming an early
-#              `return` from the first (Class 3).  `csp-exit`'s body is
-#              [L508] `exit.` - a PLAIN `EXIT`, a no-op statement, NOT
-#              `exit section.` - so the second call really does nothing, and
-#              that is why it is written as an empty function rather than
-#              dropped.
-#
-# --------------------------------------------------------------------------
+
 # ANOMALIES REPRODUCED (R-4: "a defect reproduced is correct; a defect fixed
 # is a failure").  EIGHT sites, each carrying a locator and `DO NOT FIX`.
 # --------------------------------------------------------------------------
-#   A-PL100-A  [L566-L570]  in _bl_open - a MUTUALLY EXCLUSIVE `IF ... ELSE`
-#            where every sibling uses two independent `IF`s, `irs-used` tested
-#            WITHOUT `IRS-Both-Used`, and NO open-output fallback.  Writes to
-#            unopened tables in BOTH IRS modes.  Control:
-#            [purchase/pl060.cbl:L907-L920].  Discovered here and now REGISTERED
-#            under this name in docs/migration/anomaly-log.md section 15.
-#   A-PL100-B  [L356-L361], [L405]  in _init01__cust_update - no supplier is
-#            ever created (no `Purch-Write` exists in the program), yet
-#            `Purch-Rewrite` is issued unconditionally.  Control:
-#            [purchase/pl060.cbl:L436-L440], [purchase/pl060.cbl:L515-L519].
-#            REGISTERED under this name.
-#   A-PL100-C  [L449]  in _init01__main_end - the whole deduction reversal is
-#            gated on `t-deduct` ALONE, so `n-deduct` can drift permanently.
-#            REGISTERED under this name.
+#  A-PL100-A  [L566-L570]  in _bl_open - a MUTUALLY EXCLUSIVE `IF ... ELSE`
+#  where every sibling uses two independent `IF`s, `irs-used` tested
+#  WITHOUT `IRS-Both-Used`, and NO open-output fallback.  Writes to
+#  unopened tables in BOTH IRS modes.  Control:
+#  [purchase/pl060.cbl:L907-L920].  Discovered here and now REGISTERED
+#  under this name in docs/migration/anomaly-log.md section 15.
+#  A-PL100-B  [L356-L361], [L405]  in _init01__cust_update - no supplier is
+#  ever created (no `Purch-Write` exists in the program), yet
+#  `Purch-Rewrite` is issued unconditionally.  Control:
+#  [purchase/pl060.cbl:L436-L440], [purchase/pl060.cbl:L515-L519].
+#  REGISTERED under this name.
+#  A-PL100-C  [L449]  in _init01__main_end - the whole deduction reversal is
+#  gated on `t-deduct` ALONE, so `n-deduct` can drift permanently.
+#  REGISTERED under this name.
 #
-#   THE RENAME, STATED ONCE SO A GREP FOR THE OLD NUMBER LANDS SOMEWHERE. The three
-#   candidates above used to carry bare `A-NEW-5`, `A-NEW-6` and `A-NEW-7`, numbers
-#   allocated in this file alone.  The project register in
-#   docs/migration/anomaly-log.md had independently allocated those same three
-#   numbers to unrelated defects - A-NEW-5 to "Purchase has no abort gate at all",
-#   A-NEW-6 to the reachable gl080 divide-by-zero and A-NEW-7 to a comment naming a
-#   field that does not exist - so one token meant two things depending on which file
-#   a reader was in.  The register keeps its numbers, these three take globally unique
-#   names, and the old-to-new map is published in that register:
-#   A-NEW-5 -> A-PL100-A, A-NEW-6 -> A-PL100-B, A-NEW-7 -> A-PL100-C.
-#   A-1      [L675]  in _bl_close - THE CONTROL CASE: the period IS present,
-#            so [L676] is a SIBLING `if` and `GL-Posting-Close` IS reached in
-#            pure-GL mode.  The defective sibling is [sales/sl060.cbl:L1176].
-#   A-10     [L495], [L497], [L500-L502]  in _init01__compute_purch_pay -
-#            VARIANT (d) of four mutually inconsistent moving-average idioms.
-#            Peers: [purchase/pl060.cbl:L743] (a), [purchase/pl060.cbl:L758]
-#            (b), [sales/sl100.cbl:L506] (c).  ⭐ A-8 DOES NOT APPLY HERE.
-#   A-17     [L672]  in _bl_close - `move RRN to postings.  *> Why ?`, the
-#            maintainer's own question mark.  Occurrence 4 of 4, and
-#            LOAD-BEARING via [L564] -> [L572].
-#   A-18     [L615-L616], [L640-L641]  in _bl_write - `dr-pc`/`cr-pc` dropped
-#            from the IRS record; `31` moved with `*> IS IT ???`.
-#   A-21     [L617], [L626], [L631]  in _bl_write - qualified references
-#            forced by copybook field-name collisions.
-#   NOT PRESENT IN THIS FILE, recorded so a reader does not hunt for them:
-#     A-8  (double truncation) - both accumulators here are integer
-#          `binary-long` day counts, so there is only ONE truncation.
-#     A-22 (wrapper/exit name disagreement) - `maps04` L789 and `maps04-exit`
-#          L794 AGREE.  A-22 is at [general/gl070.cbl:L603-L609] and
-#          [general/gl051.cbl:L1273]/[general/gl051.cbl:L1278].
-#     A-6  (the always-refused rewrite verb, [common/acas008.cbl:L299-L307])
-#          is never triggered: `SPL-Posting-Rewrite` is not called here.
+#  THE ALIAS MAP, STATED HERE SO A GREP FOR A BARE `A-NEW-<n>` LANDS SOMEWHERE. The
+#  three candidates above are the ones a reader may meet as bare `A-NEW-5`, `A-NEW-6`
+#  and `A-NEW-7`, numbers meaningful in this file alone.  The project register in
+#  docs/migration/anomaly-log.md had independently allocated those same three
+#  numbers to unrelated defects - A-NEW-5 to "Purchase has no abort gate at all",
+#  A-NEW-6 to the reachable gl080 divide-by-zero and A-NEW-7 to a comment naming a
+#  field that does not exist - so one token meant two things depending on which file
+#  a reader was in.  The register keeps its numbers, these three take globally unique
+#  names, and the old-to-new map is published in that register:
+#  A-NEW-5 -> A-PL100-A, A-NEW-6 -> A-PL100-B, A-NEW-7 -> A-PL100-C.
+#  A-1      [L675]  in _bl_close - THE CONTROL CASE: the period IS present,
+#  so [L676] is a SIBLING `if` and `GL-Posting-Close` IS reached in
+#  pure-GL mode.  The defective sibling is [sales/sl060.cbl:L1176].
+#  A-10     [L495], [L497], [L500-L502]  in _init01__compute_purch_pay -
+#  VARIANT (d) of four mutually inconsistent moving-average idioms.
+#  Peers: [purchase/pl060.cbl:L743] (a), [purchase/pl060.cbl:L758]
+#  (b), [sales/sl100.cbl:L506] (c).  A-8 DOES NOT APPLY HERE.
+#  A-17     [L672]  in _bl_close - `move RRN to postings.  *> Why ?`, the
+#  maintainer's own question mark.  Occurrence 4 of 4, and
+#  LOAD-BEARING via [L564] -> [L572].
+#  A-18     [L615-L616], [L640-L641]  in _bl_write - `dr-pc`/`cr-pc` dropped
+#  from the IRS record; `31` moved with `*> IS IT ???`.
+#  A-21     [L617], [L626], [L631]  in _bl_write - qualified references
+#  forced by copybook field-name collisions.
+#  NOT PRESENT IN THIS FILE, recorded so a reader does not hunt for them:
+#  A-8  (double truncation) - both accumulators here are integer
+#  `binary-long` day counts, so there is only ONE truncation.
+#  A-22 (wrapper/exit name disagreement) - `maps04` L789 and `maps04-exit`
+#  L794 AGREE.  A-22 is at [general/gl070.cbl:L603-L609] and
+#  [general/gl051.cbl:L1273]/[general/gl051.cbl:L1278].
+#  A-6  (the always-refused rewrite verb, [common/acas008.cbl:L299-L307])
+#  is never triggered: `SPL-Posting-Rewrite` is not called here.
 #
 # --------------------------------------------------------------------------
-# FINDINGS - divergences and oddities recorded but not classified as
+# FINDINGS - named `F-PL100-<n>` rather than bare `F-<n>`, so a file-local
+# candidate cannot be read as an entry of a shared register, and so it cannot be
+# confused with the REGISTERED anomalies `A-PL100-A`, `A-PL100-B` and
+# `A-PL100-C`. The rule is docs/migration/anomaly-log.md section 15.1.
+# Divergences and oddities recorded but not classified as
 # registered anomalies.
 # --------------------------------------------------------------------------
-#   F-1  [L621]  an INERT store: `move spaces to post-vat-side` is overwritten
-#        by `"DR"` at [L627] before any write.  Same pattern at
-#        [sales/sl100.cbl:L639]/[L645].  Reproduced, not optimised away.
-#   F-2  [L537]  ASYMMETRY: no `move 1 to File-Key-No` precedes the second
-#        `Value-Rewrite`, where [L524] precedes the first.
-#   F-3  [L612-L613]  the DR/CR sides are SWAPPED relative to
-#        [purchase/pl060.cbl:L958-L959], and the account is `bl-pay-ac`, not
-#        `bl-purch-ac`.
-#   F-4  [L617], [L623-L624]  `vat-ac` is ZEROED where
-#        [purchase/pl060.cbl:L966-L967] copies it, and only TWO control totals
-#        are accumulated where [purchase/pl060.cbl:L973-L976] accumulates
-#        FOUR.  A payment posting carries no VAT.
-#   F-5  [L546], [L548]  the field is `bl-next-batch`, a DIFFERENT
-#        `SYSTEM-REC` column from the `next-batch` that
-#        [purchase/pl060.cbl:L885-L887] uses.
-#   F-6  §541/§577/§660  the sections are declared LOWER CASE (`bl-open`,
-#        `bl-write`, `bl-close`) yet performed as `BL-Open` [L317], `BL-Write`
-#        [L410], `bl-close` [L455] and `bl-close`/`bl-open` [L654-L655].
-#        COBOL is case-insensitive; the inconsistency is recorded.
-#   F-7  [L670]  the `accept` is NOT wrapped in `if WS-Caller not = "xl150"`,
-#        unlike [purchase/pl060.cbl:L1022-L1025] - the unattended-mode branch
-#        is simply absent.
-#   F-8  [L671]  the comment reads `*> THIS IS IN PURCHASE PL060` - inside
-#        pl100.  A copy-paste artefact present in four files:
-#        [sales/sl060.cbl:L1172], [purchase/pl060.cbl:L1027],
-#        [sales/sl100.cbl:L690], [purchase/pl100.cbl:L671].
-#   F-9  [L468]  the program ends with `exit program.`, not `goback`.
-#   F-10 [L689-L722]  `zz050-Validate-Date` is DECLARED but NEVER PERFORMED -
-#        `grep -c "perform *zz050"` returns 0.  Dead code that R-5 still
-#        requires a named function for.
-#   F-11 [L369]  `move u-date to l5-date` uses `u-date`, where
-#        [purchase/pl060.cbl:L448] uses `ws-date`.  Presentation only, but the
-#        field choice is reproduced.
-#   F-12 [L356]  the unknown-supplier test is `fs-reply = 21`, where
-#        [purchase/pl060.cbl:L433] tests `not = zero`.
-#   F-13 [L386-L389]  the sign flip uses the `GIVING` form, so `purch-current`
-#        is NOT mutated by the multiply and is zeroed separately at [L389];
-#        [purchase/pl060.cbl:L507] uses the no-`GIVING` form, which DOES
-#        mutate it.  Net effect equal, intermediate not.
-#   F-14 [L634], [L636], [L638]  the IRS receivers are one digit NARROWER than
-#        the GL senders (`9(6)`->`9(5)`, `s9(8)v99`->`s9(7)v99`), so a
-#        six-digit account or a nine-digit amount loses its high-order digit.
-#   F-15 [L640-L641]  the second receiver of the `move 31` is `Vat-PC` on the
-#        GL POSTING record, written from inside the IRS block, over the zero
-#        [L618] had just stored.  So `GLPOSTING-REC.VAT-PC` is 0 in pure-GL
-#        mode and 31 in either IRS mode - the IRS switch changes a GL column.
-#   F-19 [L591-L592]  `post-date` is built from `u-date`, which holds the
-#        OPEN-ITEM date [L367-L368] unpacked from `oi-date` - NOT the run date.
-#        `to-day` never reaches the posting record at all.  Verified at run
-#        time: oi-date 155000 -> post-date "17/05/25" for a run of 31/12/2025.
-#   F-16 [L653-L655]  the 99-item cap re-performs `bl-open`, so every reopen
-#        repeats A-PL100-A in full.
-#   F-17 [L316-L317], [L409-L410], [L454-L455]  ALL THREE `bl-*` sections are
-#        gated on `G-L` ALONE, consistently, so with `G-L` unset none of them
-#        runs and the IRS fan-out inside `bl-write` NEVER EXECUTES - the IRS
-#        switch is inert unless the General Ledger is also enabled.  Verified
-#        by driving the "B"-mode-with-`G-L`-unset case: zero batch and zero
-#        posting verbs are reached.  This is NOT a pl100 divergence:
-#        [purchase/pl060.cbl:L405-L406], [purchase/pl060.cbl:L474-L475] and
-#        [purchase/pl060.cbl:L573-L574] gate identically, so it is a
-#        codebase-wide property of the purchase posting family.  Recorded
-#        because the coupling is invisible from `bl-write`'s own predicates,
-#        which name `irs-used`/`IRS-Both-Used` as though they were sufficient.
-#   F-18 [L671]/[L674]/[L676]  SIX IRS fan-out sites where `sl060`, `sl100`
-#        and `pl060` each have SEVEN, and [L566]'s predicate disagrees with
-#        [L629]'s.  Not harmonised across programs.
+#  F-PL100-1  [L621]  an INERT store: `move spaces to post-vat-side` is overwritten
+#  by `"DR"` at [L627] before any write.  Same pattern at
+#  [sales/sl100.cbl:L639]/[L645].  Reproduced, not optimised away.
+#  F-PL100-2  [L537]  ASYMMETRY: no `move 1 to File-Key-No` precedes the second
+#  `Value-Rewrite`, where [L524] precedes the first.
+#  F-PL100-3  [L612-L613]  the DR/CR sides are SWAPPED relative to
+#  [purchase/pl060.cbl:L958-L959], and the account is `bl-pay-ac`, not
+#  `bl-purch-ac`.
+#  F-PL100-4  [L617], [L623-L624]  `vat-ac` is ZEROED where
+#  [purchase/pl060.cbl:L966-L967] copies it, and only TWO control totals
+#  are accumulated where [purchase/pl060.cbl:L973-L976] accumulates
+#  FOUR.  A payment posting carries no VAT.
+#  F-PL100-5  [L546], [L548]  the field is `bl-next-batch`, a DIFFERENT
+#  `SYSTEM-REC` column from the `next-batch` that
+#  [purchase/pl060.cbl:L885-L887] uses.
+#  F-PL100-6  §541/§577/§660  the sections are declared LOWER CASE (`bl-open`,
+#  `bl-write`, `bl-close`) yet performed as `BL-Open` [L317], `BL-Write`
+#  [L410], `bl-close` [L455] and `bl-close`/`bl-open` [L654-L655].
+#  COBOL is case-insensitive; the inconsistency is recorded.
+#  F-PL100-7  [L670]  the `accept` is NOT wrapped in `if WS-Caller not = "xl150"`,
+#  unlike [purchase/pl060.cbl:L1022-L1025] - the unattended-mode branch
+#  is simply absent.
+#  F-PL100-8  [L671]  the comment reads `*> THIS IS IN PURCHASE PL060` - inside
+#  pl100.  A copy-paste artefact present in four files:
+#  [sales/sl060.cbl:L1172], [purchase/pl060.cbl:L1027],
+#  [sales/sl100.cbl:L690], [purchase/pl100.cbl:L671].
+#  F-PL100-9  [L468]  the program ends with `exit program.`, not `goback`.
+#  F-PL100-10 [L689-L722]  `zz050-Validate-Date` is DECLARED but NEVER PERFORMED -
+#  `grep -c "perform *zz050"` returns 0.  Dead code that R-5 still
+#  requires a named function for.
+#  F-PL100-11 [L369]  `move u-date to l5-date` uses `u-date`, where
+#  [purchase/pl060.cbl:L448] uses `ws-date`.  Presentation only, but the
+#  field choice is reproduced.
+#  F-PL100-12 [L356]  the unknown-supplier test is `fs-reply = 21`, where
+#  [purchase/pl060.cbl:L433] tests `not = zero`.
+#  F-PL100-13 [L386-L389]  the sign flip uses the `GIVING` form, so `purch-current`
+#  is NOT mutated by the multiply and is zeroed separately at [L389];
+#  [purchase/pl060.cbl:L507] uses the no-`GIVING` form, which DOES
+#  mutate it.  Net effect equal, intermediate not.
+#  F-PL100-14 [L634], [L636], [L638]  the IRS receivers are one digit NARROWER than
+#  the GL senders (`9(6)`->`9(5)`, `s9(8)v99`->`s9(7)v99`), so a
+#  six-digit account or a nine-digit amount loses its high-order digit.
+#  F-PL100-15 [L640-L641]  the second receiver of the `move 31` is `Vat-PC` on the
+#  GL POSTING record, written from inside the IRS block, over the zero
+#  [L618] had just stored.  So `GLPOSTING-REC.VAT-PC` is 0 in pure-GL
+#  mode and 31 in either IRS mode - the IRS switch changes a GL column.
+#  F-PL100-19 [L591-L592]  `post-date` is built from `u-date`, which holds the
+#  OPEN-ITEM date [L367-L368] unpacked from `oi-date` - NOT the run date.
+#  `to-day` never reaches the posting record at all.  Verified at run
+#  time: oi-date 155000 -> post-date "17/05/25" for a run of 31/12/2025.
+#  F-PL100-16 [L653-L655]  the 99-item cap re-performs `bl-open`, so every reopen
+#  repeats A-PL100-A in full.
+#  F-PL100-17 [L316-L317], [L409-L410], [L454-L455]  ALL THREE `bl-*` sections are
+#  gated on `G-L` ALONE, consistently, so with `G-L` unset none of them
+#  runs and the IRS fan-out inside `bl-write` NEVER EXECUTES - the IRS
+#  switch is inert unless the General Ledger is also enabled.  Verified
+#  by driving the "B"-mode-with-`G-L`-unset case: zero batch and zero
+#  posting verbs are reached.  This is NOT a pl100 divergence:
+#  [purchase/pl060.cbl:L405-L406], [purchase/pl060.cbl:L474-L475] and
+#  [purchase/pl060.cbl:L573-L574] gate identically, so it is a
+#  codebase-wide property of the purchase posting family.  Recorded
+#  because the coupling is invisible from `bl-write`'s own predicates,
+#  which name `irs-used`/`IRS-Both-Used` as though they were sufficient.
+#  F-PL100-18 [L671]/[L674]/[L676]  SIX IRS fan-out sites where `sl060`, `sl100`
+#  and `pl060` each have SEVEN, and [L566]'s predicate disagrees with
+#  [L629]'s.  Not harmonised across programs.
 #
 # --------------------------------------------------------------------------
 # AMBIGUITIES referred to the compiled oracle (R-6).  Five sites, each marked
 # `# AMBIGUITY Q-n` at its location.
 # --------------------------------------------------------------------------
-#   Q-1  _bl_open  - the status pair and row state produced by A-PL100-A's write
-#        to an unopened table, in "Y" mode, in "B" mode, and with `G-L` unset.
-#   Q-2  _init01__cust_update - the `PULEDGER-REC` state produced by
-#        A-PL100-B's rewrite of a record that was never successfully read.
-#   Q-3  _init01__main_end - the `VALUEANAL-REC` count drift from A-PL100-C, and
-#        whether the unsigned count columns underflow or clamp.
-#   Q-4  _bl_write - the exact `post-date` text the century-dropping
-#        reference modification at [L591-L592] yields per `Date-Form`.
-#   Q-5  _init01__compute_purch_pay - the stored value of `purch-pay-average`
-#        if the bridge narrows a signed `binary-long` to an unsigned column.
+#  Q-1  _bl_open  - the status pair and row state produced by A-PL100-A's write
+#  to an unopened table, in "Y" mode, in "B" mode, and with `G-L` unset.
+#  Q-2  _init01__cust_update - the `PULEDGER-REC` state produced by
+#  A-PL100-B's rewrite of a record that was never successfully read.
+#  Q-3  _init01__main_end - the `VALUEANAL-REC` count drift from A-PL100-C, and
+#  whether the unsigned count columns underflow or clamp.
+#  Q-4  _bl_write - the exact `post-date` text the century-dropping
+#  reference modification at [L591-L592] yields per `Date-Form`.
+#  Q-5  _init01__compute_purch_pay - the stored value of `purch-pay-average`
+#  if the bridge narrows a signed `binary-long` to an unsigned column.
 #
 # --------------------------------------------------------------------------
 # OMISSIONS - deliberate, and recorded so nothing looks lost.
 # --------------------------------------------------------------------------
-#   O-1  [L446]  `call "SYSTEM" using Print-Report` - the spool-out path,
-#        which plan section 0.1.1 EXPLICITLY excludes.  Omitted entirely.
-#        ⭐ This is the ONLY non-migratable `call` in the program: pl100 has
-#        NO `call "CBL_*"` library calls and NO `FS-Cobol-Files-Used`-gated
-#        library block at all, unlike pl055 (`call "sl070"`), pl060 (four
-#        `CBL_*` calls) and sl060.  Do not go looking for one.
-#   O-2  The ENTIRE PRINT FILE: `open output print-file` [L319], `close
-#        print-file` [L445], every `write print-record` ([L420], [L438],
-#        [L444], [L484-L485]), the `line-1`..`line-5` layouts [L221-L256],
-#        `j`, `l1-name`, `l1-page`, `l2-date`, `l2-user`, `Print-Spool-Name`,
-#        `PSN`, and `copy "selprint"` [L115] / `"fdprint"` [L122] /
-#        `"print-spool-command"` [L127].  `headings` [L470] SURVIVES as a
-#        named log-only function because R-5 requires it, and `line-cnt` is
-#        still maintained because [L422] tests it.
-#   O-3  `display ... at` -> A LOG RECORD, BUT NOT ALL OF IT.  Plan section 0.3.4
-#        converts a DIAGNOSTIC display, and such records "must not alter control
-#        flow and must not appear in any table dump" - none of these does.
-#        CONVERTED: [L290] (`PL137`), [L298-L299] (the banner) and [L665-L668]
-#        (the batch-write failure with its file status, we-error and the decoded
-#        status name).  NOT CONVERTED, each for a stated reason:
-#          - [L291] and [L669] - `PL002`.  PURE ACKNOWLEDGEMENT PROMPTS standing
-#            immediately before the `accept ws-reply`s of O-4; the whole of the
-#            literal is the key-press instruction, so nothing substantive is lost.
-#            `P-Flag-P`, which the [L290] record once narrated, is a SYSTEM-REC
-#            host-variable value and is excluded by the safe-event schema in
-#            `acas_posting/dal/status.py` (CWE-532) - and the frozen display shows
-#            the literal alone in any case.
-#          - [L301] - `display ws-date`.  THE POSTING DATE IS BUSINESS DATA,
-#            excluded by the same schema; it is a command-line INPUT that
-#            `clock.py` pins.
-#          - [L303-L304] - the run-confirm PROMPT.  It is the screen text for the
-#            `accept wx-reply` that O-4 resolves into the `ok_to_post` parameter,
-#            so reproducing it would log a question no one can answer, and echoing
-#            the answer would restate a command-line argument.
-#        Nothing from `01 line-1`..`line-5` is logged either: [L433-L444] (the two
-#        total blocks) and [L472-L473] (the page number and the operator identity)
-#        are report content, out of scope per plan section 0.2.2, and the amounts
-#        and user identity they carry are excluded by the safe-event schema.
-#        `run()` emits NO entry or exit record: the COBOL displays nothing on
-#        either boundary, so both would be invented output (R-4).
-#   O-4  `accept wx-reply` [L306] -> the explicit `ok_to_post` parameter of
-#        `run()`, because it GATES A DATABASE WRITE.  That parameter carries NO
-#        default: [L157], [L305] and [L310-L311] leave the frozen prompt with
-#        none, so section 0.3.4's "with the COBOL default preserved" has nothing
-#        to preserve and the answer is required of the caller.  `accept ws-reply` [L292]
-#        and [L670] -> DROPPED as acknowledgement pauses; but [L293]'s
-#        `go to menu-exit` control transfer IS PRESERVED.
-#   O-5  `set ENVIRONMENT` [L276-L277] and `copy "envdiv.cob"` [L108] -
-#        representation only.
-#   O-6  `01 Dummies-4-Unused-ACAS-FH-Calls.` [L133] - pl100 declares the
-#        group but NO facade stub block of the kind [general/gl072.cbl:L135]
-#        and [general/gl080.cbl:L194] carry; Python needs no linker
-#        satisfaction either way.  Maps to nothing.
-#   O-7  The message literals.  `PL132` [L207] and `PL137` [L208] survive as log
-#        text.  `PL002` [L204] is DECLARED AND DELIBERATELY NEVER REFERENCED - it
-#        is the acknowledgement prompt of O-3 - and stays declared because rule
-#        R-5 maps the whole `01 Error-Messages.` group.
-#   O-8  The local print totals `t-approp`, `j-approp`, `j-paid` and
-#        `j-deduct` are still COMPUTED - [L396] and [L448] consume them - but
-#        their print lines are omitted.  `t-paid`, `t-deduct` and `n-deduct`
-#        are LOAD-BEARING: `t-paid` receives period total 9 alongside
-#        `pl-payments`, and `t-deduct`/`n-deduct` drive [L449] and the whole
-#        of `analise-deductions`.
-#   O-9  Absent facade verbs, stated so a reader does not expect them: NO
-#        `GL-Posting-Open-Output`, NO `SPL-Posting-Open-Output` (that absence
-#        IS A-PL100-A defect (c)), NO `Purch-Write` (that absence IS A-PL100-B),
-#        NO `OTM5-Start` and NO `set fn-*` anywhere - the OTM5 walk is purely
-#        sequential from the top, with no cursor positioning at all.
-#   O-10 NO WORK FILE.  pl100 declares no `seloi4`/`fdoi4` and no
-#        `plwsoi`/`plwssoi`, unlike pl055/pl060 which share OTM4.  Nothing
-#        imports `acas_posting.workfiles`.
-#   O-11 ZERO `ROUNDED` sites.  Every store in this program truncates toward
-#        zero.  The migration's five `ROUNDED` sites are
-#        [general/gl051.cbl:L791], [general/gl051.cbl:L796],
-#        [general/gl080.cbl:L328], [irs/irs030.cbl:L1551] and
-#        [irs/irs030.cbl:L1562].
-#   O-12 `copy "FileStat-Msgs.cpy"` [L684-L685] - the message text is taken
-#        from `dal.status.FsReply` rather than duplicating the copybook's
-#        literal table; the rendering is diagnostic and reaches no table.
+#  O-1  [L446]  `call "SYSTEM" using Print-Report` - the spool-out path,
+#  which plan section 0.1.1 EXPLICITLY excludes.  Omitted entirely.
+#  This is the ONLY non-migratable `call` in the program: pl100 has
+#  NO `call "CBL_*"` library calls and NO `FS-Cobol-Files-Used`-gated
+#  library block at all, unlike pl055 (`call "sl070"`), pl060 (four
+#  `CBL_*` calls) and sl060.  Do not go looking for one.
+#  O-2  The ENTIRE PRINT FILE: `open output print-file` [L319], `close
+#  print-file` [L445], every `write print-record` ([L420], [L438],
+#  [L444], [L484-L485]), the `line-1`..`line-5` layouts [L221-L256],
+#  `j`, `l1-name`, `l1-page`, `l2-date`, `l2-user`, `Print-Spool-Name`,
+#  `PSN`, and `copy "selprint"` [L115] / `"fdprint"` [L122] /
+#  `"print-spool-command"` [L127].  `headings` [L470] SURVIVES as a
+#  named log-only function because R-5 requires it, and `line-cnt` is
+#  still maintained because [L422] tests it.
+#  O-3  `display ... at` -> A LOG RECORD, BUT NOT ALL OF IT.  Plan section 0.3.4
+#  converts a DIAGNOSTIC display, and such records "must not alter control
+#  flow and must not appear in any table dump" - none of these does.
+#  CONVERTED: [L290] (`PL137`), [L298-L299] (the banner) and [L665-L668]
+#  (the batch-write failure with its file status, we-error and the decoded
+#  status name).  NOT CONVERTED, each for a stated reason:
+#  - [L291] and [L669] - `PL002`.  PURE ACKNOWLEDGEMENT PROMPTS standing
+#  immediately before the `accept ws-reply`s of O-4; the whole of the
+#  literal is the key-press instruction, so nothing substantive is lost.
+#  `P-Flag-P`, which the [L290] record once narrated, is a SYSTEM-REC
+#  host-variable value and is excluded by the safe-event schema in
+#  `acas_posting/dal/status.py` (CWE-532) - and the frozen display shows
+#  the literal alone in any case.
+#  - [L301] - `display ws-date`.  THE POSTING DATE IS BUSINESS DATA,
+#  excluded by the same schema; it is a command-line INPUT that
+#  `clock.py` pins.
+#  - [L303-L304] - the run-confirm PROMPT.  It is the screen text for the
+#  `accept wx-reply` that O-4 resolves into the `ok_to_post` parameter,
+#  so reproducing it would log a question no one can answer, and echoing
+#  the answer would restate a command-line argument.
+#  Nothing from `01 line-1`..`line-5` is logged either: [L433-L444] (the two
+#  total blocks) and [L472-L473] (the page number and the operator identity)
+#  are report content, out of scope per plan section 0.2.2, and the amounts
+#  and user identity they carry are excluded by the safe-event schema.
+#  `run()` emits NO entry or exit record: the COBOL displays nothing on
+#  either boundary, so both would be invented output (R-4).
+#  O-4  `accept wx-reply` [L306] -> the explicit `ok_to_post` parameter of
+#  `run()`, because it GATES A DATABASE WRITE.  That parameter carries NO
+#  default: [L157], [L305] and [L310-L311] leave the frozen prompt with
+#  none, so section 0.3.4's "with the COBOL default preserved" has nothing
+#  to preserve and the answer is required of the caller.  `accept ws-reply` [L292]
+#  and [L670] -> DROPPED as acknowledgement pauses; but [L293]'s
+#  `go to menu-exit` control transfer IS PRESERVED.
+#  O-5  `set ENVIRONMENT` [L276-L277] and `copy "envdiv.cob"` [L108] -
+#  representation only.
+#  O-6  `01 Dummies-4-Unused-ACAS-FH-Calls.` [L133] - pl100 declares the
+#  group but NO facade stub block of the kind [general/gl072.cbl:L135]
+#  and [general/gl080.cbl:L194] carry; Python needs no linker
+#  satisfaction either way.  Maps to nothing.
+#  O-7  The message literals.  `PL132` [L207] and `PL137` [L208] survive as log
+#  text.  `PL002` [L204] is DECLARED AND DELIBERATELY NEVER REFERENCED - it
+#  is the acknowledgement prompt of O-3 - and stays declared because rule
+#  R-5 maps the whole `01 Error-Messages.` group.
+#  O-8  The local print totals `t-approp`, `j-approp`, `j-paid` and
+#  `j-deduct` are still COMPUTED - [L396] and [L448] consume them - but
+#  their print lines are omitted.  `t-paid`, `t-deduct` and `n-deduct`
+#  are LOAD-BEARING: `t-paid` receives period total 9 alongside
+#  `pl-payments`, and `t-deduct`/`n-deduct` drive [L449] and the whole
+#  of `analise-deductions`.
+#  O-9  Absent facade verbs, stated so a reader does not expect them: NO
+#  `GL-Posting-Open-Output`, NO `SPL-Posting-Open-Output` (that absence
+#  IS A-PL100-A defect (c)), NO `Purch-Write` (that absence IS A-PL100-B),
+#  NO `OTM5-Start` and NO `set fn-*` anywhere - the OTM5 walk is purely
+#  sequential from the top, with no cursor positioning at all.
+#  O-10 NO WORK FILE.  pl100 declares no `seloi4`/`fdoi4` and no
+#  `plwsoi`/`plwssoi`, unlike pl055/pl060 which share OTM4.  Nothing
+#  imports `acas_posting.workfiles`.
+#  O-11 ZERO `ROUNDED` sites.  Every store in this program truncates toward
+#  zero.  The migration's five `ROUNDED` sites are
+#  [general/gl051.cbl:L791], [general/gl051.cbl:L796],
+#  [general/gl080.cbl:L328], [irs/irs030.cbl:L1551] and
+#  [irs/irs030.cbl:L1562].
+#  O-12 `copy "FileStat-Msgs.cpy"` [L684-L685] - the message text is taken
+#  from `dal.status.FsReply` rather than duplicating the copybook's
+#  literal table; the rendering is diagnostic and reaches no table.
 #
 # --------------------------------------------------------------------------
 # FIELD -> DICTIONARY ENTRY.  Every `FieldDescriptor` above is built either

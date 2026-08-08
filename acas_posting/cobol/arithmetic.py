@@ -95,7 +95,7 @@ def _rounding(rounded: bool) -> str:
 # How many significant digits an intermediate result carries before the single quantize
 # at the store.
 #
-# ⭐ Q-2 ASKS TWO THINGS, AND BOTH ARE NOW MEASURED. Keep them separate anyway, because
+# Q-2 ASKS TWO THINGS, AND BOTH ARE NOW MEASURED. Keep them separate anyway, because
 # this constant is the one place the difference is expressible and because they were
 # settled by different means.
 #

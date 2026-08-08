@@ -19,7 +19,9 @@ modules; this module moves records between :class:`WsLedgerRecord` and the
 frozen table and reports the ``(FS-Reply, We-Error)`` pair the compiled system
 would have left in the caller's ``File-Access`` block.
 
-THE HEADLINE RISK  -  THIS IS THE SEQUENTIALLY-READ TABLE
+THE HEADLINE RISK is that this is the sequentially-read table: `gl072` locates a
+posting's nominal account by walking, not by key, so the ordering contract that
+makes it land correctly is stated in full at :func:`read_next`.
 """
 
 from __future__ import annotations
@@ -1080,8 +1082,8 @@ def _mysql_1210_command(
         The outcome, with ``count_rows`` filled whether or not the command failed.
     """
     bound = tuple(parameters)
-    #  THE STATEMENT IS NOT LOGGED. It used to be, redacted - and redaction cannot
-    #  help here, because what leaks is not an identity shape the rules recognise
+    #  THE STATEMENT IS NOT LOGGED, AND REDACTING IT WOULD NOT HELP: what leaks is
+    #  not an identity shape the redaction rules recognise
     #  but the statement itself: an `UPDATE ... SET` over `GLLEDGER-REC` names every
     #  column of the nominal ledger row, and a `WHERE` clause names the account
     #  being posted to (CWE-532). The bound parameters are not logged for the same
@@ -1482,14 +1484,14 @@ def ba040_process_read_next(
 
     Agent Action Plan 0.6.4, verbatim: "The sort feeds a sequential read. ``gl072``
     locates the nominal-ledger account for each posting with a sequential read-next
-    rather than an indexed read [general/gl072.cbl:L410-L412]. It finds the correct
+    rather than an indexed read [general/gl072.cbl:L408]. It finds the correct
     account only because ``gl071`` has already emitted the transaction stream in
     nominal-key order. Any change in sort stability or key composition produces
     SILENT MISPOSTING - no error, no diagnostic, wrong balances."
 
     The plan's citation is off by a few lines: the sequential read is the guarded
     ``if read-ledger not = "R" / perform GL-Nominal-Read-Next`` at
-    ``[general/gl072.cbl:L407-L408]``, and ``[general/gl072.cbl:L410-L412]`` is the
+    ``[general/gl072.cbl:L407-L408]``, and ``[general/gl072.cbl:L408]`` is the
     ``move zero to tot-dr tot-cr`` after it. The requirement is unchanged.
 
     So the ordering below is a CORRECTNESS REQUIREMENT, not a convenience. It is
@@ -1897,7 +1899,7 @@ def ca_process_logs(file_access: FileAccess, dal_common: AcasDalCommonData) -> N
     control flow, which is the treatment Agent Action Plan 0.3.4 prescribes for
     output that does not reach a table.
 
-    ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L20] is advanced, because
+    ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L18] is advanced, because
     the counter lives in ``ACAS-DAL-Common-data`` - shared with the handler, per its
     comment "in both acas0nn and a DAL" - and a caller can read it. It is plain
     accounting of records written, not a clock or a random source, so it does not
@@ -1906,7 +1908,7 @@ def ca_process_logs(file_access: FileAccess, dal_common: AcasDalCommonData) -> N
     than growing, and an unbounded Python integer diverged from the frozen value the
     moment a run wrote a millionth record.
 
-    ONE ADAPTER FOR ALL TWENTY HANDLERS. The record is composed by
+    ONE ADAPTER FOR ALL SEVENTEEN HANDLER MODULES. The record is composed by
     :func:`acas_posting.dal.status.log_file_handler_record`, so this handler's field
     set, level and counter arithmetic are identical to every other handler's rather
     than a local reading of the same one-line paragraph. Three fields are withheld
@@ -1963,7 +1965,7 @@ def nominal_mt(
     signatures to be published precisely so the difference is visible.
 
     Args:
-        file_access: ``File-Access`` [copybooks/wsfnctn.cob:L23-L38], supplying ``File-
+        file_access: ``File-Access`` [copybooks/wsfnctn.cob:L22-L41], supplying ``File-
             Function``, ``Access-Type`` and ``RDB-Data``, and receiving ``FS-Reply``,
             ``We-Error`` and all ``Logging-Data``.
         dal_common: ``ACAS-DAL-Common-data`` [copybooks/Test-Data-Flags.cob:L6], the

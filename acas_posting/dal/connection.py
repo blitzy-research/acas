@@ -83,10 +83,10 @@ __all__: Final[tuple[str, ...]] = (
     "OpenOutcome",
     "TransportSecurity",
     "acquire_cursor",
-    #  ---- connection policy: REPORTING is on the parity path, REFUSING is not
-    #  (M-06). `audit_connection_policy` returns concerns and `mysql_1000_open`
-    #  logs them; `require_connection_policy` raises and nothing in the migrated
-    #  cycle calls it.
+    #  ---- connection policy: REPORTING is on the parity path, REFUSING is not.
+    #  `audit_connection_policy` returns concerns and `mysql_1000_open` logs them;
+    #  `require_connection_policy` raises and nothing in the migrated cycle calls
+    #  it.
     "audit_connection_policy",
     "require_connection_policy",
     "cobol_string_delimited_by_space",
@@ -550,19 +550,19 @@ def _atoi(text: str) -> int:
 #  is the one place where two properties of the frozen source stop being
 #  harmless facts about a 1980s accounting package and become live exposures.
 #
-#  1. THE CREDENTIALS ARE SOURCE LITERALS. `05 RDBMS-User pic x(12) value
-#     "ACAS-User"` and `05 RDBMS-Passwd pic x(12) value "PaSsWoRd"`
-#     [copybooks/wssystem.cob:L138-L139], each annotated `*> change in setup` by
-#     the maintainer. `acas_posting/records/system_record.py` declares them
-#     byte-for-byte because `SYSTEM-REC` is a dumped table and its declared
-#     defaults are diff-visible (rule R-4), and it publishes them so that this
-#     module can RECOGNISE them.
+#  1. THE CREDENTIALS ARE SOURCE LITERALS. `05 RDBMS-User` and `05 RDBMS-Passwd`
+#  each carry a shipped placeholder `value` clause
+#  [copybooks/wssystem.cob:L138-L139], each annotated `*> change in setup` by
+#  the maintainer. `acas_posting/records/system_record.py` declares them
+#  byte-for-byte because `SYSTEM-REC` is a dumped table and its declared
+#  defaults are diff-visible (rule R-4), and it publishes them so that this
+#  module can RECOGNISE them.
 #  2. THE TRANSPORT IS PLAINTEXT. The C interface the bridges link calls
-#     `mysql_real_connect(&sql, host, user, passwd, db, port, socket, 0)` with a
-#     literal zero client-flag word, so `CLIENT_SSL` is never negotiated and the
-#     password crosses the wire in the clear. On a loopback socket that is of no
-#     consequence; to a server on another host it is the whole credential and
-#     every posted figure, unprotected and unauthenticated.
+#  `mysql_real_connect(&sql, host, user, passwd, db, port, socket, 0)` with a
+#  literal zero client-flag word, so `CLIENT_SSL` is never negotiated and the
+#  password crosses the wire in the clear. On a loopback socket that is of no
+#  consequence; to a server on another host it is the whole credential and
+#  every posted figure, unprotected and unauthenticated.
 #
 #  WHAT IS NOT DONE ABOUT IT, AND WHY
 #  ----------------------------------
@@ -577,35 +577,36 @@ def _atoi(text: str) -> int:
 #
 #  WHAT IS DONE INSTEAD: ONE POLICY BOUNDARY, DECLARED BY THE DEPLOYMENT
 #  --------------------------------------------------------------------
-#  ⭐ THE POLICY IS ONE OBJECT, SET ONCE, AND EVERY OPEN RESOLVES TO IT.
+#  THE POLICY IS ONE OBJECT, SET ONCE, AND EVERY OPEN RESOLVES TO IT.
 #  :class:`ConnectionPolicy` is the whole of it, :func:`set_connection_policy`
 #  installs it and :func:`connection_policy` reads it back. When a caller opens
 #  without a declaration of its own - `transport=None`, which is the default of
 #  every handler in this package - :func:`mysql_1000_open` resolves the omission
-#  FROM THAT ONE POLICY. So the twenty handler modules above this one need know
+#  FROM THAT ONE POLICY. So the seventeen handler modules above this one need know
 #  nothing about transport: whatever the deployment declared before the first
 #  `fn-Open` is what every one of them gets, and there is exactly one place to
 #  look to find out what that was.
 #
-#  ⛔ AND THE DEFAULT DOES NOT REFUSE, WHICH IS A DELIBERATE CORRECTION.
-#  An earlier revision of this module failed CLOSED: a target that was neither a
-#  loopback address nor a Unix socket was REFUSED unless the caller declared
-#  `isolated_oracle=True`, and a row still carrying the shipped placeholders was
-#  REFUSED unless the caller declared them intended. That was withdrawn, for two
+#  AND THE DEFAULT DOES NOT REFUSE, WHICH IS A DELIBERATE CORRECTION.
+#  FAILING CLOSED HERE WOULD BE WRONG, and the reasoning is worth stating because
+#  the safer-looking option is the incorrect one. Refusing a target that is neither
+#  a loopback address nor a Unix socket unless the caller declares
+#  `isolated_oracle=True`, and refusing a row still carrying the shipped
+#  placeholders unless the caller declares them intended, is wrong for two
 #  reasons that agree:
 #
-#    * IT WAS A VALIDATION THE MIGRATED CYCLE DOES NOT HAVE. Rule R-3 forbids
-#      adding one. `Mysql-1000-Open` calls `MySQL_real_connect` and reports what
-#      the server says [copybooks/mysql-procedures.cpy:L72-L77]; it inspects
-#      neither the host nor the credential, so a refusal before the connect call
-#      is behaviour the compiled program cannot produce.
-#    * IT BLOCKED THE DOCUMENTED CYCLE OUTRIGHT. The comparison database runs in
-#      a container reached at a private, NON-loopback address
-#      (`harness/docker-compose.yml`), so the fail-closed default refused every
-#      posting run before a single figure was written - and it did so through a
-#      declaration no entry point could make, since the policy was reachable only
-#      as a keyword on individual handler calls. A guard that stops the cycle it
-#      is guarding is not hardening.
+#  * IT WAS A VALIDATION THE MIGRATED CYCLE DOES NOT HAVE. Rule R-3 forbids
+#  adding one. `Mysql-1000-Open` calls `MySQL_real_connect` and reports what
+#  the server says [copybooks/mysql-procedures.cpy:L72-L77]; it inspects
+#  neither the host nor the credential, so a refusal before the connect call
+#  is behaviour the compiled program cannot produce.
+#  * IT BLOCKED THE DOCUMENTED CYCLE OUTRIGHT. The comparison database runs in
+#  a container reached at a private, NON-loopback address
+#  (`harness/docker-compose.yml`), so the fail-closed default refused every
+#  posting run before a single figure was written - and it did so through a
+#  declaration no entry point could make, since the policy was reachable only
+#  as a keyword on individual handler calls. A guard that stops the cycle it
+#  is guarding is not hardening.
 #
 #  WHAT REPLACES IT: SAY SO, LOUDLY, AND STILL PROCEED
 #  --------------------------------------------------
@@ -623,13 +624,13 @@ def _atoi(text: str) -> int:
 #  A deployment that wants the refusal back asks for it, at the boundary, in one
 #  place, and gets it for every handler at once:
 #
-#    * `ConnectionPolicy(transport=TransportSecurity(ca_file=...))` turns on TLS
-#      with certificate AND host-name verification, which is protection rather
-#      than decoration (CWE-295);
-#    * `ConnectionPolicy(require_encrypted_transport=True)` restores the refusal
-#      of unprotected non-local targets (CWE-319);
-#    * `ConnectionPolicy(require_declared_placeholder_credentials=True)` restores
-#      the refusal of the shipped placeholder credentials (CWE-798).
+#  * `ConnectionPolicy(transport=TransportSecurity(ca_file=...))` turns on TLS
+#  with certificate AND host-name verification, which is protection rather
+#  than decoration (CWE-295);
+#  * `ConnectionPolicy(require_encrypted_transport=True)` restores the refusal
+#  of unprotected non-local targets (CWE-319);
+#  * `ConnectionPolicy(require_declared_placeholder_credentials=True)` restores
+#  the refusal of the shipped placeholder credentials (CWE-798).
 #
 #  Both refusals stay off unless asked for, so the shipped behaviour of the
 #  migrated cycle is the compiled behaviour and the security surface is a
@@ -686,10 +687,10 @@ class ConnectionPolicyError(RuntimeError):
 class FrozenPlaceholderCredentialsError(ConnectionPolicyError):
     """The `SYSTEM-REC` row still carries the maintainer's shipped credentials.
 
-    `05 RDBMS-User pic x(12) value "ACAS-User"` and `05 RDBMS-Passwd pic x(12) value
-    "PaSsWoRd"` [copybooks/wssystem.cob:L138-L139] are published in the frozen source
-    and in this repository, so a connection authenticated by them is a connection anyone
-    reading the source can make.
+    `05 RDBMS-User` and `05 RDBMS-Passwd` carry the maintainer's shipped placeholder
+    `value` clauses [copybooks/wssystem.cob:L138-L139], published in the frozen source
+    and therefore in this repository, so a connection authenticated by them is a
+    connection anyone reading the source can make.
     """
 
 
@@ -704,7 +705,7 @@ class InsecureTransportError(ConnectionPolicyError):
 
 
 #: THE THREE DRIVER DEADLINES, IN SECONDS, AND WHY THEY ARE FINITE BY DEFAULT
-#: (finding F-05). ``mysql_real_connect`` is called by the frozen bridge with no
+#:. ``mysql_real_connect`` is called by the frozen bridge with no
 #: option set on the handle [copybooks/mysql-procedures.cpy:L72-L77], so the
 #: compiled program waits forever on an unreachable or wedged server. The
 #: migrated cycle is a headless batch process whose runs are compared: a wait
@@ -757,9 +758,7 @@ class TransportSecurity:
     def __post_init__(self) -> None:
         """Reject half a client-certificate pair, at construction.
 
-        ⭐ M-06.  THIS CHECK USED TO RUN ON THE PARITY PATH, inside
-        `_require_permitted_connection` and therefore inside
-        :func:`mysql_1000_open`. It has moved here because it is not a statement
+        THIS CHECK BELONGS HERE AND NOT ON THE PARITY PATH. It is not a statement
         about the connection at all - it is an invariant of THIS PYTHON OBJECT,
         which has no frozen counterpart: the frozen `Mysql-1000-Open`
         [copybooks/mysql-procedures.cpy:L60-L128] passes no TLS material of any
@@ -797,7 +796,7 @@ class TransportSecurity:
             connect call byte-for-byte as it was before this policy existed, so
             a permitted plaintext connection behaves exactly as the frozen C
             interface's does. The empty case is always permitted on the parity
-            path (M-06); :func:`audit_connection_policy` reports it as a concern
+            path; :func:`audit_connection_policy` reports it as a concern
             and :func:`require_connection_policy` is the separate opt-in gate that
             refuses it.
         """
@@ -821,7 +820,7 @@ class TransportSecurity:
 class ConnectionPolicy:
     """The ONE connection policy of the process, installed by the deployment.
 
-    ⭐ THIS IS THE SINGLE BOUNDARY. Every handler in this package opens without a
+    THIS IS THE SINGLE BOUNDARY. Every handler in this package opens without a
     transport declaration of its own, and :func:`mysql_1000_open` resolves that
     omission here, so one installed policy governs all twenty of them. A handler
     that DOES pass a declaration still wins for its own call - the per-call
@@ -856,8 +855,8 @@ class ConnectionPolicy:
             oracle, raising :class:`InsecureTransportError` (CWE-319). ``False``
             - the default - reports the exposure as a warning and proceeds.
         require_declared_placeholder_credentials: ``True`` refuses a
-            ``SYSTEM-REC`` row still carrying the maintainer's shipped
-            ``"ACAS-User"`` / ``"PaSsWoRd"`` [copybooks/wssystem.cob:L138-L139]
+            ``SYSTEM-REC`` row still carrying the frozen shipped placeholder
+            user and password [copybooks/wssystem.cob:L138-L139]
             unless the opening call declares them intended, raising
             :class:`FrozenPlaceholderCredentialsError` (CWE-798). ``False`` - the
             default - reports the exposure as a warning and proceeds, which is
@@ -870,7 +869,7 @@ class ConnectionPolicy:
             declares this; a production deployment should not need to, because
             its row carries real credentials.
         connect_timeout_seconds: The driver's connect deadline, in whole seconds.
-            FINITE, AND THERE IS NO SPELLING FOR "NONE" (finding F-05). The frozen
+            FINITE, AND THERE IS NO SPELLING FOR "NONE". The frozen
             C interface sets no option on the handle at all
             [copybooks/mysql-procedures.cpy:L72-L77], so an unreachable server
             blocks the compiled program forever; reproducing that in a headless
@@ -1186,10 +1185,11 @@ def _require_permitted_connection(
             ``require_encrypted_transport``.
 
     Note:
-        ONE RETURN CONTRACT, AND IT IS `None` (finding F-04). This function used
-        to carry a vestigial `concerns` list from before `audit_connection_policy`
-        existed, returning an always-empty tuple from three branches and a bare
-        `return` from a fourth while its only caller ignored the value. The
+        ONE RETURN CONTRACT, AND IT IS `None`. Returning a `concerns` list here
+        would duplicate `audit_connection_policy`, which owns that reporting; a
+        function returning an always-empty tuple from some branches and a bare
+        `return` from others, with its only caller ignoring the value, states no
+        contract at all. The
         reporting API is `audit_connection_policy`, which returns the findings; this
         one is a guard and returns nothing.
     """
@@ -1278,11 +1278,11 @@ def audit_connection_policy(
 ) -> tuple[str, ...]:
     """Report the policy concerns about one connection. NEVER refuses.
 
-    ⭐ M-06.  THIS IS THE WHOLE OF `_require_permitted_connection`, TURNED FROM
-    REFUSALS INTO FINDINGS. That function ran on the parity path - it was called
-    from :func:`mysql_1000_open`, which reproduces ``Mysql-1000-Open``
-    [copybooks/mysql-procedures.cpy:L60-L128] - and it raised two exception types
-    the frozen paragraph cannot produce. The frozen paragraph has exactly two
+    THE WHOLE CONNECTION POLICY, EXPRESSED AS FINDINGS RATHER THAN REFUSALS,
+    BECAUSE THIS FUNCTION IS ON THE PARITY PATH. :func:`mysql_1000_open` calls it,
+    and that function reproduces ``Mysql-1000-Open``
+    [copybooks/mysql-procedures.cpy:L60-L128], which cannot raise: the frozen
+    paragraph has exactly two
     outcomes: it connects, or it reports ``(FS-Reply 99, We-Error 911)``
     [copybooks/mysql-procedures.cpy:L127-L128]. It does not inspect whose
     credentials it was given and it does not care where the server is. So the
@@ -1291,10 +1291,10 @@ def audit_connection_policy(
 
     The analysis was not wrong about the exposure, and none of it is discarded:
 
-      * ``05 RDBMS-User pic x(12) value "ACAS-User"`` and
-        ``05 RDBMS-Passwd pic x(12) value "PaSsWoRd"``
-        [copybooks/wssystem.cob:L138-L139] are published in this repository, so a
-        connection authenticated by them is one any reader of the source can make.
+      * ``05 RDBMS-User`` and ``05 RDBMS-Passwd`` carry shipped placeholder ``value``
+        clauses [copybooks/wssystem.cob:L138-L139] that are published in this
+        repository, so a connection authenticated by them is one any reader of the
+        source can make.
       * A plaintext connection to a non-local server puts those credentials and
         every posted figure on the wire in the clear.
 
@@ -1366,7 +1366,7 @@ def require_connection_policy(
 ) -> None:
     """Refuse a connection the caller has not declared safe. OFF the parity path.
 
-    ⭐ M-06.  THE FAIL-CLOSED GATE, KEPT AND MADE OPT-IN. It is the same policy
+    THE FAIL-CLOSED GATE, PUBLISHED AS OPT-IN. It is the same policy
     :func:`audit_connection_policy` reports, raised instead of returned, and it is
     published so that an orchestrator or a deployment script can still refuse
     before a run rather than merely be told. NOTHING IN `acas_posting` CALLS IT -
@@ -1480,7 +1480,7 @@ def connection_parameters(
     its ``ssl_*`` keywords are merged in. They affect the wire and nothing above
     it: no ``RDB-Data`` item is re-read, no value is validated and no stored
     value moves (rules R-3, R-4). A connection without them is always permitted on
-    the parity path (M-06) - :func:`audit_connection_policy` reports it and
+    the parity path - :func:`audit_connection_policy` reports it and
     :func:`require_connection_policy` is the separate opt-in gate that refuses it -
     and either way this function marshals, it does not judge.
 
@@ -1617,8 +1617,8 @@ def _db_error_status(
     """Map one connect failure through ``Mysql-1100-Db-Error``.
 
     ``command`` is passed as empty on purpose. That argument feeds ONLY the duplicate-
-    key test, which examines ``Ws-Mysql-Command (1:6)`` [copybooks/mysql-
-    procedures.cpy:L100] and can fire only for error numbers 1062 and 1022 [:L99].
+    key test, which examines ``Ws-Mysql-Command (1:6)``
+    [copybooks/mysql-procedures.cpy:L100] and can fire only for error numbers 1062 and 1022 [:L99].
 
     Args:
         errno: The driver's error number.
@@ -1632,8 +1632,8 @@ def _db_error_status(
         The status the error paragraph would have left behind.
     """
     return mysql_1100_db_error(
-        # `call "MySQL_errno" using Ws-Mysql-Error-Number` [copybooks/mysql-
-        # procedures.cpy:L97]. Text, because `Ws-Mysql-Error-Number` is `pic x(5)`
+        # `call "MySQL_errno" using Ws-Mysql-Error-Number`
+        # [copybooks/mysql-procedures.cpy:L97]. Text, because `Ws-Mysql-Error-Number` is `pic x(5)`
         # [copybooks/mysql-variables.cpy:L84] and the duplicate test compares it as
         # characters.
         errno=str(errno) if errno > 0 else "",
@@ -1659,7 +1659,7 @@ _CONVERTER_HOOKS_CHECKED: bool = False
 def _assert_converter_hooks_pinned() -> None:
     """Check the STATIC half of rule R-2: the hooks the converter class overrides.
 
-    ⭐ NO DATABASE, AND ONCE PER PROCESS. This half compares class attributes -
+    NO DATABASE, AND ONCE PER PROCESS. This half compares class attributes -
     `AcasConverter`'s hooks against `MySQLConverter`'s - so its answer cannot
     differ between two connections or between two calls, and running it on every
     handler open bought nothing. It is separated from the live probe so that the
@@ -1696,7 +1696,7 @@ def _assert_converter_pinned(connection: MySQLConnectionAbstract) -> None:
     Rule R-2 names this file for pinning the converter "rather than relying on the
     default".
 
-    ⭐ ONCE PER PHYSICAL CONNECTION, NOT ONCE PER HANDLER OPEN. The converter is
+    ONCE PER PHYSICAL CONNECTION, NOT ONCE PER HANDLER OPEN. The converter is
     an attribute of the connection and the probe reads three casts from the
     server; neither answer can change while a connection is open, so re-running it
     for every `fn-Open` added one round trip per handler - twenty in a full cycle -
@@ -1789,10 +1789,10 @@ def _assert_converter_pinned(connection: MySQLConnectionAbstract) -> None:
 def forget_converter_probe(connection: MySQLConnectionAbstract) -> None:
     """Forget that one connection was probed, so a successor is probed again.
 
-    Called by :func:`reset_process_connection` and :func:`close_all_connections`
-    when a connection leaves the process's hands. A driver may hand the same
-    object back for a later `connect`, and a re-connected handle is a NEW session
-    whose converter has not been observed.
+    Called by :func:`reset_process_connection`, which closes every tracked handle, and
+    by :func:`mysql_1000_open`'s failure path, which discards a handle whose converter
+    could not be pinned. A driver may hand the same object back for a later `connect`,
+    and a re-connected handle is a NEW session whose converter has not been observed.
 
     Args:
         connection: The connection being discarded. Not being on the list is
@@ -1896,7 +1896,7 @@ def mysql_1000_open(
             governs this open. Passing a declaration overrides the policy for
             this call only. See the policy section of this module.
         allow_frozen_placeholder_credentials: Declares that the caller knows the
-            row may still carry `"ACAS-User"` and `"PaSsWoRd"`
+            row may still carry the frozen shipped placeholder user and password
             [copybooks/wssystem.cob:L138-L139] and that the target server is
             disposable. ``None`` - the default - resolves to the installed
             process policy; ``False`` states positively that no declaration is
@@ -1945,11 +1945,10 @@ def mysql_1000_open(
     rdb_data = load_rdb_data_once(system_record)
     parameters = connection_parameters(rdb_data, transport=declared_transport)
 
-    # ⭐ M-06.  REPORTED, NOT REFUSED.  This used to call
-    # `_require_permitted_connection`, which raised
+    # REPORTED, NOT REFUSED.  A policy refusal here - raising
     # `FrozenPlaceholderCredentialsError` or `InsecureTransportError` before the
-    # connect. That put two dispositions on this path that its frozen counterpart
-    # has not got: `Mysql-1000-Open` [copybooks/mysql-procedures.cpy:L60-L128]
+    # connect - would put two dispositions on this path that its frozen
+    # counterpart has not got: `Mysql-1000-Open` [copybooks/mysql-procedures.cpy:L60-L128]
     # either connects or reports `(FS-Reply 99, We-Error 911)`
     # [copybooks/mysql-procedures.cpy:L127-L128], and it inspects neither whose
     # credentials it was handed nor where the server is. Rule R-3 forbids adding a
@@ -1979,7 +1978,7 @@ def mysql_1000_open(
     # the frozen source does.
     driver_arguments: dict[str, Any] = {
         **parameters,
-        #  THE THREE FINITE DEADLINES (finding F-05), from the one installed
+        #  THE THREE FINITE DEADLINES, from the one installed
         #  policy, so a route that declared them in the deployment contract gets
         #  them on every open this process makes. They bound how long a call
         #  WAITS; no statement, status pair or stored value moves because of them.
@@ -2082,8 +2081,8 @@ def _failed_open(
     # The step code, its name and the two ACAS status values are this module's
     # own values and carry nothing sensitive. THE DRIVER'S MESSAGE DOES, AND IS
     # THEREFORE NOT LOGGED AT ALL: a failed connect is precisely the failure whose
-    # message names the account and the host - "Access denied for user
-    # 'ACAS-User'@'localhost' (using password: YES)" - and it can carry a carriage
+    # message names the account and the host - the driver's "Access denied for user
+    # '<account>'@'<host>' (using password: YES)" shape - and it can carry a carriage
     # return that forges a second log record. Redacting it was not enough, because
     # the rules of `redact_for_log` recognise the connection-message shapes the
     # client library is known to produce and cannot recognise text it has never

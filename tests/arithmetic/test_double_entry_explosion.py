@@ -113,18 +113,15 @@ program, so every store composed below is made with `rounded=False`. Agent Actio
 Plan section 0.1.1: "Getting this backwards would corrupt essentially every posted
 figure."
 
-THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports that none
-was provided, so there is no on-disk rules file to consult and no reader should
-look for one; where the specification is silent, enterprise-standard best practice
-applies and nothing is invented. The six binding rules R-1 to R-6 live in the Agent
-Action Plan itself, section 0.7.2, and their exact wording is retrievable from the
-requirements. Summarised in this module's own words, and each named at the site
-that honours it:
+THE SIX BINDING RULES R-1 to R-6 live in Agent Action Plan section 0.7.2, and their
+exact wording is retrievable from the requirements; where they are silent,
+enterprise-standard best practice applies. Summarised in this module's own words,
+and each named at the site that honours it:
 
     R-1  No COBOL at runtime. This module executes no COBOL, opens no database,
          spawns no subprocess and reads no `.cbl` file. Note what the three legs
          are: `write pre-trans-record` statements to `pretrans.tmp`, a transient
-         work file that is NOT part of the schema [copybooks/wsnames.cob:L14-L17],
+         work file that is NOT part of the schema [copybooks/wsnames.cob:L15-L16],
          so this module asserts the record VALUES the block produces and never a
          write. The migration's own work-file module, which models the two General
          Ledger scratch files, is deliberately NOT imported here - it sits outside
@@ -153,7 +150,7 @@ that honours it:
          through the program-source key of a work-record field, and never by a bare
          field name. Coverage is evidence, never a gate.
     R-6  Compiled behaviour is the tie-breaker. The file contained exactly ONE
-         un-arbitrated observable and it is now MEASURED (finding F-19), so there is
+         un-arbitrated observable and it is now MEASURED, so there is
          no `xfail` here; the reading the marker used to assert is asserted AGAINST,
          so a change back to it fails by name:
 
@@ -521,7 +518,7 @@ def _transcribe_lines_495_to_533(
 ) -> tuple[work_records.PreTransRecord, ...]:
     """Drive the MIGRATED explosion for one posting and return the legs it wrote.
 
-    ⭐ THIS FUNCTION USED TO BE A TRANSCRIPTION AND IS NOW A DRIVER, AND THE CHANGE
+    THIS FUNCTION USED TO BE A TRANSCRIPTION AND IS NOW A DRIVER, AND THE CHANGE
     MATTERS MORE THAN IT LOOKS. It previously re-executed
     [general/gl070.cbl:L495-L533] statement by statement in this file - over the
     production primitives, but as its own sequence - which made the file a SECOND
@@ -909,7 +906,7 @@ def test_work_record_descriptors_have_program_provenance_and_no_drift() -> None:
 
     `pre-trans-record` is `gl070`'s own file-section declaration
     [general/gl070.cbl:L106-L116]; `pretrans.tmp` is a transient work file, not part
-    of the schema [copybooks/wsnames.cob:L14-L17]. So every one of its dictionary
+    of the schema [copybooks/wsnames.cob:L15-L16]. So every one of its dictionary
     entries is a PROGRAM-SOURCE entry, and because there is no second view of the
     field there is nothing for a shape to drift against. That is what makes these
     eight descriptors the one group in the whole migration that can be trusted
@@ -1978,7 +1975,7 @@ def test_q70f_a_negated_zero_keeps_the_positive_overpunch_on_the_wire() -> None:
     is overpunched onto the last digit of the zoned `pic s9(8)v99`
     [general/gl070.cbl:L115]. Only the compiled program could say which byte it writes.
 
-    THE MEASUREMENT (finding F-19). GnuCOBOL 3.2.0, `cobc -x -free`, default flags, with
+    THE MEASUREMENT. GnuCOBOL 3.2.0, `cobc -x -free`, default flags, with
     a `####` sentinel immediately after the item so byte 10 is unambiguously the
     sign-carrying digit and byte 11 is the neighbour:
 
@@ -2205,18 +2202,11 @@ def test_every_store_in_this_block_is_un_rounded() -> None:
 
 
 # ==========================================================================
-#  MERGED GROUP - was tests/arithmetic/test_shipped_close_and_rejection_paths.py
-#
-#  Relocated verbatim so that this directory holds exactly the fourteen test
-#  modules the Agent Action Plan section 0.3.1 inventory names. Nothing was
-#  rewritten: the group's own preamble follows, as its author wrote it, and
-#  every test below is the test that ran under the old file name.
-# ==========================================================================
 #
 #  THE TWO BEHAVIOURS A TABLE DUMP CANNOT SEE, LOCKED BY CALL SEQUENCE INSTEAD.
 #
-#  Findings MJ-07 and MJ-11. Both are anomaly locks rule R-4 requires, and neither can be
-#  held by a state comparison, for the same structural reason: the behaviour under test is
+#  Two anomaly locks rule R-4 requires, neither of which can be held by a state
+#  comparison, for the same structural reason: the behaviour under test is
 #  a call that changes no row.
 #
 #    * ANOMALY A-1, `[sales/sl060.cbl:L1172-L1178]` - the missing terminating period nests
@@ -2424,7 +2414,7 @@ def _program_log(logger_name: str) -> Iterator[list[logging.LogRecord]]:
 
 
 # ---------------------------------------------------------------------------
-#  1.  ANOMALY A-1 - THE NESTED POSTING CLOSE IN `sl060`   (finding MJ-07)
+#  1.  ANOMALY A-1 - THE NESTED POSTING CLOSE IN `sl060`
 #
 #  [sales/sl060.cbl] `ca000-BL-Close section.` opens at L1158. The four lines that
 #  matter, verbatim:
@@ -2517,7 +2507,7 @@ def _sl060_state(sl060: types.ModuleType, *, irs_instead: str, level_1: int) -> 
 #: The full truth table of `ca000-BL-Close`'s two nested tests, as the frozen nesting
 #: produces it. `(irs_instead, level_1, spl_posting_close?, gl_posting_close?)`.
 #:
-#: ⭐ ROW 1 IS A-1. `IRS-Instead = space` and `Level-1 = 1` is pure General Ledger mode:
+#: ROW 1 IS A-1. `IRS-Instead = space` and `Level-1 = 1` is pure General Ledger mode:
 #: IF#3 would be TRUE on its own, and it is unreachable because IF#2 is false. THAT
 #: UNREACHABILITY IS THE DEFECT, and it is what row 1 asserts.
 _CLOSE_TRUTH_TABLE: Final[tuple[tuple[str, int, bool, bool], ...]] = (
@@ -2621,7 +2611,7 @@ def test_a1_the_nested_and_sibling_readings_differ_on_exactly_one_row() -> None:
 
 
 def test_a1_is_not_observable_in_any_table_and_this_file_says_why() -> None:
-    """The premise of this section: a CLOSE has no database effect (MJ-07).
+    """The premise of this section: a CLOSE has no database effect.
 
     Stated as an assertion rather than left in a comment, because it is the reason the
     lock lives here and not in `tests/scenarios/test_clean_batch_post_sl.py`. Both
@@ -2671,7 +2661,7 @@ def test_a1_is_not_observable_in_any_table_and_this_file_says_why() -> None:
 
 
 # ---------------------------------------------------------------------------
-#  2.  THE IR032 CLEAN REJECTION IN `irs030`   (finding MJ-11)
+#  2.  THE IR032 CLEAN REJECTION IN `irs030`
 #
 #  [irs/irs030.cbl:L1626-L1634]. `Input-Loop` moves the transfer record's DEBIT account
 #  into the nominal key, reads it, and then:
@@ -2835,7 +2825,7 @@ def _transfer(*, debit: int, credit: int, amount: str) -> dict[str, object]:
 
 
 def test_ir032_a_missing_debit_account_writes_nothing_at_all() -> None:
-    """THE CLEAN REJECTION: no nominal rewrite, no posting write (MJ-11).
+    """THE CLEAN REJECTION: no nominal rewrite, no posting write.
 
     One transfer record whose DEBIT account is absent. The frozen path reports IR032 and
     loops [irs/irs030.cbl:L1630-L1634], so the run must reach the next read having
@@ -2889,7 +2879,7 @@ def test_ir032_a_missing_debit_account_writes_nothing_at_all() -> None:
 
 
 def test_ir032_processing_CONTINUES_to_the_next_transfer_record() -> None:
-    """The rejection is a `GO TO Input-Loop`, NOT an abort (MJ-11).
+    """The rejection is a `GO TO Input-Loop`, NOT an abort.
 
     THE DISCRIMINATING HALF, and the reason the test above is not sufficient on its own:
     an implementation that ABORTED the run on a missing debit account would satisfy
@@ -2948,7 +2938,7 @@ def test_ir032_processing_CONTINUES_to_the_next_transfer_record() -> None:
 
 
 def test_ir032_and_a4_are_different_paths_with_different_effects() -> None:
-    """The missing-DEBIT and missing-CREDIT paths are not interchangeable (MJ-11).
+    """The missing-DEBIT and missing-CREDIT paths are not interchangeable.
 
     Both are "an account was not found", they are twenty lines apart, and they have
     OPPOSITE database effects: the debit path writes nothing, and the credit path leaves

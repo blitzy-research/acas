@@ -5,7 +5,7 @@
 # posting route, and the CONTROL HALF of the anomaly A-1 evidence pair. Its
 # shape is the canonical one defined by harness/scenarios/clean_batch_gl.yaml
 # and followed by harness/scenarios/clean_batch_sl.yaml: the same top-level
-# keys, in the same order, so that all nine scenario files read as one family.
+# keys, in the same order, so that all eight scenario files read as one family.
 # Where this file CANNOT mirror its Sales twin, the difference is the evidence
 # rather than an inconsistency, and every such place is named in the
 # description below with the frozen locator that forces it.
@@ -33,7 +33,7 @@
 # column, an index or a constraint. operations is a strictly ordered list and
 # its steps run one at a time, matching the single-threaded COBOL.
 #
-# KEYS APPEAR IN A FIXED ORDER, identically in all nine scenario files, and
+# KEYS APPEAR IN A FIXED ORDER, identically in all eight scenario files, and
 # the file is UTF-8, ASCII-only, LF-terminated, two-space indented and free of
 # tabs. It carries no wall-clock reading, no host identity, no process id, no
 # random value and no absolute host path, so two captures of one scenario are
@@ -168,7 +168,7 @@ description: |
        divergences below. The field is
        05  PL-Autogen  pic x  value space  at [copybooks/wssystem.cob:L209],
        which the maintainer marks NOT USED YET. It is pinned anyway so that
-       all nine scenario files share one system block and so the asymmetry is
+       all eight scenario files share one system block and so the asymmetry is
        recorded from the Purchase side as well as the Sales side.
   The remaining four are INERT on this route and are present only so that the
   seeded system record is fully determined:
@@ -447,7 +447,7 @@ description: |
   [copybooks/wssys4.cob:L23], pl-credit-notes-this-month
   [copybooks/wssys4.cob:L24] and pl-cn-unappl-this-month
   [copybooks/wssys4.cob:L27], all pic s9(8)v99 comp-3 inside the
-  Purchase-Ledger-Data group [copybooks/wssys4.cob:L20]. Anomaly 20 of the
+  Purchase-Ledger-Data group [copybooks/wssys4.cob:L20]. Anomaly A-20 of the
   register lives in that same group and is visible in this table: its two
   spare fields are named sl4-spare3 and sl4-spare4
   [copybooks/wssys4.cob:L29-L30], carrying the SALES prefix inside the
@@ -547,13 +547,13 @@ description: |
   the bound.
 
   TWO CELLS OF SYSTEM-REC ARE WITHHELD FROM THE CAPTURE, AND ONLY TWO.
-  `RDBMS-Passwd pic x(12)' [copybooks/wssystem.cob:L139] and the frozen schema's
-  shorter PASS-WORD column are the database's own password as seeded, and a dump
-  is SELECT *, so harness/dump_tables.py's REDACTED_COLUMNS replaces exactly
-  those two cells, on BOTH sides, with one fixed marker -- which is why this file
-  declares neither field. The row is still dumped and still diffed, every other
-  column byte for byte, so this is not an ignore-list, and withholding a secret
-  symmetrically cannot conceal a difference in anything the cycle computes.
+  `RDBMS-Passwd' [copybooks/wssystem.cob:L139] and the frozen schema's shorter
+  PASS-WORD column are the seeded database password, and a dump is SELECT *, so
+  harness/dump_tables.py's REDACTED_COLUMNS replaces those two cells, on BOTH
+  sides, with one fixed marker -- which is why this file declares neither field.
+  The row is still dumped and still diffed, every other column byte for byte, so
+  this is not an ignore-list, and an ignore-list in the diff stage remains
+  forbidden outright.
   THE ROW IS ALSO FINGERPRINTED, ON EVERY SCENARIO AND ON BOTH SIDES:
   acas_resolve_fingerprint_tables appends it when a scenario has not declared it,
   and tests/conftest.py's `assert_system_record_parity' compares the two sides'
@@ -707,27 +707,16 @@ description: |
   specification (R-6).
 
   THE ACCEPTANCE PROTOCOL
-  TEN stages, in this order, one scenario at a time and nothing
-  alongside it. harness/normalize.py is the single registry and
-  `harness/normalize.py --print-stages' prints it, so this list is a restatement
-  and never the authority:
-    1 reset the schema and seed the scenario
-    2 run the compiled COBOL cycle
-    3 dump the COBOL state
-    4 normalise the COBOL dump
-    5 reset the schema and RE-SEED THE SAME SCENARIO -- the same fixture bytes, so
-      the Python cycle starts from the state the COBOL cycle started from and not
-      the state it left
-    6 run the migrated Python cycle
-    7 dump the Python state
-    8 normalise the Python dump
-    9 verify both captures are published -- BEFORE a single row is compared,
-      because two PARTIAL captures can produce an empty diff and so pass a
-      comparison that compared nothing
-    10 diff the two normalised trees
-  harness/build_oracle.sh and harness/seed.sh --build-fixtures come before stage 1 and are
-  not stages: the first runs once per image, the second once per change to a
-  scenario's seed records.
+  TEN stages, one scenario at a time and nothing alongside it.
+  `harness/normalize.py --print-stages' is the registry and the authority. The
+  two stages a reader would not guess are stage 5, which re-seeds THE SAME
+  FIXTURE BYTES so the Python cycle starts from the state the COBOL cycle
+  started from rather than the state it left, and stage 9, which verifies both
+  captures are published BEFORE a single row is compared, because two PARTIAL
+  captures produce an empty diff and so pass a comparison that compared nothing.
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures precede stage 1
+  and are not stages: the first runs once per image, the second once per change
+  to a scenario's seed records.
   AN EMPTY DIFF IS THE PASS CONDITION AND THE ONLY ONE.
   A stage that exits non-zero has produced no evidence, so the correct response
   is to re-seed rather than to carry a partial capture forward. The result is
@@ -747,30 +736,23 @@ description: |
   PURCH-KEY, LEDGER-TOTALS-REC-KEY and VA-CODE.
 
   LOCATOR PROVENANCE
-  Every line number cited above was read directly out of the frozen source in
-  this checkout rather than copied from a plan, and several planning citations
-  were found to be off by one. The corrections are worth knowing when
-  cross-reading:
-  load08 spans [purchase/purchase.cbl:L752-L762] and not the paragraph starting
-  a line earlier -- the oracle-side runner's own operation table agrees; the
-  commented-out Purchase autogen call and gate are
-  [purchase/purchase.cbl:L755-L758]; the credential copy in the open-item
-  handler spans [common/acas029.cbl:L587-L592], of which the user field is only
-  the second line; the menu's minimum-geometry refusal begins at
-  [general/general.cbl:L374] and its system-record recovery runs to
-  [general/general.cbl:L396]; the batch-file recovery open in pl060 at
-  [purchase/pl060.cbl:L881-L883] and the G-L bypass at
-  [purchase/pl060.cbl:L644-L646] are BOTH COMMENTED OUT and are therefore
-  neither verbs nor code; and G-L is a condition name on the installed-ledger
-  level byte at [copybooks/wssystem.cob:L85], NOT on the fan-out switch at
-  [copybooks/wssystem.cob:L179-L181], which is the correction that produced the
-  two-field statement of pure General Ledger mode above and that revealed the
-  three G-L gates peculiar to this route.
-  THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common,
-  copybooks, general, sales, purchase, irs, stock or mysql is a defect in the
-  migration however harmless it looks.
-
-
+  Every line number cited above was read out of the frozen source in this
+  checkout; docs/migration/traceability.md carries the corrected-locator record.
+  Four spans are cited only here: load08 is [purchase/purchase.cbl:L752-L762], of
+  which the commented-out Purchase autogen call and gate are
+  [purchase/purchase.cbl:L755-L758]; the credential copy in the open-item handler
+  spans [common/acas029.cbl:L587-L592], of which the user field is only the second
+  line; the menu's minimum-geometry refusal begins at [general/general.cbl:L374]
+  and its system-record recovery runs to [general/general.cbl:L396]; and the
+  batch-file recovery open in pl060 at [purchase/pl060.cbl:L881-L883] and the G-L
+  bypass at [purchase/pl060.cbl:L644-L646] are BOTH COMMENTED OUT, so neither is a
+  verb. G-L is a condition name on the installed-ledger level byte at
+  [copybooks/wssystem.cob:L85] and NOT on the fan-out switch at
+  [copybooks/wssystem.cob:L179-L181], which is what makes pure General Ledger mode
+  two seeded fields rather than one and what puts three G-L gates on this route.
+  THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common, copybooks,
+  general, sales, purchase, irs, stock or mysql is a defect in the migration
+  however harmless it looks.
 subsystem: purchase
 
 # Read by the oracle-side runner as the default for its --operation option; it

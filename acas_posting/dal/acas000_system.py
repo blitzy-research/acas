@@ -355,7 +355,7 @@ class HandlerState:
             network in clear text, so the policy has to arrive from somewhere;
             it arrives here rather than as a fifth parameter on
             :func:`dispatch`, because the linkage list is four items and adding
-            to it would break the diff a reviewer needs.
+            to it would break the diff a reader diffing the two needs.
         system_record: The last ``SystemRecord`` a caller passed. NO
             DIRECT COBOL COUNTERPART, and the reason is worth stating.
             ``ba012-Test-WS-Rec-Size-2`` loads the six connection
@@ -457,7 +457,7 @@ def configure_transport(
 
     NO COBOL COUNTERPART - see :class:`HandlerState`. It is a separate function rather
     than a parameter on :func:`dispatch` because the linkage list is four items
-    [common/acas000.cbl:L309-L315] and a reviewer diffing the argument lists must find
+    [common/acas000.cbl:L309-L315] and a reader diffing the argument lists must find
     four on both sides.
 
     Args:
@@ -1547,7 +1547,7 @@ def ca_process_logs(
     control flow and must not appear in any table dump." This function does
     exactly that and nothing else.
 
-    ONE ADAPTER FOR ALL TWENTY HANDLERS. The record is composed by
+    ONE ADAPTER FOR ALL SEVENTEEN HANDLER MODULES. The record is composed by
     :func:`acas_posting.dal.status.log_file_handler_record`, not here, so the
     field set, the level and the counter arithmetic are the same in every handler
     instead of being twenty independent readings of the same one-line paragraph.
@@ -1556,7 +1556,7 @@ def ca_process_logs(
     ``SQL-Msg`` - and why: the first is the record key of a business entity, and
     the other two are free text this layer cannot reason about.
 
-    ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L20] IS NOW ADVANCED,
+    ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L18] IS NOW ADVANCED,
     and its omission here was a defect rather than a decision. ``fhlogger`` owns
     the counter and is out of scope, but the counter itself lives in
     ``ACAS-DAL-Common-data``, which this function is handed and which the caller
@@ -2676,9 +2676,9 @@ def _ba040_process_read_next(
 ) -> str:
     """``ba040-Process-Read-Next`` - the verb function codes 3 AND 4 reach.
 
-    ⭐ THE HANDLER PUBLISHES ``System-Read-Indexed`` AND NOTHING ELSE [copybooks/Proc-
-    ACAS-FH-Calls.cob:L190-L230], yet every one of the four bridges routes BOTH function
-    code 3 and function code 4 into this sequential paragraph
+    THE HANDLER PUBLISHES ``System-Read-Indexed`` AND NOTHING ELSE
+    [copybooks/Proc-ACAS-FH-Calls.cob:L190-L230], yet every one of the four bridges routes BOTH
+    function code 3 and function code 4 into this sequential paragraph
     [common/systemMT.cbl:L578-L581, and the same two ``when`` clauses in the other
     three].
 
@@ -2999,7 +2999,7 @@ def _log_where_text(text: str) -> str:
 # Each of the four is `CALL`ed with THREE parameters and `File-Access` FIRST
 # [common/acas000.cbl:L576-L579], a different arity and order from the handler's own
 # four-parameter linkage [common/acas000.cbl:L309-L315]; both are published as written
-# rather than harmonised, so a reviewer can diff the argument lists (rule R-5).
+# rather than harmonised, so a reader can diff the argument lists (rule R-5).
 
 
 def _run_bridge(
@@ -3010,7 +3010,7 @@ def _run_bridge(
 ) -> None:
     """One bridge's whole ``PROCEDURE DIVISION``, for one call.
 
-    ⭐ Function code 3 and function code 4 share one arm, and the arm is the SEQUENTIAL
+    Function code 3 and function code 4 share one arm, and the arm is the SEQUENTIAL
     read.
 
     Args:
@@ -3177,7 +3177,7 @@ def aa_exit() -> None:
 def aa100_bad_function(file_access: FileAccess) -> None:
     """``aa100-Bad-Function`` - 999 and 99, then fall through.
 
-    ⭐ The handler reports 999 where all four bridges report 990 for the same condition
+    The handler reports 999 where all four bridges report 990 for the same condition
     [common/systemMT.cbl:L1027-L1029].
 
     Args:
@@ -3318,7 +3318,7 @@ def aa070_process_write(
 ) -> None:
     """``aa070-Process-Write`` - write relative record ``File-Key-No``.
 
-    ⭐ ``write System-Record from WS-System-Record`` writes the FILE SECTION record FROM
+    ``write System-Record from WS-System-Record`` writes the FILE SECTION record FROM
     the linkage buffer.
 
     Args:
@@ -3401,7 +3401,7 @@ def ba_rdbms_exit() -> None:
 def ba010_test_ws_rec_size(file_access: FileAccess) -> None:
     """``ba010-Test-WS-Rec-Size`` - ONE statement, and it is anomaly N-log.
 
-    ⭐ ANOMALY N-log. ``aa010-main`` has already put 10 in that field
+    ANOMALY N-log. ``aa010-main`` has already put 10 in that field
     [common/acas000.cbl:L328], and the two paths then diverge.
 
     Args:
@@ -3476,7 +3476,7 @@ def ba015_test_ends(
     dal_common: AcasDalCommonData,
     record: SystemFileRecord,
 ) -> None:
-    """``ba015-Test-Ends`` - ⭐ THE DISPATCH. FIVE branches, one buffer.
+    """``ba015-Test-Ends`` - THE DISPATCH. FIVE branches, one buffer.
 
     and the linkage comment states the arrangement outright [common/acas000.cbl:L311]:
     "with images for the other three record types as same size". So in the compiled
@@ -3677,7 +3677,7 @@ def dispatch(
 ) -> None:
     """``call "acas000" using ...`` - FOUR parameters, in the frozen order.
 
-    ⭐ AND THE CALLER OWNS THE KEY. ``acas000.`` is the ONLY dispatch paragraph in the
+    AND THE CALLER OWNS THE KEY. ``acas000.`` is the ONLY dispatch paragraph in the
     1,449-line facade with no ``move 1 to File-Key-No``.
 
     Args:
@@ -3689,8 +3689,8 @@ def dispatch(
         file_defs: The file-name definitions [copybooks/wsnames.cob]. Accepted because
             the linkage names it [common/acas000.cbl:L314] and unused on the migrated
             path; see :func:`aa010_main` for the full record of that omission.
-        dal_common: The shared testing and logging flags [copybooks/Test-Data-
-            Flags.cob].
+        dal_common: The shared testing and logging flags
+            [copybooks/Test-Data-Flags.cob].
 
     Raises:
         RelativeFileStoreNotMigratedError: If the caller leaves

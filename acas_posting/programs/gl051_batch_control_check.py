@@ -1,7 +1,7 @@
 """`gl051` - the General Ledger batch control-total gate [general/gl051.cbl].
 
 A PARTIAL migration: only the control-total gate, the `end-batch` paragraph of
-the `batch-print` section [general/gl051.cbl:L1096-L1133]. The rest of the file
+the `batch-print` section [general/gl051.cbl:L1096-L1134]. The rest of the file
 is a proof-and-amendment screen program and is out of scope, so this module holds
 no screen, no accept loop and no amendment dialogue.
 
@@ -45,42 +45,33 @@ reason it has to be:
     against zero and rejects every batch that has any value in it.
 
 ALSO IN SCOPE, THOUGH UNREACHABLE FROM THE GATE - the seven arithmetic fragments
-plan section 0.4.1.2 names for this module BY LOCATOR:
+plan section 0.4.1.2 names for this module BY LOCATOR: `net.` L788 with its ROUNDED
+compute L791 (`_net`); `gross.` L793 with its ROUNDED compute L796 and the
+un-ROUNDED subtract L797 that follows (`_gross`); `accept-date.` L582's two scaling
+divides L604 and L607 (`_accept_date_scale_out`); `accept-amount.` L650's two
+scaling multiplies L654 and L657 (`_accept_amount_scale_in`); and
+`get-description.` L799's fifth scaling multiply L803
+(`_gl050c_get_description_scale`). All seven live in `gl050c` section 496, which
+the boundary excludes, and a census of every `perform` between L999 and L1166
+proves none is reachable from inside the gate, so none of the five functions has a
+caller here. They are reproduced regardless: section 0.4.1.2's `gl051` row names
+them explicitly, and section 0.6.1's census counts L791 and L796 among the FIVE
+`ROUNDED` sites of the entire in-scope cycle - omitting them would ship three of
+five and make both that census and this module's ROUNDING section untrue. The
+section comment above `_net` gives the argument in full.
 
-    net.              L788   ROUNDED compute L791          `_net`
-    gross.            L793   ROUNDED compute L796,         `_gross`
-                             then the un-ROUNDED subtract L797
-    accept-date.      L582   the two scaling divides        `_accept_date_scale_out`
-                             L604 and L607
-    accept-amount.    L650   the two scaling multiplies     `_accept_amount_scale_in`
-                             L654 and L657
-    get-description.  L799   the fifth scaling multiply     `_gl050c_get_description_scale`
-                             L803
-
-All seven live in paragraphs section 0.2.1.1's boundary excludes - `gl050c`
-section 496 - and a census of every `perform` between L999 and L1166 proves that
-not one of them is reachable from inside the gate, so none of the five functions
-has a caller in this module. They are reproduced regardless, because section
-0.4.1.2's `gl051` row names them explicitly and section 0.6.1's census counts L791
-and L796 among the FIVE `ROUNDED` sites of the entire in-scope cycle that rule R-2
-requires to exist. Omitting them would ship three of five and make both that
-census and this module's own ROUNDING section untrue. The section comment above
-`_net` sets out the argument in full, together with what the gate consumes from
-each.
-
-NOT IN SCOPE - the two date sections a reader of the same column might also expect
-here. A census of the four `perform` sites of each shows `zz050-Validate-Date`
-L1169 is performed ONCE, from `gl050c`'s `accept-date.` [general/gl051.cbl:L593],
-and `zz070-Convert-Date` L1243 THREE TIMES, from `gl051-Main`
-[general/gl051.cbl:L369], `proof-all` [general/gl051.cbl:L501] and `gl050d`
-[general/gl051.cbl:L973] - so neither is reachable from the boundary either. Unlike
-the arithmetic fragments, section 0.4.1.2 does not name them for this module, and
-both already exist in `acas_posting.dates` as `zz050_validate_date_gl051` and
-`zz070_convert_date`. Reproducing them here would duplicate shared code that
-section 0.6.3 puts in one place. Recorded in
-`docs/migration/traceability.md` section 9.7. Section 0.8.7 is the governing
-warning throughout: "an agent working from the file rather than from the stated
-boundary would migrate several hundred lines that must not be migrated."
+NOT IN SCOPE - the two date sections a reader of the same column might expect here.
+`zz050-Validate-Date` L1169 is performed ONCE, from `gl050c`'s `accept-date.`
+[general/gl051.cbl:L593], and `zz070-Convert-Date` L1243 three times, from
+`gl051-Main` [general/gl051.cbl:L369], `proof-all` [general/gl051.cbl:L501] and
+`gl050d` [general/gl051.cbl:L973] - so neither is reachable from the boundary, and
+unlike the arithmetic fragments section 0.4.1.2 does not name them for this module.
+Both already exist in `acas_posting.dates` as `zz050_validate_date_gl051` and
+`zz070_convert_date`; reproducing them here would duplicate shared code that
+section 0.6.3 puts in one place. Recorded in `docs/migration/traceability.md`
+section 9.7. Section 0.8.7 is the governing warning throughout: "an agent working
+from the file rather than from the stated boundary would migrate several hundred
+lines that must not be migrated."
 
 IN SCOPE as thin delegations, because `batch-print` performs `zz060` twice
 (at [general/gl051.cbl:L1020] and [general/gl051.cbl:L1082]) and `zz060` reaches
@@ -89,21 +80,10 @@ the date-module wrapper:
     zz060-Convert-Date   section.  L1208
     maps03               section.  L1273   ANOMALY A-22, OCCURRENCE 2
 
-OUT OF SCOPE - not one line of any of these is translated:
-
-    gl051-Main       section.  L359
-    proof-all        section.  L474
-    gl050c           section.  L496   incl. accept-amount. L650, h-o-data. L782,
-                                      get-description. L799, main-exit. L816
-    batch-amendment  section.  L825   incl. batch-outline. L838, b-o-loop2. L845,
-                                      b-o-data. L855, cycle-in. L868,
-                                      items-in. L889, gross-in. L901,
-                                      vat-in. L912, desc-in. L926,
-                                      detail-query. L939
-    gl050d           section.  L961   incl. disp-head-skip. L978,
-                                      main-exit. L985, end-routine. L993
-
-plus every screen section, every `accept` loop and every amendment dialog.
+OUT OF SCOPE - not one line of any of these is translated: `gl051-Main` section
+L359, `proof-all` L474, `gl050c` L496, `batch-amendment` L825 and `gl050d` L961,
+with all their paragraphs, plus every screen section, every `accept` loop and every
+amendment dialog. `docs/migration/traceability.md` carries the paragraph inventory.
 
 THE MODULE MUTATES NO TABLE
 ===========================
@@ -117,7 +97,7 @@ no close anywhere inside the REPORT SECTION. The opens are `gl050d`'s
 [general/gl051.cbl:L989-L990].
 
 The section's own deliverable is therefore a VALUE: `Batch-Status` on the batch
-record, plus the `trutht` flag that decides it. ⭐ AND `run` WRITES THAT VALUE TO
+record, plus the `trutht` flag that decides it. AND `run` WRITES THAT VALUE TO
 THE ROW. Both frozen callers of the gate perform `GL-Batch-Rewrite`
 UNCONDITIONALLY immediately after it - [general/gl051.cbl:L415] in `gl051-Main`
 and [general/gl051.cbl:L491] in `proof-all` - and both callers are out of scope,
@@ -208,7 +188,7 @@ totals agree.
 `we-error` is used here as a LOCAL 0-or-1 FLAG - literal `1` at
 [general/gl051.cbl:L1144] and [general/gl051.cbl:L1158], zero at
 [general/gl051.cbl:L1138] and [general/gl051.cbl:L1152]. It is the same
-`We-Error pic 999` field the file handlers use [copybooks/wsfnctn.cob:L23-L38],
+`We-Error pic 999` field the file handlers use [copybooks/wsfnctn.cob:L22-L41],
 but NOT the handler's code vocabulary: a reader arriving from `gl072` will
 expect the 999 sentinel and there is none here. `_batch_print_get_description`
 says so at the site.
@@ -226,11 +206,9 @@ followed IMMEDIATELY by a truncating one.
 
 ANOMALIES REPRODUCED  (rule R-4)
 ================================
-Plan section 0.8.2, verbatim: "There is no test suite: compiled COBOL execution
-is the behavioral specification, defects included. A defect reproduced is
-correct; a defect fixed is a failure." Section 0.7.4 C-4 prescribes a comment at
-each reproduction site citing the COBOL locator, and that is how engineering
-quality is expressed here rather than through correction.
+Each reproduction site carries a comment citing its COBOL locator, per section
+0.7.4 C-4. `docs/migration/anomaly-log.md` is the register; what follows is only
+what bears on this module.
 
   A-22, OCCURRENCE 2  `maps03 section.` [general/gl051.cbl:L1273] carries the
       exit label `maps04-exit.` [general/gl051.cbl:L1278] - the section named
@@ -248,47 +226,54 @@ quality is expressed here rather than through correction.
       contradicts the sum of its fields - [copybooks/wsbatch.cob:L7-L9] says
       "96 bytes ... 98 bytes ... (no, dont understand as I count 96) but
       function length (Batch-record) says 98?". `gl051` reads and compares those
-      very fields, so the contradiction bears on this module directly. It is an
-      OPEN ORACLE QUESTION - question Q-9 - and this module takes the layout as
-      `acas_posting/records/gl_batch.py` publishes it.
+      very fields, so the contradiction bears on this module directly. It was
+      arbitrated as question Q-4 and is `RESOLVED BY ORACLE`: both declared copies
+      measure 96 bytes and the 98-byte note is false, so nothing realigns and this
+      module takes the layout as `acas_posting/records/gl_batch.py` publishes it.
 
 FINDINGS NOT IN THE TWENTY-TWO-ENTRY REGISTER, recorded for the log
 ==================================================================
-  F-1 `03 trutht pic 9.` [general/gl051.cbl:L175] is a transposition typo of
+Named `F-GL051-<n>` rather than bare `F-<n>`, so that a file-local candidate
+cannot be read as an entry of any shared register - the rule
+`docs/migration/anomaly-log.md` section 15.1 states. The questions below keep
+their bare `Q-n` numbers, because `docs/migration/ambiguity-resolutions.md`
+section 15.1 already pairs each with a canonical `Q-GL051-<n>` and retains the
+scoping rule that a bare `Q-n` inside a module resolves within that module.
+  F-GL051-1 `03 trutht pic 9.` [general/gl051.cbl:L175] is a transposition typo of
       "truth" or "true", and its condition names are spelled differently again -
       `88 falset value zero.` [general/gl051.cbl:L176] and `88 truet value 1.`
       [general/gl051.cbl:L177]. `falset` is DECLARED BUT NEVER TESTED anywhere
       in the 1,282 lines; only `truet` is, at [general/gl051.cbl:L507] (out of
       scope) and [general/gl051.cbl:L1101] (in scope). Same character of finding
       as the register's A-20.
-  F-2 The plan's own section 0.4.1.2 says `gl051` "Accumulates actual DR/CR/VAT".
+  F-GL051-2 The plan's own section 0.4.1.2 says `gl051` "Accumulates actual DR/CR/VAT".
       That is factually wrong: there is no `actual-DR` and no `actual-CR`
       anywhere in the program. `03 Amounts comp-3.` has exactly four money
       fields - `Input-Gross`, `Input-Vat`, `Actual-Gross`, `Actual-Vat`
       [copybooks/wsbatch.cob:L41-L44]. What is accumulated is gross and VAT.
-  F-3 The two page-break constants DIFFER: `Page-Lines - 6`
+  F-GL051-3 The two page-break constants DIFFER: `Page-Lines - 6`
       [general/gl051.cbl:L1060] against `Page-Lines - 12`
       [general/gl051.cbl:L1111]. Deliberate, not a typo - the second is about to
       write three multi-line blocks - and both are reproduced as written.
-  F-4 The unsigned accumulators receive signed addends. `Actual-Gross` and
+  F-GL051-4 The unsigned accumulators receive signed addends. `Actual-Gross` and
       `Actual-Vat` are `pic 9(9)v99` UNSIGNED [copybooks/wsbatch.cob:L43-L44],
       while `Post-Amount` and `Vat-Amount` are `pic s9(8)v99` SIGNED
       [copybooks/wspost.cob:L23] and [copybooks/wspost.cob:L28]. So
       [general/gl051.cbl:L1063-L1064] can add a negative value into a field that
       cannot hold one. Question Q-3.
-  F-5 The file holds TWO `get-description.` paragraphs that disagree on their
+  F-GL051-5 The file holds TWO `get-description.` paragraphs that disagree on their
       own sentinel: the out-of-scope one moves `255` to `we-error`
       [general/gl051.cbl:L808], the in-scope one moves `1`
       [general/gl051.cbl:L1144]. Both are read back with the same
       `if we-error = zero` test, so neither value is wrong - but they were
       plainly written at different times.
-  F-6 `gl051` DOES have a linker-satisfying stub block -
+  F-GL051-6 `gl051` DOES have a linker-satisfying stub block -
       `01 Dummies-4-Unused-ACAS-FH-Calls.` [general/gl051.cbl:L136-L156], with
       its own comment "Call blk at zz080-ACAS-Calls" - exactly like `gl072`
       [general/gl072.cbl:L134-L153] and `gl080`. It maps to nothing in Python
       and is recorded as representation-only in
       `docs/migration/traceability.md` section 11.3.
-  F-7 In the `z = 99` "all batches" mode, `get-a-batch`
+  F-GL051-7 In the `z = 99` "all batches" mode, `get-a-batch`
       [general/gl051.cbl:L1018] re-reads the batch header on every batch change,
       which OVERWRITES `Actual-Gross` and `Actual-Vat` with the stored values
       mid-run, and [general/gl051.cbl:L1063-L1064] then accumulates on top of
@@ -301,75 +286,69 @@ FINDINGS NOT IN THE TWENTY-TWO-ENTRY REGISTER, recorded for the log
 QUESTIONS FOR THE COMPILED ORACLE  (rule R-6)
 =============================================
 Rule R-6 makes observed compiled behaviour the tie-breaker, and section 0.6.8
-requires each question be recorded with its experiment. Nothing below is guessed
-in code: each is marked `# AMBIGUITY Q-n` at the site it bears on.
+requires each question be recorded with its experiment. Nothing below is guessed in
+code: each is marked `# AMBIGUITY Q-n` at the site it bears on. The bare numbers
+are file-local; `docs/migration/ambiguity-resolutions.md` section 15.1 pairs each
+with a canonical `Q-GL051-<n>` and retains the scoping rule.
 
-  Q-1 RESOLVED FROM THE SOURCE - no oracle experiment needed. The question was
-      whether persisting `Batch-Status` is the caller's job. It is the caller's
-      STATEMENT but not a caller's DECISION: both callers issue
-      `GL-Batch-Rewrite` UNCONDITIONALLY on every path that reaches the gate -
-      [general/gl051.cbl:L415] in `gl051-Main` and [general/gl051.cbl:L491] in
-      `proof-all` - so the field ALWAYS reaches `GLBATCH-REC`. Since both callers
-      are out of scope and section 0.4.1.1 gives the migration no route that
-      dispatches `gl051`, `run` performs the rewrite itself at that position. Not
-      doing so would leave the gate with no observable effect at all.
+  Q-1 RESOLVED FROM THE SOURCE - no oracle experiment needed. Persisting
+      `Batch-Status` is the caller's STATEMENT but not a caller's DECISION: both
+      callers issue `GL-Batch-Rewrite` UNCONDITIONALLY on every path that reaches
+      the gate - [general/gl051.cbl:L415] in `gl051-Main` and
+      [general/gl051.cbl:L491] in `proof-all` - so the field ALWAYS reaches
+      `GLBATCH-REC`. Both callers are out of scope and section 0.4.1.1 gives the
+      migration no route that dispatches `gl051`, so `run` performs the rewrite
+      itself at that position; not doing so would leave the gate with no
+      observable effect at all.
   Q-2 The compound VAT expression's intermediate precision
-      [general/gl051.cbl:L796]. Section 0.6.8 names this as "the one place a
-      precision difference could change a stored penny": there is no `-std=`
-      dialect flag and no `>>SET ARITHMETIC` directive anywhere in the
-      repository, so the compiler's default governs. The expected value must be
-      CAPTURED from the compiled program, never derived by reading. Experiment:
-      drive `gross.` over a rate and amount grid and record every result.
-  Q-3 What does an unsigned `pic 9(9)v99 comp-3` receiver hold after a negative
-      addend at [general/gl051.cbl:L1063-L1064] or
-      [general/gl051.cbl:L1109]? `acas_posting.cobol.arithmetic` models the sign
-      being dropped; the compiled value must confirm it. Experiment: post a
-      credit-heavy batch whose signed `Post-Amount` is negative and dump
+      [general/gl051.cbl:L796] - section 0.6.8's "one place a precision difference
+      could change a stored penny". There is no `-std=` dialect flag and no
+      `>>SET ARITHMETIC` directive anywhere in the repository, so the compiler's
+      default governs. EXPERIMENT: drive `gross.` over a rate and amount grid and
+      record every result. The expected value must be CAPTURED, never derived.
+  Q-3 What an unsigned `pic 9(9)v99 comp-3` receiver holds after a negative addend
+      at [general/gl051.cbl:L1063-L1064] or [general/gl051.cbl:L1109].
+      `acas_posting.cobol.arithmetic` models the sign being dropped. EXPERIMENT:
+      post a credit-heavy batch whose signed `Post-Amount` is negative and dump
       `GLBATCH-REC`.
   Q-4 The three promoted preconditions - `move 1 to trutht`
       [general/gl051.cbl:L967] and `move zero to actual-gross actual-vat`
-      [general/gl051.cbl:L982] - plus the batch-selection value `z`. All are set
-      by `gl050d` immediately before `perform batch-print`
-      [general/gl051.cbl:L983], so they are inputs to this boundary rather than
-      behaviour of it. Defaulted below to the COBOL's own values. Experiment:
-      confirm no other path reaches `batch-print` with different ones.
+      [general/gl051.cbl:L982] - plus the batch-selection value `z`. All are set by
+      `gl050d` immediately before `perform batch-print` [general/gl051.cbl:L983],
+      so they are inputs to this boundary rather than behaviour of it, and are
+      defaulted below to the COBOL's own values. EXPERIMENT: confirm no other path
+      reaches `batch-print` with different ones.
   Q-5 `z` has no `VALUE` clause [general/gl051.cbl:L172] and is set only in
-      out-of-scope interactive code, yet it is tested in scope four times -
-      [general/gl051.cbl:L1015], [general/gl051.cbl:L1026],
-      [general/gl051.cbl:L1088] and [general/gl051.cbl:L1099]. The default here
-      is zero, the "single selected batch" mode, because that is the only mode
-      that reaches the gate. Experiment: observe the value on entry for each
-      menu path.
-  Q-6 The file-handler facade's Python call shape. Plan section 0.4.3 writes it
-      as `facade.gl_batch_read_next(ctx)`, but no `ctx` type is defined
-      anywhere, whereas the frozen copybook forwards five arguments -
-      `call "acas007" using System-Record WS-Batch-Record File-Access File-Defs
-      ACAS-DAL-Common-Data` [copybooks/Proc-ACAS-FH-Calls.cob:L51-L57] - and
-      every already-written handler in this tree reproduces exactly that
-      five-argument order. This module binds to the frozen copybook and the real
-      code rather than to the prose, through one private adapter per verb, so
-      there is a single place to reconcile if the facade lands with a context
-      object instead.
-  Q-7 `Date-Form` is MUTATED when it is zero - `if Date-Form = zero move 1 to
-      Date-Form` at [general/gl051.cbl:L1183-L1184], and again inside `zz060`
-      [general/gl051.cbl:L1223-L1224] and `zz070`
-      [general/gl051.cbl:L1253-L1254]. It is a `SYSTEM-REC` column, so the
-      mutation is visible in a table dump. `_headings` performs `zz060` and
-      writes the returned value back for that reason. Experiment: dump
-      `SYSTEM-REC` before and after a proof run started with `Date-Form` zero.
+      out-of-scope interactive code, yet is tested in scope four times -
+      [general/gl051.cbl:L1015], [:L1026], [:L1088] and [:L1099]. The default here
+      is zero, the "single selected batch" mode, that being the only mode which
+      reaches the gate. EXPERIMENT: observe the value on entry for each menu path.
+  Q-6 The file-handler facade's Python call shape. Section 0.4.3 writes it as
+      `facade.gl_batch_read_next(ctx)`, but no `ctx` type is defined anywhere,
+      whereas the frozen copybook forwards five arguments
+      [copybooks/Proc-ACAS-FH-Calls.cob:L51-L57] and every handler in this tree
+      reproduces that five-argument order. This module binds to the frozen copybook
+      and the real code rather than to the prose, through one private adapter per
+      verb, so there is a single place to reconcile if the facade ever lands with a
+      context object instead.
+  Q-7 `Date-Form` is MUTATED when zero - `if Date-Form = zero move 1 to Date-Form`
+      at [general/gl051.cbl:L1183-L1184], and again inside `zz060` [:L1223-L1224]
+      and `zz070` [:L1253-L1254]. It is a `SYSTEM-REC` column, so the mutation is
+      diff-visible; `_headings` performs `zz060` and writes the returned value back
+      for that reason. EXPERIMENT: dump `SYSTEM-REC` before and after a proof run
+      started with `Date-Form` zero.
   Q-8 `line-cnt` [general/gl051.cbl:L166] counts print lines and is therefore
-      presentation - but it is TESTED at [general/gl051.cbl:L1060] and
-      [general/gl051.cbl:L1111], and a true test performs `headings`, which
-      performs `zz060`, which can mutate `Date-Form`. So the counter arithmetic
-      is reproduced even though the printing is not, because dropping it would
-      change how many times a diff-visible column is written. Experiment: as
-      Q-7, with a page-length small enough to force a break.
+      presentation - but it is TESTED at [:L1060] and [:L1111], and a true test
+      performs `headings`, which performs `zz060`, which can mutate `Date-Form`. So
+      the counter arithmetic is reproduced even though the printing is not, because
+      dropping it would change how many times a diff-visible column is written.
+      EXPERIMENT: as Q-7, with a page length small enough to force a break.
   Q-9 A-15's record-length contradiction [copybooks/wsbatch.cob:L7-L9]. Section
-      0.6.8, verbatim: "Whether the declared length or the field sum governs the
-      record actually read affects field alignment for the trailing fields, and
-      only execution shows which." This module reads `Input-Gross`, `Input-Vat`,
-      `Actual-Gross` and `Actual-Vat`, which sit mid-record, and takes the
-      layout as `acas_posting/records/gl_batch.py` publishes it.
+      0.6.8: "Whether the declared length or the field sum governs the record
+      actually read affects field alignment for the trailing fields, and only
+      execution shows which." This module reads `Input-Gross`, `Input-Vat`,
+      `Actual-Gross` and `Actual-Vat`, which sit mid-record, and takes the layout as
+      `acas_posting/records/gl_batch.py` publishes it.
 
 WHAT THIS MODULE DELIBERATELY DOES NOT DO
 =========================================
@@ -385,12 +364,6 @@ unrequested." Two indexed nominal reads per posting look like an obvious
 candidate for caching, and nothing is cached. Rule R-6: there is no ambient
 clock; the date arrives through `to_day` and through `system_record`, and
 `acas_posting/clock.py` is not imported.
-
-NOTE ON THE RULES DOCUMENT: this project has NO user rules document -
-`review_rules` reports that none was provided. The six binding rules R-1 to R-6
-are the Agent Action Plan's own, section 0.7.2, and are cited above by name and
-number. None has been invented, and where the plan is silent this module holds
-to ordinary enterprise practice.
 """
 
 from __future__ import annotations
@@ -432,7 +405,7 @@ from acas_posting.dates import (
 )
 
 # copy "wsfnctn.cob". [general/gl051.cbl:L129] - the record-layout half. `01 File-
-# Access.` [copybooks/wsfnctn.cob:L23-L38], carrying `We-Error pic 999` and `Fs-Reply
+# Access.` [copybooks/wsfnctn.cob:L22-L41], carrying `We-Error pic 999` and `Fs-Reply
 # pic 99`. Both are read and written inside the boundary.
 from acas_posting.records.file_access import (
     ALL_FIELDS as _FILE_ACCESS_FIELDS,
@@ -573,11 +546,11 @@ _WE_ERROR: Final = _from_record(_FILE_ACCESS_FIELDS, "We-Error")
 #: the handler's code vocabulary: it is emphatically NOT `WeError.NOT_USED`,
 #: whose value is 999 and which is `gl072`'s sentinel
 #: [general/gl072.cbl:L306-L307]. (The anomaly register cites that sentinel as
-#: [general/gl072.cbl:L303-L304]; in the frozen checkout the two statements read
+#: [general/gl072.cbl:L306-L307]; in the frozen checkout the two statements read
 #: at L306-L307, and the frozen file is the authority.) Named here so the call
 #: sites read as the flag
 #: they are, and so nobody substitutes an enum member that would change the
-#: stored value. Finding F-5 records that the out-of-scope `get-description.`
+#: stored value. Finding F-GL051-5 records that the out-of-scope `get-description.`
 #: [general/gl051.cbl:L799] uses 255 for the identical purpose
 #: [general/gl051.cbl:L808].
 _WE_ERROR_LOCAL_FAILURE: Final[int] = 1
@@ -654,7 +627,7 @@ _L9_AMOUNT: Final = descriptor_for(
 #: `88 truet value 1.` [general/gl051.cbl:L177].
 _TRUET_VALUE: Final[int] = 1
 
-#: `88 falset value zero.` [general/gl051.cbl:L176]. FINDING F-1: declared and NEVER
+#: `88 falset value zero.` [general/gl051.cbl:L176]. FINDING F-GL051-1: declared and NEVER
 #: TESTED - not once in 1,282 lines.
 _FALSET_VALUE: Final[int] = 0
 
@@ -665,7 +638,7 @@ _BATCH_NOT_FOUND_SENTINEL: Final[int] = 99999
 _Z_ALL_BATCHES: Final[int] = 99
 
 #: `Page-Lines - 6` [general/gl051.cbl:L1060] against `Page-Lines - 12`
-#: [general/gl051.cbl:L1111]. FINDING F-3.
+#: [general/gl051.cbl:L1111]. FINDING F-GL051-3.
 _PAGE_BREAK_MARGIN_DETAIL: Final[int] = 6
 _PAGE_BREAK_MARGIN_TOTALS: Final[int] = 12
 
@@ -801,7 +774,7 @@ class _HandlerLinkage:
 # section; the opens are `gl050d`'s [general/gl051.cbl:L980-L981] and so are the
 # closes [general/gl051.cbl:L989-L990].
 #
-# ⭐ THE FOURTH VERB IS `GL-Batch-Rewrite`, AND IT IS NOT OPTIONAL. The gate's one
+# THE FOURTH VERB IS `GL-Batch-Rewrite`, AND IT IS NOT OPTIONAL. The gate's one
 # deliverable is `Batch-Status` on `GLBATCH-REC`, and a status that is only set in
 # memory is not a database effect at all. In the frozen program the rewrite that
 # persists it is UNCONDITIONAL in both of the gate's callers:
@@ -877,7 +850,7 @@ def _gl_batch_rewrite(linkage: _HandlerLinkage) -> None:
              set      fn-Re-write to true.
              perform  acas007.
 
-    ⭐ THE ONE DATABASE MUTATION OF THE WHOLE `gl051` BOUNDARY, and the statement
+    THE ONE DATABASE MUTATION OF THE WHOLE `gl051` BOUNDARY, and the statement
     that turns the control-total gate from an in-memory calculation into an
     observable effect on `GLBATCH-REC`. It writes back the batch record the gate
     just mutated, carrying `Batch-Status` - `88 Status-Closed value 1.`
@@ -1027,7 +1000,7 @@ def _zz060_convert_date(storage: _WorkingStorage, date_form: int) -> int:
 def _net(posting: WsPostingRecord, ws_vat_rate: decimal.Decimal) -> None:
     """`net.` [general/gl051.cbl:L788-L791] - VAT from a VAT-EXCLUSIVE amount.
 
-    ⭐ ROUNDED STORE 1 OF THE 2 THIS MODULE OWNS, and 1 of the 5 the whole
+    ROUNDED STORE 1 OF THE 2 THIS MODULE OWNS, and 1 of the 5 the whole
     migration owns. `compute ... rounded` [general/gl051.cbl:L791] stores half-up;
     every other store in this module truncates, which is why rounding is a
     per-call argument here and never a module-wide mode.
@@ -1049,7 +1022,7 @@ def _net(posting: WsPostingRecord, ws_vat_rate: decimal.Decimal) -> None:
 def _gross(posting: WsPostingRecord, ws_vat_rate: decimal.Decimal) -> None:
     """`gross.` [general/gl051.cbl:L793-L797] - VAT out of a VAT-INCLUSIVE amount.
 
-    ⭐ ROUNDED STORE 2 OF THE 2, IMMEDIATELY FOLLOWED BY A TRUNCATING ONE. The
+    ROUNDED STORE 2 OF THE 2, IMMEDIATELY FOLLOWED BY A TRUNCATING ONE. The
     adjacency at [general/gl051.cbl:L796-L797] is the reason this module can never
     carry a module-wide rounding mode: a half-up store is followed by an
     un-`ROUNDED` `subtract` in the very next statement, and both are reproduced as
@@ -1086,7 +1059,7 @@ def _accept_date_scale_out(
 ) -> None:
     """`accept-date.` [general/gl051.cbl:L603-L608] - the two scaling DIVIDES.
 
-    ⭐ NAMED FOR ITS OWNING PARAGRAPH, WHICH IS NOT THE OBVIOUS ONE. The `if
+    NAMED FOR ITS OWNING PARAGRAPH, WHICH IS NOT THE OBVIOUS ONE. The `if
     convention = "DR"` block is the LAST statement of `accept-date.`
     [general/gl051.cbl:L582], not the first of `get-account.`
     [general/gl051.cbl:L610], even though `get-account` is what consumes the result
@@ -1523,7 +1496,7 @@ def _end_batch(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
         TOUCHED. A clean rejection with NO database effect: in all-batches proof
         mode the report is produced and no batch is accepted or rejected. This is
         also why the accumulator clobber at [general/gl051.cbl:L1018] is harmless
-        - finding F-7.
+        - finding F-GL051-7.
       * [general/gl051.cbl:L1103], reached when `trutht` has been cleared. Sets
         `Batch-Status` to zero and returns BEFORE COMPARING ANYTHING. A rejection
         WITH a database effect, and the only path by which a batch whose figures
@@ -1570,7 +1543,7 @@ def _end_batch(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
     RESOLVED FROM THE SOURCE: there is no path in either caller on which the gate
     runs and the rewrite does not follow.
 
-    FINDING F-3: the page-break margin is TWELVE here [general/gl051.cbl:L1111]
+    FINDING F-GL051-3: the page-break margin is TWELVE here [general/gl051.cbl:L1111]
     and SIX in `loop` [general/gl051.cbl:L1060]. Twelve guards the three
     multi-line total blocks about to be written. Both are reproduced as written.
 
@@ -1764,15 +1737,15 @@ def _batch_print_get_description(
     success, and neither can un-clear `trutht`.
 
     `we-error` IS A LOCAL FLAG HERE, NOT A HANDLER CODE. It is the same
-    `We-Error pic 999` field [copybooks/wsfnctn.cob:L23-L38] the file handlers
+    `We-Error pic 999` field [copybooks/wsfnctn.cob:L22-L41] the file handlers
     write their diagnostics into, but this paragraph uses it as plain 0-or-1:
     literal `1` at [general/gl051.cbl:L1144] and [general/gl051.cbl:L1158], zero
     at [general/gl051.cbl:L1138] and [general/gl051.cbl:L1152]. A reader arriving
     from `gl072` will expect the handler vocabulary - in particular the 999
     sentinel `gl072` tests at [general/gl072.cbl:L306-L307], cited by the anomaly
-    register as [general/gl072.cbl:L303-L304] - and NONE OF IT
+    register as [general/gl072.cbl:L306-L307] - and NONE OF IT
     APPLIES HERE. Nothing below compares `we-error` against a handler code.
-    Finding F-5 records that the out-of-scope namesake at
+    Finding F-GL051-5 records that the out-of-scope namesake at
     [general/gl051.cbl:L799] uses 255 for the same purpose.
 
     THE PRINT MARKERS ARE NOT PURELY PRESENTATION. `dr-error` and `cr-error` look
@@ -1914,7 +1887,7 @@ def run(
     [general/gl051.cbl:L1156] - so the report section performs no mutation of its
     own.
 
-    ⭐ `run` THEN PERFORMS `GL-Batch-Rewrite`, unconditionally, exactly where both
+    `run` THEN PERFORMS `GL-Batch-Rewrite`, unconditionally, exactly where both
     frozen callers of the gate perform it: [general/gl051.cbl:L415] in
     `gl051-Main`, reached on every path out of its menu dispatch, and
     [general/gl051.cbl:L491] in `proof-all`. Both callers are out of scope
@@ -1973,7 +1946,7 @@ def run(
     cannot be made non-deterministic by one.
 
     Args:
-        ws_calling_data: `01 WS-Calling-Data.` [copybooks/wscall.cob:L6-L13], linkage
+        ws_calling_data: `01 WS-Calling-Data.` [copybooks/wscall.cob:L7-L14], linkage
             parameter one.
         system_record: `SYSTEM-REC` [general/gl051.cbl:L348], linkage parameter two.
             Supplies `Page-Lines` for the two page-break tests and `Date-Form`, which
@@ -1990,7 +1963,7 @@ def run(
             FUNCTION IS A FIELD OF THIS RECORD.
         ledger: `01 WS-Ledger-Record.` [general/gl051.cbl:L130] - the buffer both `GL-
             Nominal-Read-Indexed` calls fill.
-        file_access: `01 File-Access.` [copybooks/wsfnctn.cob:L23-L38] - carries `Fs-
+        file_access: `01 File-Access.` [copybooks/wsfnctn.cob:L22-L41] - carries `Fs-
             Reply`, tested after every verb, and `We-Error`, used by `get-description`
             as a local 0-or-1 flag.
         dal_common: `01 ACAS-DAL-Common-Data.` from `copy "Test-Data-Flags.cob"`
@@ -2056,12 +2029,12 @@ def run(
     _batch_print(storage, linkage)
 
     # 415  perform  GL-Batch-Rewrite.               *> rewrite  batch-record..
-    # ⭐ THE GATE'S VERDICT REACHES THE ROW. Both frozen callers of the gate issue
+    # THE GATE'S VERDICT REACHES THE ROW. Both frozen callers of the gate issue
     # this UNCONDITIONALLY immediately after it - `gl051-Main`
     # [general/gl051.cbl:L415] and `proof-all` [general/gl051.cbl:L491] - and both
     # are out of scope, so there is no other place in the migration for it. See
     # `_gl_batch_rewrite` for the full argument and for what `gl070` does with the
-    # field. Without it, M-01: the gate would compute a verdict that no table ever
+    # field. Without it the gate would compute a verdict that no table ever
     # records and no later phase could ever read.
     _gl_batch_rewrite(linkage)
 
@@ -2091,7 +2064,7 @@ def run(
     # performs. Both are bound so the linkage shape is exact, and both are named
     # here so that no reader concludes a parameter was dropped.
     #
-    # ⭐ `move u-bin to proofed.` [general/gl051.cbl:L413-L414] IS NOT REPRODUCED,
+    # `move u-bin to proofed.` [general/gl051.cbl:L413-L414] IS NOT REPRODUCED,
     # and the omission is deliberate rather than an oversight. It stamps the batch
     # header's proofed date from the run date and is carried by the SAME rewrite
     # above, so it looks at first like a companion effect that belongs here. It

@@ -751,9 +751,9 @@ _SEPARATE_SIGN_POSITIONS: Final[frozenset[SignPosition]] = frozenset(
 def _sign_carrying_index(digit_count: int, position: SignPosition) -> int:
     """Which digit of a zoned item carries the overpunched sign.
 
-    The first for a LEADING sign - `pic s9(7)v99 sign leading` [copybooks/wspost-
-    irs.cob:L21] - and the last otherwise. `SignPosition.NONE` on a signed item lands
-    here as the last digit deliberately.
+    The first for a LEADING sign - `pic s9(7)v99 sign leading`
+    [copybooks/wspost-irs.cob:L21] - and the last otherwise. `SignPosition.NONE` on a signed
+    item lands here as the last digit deliberately.
     """
     if position is SignPosition.LEADING_INCLUDED:
         return 0

@@ -12,11 +12,9 @@ WHAT THIS FILE PROVES
     descriptors are right, so nothing here may be taken on trust.
 
 PROVENANCE OF THE RULES
-    THERE IS NO USER RULES DOCUMENT for this project: `review_rules` returns exactly
-    "No user rules provided.", so no rules file exists on disk and none should be looked
-    for. The six binding rules R-1 .. R-6 live in the Technical Specification section
-    0.7.2, and where that specification is silent this file holds to enterprise-standard
-    best practice and invents nothing.
+    The six binding rules R-1 .. R-6 live in the Technical Specification section
+    0.7.2, and where that specification is silent this file holds to
+    enterprise-standard best practice.
 
 HOW THE SIX RULES BIND HERE
     R-1  No COBOL at runtime. This module imports `pytest`, `decimal` and four
@@ -91,7 +89,7 @@ HOW THE SIX RULES BIND HERE
 
              Q-3  what a negative binary value becomes once it has passed through an
                   unsigned host variable into an unsigned column. MEASURED on GnuCOBOL
-                  3.2.0 (finding F-19): the absolute value, then bounded by the
+                  3.2.0: the absolute value, then bounded by the
                   receiving digit count. The 91 affected entries now carry that
                   measurement in their notes and no longer publish `Q-3` in
                   `ambiguity_refs()`, while anomaly `A-11` stays on every one - and
@@ -1079,7 +1077,7 @@ def test_a11_signed_binary_long_narrowed_to_unsigned_at_the_bridge() -> None:
     unsigned; the column is `int(8) unsigned`. A negative value therefore loses its sign
     AT THE BRIDGE, before any SQL runs, and not at the database. What it becomes instead
     was question Q-3, and only running the compiled program could settle it. It has
-    been run (finding F-19): the bridge stores the ABSOLUTE VALUE, bounded by the
+    been run: the bridge stores the ABSOLUTE VALUE, bounded by the
     receiving digit count. So this test asserts that the drift is recorded, that the
     measurement is in the entry's notes and that `Q-3` is no longer published as open -
     and it still asserts no stored value of its own, because the stored value belongs to
@@ -1102,7 +1100,7 @@ def test_a11_signed_binary_long_narrowed_to_unsigned_at_the_bridge() -> None:
     assert "A-11" in descriptor.anomaly_refs()
     # R-6: no stored value is INVENTED here. What is asserted is the MEASUREMENT the
     # register recorded, read out of the entry's own notes rather than restated.
-    # Q-3 IS RESOLVED (finding F-19): GnuCOBOL 3.2.0 stores the ABSOLUTE VALUE,
+    # Q-3 IS RESOLVED: GnuCOBOL 3.2.0 stores the ABSOLUTE VALUE,
     # bounded by the receiving digit count. So the entry no longer publishes it as
     # an OPEN question - it publishes the measurement - while anomaly A-11, the
     # sign loss itself, stays exactly as it was (rule R-4).
@@ -1191,7 +1189,7 @@ def test_a11_second_instance_in_the_batch_date_group(
     assert drift is not None
     assert drift.signedness is True
     assert "A-11" in descriptor.anomaly_refs()
-    # Q-3 IS RESOLVED (finding F-19): GnuCOBOL 3.2.0 stores the ABSOLUTE VALUE,
+    # Q-3 IS RESOLVED: GnuCOBOL 3.2.0 stores the ABSOLUTE VALUE,
     # bounded by the receiving digit count. So the entry no longer publishes it as
     # an OPEN question - it publishes the measurement - while anomaly A-11, the
     # sign loss itself, stays exactly as it was (rule R-4).
@@ -2597,9 +2595,9 @@ def test_the_committed_dictionary_validates_against_its_committed_schema() -> No
 
 
 def test_every_physical_copybook_declaration_has_its_own_entry() -> None:
-    """R-5 closure over the DECLARATION MULTISET, never over an aggregate (finding M-18).
+    """R-5 closure over the DECLARATION MULTISET, never over an aggregate.
 
-    ⭐ WHY A TOTAL IS NOT ENOUGH, stated as the defect it hid. Before this test the
+    WHY A TOTAL IS NOT ENOUGH, stated as the defect it hid. Before this test the
     artifact reported 1001 copybook fields covered against 1001 physical declarations,
     and both numbers were right while the mapping between them was wrong:
     `copybooks/plwsoi5C.cob` had ONE entry for its SEVEN declarations, and
@@ -2956,7 +2954,7 @@ def test_every_ref_node_carries_only_annotations_beside_it() -> None:
 
 
 # ---------------------------------------------------------------------------
-#  MJ-06 - EVERY RECORD ATTRIBUTE REACHES A DICTIONARY ENTRY
+#  EVERY RECORD ATTRIBUTE REACHES A DICTIONARY ENTRY
 #
 #  Rule R-5 requires field-level traceability: every record field maps to a
 #  data-dictionary entry. `acas_posting/dictionary/loader.py` makes that mechanical by
@@ -3036,7 +3034,7 @@ def test_every_record_attribute_routes_to_a_dictionary_entry() -> None:
     )
     assert not unrouted, (
         f"{len(unrouted)} of {traced} record attributes reach no dictionary entry, so "
-        "rule R-5's field-level traceability does not hold of them (MJ-06):\n  "
+        "rule R-5's field-level traceability does not hold of them:\n  "
         + "\n  ".join(unrouted)
         + "\n\n  Give the field an explicit route, e.g. "
         'field(metadata={"dictionary_key": ...}), taking the key from the module\'s '
@@ -3045,7 +3043,7 @@ def test_every_record_attribute_routes_to_a_dictionary_entry() -> None:
 
 
 def test_the_repeated_filler_that_had_no_route_now_has_one() -> None:
-    """`SystemDataBlock.filler_81` routes by stated key, to the entry it names (MJ-06).
+    """`SystemDataBlock.filler_81` routes by stated key, to the entry it names.
 
     Named specifically as well as counted, because the count alone would go green
     again if the attribute were deleted rather than routed - and deleting a `FILLER`
@@ -3085,13 +3083,6 @@ def test_the_repeated_filler_that_had_no_route_now_has_one() -> None:
 
 
 # ==========================================================================
-#  MERGED GROUP - was tests/arithmetic/test_deployment_contract_boundaries.py
-#
-#  Relocated verbatim so that this directory holds exactly the fourteen test
-#  modules the Agent Action Plan section 0.3.1 inventory names. Nothing was
-#  rewritten: the group's own preamble follows, as its author wrote it, and
-#  every test below is the test that ran under the old file name.
-# ==========================================================================
 #
 #  Regression locks for the deployment contract and the IRS bind boundary.
 #
@@ -3105,7 +3096,7 @@ def test_the_repeated_filler_that_had_no_route_now_has_one() -> None:
 #
 #  WHAT IS LOCKED, AND WHICH DEFECT EACH LOCK CLOSES:
 #
-#    * F-07 - ONE transport environment contract. There were two: this package
+#    * ONE transport environment contract. There were two: this package
 #      declared four flag variables that nothing in the shipped stack set, while
 #      `acas_posting/cli/args.py` read a fifth with a DIFFERENT rule for what counts
 #      as an affirmative value. The tests here assert that every row of
@@ -3115,16 +3106,16 @@ def test_the_repeated_filler_that_had_no_route_now_has_one() -> None:
 #      `harness/docker-compose.yml` actually sets, and that a command-line
 #      declaration can no longer annul the contract's refusal switches.
 #
-#    * F-05 - the three driver deadlines are finite, and the two layers that name
+#    * the three driver deadlines are finite, and the two layers that name
 #      their defaults agree. `dal/connection.py` may not import the entry-point
 #      layer, so the defaults are declared twice by necessity; this is what stops
 #      them drifting.
 #
-#    * F-01 - the IRS route binds once. `bind_irs_route` publishes the snapshot its
+#    * the IRS route binds once. `bind_irs_route` publishes the snapshot its
 #      single `zz090` pass captured, and `bind_irs_linkage` delegates to it rather
 #      than repeating the bind.
 #
-#    * F-42 - cross-file references into the harness scripts name a SYMBOL and not a
+#    * cross-file references into the harness scripts name a SYMBOL and not a
 #      line number. 91 distinct line-number locators had accumulated across the nine
 #      scenario YAMLs, the migration documents and the scenario tests, and they were
 #      stale by construction: they point into files this project edits, so every edit
@@ -3207,7 +3198,7 @@ def test_every_transport_contract_row_has_a_consumer() -> None:
         assert entry.field in fields, (
             f"{entry.variable} resolves into {entry.field!r}, which is not a "
             f"field of TransportPolicyParams; a knob nothing reads is a knob "
-            f"that lies about what it does (finding F-07)"
+            f"that lies about what it does"
         )
 
 
@@ -3219,7 +3210,7 @@ def test_every_transport_policy_field_has_a_provider() -> None:
     for field in dataclasses.fields(cli_args.TransportPolicyParams):
         assert field.name in declared, (
             f"TransportPolicyParams.{field.name} is resolved from no declared "
-            f"variable, so a deployment cannot set it (finding F-07)"
+            f"variable, so a deployment cannot set it"
         )
 
 
@@ -3255,7 +3246,7 @@ def test_the_harness_provides_exactly_the_rows_marked_provided() -> None:
         if entry.provided_by_harness:
             assert entry.variable in supplied, (
                 f"{entry.variable} is marked provided_by_harness but "
-                f"harness/docker-compose.yml does not set it (finding F-07)"
+                f"harness/docker-compose.yml does not set it"
             )
 
 
@@ -3322,9 +3313,9 @@ def test_the_superseded_spelling_is_not_read_at_all() -> None:
 def test_affirmative_spellings_match_the_shell_scripts_closed_set() -> None:
     """`false` must not mean yes, and a spelling in NEITHER set stops the run.
 
-    THE SET IS CLOSED AT BOTH ENDS, and that is the whole of the remediation. Reading
-    an unrecognised value as "no" was the original defect in reverse: `false` read as
-    yes, `maybe` read as no, and either way the operator who typed it was never told.
+    THE SET IS CLOSED AT BOTH ENDS, and that is the whole of the rule. Reading an
+    unrecognised value as "no" is the same defect in reverse: `false` read as yes,
+    `maybe` read as no, and either way the operator who typed it is never told.
     `harness/seed.sh acas_plaintext_declared` matches `1|true|yes|on` and
     `''|0|false|no|off` case-insensitively and DIES on anything else; this module's
     `read_declared_flag` raises on anything else. `Y` is in neither set, in either
@@ -3476,7 +3467,7 @@ def test_the_contract_alone_installs_the_same_transport_declaration() -> None:
 
 
 def test_bind_irs_route_publishes_the_snapshot_of_its_single_zz090_pass() -> None:
-    """F-01: one bind, one key-1 load, one remap, and the snapshot comes back."""
+    """One bind, one key-1 load, one remap, and the snapshot comes back."""
     args = importlib.import_module("acas_posting.cli.args")
 
     parser = argparse.ArgumentParser()
@@ -3495,7 +3486,7 @@ def test_bind_irs_route_publishes_the_snapshot_of_its_single_zz090_pass() -> Non
 
 
 def test_bind_irs_linkage_delegates_to_bind_irs_route() -> None:
-    """Two entry points, ONE implementation, so they cannot drift (F-01)."""
+    """Two entry points, ONE implementation, so they cannot drift."""
     args = importlib.import_module("acas_posting.cli.args")
 
     parser = argparse.ArgumentParser()
@@ -3514,7 +3505,7 @@ def test_bind_irs_linkage_delegates_to_bind_irs_route() -> None:
 
 
 def test_load00_publishes_no_transport_parameter() -> None:
-    """F-03: the unused keyword-only parameter must stay removed."""
+    """The unused keyword-only parameter must stay absent."""
     import inspect
 
     gl_post_cycle = importlib.import_module("acas_posting.cli.gl_post_cycle")
@@ -3531,7 +3522,7 @@ def test_load00_publishes_no_transport_parameter() -> None:
 
 
 # ---------------------------------------------------------------------------
-# F-42 -- cross-file references into the harness scripts
+# Cross-file references into the harness scripts
 # ---------------------------------------------------------------------------
 
 #: The FROZEN tree, verbatim from AAP 0.8.1 plus the maintainer's own documents. A
@@ -3570,18 +3561,17 @@ _FROZEN_FILES: frozenset[str] = frozenset(
 
 #: The harness files whose line numbers move whenever this project edits them, and
 #: which are therefore referenced by symbol. `harness/scenario_stream.py` and
-#: `harness/parity_stages.sh` used to be listed here even though nothing referenced
-#: them by line, so that a first such reference would be caught; both are now MODES of
-#: `harness/normalize.py` (findings M-07 and M-08), which is listed in its own right.
-#: `harness/build_fixtures.sh` and `harness/make_fixtures.py` left the same way, into
-#: `harness/seed.sh --build-fixtures` and `harness/dump_tables.py --make-fixtures`
-#: (findings M-04 and M-02); both owners are listed.
-#: `harness/run_parity.sh` is likewise gone (finding M-06). It was not a mode of anything:
-#: its ten-stage orchestration was already implemented programmatically in
-#: `tests/conftest.py`, and the three gates it alone owned moved to the stages that own
-#: the state they protect - the oracle-provenance gate and the seed pre-flight into
-#: `harness/reset_db.sh`, the cross-side operations check into
-#: `harness/run_cobol_scenario.sh`. All three of those files are listed here.
+#: `harness/parity_stages.sh` are NOT listed: both are MODES of `harness/normalize.py`,
+#: which is listed in its own right.
+#: `harness/build_fixtures.sh` and `harness/make_fixtures.py` are likewise modes, of
+#: `harness/seed.sh --build-fixtures` and `harness/dump_tables.py --make-fixtures`; both
+#: owners are listed.
+#: THERE IS NO `harness/run_parity.sh` AND NO TEN-STAGE DRIVER SCRIPT. The ten-stage
+#: orchestration is implemented programmatically in `tests/conftest.py`, and the three
+#: gates such a script would own live in the stages that own the state they protect - the
+#: oracle-provenance gate and the seed pre-flight in `harness/reset_db.sh`, the cross-side
+#: operations check in `harness/run_cobol_scenario.sh`. All three of those files are
+#: listed here.
 _EDITABLE_HARNESS_FILES: tuple[str, ...] = (
     "run_cobol_scenario.sh",
     "run_python_scenario.sh",
@@ -3727,7 +3717,7 @@ def _is_frozen(path_text: str) -> bool:
 
 
 def test_no_reference_names_a_line_in_a_file_this_migration_writes() -> None:
-    """The general form of F-42, so the defect cannot come back somewhere new.
+    """The general form of the rule, so the defect cannot come back somewhere new.
 
     A line number is a perfectly good reference into the FROZEN tree, where the file
     cannot change. Into a file this migration writes it is stale at the next edit --
@@ -3828,7 +3818,7 @@ def test_every_harness_symbol_reference_resolves() -> None:
                     )
     assert checked, (
         "no `harness/<file> <symbol>` reference was found at all, so this test is "
-        "asserting nothing. The 129 references converted for F-42 should be here."
+        "asserting nothing. The 129 symbol-named references should be here."
     )
     assert not unresolved, (
         "these cross-file references name a symbol their target does not "
@@ -3839,7 +3829,7 @@ def test_every_harness_symbol_reference_resolves() -> None:
 #: `<number word> ... under|of `<directory>`` -- how the migration documents state an
 #: inventory count. The word is checked against the tree, so a document cannot claim
 #: fifteen files where sixteen exist. Three documents held three DIFFERENT numbers for
-#: `tests/arithmetic/` before F-47.
+#: `tests/arithmetic/`.
 _NUMBER_WORDS: dict[str, int] = {
     "two": 2,
     "three": 3,
@@ -3901,7 +3891,7 @@ def _inventory_documents() -> list[Path]:
 def test_documented_inventory_counts_match_the_tree() -> None:
     """A stated count must be what the directory holds.
 
-    F-47's defect was documents preserving the counts they were authored with. The
+    The defect this guards is a document preserving the count it was authored with. The
     numbers are small and written as English words, which is exactly why nobody
     noticed three documents disagreeing about one directory. This reads the tree.
     """
@@ -4097,7 +4087,7 @@ def test_no_function_reads_a_name_nothing_defines() -> None:
 
 
 # ---------------------------------------------------------------------------
-#  MJ-01 - THE ADMITTED-STATUS BAND IS DECLARED TWICE AND MUST AGREE
+#  THE ADMITTED-STATUS BAND IS DECLARED TWICE AND MUST AGREE
 #
 #  A status the Python runner admits as a DISPOSITION becomes evidence: the wrapper
 #  exits 69, the protocol continues past stage 6 so the capture can
@@ -4241,7 +4231,7 @@ def test_only_three_term_codes_exist_and_they_are_the_frozen_ones() -> None:
 
 
 # ---------------------------------------------------------------------------
-#  MJ-17 - ONE DUPLICATE-REJECTING SCENARIO PARSER, AND NO OTHER
+#  ONE DUPLICATE-REJECTING SCENARIO PARSER, AND NO OTHER
 #
 #  `yaml.safe_load` applies last-one-wins to a repeated mapping key, silently. A
 #  scenario definition carries the destructive answers (`irs_clear_postings`,
@@ -4259,12 +4249,12 @@ def test_only_three_term_codes_exist_and_they_are_the_frozen_ones() -> None:
 #  `harness/normalize.py` is NOT listed: it is the OWNER of the loader, not a consumer
 #  of it, and the flat record stream both runners read - once
 #  `harness/scenario_stream.py`, a consumer in its own right - is now a mode of that same
-#  file (findings M-05 and M-07), so it reads the loader by calling it directly.
+#  file, so it reads the loader by calling it directly.
 #  `harness/make_fixtures.py` is likewise absent: it is now the `--make-fixtures` mode of
-#  `harness/dump_tables.py` (finding M-02), which is listed, and it reaches the loader
+#  `harness/dump_tables.py`, which is listed, and it reaches the loader
 #  through that module's own by-path resolver rather than a second import of its own.
-#  `harness/run_parity.sh` was the eighth consumer and is gone (finding M-06): the ten
-#  stages it drove are driven by `tests/conftest.py`, which is listed and which reads a
+#  There is NO `harness/run_parity.sh` and so no eighth consumer: the ten stages such a
+#  script would drive are driven by `tests/conftest.py`, which is listed and which reads a
 #  definition through the same loader.
 _SCENARIO_YAML_CONSUMERS: tuple[str, ...] = (
     "harness/seed.sh",
@@ -4277,8 +4267,8 @@ _SCENARIO_YAML_CONSUMERS: tuple[str, ...] = (
 def _scenario_yaml_module():
     """Load the module that owns the shared scenario parser, by explicit path (rule R-1).
 
-    It is `harness/normalize.py` as of finding M-05; it was `harness/scenario_yaml.py`,
-    which the Agent Action Plan section 0.3.1 harness inventory does not name.
+    It is `harness/normalize.py`, and NOT `harness/scenario_yaml.py`, which the Agent
+    Action Plan section 0.3.1 harness inventory does not name.
 
     REGISTERED IN `sys.modules` BEFORE EXECUTION, and removed again if execution fails.
     Not optional: the module declares `@dataclass(frozen=True, slots=True)` records, and
@@ -4334,7 +4324,7 @@ def test_the_shared_loader_rejects_a_duplicate_key() -> None:
 
 
 def test_every_committed_scenario_parses_within_the_budgets() -> None:
-    """The budgets admit every committed definition unchanged (finding SEC-07).
+    """The budgets admit every committed definition unchanged.
 
     Stated FIRST and separately from the refusal test, because this is the half that
     would make the hardening a regression. A budget derived from anything other than the
@@ -4420,7 +4410,7 @@ def test_the_dictionary_reader_bounds_what_it_reads() -> None:
     Both halves in one test because they are one contract: the committed dictionary must
     load exactly as before, and a document that is oversized, deeper than the budget, or
     deep enough to exhaust the interpreter's own recursion limit must be refused as a
-    named `DictionaryParseError` rather than crashing the reader (finding SEC-07).
+    named `DictionaryParseError` rather than crashing the reader.
     """
     import json
     import tempfile
@@ -4473,7 +4463,7 @@ def test_the_dictionary_reader_bounds_what_it_reads() -> None:
 
 
 def test_the_dictionary_reader_follows_no_symbolic_link() -> None:
-    """An explicit artifact path is opened link by link, and a link is REFUSED (F-08).
+    """An explicit artifact path is opened link by link, and a link is REFUSED.
 
     The guarantee the loader states has to be the guarantee it enforces. It used to pass
     an explicit path through `Path.resolve()` before the `O_NOFOLLOW` open, which follows
@@ -4494,8 +4484,8 @@ def test_the_dictionary_reader_follows_no_symbolic_link() -> None:
     artifact = root / "data_dictionary" / "acas_posting_dictionary.json"
     payload = artifact.read_bytes()
 
-    #  The default lookup is unaffected: it resolves its own two candidates, because an
-    #  installed tree legitimately reaches its package data through a linked directory.
+    #  The default lookup is unaffected: it resolves the one candidate in
+    #  DATA_DICTIONARY_SEARCH_PATH, the committed repository sibling.
     assert loader.load_dictionary().entries, "the committed dictionary no longer loads"
 
     with tempfile.TemporaryDirectory() as directory:
@@ -4536,7 +4526,7 @@ def test_the_dictionary_reader_follows_no_symbolic_link() -> None:
 
 
 def test_no_artifact_recommends_an_unhashed_install() -> None:
-    """Install guidance names the hash-verified route, never a bare `pip install` (DEP-02).
+    """Install guidance names the hash-verified route, never a bare `pip install`.
 
     A `pip install <name>==<version>` in remediation text teaches the reader to fetch an
     unverified artifact, which is exactly the route the rest of this project refuses. The
@@ -4567,7 +4557,7 @@ def test_no_artifact_recommends_an_unhashed_install() -> None:
 
     assert not offenders, (
         "these lines recommend installing a pinned distribution without hash "
-        "verification, which is the DEP-02 defect:\n  " + "\n  ".join(offenders) + "\n"
+        "verification, which is the defect:\n  " + "\n  ".join(offenders) + "\n"
         "  Point at `pip install --require-hashes -r requirements.txt` instead."
     )
 
@@ -4617,17 +4607,17 @@ def test_every_scenario_yaml_consumer_uses_the_shared_loader() -> None:
     )
     assert not offenders, (
         "these lines call `yaml.safe_load`, whose last-one-wins on a duplicate key "
-        "is the defect finding MJ-17 names:\n  " + "\n  ".join(offenders) + "\n\n"
+        "is the defect:\n  " + "\n  ".join(offenders) + "\n\n"
         "  Parse scenario definitions through harness/normalize.py's "
         "`load_scenario_yaml` instead."
     )
 
 
 # ---------------------------------------------------------------------------
-#  MJ-17, SECOND HALF - A CONSUMER MUST RESOLVE THE SHARED PARSER BY ITSELF
+#  SECOND HALF - A CONSUMER MUST RESOLVE THE SHARED PARSER BY ITSELF
 #
-#  Wiring every consumer to the shared loader fixed the last-one-wins defect and
-#  introduced a quieter one. Its owner - `harness/normalize.py`, and before finding M-05
+#  Wiring every consumer to the shared loader removes the last-one-wins defect and opens
+#  a quieter one. The loader's owner - `harness/normalize.py`, not
 #  `harness/scenario_yaml.py` - is a SIBLING FILE, not an installed package, so a bare
 #  `import` of it resolves only when something has already put
 #  `harness/` on `sys.path` - true when the consumer runs as a script from that
@@ -4783,7 +4773,7 @@ def test_a_scenario_reads_with_harness_off_the_path_and_out_of_cache(
 
 
 # ---------------------------------------------------------------------------
-#  MJ-19 - EVERY KEYSTROKE A SCENARIO SUPPLIES IS ESCAPED AT THE PLAN BOUNDARY
+#  EVERY KEYSTROKE A SCENARIO SUPPLIES IS ESCAPED AT THE PLAN BOUNDARY
 #
 #  The pty driver's `decode_send` expands `\r`, `\n`, `\e`, `\t` and `\\` anywhere in a
 #  plan row's send field. That is correct for the terminator the runner appends and
@@ -4810,7 +4800,7 @@ def test_every_scenario_supplied_keystroke_is_escaped() -> None:
 
     assert "acas_plan_escape_data()" in text, (
         "harness/run_cobol_scenario.sh no longer defines acas_plan_escape_data, the "
-        "boundary between trusted plan controls and untrusted scenario data (MJ-19)."
+        "boundary between trusted plan controls and untrusted scenario data."
     )
 
     raw: list[str] = []
@@ -4824,7 +4814,7 @@ def test_every_scenario_supplied_keystroke_is_escaped() -> None:
     assert not raw, (
         "these plan send fields interpolate a variable directly, so a backslash in "
         "the value would be expanded by decode_send into a control sequence and the "
-        "two parity legs would receive different bytes (MJ-19):\n  "
+        "two parity legs would receive different bytes:\n  "
         + "\n  ".join(raw)
         + '\n\n  Wrap the value: "$(acas_plan_escape_data "$VAR")\\\\r"'
     )
@@ -4880,7 +4870,7 @@ def test_the_escape_boundary_round_trips_every_byte() -> None:
         assert got == data.encode("utf-8") + b"\r", (
             f"the escape boundary is not byte-transparent for {data!r}: the compiled "
             f"leg would be typed {got!r} while the migrated leg receives {data!r} as "
-            "argv, so the two legs would not share one logical input (MJ-19)."
+            "argv, so the two legs would not share one logical input."
         )
 
     # Proof the escaping is what achieves it: unescaped, the CR-bearing case really
@@ -4952,9 +4942,9 @@ def test_no_diagnostic_argument_list_is_broken_by_a_missing_continuation() -> No
 
 
 # ---------------------------------------------------------------------------
-#  MJ-16 / MJ-10 - THE END-OF-CYCLE DESTRUCTIVE ANSWERS
+#  THE END-OF-CYCLE DESTRUCTIVE ANSWERS
 #
-#  MJ-16: `acas_posting/cli/args.py` carries an explicit-intent gate. `require_stated`
+#  `acas_posting/cli/args.py` carries an explicit-intent gate. `require_stated`
 #  refuses to run until each destructive answer has been STATED, and
 #  `stated_explicitly` decides that by asking whether the option was PRESENT ON THE
 #  COMMAND LINE. The Python runner then composed `--run-confirmed` and
@@ -4963,7 +4953,7 @@ def test_no_diagnostic_argument_list_is_broken_by_a_missing_continuation() -> No
 #  point indistinguishable from a deliberate instruction, and the one component whose
 #  job is to refuse un-stated consent was told consent had been given.
 #
-#  MJ-10: the oracle leg listed `disk_change_option` and `archive_path_override` among
+#  the oracle leg listed `disk_change_option` and `archive_path_override` among
 #  its known keys and read NEITHER, hard-coding `0`. A scenario declaring `9` was
 #  accepted, honoured by the migrated leg and contradicted by the compiled one.
 #
@@ -4995,7 +4985,7 @@ def test_neither_end_of_cycle_answer_can_be_defaulted() -> None:
     assert not offenders, (
         "these lines default a DESTRUCTIVE end-of-cycle answer, which the runner then "
         "passes as an option and the entry point reads as consent explicitly stated "
-        "(MJ-16):\n  " + "\n  ".join(offenders) + "\n\n"
+        ":\n  " + "\n  ".join(offenders) + "\n\n"
         "  Read the key without a fallback and refuse when it is absent."
     )
 
@@ -5007,24 +4997,24 @@ def test_neither_end_of_cycle_answer_can_be_defaulted() -> None:
             assert re.search(rf"does not declare {key}", text), (
                 f"{relative} does not refuse a scenario that omits {key}; without "
                 "the refusal, removing the default just substitutes an empty answer "
-                "for an invented one (MJ-16)."
+                "for an invented one."
             )
 
 
 def test_the_oracle_leg_reads_the_disk_change_answer_it_types() -> None:
-    """The compiled leg drives the declared option rather than a hard-coded one (MJ-10)."""
+    """The compiled leg drives the declared option rather than a hard-coded one."""
     root = Path(__file__).resolve().parents[2]
     text = (root / "harness" / "run_cobol_scenario.sh").read_text(encoding="utf-8")
 
     assert re.search(r"ACAS_RUN_DISK_CHANGE=\"\$\(acas_scenario_scalar disk_change_option\)\"", text), (
         "harness/run_cobol_scenario.sh does not READ disk_change_option. It listed the "
         "key among those it accepts while ignoring it, so a scenario declaring 9 was "
-        "driven as 0 on this leg and as 9 on the other (MJ-10)."
+        "driven as 0 on this leg and as 9 on the other."
     )
     # The GL084 step must send the READ value, not a literal.
     assert not re.search(r"'gl080-archive' react 'GL084' '0", text), (
         "the GL084 plan step still hard-codes 0, so the two legs can be driven with "
-        "different disk-change answers (MJ-10)."
+        "different disk-change answers."
     )
     assert re.search(r"'gl080-archive' react 'GL084'", text) and re.search(
         r'acas_plan_escape_data "\$ACAS_RUN_DISK_CHANGE"', text
@@ -5035,12 +5025,12 @@ def test_the_oracle_leg_reads_the_disk_change_answer_it_types() -> None:
         "the plan has no step for the archive-path accept at "
         "[general/gl080.cbl:L555]. Answering GL084 falls through to it, so without a "
         "step the run would stall there and report a pty timeout rather than the "
-        "missing step it actually is (MJ-10)."
+        "missing step it actually is."
     )
 
 
 def test_inputs_with_no_oracle_counterpart_are_refused_by_both_legs() -> None:
-    """Neither leg accepts an input the other cannot reproduce (MJ-10).
+    """Neither leg accepts an input the other cannot reproduce.
 
     Asymmetry here is the whole defect: one leg honouring an input the other cannot
     means the two were driven differently, and the diff then measures the harness.
@@ -5050,10 +5040,10 @@ def test_inputs_with_no_oracle_counterpart_are_refused_by_both_legs() -> None:
         text = (root / relative).read_text(encoding="utf-8")
         assert "cannot be driven through this leg provably" in text or (
             "has no oracle counterpart" in text
-        ), f"{relative} does not refuse the unsupported end-of-cycle inputs (MJ-10)."
+        ), f"{relative} does not refuse the unsupported end-of-cycle inputs."
         assert "archive_path_override" in text and re.search(
             r"archive_path_override (cannot be driven|has no oracle counterpart)", text
-        ), f"{relative} still accepts archive_path_override (MJ-10)."
+        ), f"{relative} still accepts archive_path_override."
         # The arbitration must be NAMED, not gestured at, so the refusal is findable.
         # `Q-GL084-ACCEPT-SEMANTICS` is `RESOLVED BY ORACLE` (2026-08-08): the two
         # ACCEPT statements were measured by a standalone cobc 3.2.0 probe over a real
@@ -5078,7 +5068,7 @@ def test_inputs_with_no_oracle_counterpart_are_refused_by_both_legs() -> None:
 
 
 def test_no_scenario_declares_an_input_its_runners_refuse() -> None:
-    """Every committed scenario is still runnable after the MJ-10/MJ-16 tightening."""
+    """Every committed scenario is runnable under the tightened input contract."""
     yaml = pytest.importorskip("yaml")
     root = Path(__file__).resolve().parents[2]
     probe = "acas_scenario_parser_probe2"
@@ -5103,7 +5093,7 @@ def test_no_scenario_declares_an_input_its_runners_refuse() -> None:
     for path in scenarios:
         try:
             declared = loader.load_scenario_yaml(path.read_text(encoding="utf-8"))
-        except yaml.YAMLError as exc:  # a duplicate key is MJ-17's business
+        except yaml.YAMLError as exc:  # a duplicate key is the parser test's business
             problems.append(f"{path.name}: does not parse: {exc}")
             continue
         operations = declared.get("operations") or []
@@ -5134,27 +5124,27 @@ def test_no_scenario_declares_an_input_its_runners_refuse() -> None:
 
 
 # ---------------------------------------------------------------------------
-#  DEP-01 / MJ-20 - THE DECLARED CLOSURE IS THE PLAN'S, AND THE IMPORTED SET IS
+#  THE DECLARED CLOSURE IS THE PLAN'S, AND THE IMPORTED SET IS
 #  EXACTLY THE DRIVER
 #
-#  This section has been wrong in BOTH directions, and it now locks both.
+#  THIS PAIR CAN BE WRONG IN TWO OPPOSITE DIRECTIONS, and both are locked.
 #
-#  MJ-20 was the first direction. `pyproject.toml` declared `SQLAlchemy`, `greenlet` and
-#  `typing_extensions` as runtime dependencies, SQLAlchemy described as "CORE LEVEL ONLY:
-#  text() statements on an explicit Connection"; `requirements.txt` pinned all three with
-#  hashes; and the README documented that boundary as ACTIVE. No module under
-#  `acas_posting/` imported any of them. The same file that declared them also stated,
-#  correctly, that the package imports "exactly one third-party top-level module,
-#  `mysql`". Three artifacts described an execution path the code did not take.
+#  TOO WIDE: declaring `SQLAlchemy`, `greenlet` and `typing_extensions` as runtime
+#  dependencies, describing SQLAlchemy as "CORE LEVEL ONLY: text() statements on an
+#  explicit Connection", pinning all three with hashes and documenting that boundary as
+#  ACTIVE - while no module under `acas_posting/` imports any of them. That would have
+#  three artifacts describing an execution path the code does not take, and it would sit
+#  alongside the same file's correct statement that the package imports "exactly one
+#  third-party top-level module, `mysql`".
 #
-#  DEP-01 was the correction over-shooting. The response to MJ-20 deleted the three pins
-#  from both manifests so that declared and imported coincided. That made the artifacts
-#  self-consistent and made them NARROWER THAN THE FROZEN PLAN: AAP section 0.5.1 states
-#  the runtime inventory as four names at exact versions -- mysql-connector-python
-#  26.7.0, SQLAlchemy 2.0.51, and in its own words "Pulls `greenlet` 3.5.4 as a
-#  transitive dependency", with typing_extensions travelling with it. The plan is the
-#  agreed contract for what this distribution DECLARES and is not editable by the
-#  implementation, so a manifest that drops one of its names diverges from it.
+#  TOO NARROW: deleting those three pins from both manifests so that declared and
+#  imported coincide. That is self-consistent and NARROWER THAN THE FROZEN PLAN: AAP
+#  section 0.5.1 states the runtime inventory as four names at exact versions --
+#  mysql-connector-python 26.7.0, SQLAlchemy 2.0.51, and in its own words "Pulls
+#  `greenlet` 3.5.4 as a transitive dependency", with typing_extensions travelling with
+#  it. The plan is the agreed contract for what this distribution DECLARES and is not
+#  editable by the implementation, so a manifest that drops one of its names diverges
+#  from it.
 #
 #  WHAT IS LOCKED, THEREFORE, IS THE PAIR AND NOT EITHER HALF:
 #    * the DECLARED runtime closure is EXACTLY the plan's four names - no wider, so a
@@ -5167,12 +5157,12 @@ def test_no_scenario_declares_an_input_its_runners_refuse() -> None:
 #      cannot join them unnoticed;
 #    * `requirements.txt` pins exactly the union of the manifest's sets, so the hashed
 #      route the container and the parity protocol use installs neither more nor less;
-#    * and no artifact describes the Core boundary as ACTIVE, which is the MJ-20 defect
-#      itself and is a property of prose that no import census can see.
+#    * and no artifact describes the Core boundary as ACTIVE, which is the too-wide
+#      defect itself and is a property of prose that no import census can see.
 #
 #  Declaring more than is imported is therefore permitted HERE AND ONLY HERE, only for
 #  the names the plan itself declares, and only while every artifact says so in as many
-#  words. That is what makes it an auditable decision rather than the drift MJ-20 found.
+#  words. That is what makes it an auditable decision rather than undetected drift.
 _PACKAGE_ROOT = "acas_posting"
 
 #: Distribution name -> the top-level module it provides, for the runtime set. A
@@ -5296,12 +5286,12 @@ def _imported_third_party_modules() -> dict[str, set[str]]:
 
 
 def test_the_declared_runtime_closure_is_exactly_the_plans_closure() -> None:
-    """`[project].dependencies` is the plan's four names at the plan's versions (DEP-01).
+    """`[project].dependencies` is the plan's four names at the plan's versions.
 
     Both directions matter and for different reasons. A name the plan does not declare
     would put a package into the shipped dependency graph on no authority. A plan name
-    that is missing would narrow the frozen closure by deletion, which is the defect
-    DEP-01 records -- the response to MJ-20 removed three of these four.
+    that is missing would narrow the frozen closure by deletion, which is a defect in the
+    opposite direction and no more permitted than the first.
     """
     declared = _declared_runtime_pins()
 
@@ -5318,7 +5308,7 @@ def test_the_declared_runtime_closure_is_exactly_the_plans_closure() -> None:
     assert not missing, (
         "AAP section 0.5.1 declares these in the runtime dependency inventory and "
         f"pyproject.toml no longer does: {', '.join(missing)}.\n"
-        "  This is finding DEP-01. The plan is FROZEN: aligning the manifest to it is "
+        "  The plan is FROZEN: aligning the manifest to it is "
         "the standing rule, and a name may not be dropped because nothing imports it. "
         "Declaring a name the code does not import is permitted for exactly "
         f"{', '.join(sorted(_DECLARED_AND_NOT_IMPORTED))} and is stated as such in "
@@ -5340,9 +5330,9 @@ def test_the_declared_runtime_closure_is_exactly_the_plans_closure() -> None:
 
 
 def test_the_imported_third_party_set_is_exactly_the_driver() -> None:
-    """`acas_posting/` imports exactly one third-party module, `mysql` (MJ-20).
+    """`acas_posting/` imports exactly one third-party module, `mysql`.
 
-    This is the half MJ-20 was raised about, expressed positively. The manifest declares
+    This is the too-wide half, expressed positively. The manifest declares
     four names; the source may reach for only one of them, so that the execution path
     stays auditable from the source rather than inferred from the manifest.
     """
@@ -5374,12 +5364,12 @@ def test_the_imported_third_party_set_is_exactly_the_driver() -> None:
 
 
 def test_the_declared_but_unimported_set_is_exactly_the_three_the_plan_declares() -> None:
-    """Declaring-without-importing is confined to the plan's three names (DEP-01/MJ-20).
+    """Declaring-without-importing is confined to the plan's three names.
 
-    The difference between the declared closure and the imported set is where MJ-20's
-    drift lived. Leaving it merely "allowed to be non-empty" would let a fourth package
-    settle there unnoticed, which is the same defect with a different name in it, so the
-    set is pinned exactly.
+    The difference between the declared closure and the imported set is where the drift
+    lives. Leaving it merely "allowed to be non-empty" would let a fourth package settle
+    there unnoticed, which is the same defect with a different name in it, so the set is
+    pinned exactly.
     """
     declared = set(_declared_runtime_distributions())
     imported = _imported_third_party_modules()
@@ -5399,7 +5389,7 @@ def test_the_declared_but_unimported_set_is_exactly_the_three_the_plan_declares(
         f"in the package imports them, and the plan does not declare them either: "
         f"{', '.join(joined)}.\n"
         "  A manifest that advertises an execution path the code does not take makes "
-        "the shipped architecture unauditable from the artifact (MJ-20). Either use the "
+        "the shipped architecture unauditable from the artifact. Either use the "
         "package or stop declaring it -- and if it belongs to the harness or the test "
         "tooling, declare it in the matching optional-dependency group instead."
     )
@@ -5417,7 +5407,7 @@ def test_the_declared_but_unimported_set_is_exactly_the_three_the_plan_declares(
 
 
 def test_every_imported_third_party_module_is_declared() -> None:
-    """The package imports nothing it does not declare (MJ-20, the other direction).
+    """The package imports nothing it does not declare - the other direction.
 
     Without this half, satisfying the first would be as easy as deleting a needed pin:
     an install reproduced from the manifest would then fail at import instead.
@@ -5438,12 +5428,12 @@ def test_every_imported_third_party_module_is_declared() -> None:
     assert not undeclared, (
         "acas_posting imports these third-party modules and pyproject.toml's "
         f"[project].dependencies declares none of them:\n  {chr(10).join(undeclared)}\n"
-        "  An environment built from the manifest would fail at import (MJ-20)."
+        "  An environment built from the manifest would fail at import."
     )
 
 
 def test_the_manifests_agree_on_the_runtime_set() -> None:
-    """`requirements.txt` pins exactly the manifest's names, with no orphan (MJ-20).
+    """`requirements.txt` pins exactly the manifest's names, with no orphan.
 
     The lock file is what the container and the parity protocol install from, so it is
     the artifact that decides what actually lands in every environment that matters. A
@@ -5493,8 +5483,8 @@ def test_the_manifests_agree_on_the_runtime_set() -> None:
     assert not orphans, (
         f"requirements.txt pins {', '.join(orphans)} and no group of pyproject.toml "
         "declares them. A hashed install would place them in the container and the "
-        "parity environment while the manifest looked clean, which is how MJ-20's "
-        "divergence survived in the first place."
+        "parity environment while the manifest looked clean, which is exactly how such a "
+        "divergence survives unnoticed."
     )
 
     disagreements = sorted(
@@ -5543,10 +5533,10 @@ def test_every_pin_in_the_lock_is_hash_verified() -> None:
 def test_the_documented_pin_and_hash_counts_match_the_lock() -> None:
     """README section 7 quotes the pin and hash counts; both must be measured, not stale.
 
-    This is the third symptom of DEP-01 specifically: when three pins were removed the
-    documented figure was left behind, so the README described a 13-pin lock that had
-    become a 10-pin lock. A count in prose is a claim about the tree, and this ties it
-    to the tree so the next pin change cannot leave it behind again.
+    A pin change that leaves the documented figure behind makes the README describe a
+    lock the tree has not got - a 13-pin lock where the tree carries ten. A count in
+    prose is a claim about the tree, and this ties it to the tree so the next pin change
+    cannot leave it behind.
     """
     root = Path(__file__).resolve().parents[2]
     lock = (root / "requirements.txt").read_text(encoding="utf-8")
@@ -5569,8 +5559,8 @@ def test_the_documented_pin_and_hash_counts_match_the_lock() -> None:
         f"README section 7 documents {documented_hashes} hashes across "
         f"{documented_pins} pins; requirements.txt actually carries {hashes} hashes "
         f"across {pins} pins.\n"
-        "  A stale count here is how DEP-01 presented: the prose kept describing the "
-        "closure the lock used to have."
+        "  A stale count here means the prose is describing a closure the lock does not "
+        "have."
     )
 
     # The prose also spells the pin count as a word ("all thirteen pinned
@@ -5587,14 +5577,13 @@ def test_the_documented_pin_and_hash_counts_match_the_lock() -> None:
 
 
 def test_no_document_claims_an_unused_data_access_boundary() -> None:
-    """No artifact describes SQLAlchemy Core as the active boundary (MJ-20).
+    """No artifact describes SQLAlchemy Core as the active boundary.
 
     Text rather than imports, because the defect was three documents describing an
-    execution path the code did not take, and no import census can see prose. This
-    survives DEP-01 unchanged in substance: restoring the pins restored what the
-    manifests DECLARE, not what the code executes, so a document may say the name is
-    declared and may quote what the plan contemplates -- and may not say the boundary is
-    live. A sentence recording the decision is exempt; a sentence asserting the boundary
+    execution path the code does not take, and no import census can see prose. The pins
+    fix what the manifests DECLARE, not what the code executes, so a document may say the
+    name is declared and may quote what the plan contemplates -- and may not say the
+    boundary is live. A sentence recording the decision is exempt; a sentence asserting the boundary
     is active is not.
     """
     root = Path(__file__).resolve().parents[2]
@@ -5637,7 +5626,7 @@ def test_no_document_claims_an_unused_data_access_boundary() -> None:
                     offenders.append(f"{relative}:{number}: {line.strip()[:96]}")
     assert not offenders, (
         "these lines describe a SQLAlchemy Core boundary as active, while no module in "
-        "acas_posting imports SQLAlchemy at all (MJ-20):\n  " + "\n  ".join(offenders)
+        "acas_posting imports SQLAlchemy at all:\n  " + "\n  ".join(offenders)
     )
 
 
@@ -5645,10 +5634,10 @@ def test_the_declared_and_unimported_decision_is_stated_in_every_artifact() -> N
     """Every artifact that carries the three pins also says they are not imported.
 
     Declaring a package the code does not import is only auditable if the artifact says
-    so. MJ-20 was exactly this omission: three artifacts carried the pins and none
-    recorded that nothing imported them, so a reader could not tell the difference
-    between a decision and a mistake. Restoring the pins under DEP-01 therefore restores
-    the obligation to state the pair, and this test holds the two together.
+    so. The failure mode is exactly this omission: three artifacts carrying the pins and
+    none recording that nothing imports them, leaving a reader unable to tell a decision
+    from a mistake. Carrying the pins therefore carries the obligation to state the pair,
+    and this test holds the two together.
     """
     root = Path(__file__).resolve().parents[2]
     # Each artifact must contain a phrase asserting the DECLARED / NOT IMPORTED pair. The
@@ -5672,12 +5661,12 @@ def test_the_declared_and_unimported_decision_is_stated_in_every_artifact() -> N
         "these artifacts carry the SQLAlchemy pin, or assert on it, and none of them "
         "states that nothing imports it:\n  " + "\n  ".join(missing) + "\n"
         "  A declared-and-unimported dependency is an auditable decision only while "
-        "every artifact says so; unstated, it is the MJ-20 drift again."
+        "every artifact says so; unstated, it is undetectable drift."
     )
 
 
 # ---------------------------------------------------------------------------
-#  SEC-04 - THE DATABASE SUPERUSER CREDENTIAL REACHES TWO STAGES OF TEN
+#  THE DATABASE SUPERUSER CREDENTIAL REACHES TWO STAGES OF TEN
 #
 #  `harness/docker-compose.yml` must declare ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD
 #  at service level, because all ten protocol stages run inside the one `gnucobol`
@@ -5702,7 +5691,7 @@ _ADMIN_CREDENTIAL_NAMES: tuple[str, ...] = (
 #: at entry, so a direct invocation is scoped just as a driven one is.
 #:
 #: `harness/build_fixtures.sh` was here and is gone: the fixture builder is now the
-#: `--build-fixtures` MODE of `harness/seed.sh` (finding M-04), whose SEEDING path
+#: `--build-fixtures` MODE of `harness/seed.sh`, whose SEEDING path
 #: legitimately consumes the pair for `SET GLOBAL autocommit'. A header-level `unset`
 #: would therefore break the script, so the drop moved INTO the mode - and
 #: `test_the_fixture_build_mode_drops_the_credential_before_its_first_child` asserts it
@@ -5807,7 +5796,7 @@ def test_every_non_administrative_script_drops_the_credential_at_entry() -> None
 
     assert not problems, (
         "the administrative credential is not dropped early enough to be a guarantee "
-        "(finding SEC-04):\n  " + "\n  ".join(problems)
+        ":\n  " + "\n  ".join(problems)
     )
 
 
@@ -5817,7 +5806,7 @@ def test_the_fixture_build_mode_drops_the_credential_before_its_first_child() ->
     `harness/seed.sh` is administrative - its seeding path issues `SET GLOBAL autocommit'
     as the superuser - so it cannot drop the pair in its header. Its `--build-fixtures`
     mode needs no database at all and compiles COBOL, which is precisely the exposure
-    finding SEC-04 is about: the GnuCOBOL compiler inheriting a superuser password.
+    this guards: the GnuCOBOL compiler inheriting a superuser password.
 
     So the drop is the FIRST EXECUTABLE STATEMENT of `acas_bf_main`, and that is what is
     asserted - position, not mere presence, because an `unset` after the first child is
@@ -5833,7 +5822,8 @@ def test_the_fixture_build_mode_drops_the_credential_before_its_first_child() ->
     )
     assert start is not None, (
         "harness/seed.sh no longer defines acas_bf_main, so the fixture-build mode "
-        "has moved. The SEC-04 drop has to move with it, and this assertion with that."
+        "has moved. The superuser-credential drop has to move with it, and this "
+        "assertion with that."
     )
 
     body: list[str] = []
@@ -5857,7 +5847,7 @@ def test_the_fixture_build_mode_drops_the_credential_before_its_first_child() ->
         "the first executable statement of acas_bf_main must drop the administrative "
         f"credential; it is {first[:90]!r}. Anything before it - including a single "
         "command substitution - runs with the database superuser password in its "
-        "environment (finding SEC-04)."
+        "environment."
     )
 
     later = [
@@ -5878,7 +5868,7 @@ def test_every_harness_script_is_classified_for_the_credential() -> None:
     """Mechanism 1, at its new locus: the FILE SET decides who may hold the pair.
 
     A ten-stage driver used to decide this per stage, scrubbing the pair out of every
-    stage's environment except the two resets'. Folding that driver away (finding M-06)
+    stage's environment except the two resets'. Folding that driver away
     removes the single invocation a per-stage scrub belonged to: each of the ten stages
     is now either a script an operator runs directly or a stage `tests/conftest.py`
     runs, so the pair is scoped by WHAT IS BEING RUN rather than by a wrapper that
@@ -5935,7 +5925,7 @@ def test_the_test_protocol_scrubs_the_credential_by_default() -> None:
     administrative = signature.parameters.get("administrative")
     assert administrative is not None, (
         "tests/conftest.py::_run_script no longer takes `administrative`, so every "
-        "stage it runs receives the database superuser password again (SEC-04)."
+        "stage it runs receives the database superuser password again."
     )
     assert administrative.default is False, (
         f"`administrative` defaults to {administrative.default!r}; it must default to "
@@ -5970,7 +5960,7 @@ def test_the_test_protocol_scrubs_the_credential_by_default() -> None:
 
 
 # ---------------------------------------------------------------------------
-#  SEC-05 - NO ACCOUNTING VALUE REACHES AN ASSERTION MESSAGE
+#  NO ACCOUNTING VALUE REACHES AN ASSERTION MESSAGE
 #
 #  `harness/diff_states.py` ships two renderers and only one of them is safe to put in
 #  a failure message:
@@ -6017,7 +6007,7 @@ def _assertion_message_interpolations(path: Path) -> list[tuple[int, str]]:
 
 
 def test_no_assertion_message_renders_a_value_bearing_report() -> None:
-    """No `diff_states.render` reaches an assertion message (finding SEC-05).
+    """No `diff_states.render` reaches an assertion message.
 
     `render` is not banned outright, because it is the right function for writing the
     report and for asserting that an EMPTY comparison renders to nothing. What is
@@ -6108,7 +6098,7 @@ def test_the_value_free_route_exists_and_actually_withholds() -> None:
     leaked = [sentinel for sentinel in sentinels if sentinel in summary]
     assert not leaked, (
         f"`summarise` disclosed {leaked}, so the route the scenario tier now relies on "
-        "is no longer value-free and finding SEC-05 is reopened."
+        "is no longer value-free and an accounting value can reach a log."
     )
     # It must still be a USEFUL diagnosis: naming the table and column is the whole
     # point of summarising rather than saying nothing.
@@ -6122,7 +6112,7 @@ def test_the_value_free_route_exists_and_actually_withholds() -> None:
     assert all(sentinel in rendered for sentinel in sentinels), (
         "`render` no longer discloses values or keys, so the two renderers no longer "
         "differ and this test pair has stopped measuring anything. Re-derive the "
-        "SEC-05 policy against what the module now does."
+        "value-free-message policy against what the module now does."
     )
 
 
@@ -6292,7 +6282,7 @@ def test_no_advisory_named_stdlib_module_is_imported() -> None:
 
 
 # ---------------------------------------------------------------------------
-#  MJ-13 - ONE GLOBAL RESOLUTION STATE FOR EVERY R-6 QUESTION
+#  ONE GLOBAL RESOLUTION STATE FOR EVERY R-6 QUESTION
 #
 #  `docs/migration/ambiguity-resolutions.md` is the SINGLE place a question's status is
 #  declared. Its consumers - the test headers, the traceability document, the anomaly
@@ -6385,8 +6375,8 @@ def test_the_register_declares_a_status_for_every_question_it_enters() -> None:
     assert permits, (
         "no register entry has a status that permits open language, which means the "
         "classification below cannot be discriminating. Q-9 is PARTIALLY RESOLVED and "
-        "is what carries this lock now; Q-GL084-ACCEPT-SEMANTICS used to carry it too "
-        "and was measured on 2026-08-08. If Q-9 also goes, re-derive this lock."
+        "is what carries this lock; Q-GL084-ACCEPT-SEMANTICS does not, having been "
+        "measured on 2026-08-08. If Q-9 also goes, re-derive this lock."
     )
 
 
@@ -6447,7 +6437,7 @@ def test_no_consumer_describes_a_resolved_question_as_open() -> None:
         "these consumers describe a question the register declares RESOLVED using "
         "open language, without naming the resolution anywhere nearby, so the "
         "project's R-6 arbitration state reads differently depending on which file "
-        "you open (MJ-13):\n  " + "\n  ".join(violations) + "\n\n"
+        "you open:\n  " + "\n  ".join(violations) + "\n\n"
         "  Either state the register's declared status beside the open language - "
         "which is what a historical account does - or remove the open language. The "
         "register at "
@@ -6472,7 +6462,7 @@ def _tests_dir() -> Path:
 
 
 # ---------------------------------------------------------------------------
-#  THE ORACLE'S PROVENANCE IS THE IDENTITY OF THE SPECIFICATION (finding SEC-02)
+#  THE ORACLE'S PROVENANCE IS THE IDENTITY OF THE SPECIFICATION
 #
 #  Under R-6 the compiled COBOL *is* the behavioural specification, so "which bytes
 #  were compiled" is not an operational detail -- it decides what the migration is
@@ -6551,7 +6541,7 @@ def test_the_reset_refuses_a_transformed_oracle_as_evidence() -> None:
     read as "we measured and it matched", or as a behavioural defect that does not
     exist.
 
-    The gate lives in `harness/reset_db.sh` (moved there by finding M-06, which folded
+    The gate lives in `harness/reset_db.sh` (rather than in a ten-stage driver, which folded
     the ten-stage driver away). That is the stronger home, not merely a surviving one:
     reset is the stage that DESTROYS the database, so refusing here means the refusal
     lands before a single table is dropped and a hand-driven operator is stopped exactly
@@ -6588,7 +6578,7 @@ def test_the_reset_refuses_a_transformed_oracle_as_evidence() -> None:
     assert "ACAS_RESET_ORACLE_IS_DIAGNOSTIC" in reset
     assert "NO PARITY CLAIM" in reset
 
-    # ⭐ THE TAINT MUST BE READ, NOT MERELY SET. A flag nothing consults is a comment:
+    # THE TAINT MUST BE READ, NOT MERELY SET. A flag nothing consults is a comment:
     # the waiver has to reach the operator's terminal on the paths that SUCCEED, because
     # those are the runs whose captures get quoted. Asserted as definition plus at least
     # two live call sites, one per successful exit path.
@@ -6620,7 +6610,7 @@ def test_the_reset_refuses_a_transformed_oracle_as_evidence() -> None:
         "to measure"
     )
 
-    #  ⭐ THE TWO ACKNOWLEDGEMENTS MUST BE ONE DECISION, and this half was MEASURED
+    #  THE TWO ACKNOWLEDGEMENTS MUST BE ONE DECISION, and this half was MEASURED
     #  broken. Moving the gate into `reset_db.sh` left `tests/conftest.py` setting only
     #  its own switch: `ACAS_ACCEPT_TRANSFORMED_ORACLE=1` un-skipped the stack-bound
     #  tiers and all 73 of them then ERRORED at stage 1 on exit 77, because the script's
@@ -6686,7 +6676,7 @@ def test_the_missing_member_is_never_written_into_the_frozen_tree() -> None:
     Inventing a frozen source file would breach R-3 (no new validations) and R-4
     (reproduce, never fix), and AAP section 0.8.1 makes any diff touching
     `copybooks/*.cob` a defect however authentic the content. So the compatibility
-    include exists only inside the writable build copy, and after finding M-03 it is
+    include exists only inside the writable build copy, and it is
     not a repository file either: `harness/build_oracle.sh` emits it at build time.
 
     Three things are asserted, because each closes a different way the guarantee could
@@ -6704,7 +6694,7 @@ def test_the_missing_member_is_never_written_into_the_frozen_tree() -> None:
     )
     assert not (harness / "copybook-shims").exists(), (
         "harness/copybook-shims/ has come back. The include is generated into "
-        "$ACAS_BUILD by harness/build_oracle.sh (finding M-03); a committed copy is a "
+        "$ACAS_BUILD by harness/build_oracle.sh; a committed copy is a "
         "file a reader can mistake for archive material, and the Agent Action Plan's "
         "harness inventory does not name it."
     )
@@ -6755,20 +6745,19 @@ def test_the_missing_member_is_never_written_into_the_frozen_tree() -> None:
     ), (
         "the generated include is no longer in ACAS_SOURCE_TRANSFORMS, so a build "
         "carrying it could attest `oracle-source-is-frozen yes` and a diff against it "
-        "would read as parity with the frozen specification (SEC-02)"
+        "would read as parity with the frozen specification"
     )
 
 
 # ---------------------------------------------------------------------------
-#  THE EVIDENCE VOLUME HAS A STATED LIFETIME (finding PRIV-01, CWE-459)
+#  THE EVIDENCE VOLUME HAS A STATED LIFETIME (CWE-459)
 #
-#  THE DEFECT THIS CLOSES. The harness publishes every parity run into a named
-#  volume and said nothing about how long it is kept, what protects it, or how it is
-#  disposed of. Measured on this clone: 1410 files, 11.5 MB, nine scenario trees, and
-#  the captures are `SELECT *` over the in-scope tables -- so they carry monetary
-#  amounts and the primary keys identifying the accounts, customers and suppliers
-#  those amounts belong to. An accumulating store of accounting data with no
-#  documented disposal is the finding, and the fix is a contract a reader can follow.
+#  The harness publishes every parity run into a named volume, one tree per scenario
+#  run and so at most the eight of `harness/scenarios/`. The captures are `SELECT *`
+#  over the in-scope tables, so they carry monetary amounts and the primary keys
+#  identifying the accounts, customers and suppliers those amounts belong to. An
+#  accumulating store of accounting data needs a documented disposal contract, and
+#  these assertions are what keep the documented one honest.
 #
 #  WHY THE DISPOSAL COMMAND'S SHAPE IS ASSERTED, NOT JUST ITS PRESENCE. Sibling
 #  clones each own an `acas-harness-<CLONE_INDEX>-out` volume in the same daemon, so

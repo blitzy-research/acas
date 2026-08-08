@@ -44,10 +44,9 @@ readonly EX_AUTOCOMMIT=83     # autocommit is not ON -- see acas_assert_autocomm
                               # it requires the mode harness/Dockerfile.mariadb
                               # declares; the Agent Action Plan scopes autocommit-OFF
                               # to the seeding window, which harness/seed.sh owns.
-                              # (The inverted wording this comment used to carry was
-                              # the whole of QA issue 9 in this file: the code died
-                              # when autocommit was ON while the text said the
-                              # opposite. The --help exit-code table already agreed
+                              # (Inverting this wording is the trap: the code dies
+                              # when autocommit is ON, so text saying the opposite
+                              # contradicts the behaviour. The --help exit-code table agrees
                               # with the code; only this line did not.)
 readonly EX_PRIVILEGE=84      # the account cannot perform the drop and re-apply
 readonly EX_FROZEN=85         # mysql/ACASDB.sql has been MODIFIED -- see §invariants
@@ -57,7 +56,7 @@ readonly EX_CONCURRENT=88     # another reset holds the sequential lock
 readonly EX_TIMEOUT=89        # a client or the delegated seed exceeded its deadline
 readonly EX_TARGET=90         # the target is not a proven harness-owned disposable database
 readonly EX_FIXTURE=91        # the re-seed did not reuse the scenario's staged fixture
-#  EVIDENCE UNAVAILABLE (finding SEC-02, moved here by finding M-06). Distinct from
+#  EVIDENCE UNAVAILABLE. Distinct from
 #  every difference status on purpose: a difference is a finding ABOUT the migration,
 #  whereas this means nothing was compared at all because the oracle cannot arbitrate.
 #  Conflating the two is how a missing specification gets reported as a passing one --
@@ -68,11 +67,11 @@ readonly EX_EVIDENCE_UNAVAILABLE=77
 # This script streams 33 `DROP TABLE IF EXISTS` + 33 `CREATE TABLE` pairs at
 # whatever server the environment names.
 readonly ACAS_RESET_REQUIRED_SCHEMA='ACASDB'
-# THE DISPOSABILITY MARKER IS A SERVER SETTING, NOT A SCHEMA (finding F-43).
-# It used to be `acas_harness_disposable.disposability_marker', a table created by
-# harness/Dockerfile.mariadb with CREATE DATABASE, CREATE TABLE and INSERT -- and
-# this script REQUIRED it, which made that DDL load-bearing. Rule R-3 admits no
-# added DDL of any kind, so the proof is now `report_host', a MariaDB variable
+# THE DISPOSABILITY MARKER IS A SERVER SETTING, NOT A SCHEMA.
+# Proving it with `acas_harness_disposable.disposability_marker', a table created by
+# harness/Dockerfile.mariadb with CREATE DATABASE, CREATE TABLE and INSERT, would make
+# that DDL load-bearing here. Rule R-3 admits no added DDL of any kind, so the proof is
+# `report_host', a MariaDB variable
 # settable only from a configuration file inside the image. Same property, no
 # schema: a stock MariaDB leaves it EMPTY, so the marker can only be seen on a
 # server started from the harness image, and this server is nobody's replica so the
@@ -278,7 +277,7 @@ readonly -a ACAS_RESET_DEFAULT_DISPOSABLE_HOSTS=(
 # resolved target, so the whole token is `DESTROY <schema>@<host>:<port>`.
 readonly ACAS_RESET_CONSENT_PREFIX='DESTROY'
 
-# SEC-02 -- the shape a schema name must have before it may be interpolated
+# the shape a schema name must have before it may be interpolated
 # into SQL at all. Deliberately narrower than MySQL permits.
 readonly ACAS_RESET_SCHEMA_NAME_PATTERN='^[A-Za-z_][A-Za-z0-9_$]*$'
 
@@ -314,9 +313,9 @@ declare -a ACAS_RESET_SEED_ARGV=()   # out-parameter of acas_compose_seed_argv
 # acas_compose_seed_argv -- the ONE place the delegated seed command is built.
 #
 # WHY IT IS A FUNCTION AND NOT TWO COPIES. The command is needed twice, once to RUN and
-# once to PRINT in the dry-run plan, and while it was written out twice the two drifted:
-# --seed-dir was forwarded by the runner and omitted by the plan, so the plan quietly
-# described a different command from the one that would execute. A plan that misreports
+# once to PRINT in the dry-run plan, and two copies drift: --seed-dir forwarded by the
+# runner and omitted by the plan would leave the plan quietly describing a different
+# command from the one that would execute. A plan that misreports
 # the command is worse than no plan, and it is the same class of defect as a --help text
 # that disagrees with behaviour. Composing it once makes the two AGREE BY CONSTRUCTION
 # rather than by remembering to edit both.
@@ -345,10 +344,10 @@ ACAS_RESET_TARGET_AUTHORISED=0   # 1 once all three destructive gates passed
 ACAS_RESET_SCHEMA_LITERAL=''     # the schema as a safe SQL literal, incl. quotes
 ACAS_RESET_ACKNOWLEDGE=''        # --acknowledge-destructive: the named target
 ACAS_RESET_ACK_USED=0            # 1 once an acknowledgement has been honoured
-ACAS_RESET_FIXTURE_DIGEST=''     # sha256 of the staged fixture marker (F-22)
+ACAS_RESET_FIXTURE_DIGEST=''     # sha256 of the staged fixture marker
 # The parity attempt this reset belongs to, so the two reset stages of ONE attempt can
 # be required to have seeded identical bytes while a LATER attempt is free to seed
-# something else (F-22, F-37). Empty for a hand invocation, which is not part of an
+# something else. Empty for a hand invocation, which is not part of an
 # attempt and therefore binds nothing.
 ACAS_RESET_RUN_ID="${ACAS_PARITY_RUN_ID:-}"
 declare -a ACAS_RESET_GATE_PROBLEMS=()  # destructive-gate failures, reported together
@@ -420,32 +419,15 @@ acas_have() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# ---------------------------------------------------------------------------
-#  THE CLIENT-DIAGNOSTIC SUMMARY  (OBS-008)
+#  THE CLIENT-DIAGNOSTIC SUMMARY
 #
-#  A database client's diagnostic is text the SERVER supplied, captured here with
-#  `2>&1`, and it is NOT safe to replay:
-#
-#    * it routinely names the account and the host -- "Access denied for user
-#      'acas'@'db.internal'" -- and on a statement failure it can quote the
-#      statement and its parameters, which are live accounting values (CWE-532);
-#    * it is multi-line and arbitrary, so a newline inside it forges a further
-#      line in whatever log collects this script's output (CWE-117);
-#    * these scripts run under Compose, where standard output and standard error
-#      are collected as container logs and kept.
-#
-#  So the RAW text is persisted to a private mode-0600 file and never printed,
-#  and the console gets a bounded, identity-free summary: a token from a fixed
-#  vocabulary, the client's own numeric error and SQLSTATE when it printed them,
-#  the size, and the artifact's path and SHA-256. This is the same
-#  console/artifact split `harness/diff_states.py` and `harness/normalize.py`
-#  apply to their own detail, with the same reasoning and the same vocabulary.
-#
-#  NOTHING BELOW ECHOES A BYTE OF ITS INPUT. The category comes from a `case`
-#  over fixed globs; the error and SQLSTATE are re-validated against their
-#  documented shapes and replaced by `unknown` when they do not match, so a
-#  server that returned `28000\nERROR: forged` cannot get that through.
-# ---------------------------------------------------------------------------
+#  A client diagnostic is SERVER-supplied text: it names the account and host, can
+#  quote a statement and its live accounting parameters (CWE-532), and is multi-line
+#  and arbitrary so a newline in it forges a log line (CWE-117). The raw text goes to a
+#  private mode-0600 file and is never printed; the console gets a bounded,
+#  identity-free summary built from a fixed vocabulary, with the error and SQLSTATE
+#  re-validated against their documented shapes. Nothing below echoes a byte of its
+#  input. Full rationale: harness/build_oracle.sh, same heading.
 
 #: Where the raw text of the most recent diagnostic was kept, or empty when none
 #: was produced or it could not be persisted.
@@ -529,17 +511,17 @@ PY
 # acas_file_sha256 <path>
 #   The digest of one file, printed bare, for a value this script PUBLISHES rather
 #   than merely reports: the staged fixture marker's digest is what binds both
-#   cycles to the same seeded bytes (finding F-22). Unlike acas_diag_sha256 this one
+#   cycles to the same seeded bytes. Unlike acas_diag_sha256 this one
 #   FAILS when it cannot produce a digest, because a missing digest here would
 #   silently remove the binding rather than degrade a diagnostic.
-# ⭐ EVERY EVIDENCE LEAF IS PUBLISHED BY RENAME, NEVER BY REDIRECTION (finding F-26)
+# EVERY EVIDENCE LEAF IS PUBLISHED BY RENAME, NEVER BY REDIRECTION
 #
 # acas_create_private_file above closes the CREATE race: it refuses a symlink and
 # creates under `set -C', which is O_EXCL. It does not close the WRITE race, and the
 # write is where the evidence actually appears. Every artifact this script publishes
 # -- the run-status record, the per-operation dispositions, the seed fingerprint --
-# used to be written with a plain `>' redirection into a path that had been checked
-# for a symlink EARLIER. Between the check and the write, the name can be replaced;
+# must NOT be written with a plain `>' redirection into a path checked for a symlink
+# EARLIER. Between the check and the write, the name can be replaced;
 # `>' follows a symlink and truncates whatever it points at (CWE-59), and a reader
 # arriving mid-write sees a TRUNCATED record, which for an attestation file means a
 # capture is either unattested or attested by half a record.
@@ -882,26 +864,12 @@ acas_list_or_none() {
   acas_join_words "$@"
 }
 
-# ---------------------------------------------------------------------------
-#  THE TARGET, DESCRIBED WITHOUT NAMING IT (finding F-39)
+#  THE TARGET, DESCRIBED WITHOUT NAMING IT
 #
-#  This script's transcripts are retained evidence: they are read by operators,
-#  attached to reports and, on the Python side, replayed to a container log. A line
-#  reading `acas@mariadb:3306/ACASDB` puts the deployment's topology and the database
-#  ACCOUNT NAME into all of that, which is half of a credential and a map of the
-#  network for anybody who reads it (CWE-532). Nothing downstream needs the names:
-#  what a reader needs is WHICH KIND of target this was, and whether two runs used
-#  the SAME one.
-#
-#  So the transcript carries a CATEGORY and a stable FINGERPRINT. The category is
-#  derived from the host alone and is the same vocabulary
-#  `acas_posting/dal/connection.py` uses. The fingerprint is the first twelve hex
-#  digits of a SHA-256 over `host:port/schema` - never the password and never the
-#  account name, neither of which is in the digest at all - so two runs against one
-#  target print the same value and a run against a different target prints a
-#  different one, while the value itself discloses no name. The full values remain in the environment, where the tools that
-#  need them read them.
-# ---------------------------------------------------------------------------
+#  Transcripts are retained as evidence and quoted into reports, so the host, port,
+#  socket path and account are never printed. What identifies the target is a SHA-256
+#  over its connection identity, which two scripts can compare without either of them
+#  disclosing it. Full rationale: harness/build_oracle.sh, same heading.
 acas_target_category() {
   local host="${ACAS_DB_HOST-}" socket="${ACAS_DB_SOCKET-}"
 
@@ -919,13 +887,10 @@ acas_target_category() {
 acas_target_fingerprint() {
   local raw digest
 
-  # The ACCOUNT IS DELIBERATELY NOT IN THE DIGEST. Two reasons, both load-bearing.
-  # The digest identifies the TARGET, so harness/seed.sh (which connects as the
-  # application account) and harness/reset_db.sh (which connects as the admin
-  # account) print the SAME fingerprint for the same database -- which is exactly
-  # what makes two transcripts comparable. And an account name that is never an
-  # input can never be recovered from the output, not even by a reader who can
-  # enumerate candidate names.
+  #  The ACCOUNT IS DELIBERATELY NOT IN THE DIGEST: the digest identifies the TARGET, so
+  #  two scripts connecting as different accounts must agree that they reached the same
+  #  database, and an account name is identity a transcript must not carry. Full
+  #  rationale: harness/build_oracle.sh, same heading.
   raw="${ACAS_DB_HOST-}:${ACAS_DB_PORT-}/${ACAS_DB_NAME-}"
 
   if command -v sha256sum >/dev/null 2>&1; then
@@ -971,11 +936,12 @@ acas_split_list() {
 }
 
 # This script builds twelve read-only information_schema queries by
-# interpolating $ACAS_DB_NAME into SQL text. Every one of them went in raw:
+# interpolating $ACAS_DB_NAME into SQL text. Interpolating it raw --
 #
-#     where TABLE_SCHEMA = '${ACAS_DB_NAME}'      <-- the defect, as it was
+#     where TABLE_SCHEMA = '${ACAS_DB_NAME}'      <-- the defect this avoids
 #
-# A schema name containing an apostrophe closes the literal, and because the
+# -- is injectable: a schema name containing an apostrophe closes the literal,
+# and because the
 # client is invoked with --execute and the frozen dump is streamed on stdin,
 # the remainder is executed as SQL by whichever account is connected -- and
 # until GATE 1 that could be the application account, which the vendor grant
@@ -1194,8 +1160,8 @@ Options:
                       A default is necessary rather than convenient: a scenario's own
                       seed_dir resolves relative to the scenario file, which sits in
                       the READ-ONLY checkout, so a built fixture can never live there,
-                      and an omission used to fail only AFTER all 33 tables had been
-                      dropped and re-applied.
+                      and without a default an omission would fail only AFTER all 33
+                      tables had been dropped and re-applied.
                       Reachable from here and not only from seed.sh because the
                       ten-stage protocol seeds through this script -- stages 1
                       and 5 are both reset_db.sh <scenario>.
@@ -1223,7 +1189,7 @@ Disposability -- what this script demands before it destroys anything:
        the image and which therefore exists ONLY on a server started from an image
        this harness built. It is a SERVER SETTING and not a schema: no CREATE
        DATABASE, CREATE TABLE or INSERT is issued anywhere for it (rule R-3, and
-       finding F-43, which is why the earlier marker TABLE is gone). Proof by
+       the reason no marker TABLE is used). Proof by
        PRESENCE of a marker, not by absence of production data: an empty staging
        database and an empty production database are indistinguishable, so a
        heuristic would fail OPEN. This fails CLOSED.
@@ -1262,10 +1228,9 @@ Also required -- GATE 1, privilege separation, with NO fallback:
   ACAS_DB_ADMIN_USER      The account that performs the drop and re-apply. It
   ACAS_DB_ADMIN_PASSWORD  MUST be set and MUST differ from ACAS_DB_USER; naming
                           the application account is refused. There is
-                          deliberately no default -- an earlier revision fell
-                          back to ACAS_DB_USER, and this text described that
-                          fallback as making an override "normally unnecessary",
-                          which was wrong twice over: GATE 1 has no fallback to
+                          deliberately no default. Falling back to ACAS_DB_USER and
+                          calling an override "normally unnecessary" would be wrong
+                          twice over: GATE 1 has no fallback to
                           be optional about, and the application account no
                           longer holds the privileges the apply needs. It is
                           narrowed to SELECT, INSERT, UPDATE and DELETE by the
@@ -1333,7 +1298,7 @@ acas_parse_args() {
         shift
         ;;
       --accept-transformed-oracle)
-        #  ⭐ ACKNOWLEDGE A TRANSFORMED ORACLE FOR DIAGNOSIS ONLY. Without it a build
+        #  ACKNOWLEDGE A TRANSFORMED ORACLE FOR DIAGNOSIS ONLY. Without it a build
         #  whose attestation says `oracle-source-is-frozen no' is refused outright with
         #  EX_EVIDENCE_UNAVAILABLE, because rule R-6 makes the COMPILED PROGRAM the
         #  specification and rule R-4 requires its defects reproduced rather than
@@ -1480,14 +1445,10 @@ acas_assert_environment() {
     acas_die "$EX_PRECONDITION" \
       "ACAS_DB_PORT must be numeric; got '$ACAS_DB_PORT'."
   fi
-  # THE RANGE IS THE FROZEN CARRIER'S, 1..9999, NOT THE TCP RANGE.
-  # `LK-Port-Number pic x(4)' [common/acas-get-params.cbl:L158] and
-  # `01 Ws-Mysql-Port-Number pic x(4)' [copybooks/mysql-variables.cpy:L91] are
-  # FOUR characters, and every bridge STRINGs DB-Port into the second of them
-  # [common/glpostingMT.cbl:L410-L413]. So a five-digit port reaches the compiled
-  # cycle TRUNCATED - 13306 becomes 1330 - while this script would probe and drive
-  # the untruncated one, and the two sides of the comparison would be talking to
-  # different servers. Refused here rather than truncated silently.
+  #  THE RANGE IS THE FROZEN CARRIER'S, 1..9999, NOT THE TCP RANGE.
+  #  `LK-Port-Number pic x(4)' [common/acas-get-params.cbl:L158] cannot carry a five-digit
+  #  port, so a port above 9999 is refused rather than truncated. Full rationale:
+  #  harness/build_oracle.sh, same heading.
   if (( 10#$ACAS_DB_PORT < 1 || 10#$ACAS_DB_PORT > 9999 )); then
     acas_die "$EX_PRECONDITION" \
       "ACAS_DB_PORT must be between 1 and 9999; got '$ACAS_DB_PORT'." \
@@ -1528,7 +1489,7 @@ acas_assert_environment() {
 
   acas_log "ACAS_REPO   = $ACAS_REPO (read-only checkout; the specification)"
   acas_log "ACAS_OUT    = $ACAS_OUT"
-  # A CATEGORY and a FINGERPRINT, never the topology (F-39). What a reader of
+  # A CATEGORY and a FINGERPRINT, never the topology. What a reader of
   # this transcript needs from the next line is which KIND of target was reset and
   # whether it was the same one another transcript reset -- not its name.
   acas_log "database    = $(acas_target_description)"
@@ -1568,14 +1529,14 @@ acas_authorise_destructive_target() {
     acas_gate_problem \
       'GATE 1 (privilege separation): ACAS_DB_ADMIN_USER is not set, and there' \
       'is deliberately no fallback. This script drops every table in the target' \
-      "schema. It used to fall back to the application account (${ACAS_DB_USER})," \
-      'which would mean the account the migrated cycle authenticates with every' \
+      "schema, and falling back to the application account (${ACAS_DB_USER})" \
+      'would mean the account the migrated cycle authenticates with every' \
       'day performing the drop. Set ACAS_DB_ADMIN_USER and' \
       'ACAS_DB_ADMIN_PASSWORD to a separate account holding DROP, CREATE,' \
       'ALTER, LOCK TABLES, INSERT and SELECT on this schema and nothing else.' \
-      'Note that removing this fallback addressed which account this SCRIPT' \
+      'Note that the absence of a fallback governs which account this SCRIPT' \
       'uses, not what the application account is ABLE to do: the MariaDB vendor' \
-      'entrypoint grants it ALL on the schema, so it carried DROP regardless of' \
+      'entrypoint grants it ALL on the schema, so it carries DROP regardless of' \
       'anything decided here. That capability is removed separately, by the' \
       'least-privilege init script in harness/Dockerfile.mariadb, which reduces' \
       'the account to SELECT, INSERT, UPDATE and DELETE at container start.'
@@ -1866,7 +1827,7 @@ acas_assert_seed_script() {
 #      describe some build, not the artifacts stage 2 is about to execute;
 #   5. the SOURCE-TRANSFORMATION DISCLOSURE is present and is REPORTED with the run.
 #
-# ⭐ ON THE FIFTH (finding CR-01). harness/build_oracle.sh edits the BUILD COPY of
+# ON THE FIFTH. harness/build_oracle.sh edits the BUILD COPY of
 # frozen sources in a declared set of places -- connectivity and IF-scope repairs
 # without which the compiled cycle cannot reach MySQL at all. A version 1 attestation
 # said nothing about them, so `overrides-used no' read as "this is the unmodified
@@ -2048,7 +2009,7 @@ acas_assert_oracle_attestation() {
 
   #  THE DISCLOSURE MUST BE PRESENT. An attestation of the right version that omits it
   #  is a producer that did not look, and silence about whether the sources were
-  #  transformed is exactly the condition finding CR-01 names.
+  #  transformed is exactly the condition this gate refuses.
   case "$ACAS_RESET_SOURCE_IS_FROZEN" in
     yes|no) : ;;
     *)
@@ -2069,9 +2030,9 @@ acas_assert_oracle_attestation() {
     return 0
   fi
 
-  #  ⭐ A TRANSFORMED ORACLE IS REFUSED, NOT WARNED ABOUT (finding SEC-02)
+  #  A TRANSFORMED ORACLE IS REFUSED, NOT WARNED ABOUT
   #
-  #  This used to be a warning, and a warning was not enough. Rule R-6 makes the
+  #  A warning would not be enough. Rule R-6 makes the
   #  COMPILED PROGRAM the behavioural specification and rule R-4 requires its defects to
   #  be REPRODUCED rather than repaired. The catalogued transforms repair IF scope,
   #  connection lifetime and stale reply status in the frozen programs - so a build that
@@ -2117,7 +2078,7 @@ acas_assert_oracle_attestation() {
 
 
 # =============================================================================
-# ⭐ AN EVIDENCE RUN REFUSES EVERY DESTRUCTIVE-TARGET BYPASS (findings MJ-18, M-06)
+# AN EVIDENCE RUN REFUSES EVERY DESTRUCTIVE-TARGET BYPASS
 #
 # This script is TWO things, and the difference decides which options it may honour.
 # As stages 1 and 5 of the parity protocol it drops and re-applies every table in the
@@ -2139,9 +2100,9 @@ acas_assert_oracle_attestation() {
 # carrying it every hatch is REFUSED. Unbound, the hatches remain, because then this is
 # the administrative tool and not a protocol stage.
 #
-# WHY THIS IS STRONGER THAN WHAT IT REPLACES. The refusal used to live in the deleted
-# harness/run_parity.sh, which could only guard the stages IT drove: a hand-driven
-# stage 1 honoured every hatch. Here the guard travels with the stage, so a
+# WHY THE GUARD LIVES IN THE STAGE. A refusal in a ten-stage driver script could only
+# guard the stages THAT script drove, leaving a hand-driven stage 1 honouring every
+# hatch. Here the guard travels with the stage, so a
 # hand-driven protocol run is scoped exactly as a composed one is.
 #
 # REFUSED, NOT SILENTLY UNSET. An operator who set one deliberately is told the
@@ -2217,7 +2178,7 @@ seed file name.
 import re
 import sys
 
-#  THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17): a shadowed `seed_files`
+#  THE SHARED DUPLICATE-REJECTING LOADER: a shadowed `seed_files`
 #  key would stage a fixture the definition does not appear to declare. argv[2] is
 #  the harness directory, passed in because a heredoc has no __file__.
 sys.path.insert(0, sys.argv[2])
@@ -2353,9 +2314,9 @@ acas_assert_scenario() {
 # A scenario's own `seed_dir' resolves relative to the scenario FILE, which sits in
 # the checkout, and the checkout is mounted read-only because it is frozen
 # specification (R-3). So a built fixture can never live where the scenario points,
-# and an omitted --seed-dir used to leave harness/seed.sh resolving a path inside the
-# read-only tree -- AFTER this script had already dropped and re-applied all 33
-# tables. Defaulting removes that way of composing the protocol wrongly.
+# and without a default an omitted --seed-dir would leave harness/seed.sh resolving a
+# path inside the read-only tree -- AFTER this script had already dropped and re-applied
+# all 33 tables. Defaulting removes that way of composing the protocol wrongly.
 #
 # ONE RULE, THREE DERIVATIONS. harness/seed.sh --build-fixtures WRITES the fixtures and owns
 # the rule -- its `ACAS_BF_OUT' default is the single statement of it. This script
@@ -2387,12 +2348,9 @@ acas_resolve_fixture_root() {
 # CREDENTIAL HYGIENE. The password reaches the client through MYSQL_PWD and
 # nowhere else.
 
-# TRANSPORT SECURITY (CWE-295 certificate validation, CWE-319 cleartext).
-# The transport is decided ONCE, before anything connects, and never downgraded
-# silently. A local target may use plaintext; a non-local target needs either a
-# CA bundle in ACAS_DB_TLS_CA, whose certificate and hostname are then verified,
-# or an explicit ACAS_DB_ALLOW_PLAINTEXT declaration -- otherwise the run aborts
-# with a named cause, because the probe authenticates with a real credential.
+#  TRANSPORT SECURITY (CWE-295 certificate validation, CWE-319 cleartext). Decided ONCE,
+#  before anything connects, and never downgraded afterwards. Full rationale:
+#  harness/build_oracle.sh, same heading.
 
 # True when the target is reachable without leaving the machine: a unix socket,
 # an empty host, a loopback name, or a numeric loopback address.
@@ -2408,15 +2366,10 @@ acas_target_is_local() {
   return 1
 }
 
-# ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED.
-# `1|true|yes|on' is affirmative and `|0|false|no|off' is negative, matched
-# case-insensitively; the identical set lives in
-# acas_posting/cli/args.py as AFFIRMATIVE_SPELLINGS / NEGATIVE_SPELLINGS
-# and is read there by read_declared_flag, so one exported value cannot mean two
-# different things to the two halves of the harness. Anything else STOPS the run
-# rather than resolving to either answer: the value governs whether a credential
-# and every posted figure may cross a network in the clear, and only the operator
-# who typed it knows what was meant. The message never echoes the value.
+#  ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED. `1|true|yes|on' is
+#  affirmative, `|0|false|no|off' negative, matched case-insensitively; ANY other text
+#  stops the run rather than being read as a no. Full rationale:
+#  harness/build_oracle.sh, same heading.
 acas_plaintext_declared() {
   local declared="${ACAS_DB_ALLOW_PLAINTEXT-}"
   case "${declared,,}" in
@@ -2664,7 +2617,7 @@ acas_wait_for_database() {
     if (( elapsed >= timeout )); then
       acas_die "$EX_DATABASE" \
         "the $(acas_target_description) database did not accept a TCP connection within ${timeout}s." \
-        'The host and port are deliberately not printed (F-39): read them from' \
+        'The host and port are deliberately not printed: read them from' \
         'ACAS_DB_HOST and ACAS_DB_PORT in this environment, which is where this' \
         'script reads them from too.' \
         'Nothing can be reset without it. Start the service' \
@@ -2930,7 +2883,7 @@ acas_report_client_output() {
 # somebody else's database.
 
 # The acknowledgement must equal `user@host:port/schema' for THIS invocation.
-# THE ONE PLACE THE TARGET IS STILL NAMED, AND WHY (finding F-39)
+# THE ONE PLACE THE TARGET IS STILL NAMED, AND WHY
 #
 # Everything a run RETAINS as evidence prints acas_target_description instead of a
 # topology triple. This function is the exception, and it is deliberate: the
@@ -2994,7 +2947,7 @@ acas_assert_disposable_static() {
     if (( ! acknowledged )); then
       acas_refuse_target \
         "ACAS_DB_NAME does not name '$ACAS_RESET_REQUIRED_SCHEMA'; the configured" \
-        "value is not printed (F-39) -- it is $(acas_target_description)." \
+        "value is not printed -- it is $(acas_target_description)." \
         "The frozen $ACAS_RESET_SCHEMA_RELPATH defines exactly one database, and" \
         "this script can only apply that file. A schema named anything else is" \
         'not the database this harness owns.'
@@ -3006,7 +2959,7 @@ acas_assert_disposable_static() {
     if (( ! acknowledged )); then
       acas_refuse_target \
         "ACAS_DB_HOST is not a host this harness provisions; the configured value" \
-        "is not printed (F-39) -- the target is $(acas_target_description)." \
+        "is not printed -- the target is $(acas_target_description)." \
         "Canonical hosts: $(acas_join_words "${ACAS_RESET_CANONICAL_HOSTS[@]}")." \
         'The first is the harness/docker-compose.yml service name; the others' \
         'reach a container published on this machine. A remote host is exactly' \
@@ -3039,7 +2992,7 @@ acas_assert_disposable_server() {
   # harness/Dockerfile.mariadb, readable back with one query, and present on no
   # server this harness did not build. NOT a table and NOT a schema: rule R-3
   # admits no added DDL, and a reset gate that required some made the violation
-  # load-bearing (finding F-43).
+  # load-bearing.
   local marker='' rc=0
   acas_sql_value "select @@${ACAS_RESET_DISPOSABLE_VARIABLE}" || rc=$?
   if (( rc == 0 )); then
@@ -3587,10 +3540,10 @@ acas_assert_reseed_used_fixture() {
   stem="${ACAS_RESET_SCENARIO##*/}"
   stem="${stem%.*}"
 
-  # ⭐ NO DATA DIRECTORY IS A REFUSAL, NOT A WARNING (finding F-46). This used to
-  # warn and return SUCCESS, so a reset that could not prove which fixture the
-  # re-seed drew from reported itself as bound to the scenario anyway -- and the two
-  # cycles could then start from different premises with nothing saying so. A
+  # NO DATA DIRECTORY IS A REFUSAL, NOT A WARNING. Warning and returning SUCCESS
+  # would let a reset that cannot prove which fixture the re-seed drew from report
+  # itself as bound to the scenario anyway -- and the two cycles could then start from
+  # different premises with nothing saying so. A
   # scenario reset that cannot locate the fixture has not done what it claims.
   local base="${ACAS_RESET_DATA_DIR:-${ACAS_DATA:-}}"
   if [[ -z "$base" ]]; then
@@ -3615,7 +3568,7 @@ acas_assert_reseed_used_fixture() {
       'those files exist.'
   fi
 
-  # ⭐ THE MARKER'S EXACT SHAPE IS VALIDATED, NOT ITS EXISTENCE (finding F-22). A
+  # THE MARKER'S EXACT SHAPE IS VALIDATED, NOT ITS EXISTENCE. A
   # file count alone cannot tell two fixtures apart: two scenarios with the same
   # number of files, or one fixture rebuilt from different records, produce the same
   # count and a different seeded state. The marker carries a `file<TAB>name<TAB>sha256'
@@ -3670,7 +3623,7 @@ acas_assert_reseed_used_fixture() {
   acas_publish_seed_identity "$stem" "$recorded_count"
 }
 
-# ⭐ THE EXACT SEED IDENTITY, PUBLISHED WHERE BOTH RUNNERS CAN BIND IT (finding F-22)
+# THE EXACT SEED IDENTITY, PUBLISHED WHERE BOTH RUNNERS CAN BIND IT
 #
 # The two runners each recorded a "seed fingerprint" that was a list of TABLE ROW
 # COUNTS, and harness/diff_states.py compared those. Row counts are not an identity:
@@ -3846,7 +3799,7 @@ acas_print_plan() {
 
 # MAIN Strictly sequential (R-3). No stage is backgrounded and none is
 # parallelised. Nothing here writes to $ACAS_REPO.
-# ⭐ A DIAGNOSTIC RESET SAYS SO, ON EVERY EXIT PATH THAT SUCCEEDS. The gate above may
+# A DIAGNOSTIC RESET SAYS SO, ON EVERY EXIT PATH THAT SUCCEEDS. The gate above may
 # be waived with --accept-transformed-oracle, and a run made under that waiver has set
 # up a comparison against a REPAIRED specification. That is legitimate for diagnosis and
 # is not a parity claim, so it is stated here rather than left in the operator's memory:
@@ -3886,8 +3839,9 @@ acas_main() {
   ACAS_RESET_HARNESS="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
   readonly ACAS_RESET_HARNESS
 
-  #  ⭐ THE ORACLE-PROVENANCE GATE RUNS BEFORE A SINGLE TABLE IS DROPPED (finding
-  #  M-06 moved it here from the deleted driver; finding SEC-02 is why it exists).
+  #  THE ORACLE-PROVENANCE GATE RUNS BEFORE A SINGLE TABLE IS DROPPED (finding
+  #  it lives here rather than in a driver script, and it exists so that no evidence
+#  is produced from an unattested oracle).
   #  This script is stages 1 and 5: it destroys the database in order to set up a
   #  comparison. If the compiled specification cannot arbitrate that comparison there
   #  is nothing to set up, so the refusal belongs HERE, before the destruction --
@@ -3895,7 +3849,7 @@ acas_main() {
   #  measured behaviour as "refused before stage 1, so no database was touched".
   acas_assert_oracle_attestation
 
-  #  ⭐ AND SO DOES THE BYPASS REFUSAL, for the same reason: it decides WHICH TARGET
+  #  AND SO DOES THE BYPASS REFUSAL, for the same reason: it decides WHICH TARGET
   #  this run is permitted to destroy, so it has to be settled before the two
   #  disposability checks it would otherwise be able to waive.
   acas_assert_no_evidence_bypass

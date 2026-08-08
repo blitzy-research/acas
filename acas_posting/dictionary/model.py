@@ -114,7 +114,7 @@ layout - copybooks/plwsoi5B.cob and copybooks/plwsoi5C.cob differ only in whethe
 COPY is commented out - so they declare the same items at the same lines. Rule R-5 binds
 every field to an entry, and each of those declarations is a field a reader can point at,
 so each gets its own entry; the first in closure order keeps the unqualified key and the
-rest carry this tail (finding M-18).
+rest carry this tail.
 
 `#<n>` disambiguates a field name that repeats inside one record - `filler` occurs four
 times in copybooks/wsledger.cob - by appending its declaration line. Both tails may occur
@@ -882,7 +882,7 @@ class Presence(_JsonRecord):
             the General Ledger work files `pretrans.tmp` and `postrans.tmp` and the sort
             file that carries them between phases, declared inline in
             [general/gl070.cbl], [general/gl071.cbl] and [general/gl072.cbl] and named
-            as work files at [copybooks/wsnames.cob:L14-L17].
+            as work files at [copybooks/wsnames.cob:L15-L16].
     """
 
     in_copybook: bool
@@ -2266,7 +2266,7 @@ def _check_internal_agreement(obj: JsonObject, problems: list[str]) -> None:
             with_host_variable += 1
         if entry["copybook"] is not None:
             with_copybook += 1
-            #  ⭐ THE DECLARATION MULTISET, not the entry tally (finding M-18). A
+            #  THE DECLARATION MULTISET, not the entry tally. A
             #  physical declaration is identified by its source locator and its name, so
             #  an OCCURS item bound by six columns contributes SIX entries and ONE
             #  declaration. Counting both is what makes the two figures able to disagree,

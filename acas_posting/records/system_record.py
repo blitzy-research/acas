@@ -34,8 +34,6 @@ module follows: descriptors looked up rather than typed by hand (rule
 R-5), the six numeric storage classes, exact decimals (R-2), the two
 permitted imports, and condition names living in
 `acas_posting.cobol.condition_names`.
-
-WHY THIS RECORD MATTERS MORE THAN ITS SIZE SUGGESTS
 """
 
 from __future__ import annotations
@@ -343,7 +341,7 @@ class SystemDataBlock:
 
     phone_no: str = " " * 12
 
-    # ⭐ MJ-06: THE ONE ATTRIBUTE IN THE PACKAGE THAT HAD NO ROUTE TO ITS ENTRY.
+    # THE ONE ATTRIBUTE IN THE PACKAGE THAT HAD NO ROUTE TO ITS ENTRY.
     #
     # Rule R-5 requires that every record field be traceable to a data-dictionary
     # entry, and `acas_posting/dictionary/loader.py` normally finds one without help
@@ -410,11 +408,11 @@ class SystemDataBlock:
 
     rdbms_user: str = "ACAS-User".ljust(12)
 
-    # 05 RDBMS-Passwd pic x(12) value "PaSsWoRd"
+    # 05 RDBMS-Passwd pic x(12) value <the shipped placeholder>
     # str, 12 chars   [copybooks/wssystem.cob:L139]
     # column SYSTEM-REC.RDBMS-PASSWD char(12)
     #
-    # ⭐ `repr=False`, AND NOTHING ELSE ABOUT THIS FIELD CHANGES. It is still
+    # `repr=False`, AND NOTHING ELSE ABOUT THIS FIELD CHANGES. It is still
     # declared here, in this position, as `x(12)`, with the copybook's own
     # placeholder `VALUE` padded to twelve characters exactly as before - so the
     # layout, the declaration order, the default, the `FIELDS` tuple above and
@@ -502,8 +500,8 @@ FROZEN_PLACEHOLDER_RDBMS_USER: Final[str] = (
     _declared_system_data_block().rdbms_user
 )
 
-# `05 RDBMS-Passwd pic x(12) value "PaSsWoRd"` [copybooks/wssystem.cob:L139] - a
-# password in plain source text.
+# `05 RDBMS-Passwd pic x(12)` carries a shipped placeholder `value` clause
+# [copybooks/wssystem.cob:L139] - a password in plain source text.
 FROZEN_PLACEHOLDER_RDBMS_PASSWD: Final[str] = (
     _declared_system_data_block().rdbms_passwd
 )

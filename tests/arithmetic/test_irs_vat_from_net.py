@@ -61,12 +61,9 @@ WHAT IS ASSERTED, in the order the tests appear:
 
 THE SIX BINDING RULES, THEIR PROVENANCE, AND HOW THIS FILE HONOURS EACH.
 
-THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports that none
-was provided, so there is no on-disk rules file to consult and no reader should look
-for one. The six binding rules R-1 to R-6 live in the Agent Action Plan itself,
-section 0.7.2, and their exact wording is retrievable from the requirements via
-`review_prompt`. Summarised in this file's own words, each named at the site that
-honours it:
+THE SIX BINDING RULES R-1 to R-6 live in Agent Action Plan section 0.7.2, and their
+exact wording is retrievable from the requirements via `review_prompt`. Summarised in
+this file's own words, each named at the site that honours it:
 
     R-1  No COBOL at runtime. Section 0.7.2, verbatim: "the compiled oracle exists
          only under `harness/` and is consumed only by `tests/scenarios/*` and
@@ -404,7 +401,7 @@ def _irs_net_vat(
     there is no descriptor here that a store could target the amount through.
     `test_the_net_sequence_never_writes_post_amount` asserts that structurally.
 
-    ⭐ THE FORMULA IS NO LONGER WRITTEN HERE. This function used to evaluate
+    THE FORMULA IS NO LONGER WRITTEN HERE. This function used to evaluate
     `post_amount * rate / 100` itself, over the production primitive but as its own
     expression, which made this file a SECOND SOURCE for the statement it is about:
     nineteen assertions consumed it, and every one was checking a copy of the compute
@@ -735,7 +732,7 @@ def test_net_leaves_post_amount_byte_identical(
 def test_the_net_sequence_never_writes_post_amount() -> None:
     """No code path in the SHIPPED `Net` section can reach `post-amount`.
 
-    ⭐ ASSERTED ABOUT THE SHIPPED SECTION, NOT ABOUT A HELPER IN THIS FILE. It used to
+    ASSERTED ABOUT THE SHIPPED SECTION, NOT ABOUT A HELPER IN THIS FILE. It used to
     inspect `_irs_net_vat.__code__`, which was this file's own transcription of the
     statement - so it proved that the TRANSCRIPTION had no path to the amount and said
     nothing at all about the migration. `_irs_net_vat` now drives
@@ -1129,7 +1126,7 @@ def test_the_gl_net_paragraph_also_leaves_post_amount_byte_identical() -> None:
     not of the IRS module, which is what this test exists to establish.
 
     Scope note, so the citation is not misread: gl051's own migrated surface is the
-    control-total gate at [general/gl051.cbl:L1096-L1133] - `batch-print` and its
+    control-total gate at [general/gl051.cbl:L1096-L1134] - `batch-print` and its
     `end-batch` paragraph - and these two VAT paragraphs sit in the out-of-scope
     interactive amendment path. What is asserted here is the shared formula and the
     GL receiving fields' storage, per Agent Action Plan section 0.4.6.
@@ -1403,7 +1400,7 @@ def test_an_overflow_is_silent_and_keeps_the_low_order_digits() -> None:
 #  THE GENERAL LEDGER TWIN STAYS AT THE TRANSCRIPTION LEVEL, deliberately.
 #  `general/gl051.cbl`'s `net.` and `gross.` paragraphs [general/gl051.cbl:L788-L797]
 #  sit in the out-of-scope interactive amendment path - Agent Action Plan section
-#  0.4.1.2 migrates only the control-total gate at [general/gl051.cbl:L1096-L1133] -
+#  0.4.1.2 migrates only the control-total gate at [general/gl051.cbl:L1096-L1134] -
 #  so `acas_posting/programs/gl051_batch_control_check.py` HAS no net or gross
 #  paragraph to drive, and inventing one would be new behaviour (rule R-3).
 #  `test_the_gl_net_paragraph_also_leaves_post_amount_byte_identical` above remains
@@ -1453,12 +1450,12 @@ def _is_tier_isolated_name(name: str) -> bool:
 def _shipped_module(dotted_name: str) -> Iterator[types.ModuleType]:
     """Import a shipped module FOR REAL for one test, leaving `sys.modules` as found.
 
-    ⭐ THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
+    THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
 
-    NOT OPTIONAL. `pytest.importorskip` stood here, and it turned the one failure this
-    section exists to catch into a PASS. A shipped module that cannot be imported at
-    all - a syntax error, a circular import, a name it imports that no longer exists -
-    produced a SKIP, and a skipped test reads as green. The pinned MySQL driver the
+    NOT OPTIONAL. `pytest.importorskip` here would turn the one failure this section exists
+    to catch into a PASS: a shipped module that cannot be imported at all - a syntax error,
+    a circular import, a name it imports that no longer exists - would produce a SKIP, and
+    a skipped test reads as green. The pinned MySQL driver the
     reason text blamed is a hard requirement of `requirements.txt`, so its absence is a
     broken environment and not a supported configuration; `importlib.import_module`
     lets the `ImportError` reach pytest as the FAILURE it is.

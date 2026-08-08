@@ -10,8 +10,8 @@ Scenario `clean_batch_pl`; subsystem `purchase`; operation `pl_order_post`, whic
 drives both programs, and unlike `gl051` and `irs030` NEITHER is migrated in part -
 the whole of `pl055` and the whole of `pl060` are in scope.
 
-THE SECOND, EQUALLY IMPORTANT OBLIGATION. Where `tests/scenarios/
-test_clean_batch_post_sl.py` LOCKS anomaly A-1, this file locks the CORRECT sibling
+THE SECOND, EQUALLY IMPORTANT OBLIGATION. Where
+`tests/scenarios/test_clean_batch_post_sl.py` LOCKS anomaly A-1, this file locks the CORRECT sibling
 behaviour, and the two together are what prove A-1 is an accident rather than an
 idiom. Neither half may be normalised toward the other.
 
@@ -619,12 +619,9 @@ outright, and the COBOL being reproduced is single-threaded.
 16. THE RULES THIS FILE IS HELD TO
 -------------------------------------------------------------------------------
 
-THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports, exactly,
-"No user rules provided." There is no on-disk rules file to consult and no reader
-should look for one. The six binding rules R-1 to R-6 live in the Agent Action Plan
-itself, section 0.7.2, and their exact wording is retrievable from the requirements
-via `review_prompt` - never via `review_rules`. Where they are silent,
-enterprise-standard best practice applies, and NONE HAS BEEN INVENTED TO FILL A GAP.
+THE SIX BINDING RULES R-1 to R-6 live in Agent Action Plan section 0.7.2, and their
+exact wording is retrievable from the requirements via `review_prompt`. Where they are
+silent, enterprise-standard best practice applies.
 
   R-1  NO COBOL AT RUNTIME. This file imports `pytest` AND NOTHING ELSE. It never
        imports `harness` in any form - `harness/` has no `__init__.py` and
@@ -855,7 +852,7 @@ def parity(protocol: object) -> object:
     # side's status to `test_python_reproduced_the_oracles_disposition`, so a migrated
     # cycle that aborts where the oracle succeeded reads as a behavioural FAILURE
     # rather than as an environment ERROR in every test of this file.
-    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST (finding F-12). The
+    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST. The
     #  comparison below is between one COBOL run and one Python run, and it means
     #  nothing unless the two drove the same work in the same order - an empty diff
     #  between a short run and a full one being the most dangerous false pass this tier
@@ -1161,7 +1158,7 @@ def test_scenario_definition_preconditions(
     #    Purchase side it is DOUBLY inert, because the autogen dispatch is commented
     #    out anyway at [purchase/purchase.cbl:L755-L758] - a divergence from Sales,
     #    where [sales/sales.cbl:L759] dispatches sl830 live. Pinned regardless, so all
-    #    nine scenarios share one system block and so the asymmetry is recorded from
+    #    the eight scenarios share one system block and so the asymmetry is recorded from
     #    the Purchase side too.
     assert system["pl_autogen"] == " "
     assert system["sl_autogen"] == " "
@@ -1314,12 +1311,11 @@ WHY_SYSTEM_REC = (
     "to diverge."
 )
 
-#: How many tables this scenario bounds. ELEVEN, not ten: the tenth was the list as it
-#: stood before `SYSTEM-REC` was added for the reason `WHY_SYSTEM_REC` gives. Declared
-#: once, as a constant, because the count was previously written as a literal in two
-#: places and only ONE of them was updated when the list grew - a divergence no
-#: bare-host run could see, because this tier skips without the Compose stack, and one
-#: the containerised run caught as `assert 11 == 10`.
+#: How many tables this scenario bounds. ELEVEN, not ten: `SYSTEM-REC` counts, for the
+#: reason `WHY_SYSTEM_REC` gives. Declared ONCE, as a constant, because a count written as
+#: a literal in two places lets the list grow while only one of them is updated - a
+#: divergence no bare-host run can see, since this tier skips without the Compose stack,
+#: and one the containerised run reports as `assert 11 == 10`.
 EXPECTED_AFFECTED_TABLE_COUNT = 11
 
 
@@ -1374,6 +1370,9 @@ def test_affected_tables_are_in_scope_and_alphabetical(
             package - it has no `__init__.py` and `pyproject.toml` excludes it.
         in_scope_table_names: The same twenty-two names, ascending, for a second
             independent membership check.
+        vocabulary: The shared stack-free vocabulary bundle - the operation names both
+            runners accept, the term codes, the scenario keys and the pinned clock pair
+            - so this test reaches them without an `import conftest`.
     """
     definition = scenario_loader(SCENARIO)
     dump_tables = harness.dump_tables
@@ -1693,7 +1692,7 @@ def test_a1_control_pl060_terminating_period_is_present(
     one witnesses the defective route and the other the control route, and both capture
     COMPILED BEHAVIOUR rather than an argument about it. Neither DETECTS the missing
     period - a close writes nothing, so both routes' dumps are identical either way
-    (finding MJ-07); that is
+; that is
     `tests/arithmetic/test_double_entry_explosion.py`'s job, and it holds the
     two readings apart by verb sequence. NEITHER MAY BE NORMALISED TOWARD THE
     OTHER - harmonising the two programs would delete the evidence, and under rule R-4
@@ -1715,6 +1714,7 @@ def test_a1_control_pl060_terminating_period_is_present(
     agreement between the sides is proof the migrated cycle took the same branch.
 
     Args:
+        parity: The completed, guarded `ParityRun`.
         protocol: The protocol object; it applies the stack skip.
         harness: The three harness modules, for the report renderer.
 
@@ -1978,6 +1978,8 @@ def test_moving_average_fields_agree(
         frozen_schema: `mysql/ACASDB.sql` parsed into `{table: {column: ColumnType}}`.
             READ, NEVER WRITTEN - Agent Action Plan section 0.8.1 makes any diff against
             it a defect in the migration.
+        withheld: The value-free stand-in for a dumped cell, so a failure message can
+            name a column without reproducing an accounting figure.
 
     Raises:
         Skipped: The Compose stack is unusable.
@@ -2294,7 +2296,7 @@ def test_diff_exit_contract_is_honoured(
     differences" is the single worst bug available in this tree, and this test is the
     standing check that the three codes remain three distinct things.
 
-    ⭐ DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
+    DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
     `tests/conftest.py`'s `assert_diff_exit_contract` publishes two synthetic sides with
     `harness/dump_tables.py`'s own writer, canonicalises them with `harness/normalize.py`
     and compares them with `harness/diff_states.py` - once for each of the four cases.
@@ -2403,6 +2405,8 @@ def test_dump_is_wellformed_on_both_sides(
         harness: The three harness modules.
         frozen_schema: `mysql/ACASDB.sql` parsed into `{table: {column: ColumnType}}`.
             READ, NEVER WRITTEN.
+        withheld: The value-free stand-in for a dumped cell, so a failure message can
+            name a column without reproducing an accounting figure.
 
     Raises:
         Skipped: The Compose stack is unusable.
@@ -2570,9 +2574,8 @@ def test_dump_is_wellformed_on_both_sides(
 def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, protocol: object) -> None:
     """THE PARAMETER ROW IS BOUNDED TWICE - by the dump, and by a digest of it.
 
-    WHAT THIS CLOSES. An earlier draft kept `SYSTEM-REC` off every scenario's
-    `affected_tables` and justified that by claiming no side writes it. That claim is
-    FALSE:
+    WHAT THIS CLOSES. The tempting shortcut is to keep `SYSTEM-REC` off every scenario's
+    `affected_tables` on the ground that no side writes it. THAT GROUND IS FALSE:
     `acas_posting/cli/args.py`'s `overrewrite` reproduces
     [general/general.cbl:L656-L672] and every one of the seven routes calls it, so the
     parameter row is written on BOTH sides of every scenario. Until this assertion
@@ -2607,11 +2610,10 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
-    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
-    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
-    counter -- that scenario has since been removed (findings M-09 and M-17), and the
-    observation is recorded because it is what established that half.
+    over the eight committed scenarios, which is all four `unchanged` ones. THE `changed`
+    HALF IS NOT COVERED BY ANY COMMITTED SCENARIO: it was established on a definition that
+    declared `changed` and moved the row by construction, its Phase 5 advancing the cycle
+    and rotating the quarter counter, and no scenario in `harness/scenarios/` does that.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 

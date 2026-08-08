@@ -12,28 +12,11 @@ read into snapshots before the loop [irs/irs030.cbl:L1602],
 [irs/irs030.cbl:L1612] and rewritten from those snapshots at end of job
 [irs/irs030.cbl:L1704-L1708], so an in-loop rewrite of the same account is lost.
 
-Nothing in that list is modified. They are read as specification and cited by
-path and line at every site below, which is what makes rule R-5 checkable
-rather than asserted.
-
-KEY LOCATORS
-    handler linkage         [common/acasirsub1.cbl:L211-L217]
-    handler key guard       [common/acasirsub1.cbl:L231-L245]
-    handler RDB branch      [common/acasirsub1.cbl:L264-L268]
-    handler record size     [common/acasirsub1.cbl:L691-L731]
-    handler open-output     [common/acasirsub1.cbl:L733-L742]
-    bridge ``USING``        [common/irsnominalMT.cbl:L267-L269]
-    edit field              [common/irsnominalMT.cbl:L129]
-    key metadata            [common/irsnominalMT.cbl:L139-L151]
-    cursor block            [common/irsnominalMT.cbl:L157-L162]
-    host-variable group     [common/irsnominalMT.cbl:L186-L210]
-    bridge record           [common/irsnominalMT.cbl:L224-L247]
-    bridge dispatch         [common/irsnominalMT.cbl:L302-L328]
-    load paragraph          [common/irsnominalMT.cbl:L1189-L1222]
-    unload paragraph        [common/irsnominalMT.cbl:L1224-L1255]
-    insert section          [common/irsnominalMT.cbl:L1257-L1503]
-    update section          [common/irsnominalMT.cbl:L1505-L1747]
-    table                   [mysql/ACASDB.sql:L238-L255]
+Neither frozen file is modified. They are read as specification and cited by
+path and line at every site below, which is what makes rule R-5 checkable rather
+than asserted. The span-by-span index of both programs is the traceability
+footer's ``PARAGRAPH -> FUNCTION`` map, which :data:`PARAGRAPHS` also carries as
+data; it is not repeated here.
 
 WHICH OF THE TWO PROGRAMS IS THE SPECIFICATION
     Both, but not equally, and the split is not the one a reader expects. The
@@ -139,43 +122,16 @@ THE OVERLAY, AND WHY IT DECIDES WHAT GETS STORED
 THE VERB SET IS NOT ORDINARY CRUD
     This is the module the plan's rule about mirroring the handler boundary
     "rather than flattening them" was written for. Six verbs behave in ways no
-    other handler in the folder does, and flattening any of them breaks the
-    IRS posting section that consumes them.
-
-    ``fn-read-next`` (3)   FILTERS. Sub-nominal rows are excluded twice over -
-                           once by the SQL predicate ``` `TIPE`='O' ```
-                           [common/irsnominalMT.cbl:L405] and again at record
-                           level by ``if Sub / go to ba041-Reread``
-                           [:L541-L542]. The ordinary sequential read can
-                           never return an ``"S"`` row.
-    ``fn-start`` (9)       READS. The paragraph ends
-                           ``perform ba999-end`` then ``go to ba041-Reread``
-                           [common/irsnominalMT.cbl:L773, :L777], so one call
-                           both positions the cursor and delivers the first
-                           qualifying record - and, because it lands in the
-                           FILTERED loop, the sub-nominal filter applies to a
-                           positioning call as well. It also zeroes the low
-                           half of the key first, on the handler side
-                           [common/acasirsub1.cbl:L523], so a positioning call
-                           always lands on an owning account's first entry.
-    ``fn-write`` (5)       Issues up to FOUR statements: an insert, an update
-                           that forces the type byte to ``"O"``, an insert of
-                           the pointer row, and a "just in case" update if that
-                           insert failed [common/irsnominalMT.cbl:L793, :L839,
-                           :L856, :L863-L865]. It also mutates the caller's
-                           record and restores only part of it.
-    ``fn-delete`` (8)      Issues TWO deletes, the row and then the pointer row
-                           under a mutated key [common/irsnominalMT.cbl:L899,
-                           :L960], and leaves the mutated key in place.
-    ``fn-re-write`` (7)    Issues ONE update and is not pointer-aware at all
-                           [common/irsnominalMT.cbl:L1088] - the third,
-                           different shape among the three mutating verbs.
-    ``fn-Write-Raw`` (15)  Is an UPSERT: insert, and on failure the update
-                           paragraph performed as a second statement
-                           [common/irsnominalMT.cbl:L1149-L1151]. The only
-                           upsert in the folder, and it is two statements, not
-                           the server-side single-statement extension, because
-                           statement order is what a state diff observes.
+    other handler in the folder does, and flattening any of them breaks the IRS
+    posting section that consumes them: the sequential read FILTERS sub-nominal
+    rows out twice over (A5), ``fn-start`` READS as well as positions and inherits
+    that filter (A7, A8), ``fn-write`` issues up to FOUR statements and mutates the
+    caller's record (A9, A10), ``fn-delete`` issues TWO and leaves the key mutated
+    (A12), ``fn-re-write`` issues one and is not pointer-aware at all (A13), and
+    ``fn-Write-Raw`` is the folder's only upsert - expressed as two statements
+    rather than a server-side single-statement extension, because statement order
+    is what a state diff observes (A14). Each mechanism is stated with its
+    locators at the verb that implements it.
 
     Two function codes reach this pair that reach no other. ``fn-Write-Raw``
     (15) and ``fn-Read-Next-Raw`` (13) are declared out of numeric order in
@@ -957,7 +913,7 @@ _EDIT_FRACTION_DIGITS: Final[int] = 9
 #: ANOMALY A20, second half. The window STARTS AT POSITION 3, so it omits
 #: position 2 - the most significant of the nineteen integer positions.
 #:
-#: ⭐ CORRECTION, MEASURED ON GnuCOBOL 3.2.0 [common/comp-common.sh:L9]. This note
+#: CORRECTION, MEASURED ON GnuCOBOL 3.2.0 [common/comp-common.sh:L9]. This note
 #: used to conclude that "a key filling all eighteen digits ``HV-KEY-1`` can hold
 #: would therefore lose its leading digit before the statement was even sent". IT
 #: DOES NOT, and the arithmetic says why: ``WS-MYSQL-EDIT`` is
@@ -1850,7 +1806,7 @@ def _driver_failure(
 
 
 # `WS-File-Key`, `WS-Log-Where`, `SQL-Err`, `SQL-Msg` and `SQL-State` are alphanumeric
-# items of `Logging-Data` [copybooks/wsfnctn.cob:L44-L56] that both programs write on
+# items of `Logging-Data` [copybooks/wsfnctn.cob:L44-L55] that both programs write on
 # almost every path.
 
 _LOGGING_WIDTHS: Final[Mapping[str, int]] = MappingProxyType(
@@ -1955,7 +1911,7 @@ def _ba100_bad_function(file_access: FileAccess) -> tuple[int, int]:
     """
     # ONE ERROR, through the shared reporter, so this failure renders with the same
     # fields in the same order as every other handler's. `File-Function` is an
-    # operation code from the frozen vocabulary [copybooks/wsfnctn.cob:L88-L118].
+    # operation code from the frozen vocabulary [copybooks/wsfnctn.cob:L88-L116].
     log_handler_failure(
         _LOG,
         program="irsnominalMT",
@@ -2497,9 +2453,9 @@ def open_input(
 ) -> tuple[int, int]:
     """The facade's ``-Open-Input`` verb.
 
-    The facade sets ``access-type`` and then the function code [copybooks/Proc-ACAS-FH-
-    Calls.cob:L465-L469]; the BRIDGE ignores the access type on an open, because its
-    ``when 1`` arm routes every open to the one paragraph
+    The facade sets ``access-type`` and then the function code
+    [copybooks/Proc-ACAS-FH-Calls.cob:L465-L469]; the BRIDGE ignores the access type on an open,
+    because its ``when 1`` arm routes every open to the one paragraph
     [common/irsnominalMT.cbl:L303].
 
     Args:
@@ -3246,7 +3202,7 @@ def dispatch(
 ) -> tuple[int, int]:
     """``acasirsub1``'s entry point [common/acasirsub1.cbl:L211-L217].
 
-    so that a reviewer can diff this signature against the frozen one - which is the
+    so that a reader can diff this signature against the frozen one - which is the
     contract AAP section 0.4.3 sets for every handler call.
 
     Args:
@@ -3299,8 +3255,8 @@ def dispatch(
         return RECORD_SIZE_STATUS
 
     #  NO PER-CALL TRACE HERE. The frozen `CALL "irsnominalMT"`
-    #  [common/acasirsub1.cbl:L756] displays nothing, so the record that used to sit
-    #  on this line was invented (R-4) - and it named `NL-KEY`, the nominal account
+    #  [common/acasirsub1.cbl:L756] displays nothing, so a per-call record here would
+    #  be an invention (R-4) - and naming `NL-KEY`, the nominal account, would leak it
     #  (CWE-532). What `SW-Testing` actually gates is `Ca-Process-Logs`, and that is
     #  reproduced below, on the exit path where the frozen source performs it.
 
@@ -3320,9 +3276,9 @@ def dispatch(
     #     end-if.
     #
     # The bridge's common exit, reached by every verb, and the ONE site of the
-    # FH log record on this path. It was previously not reproduced at all - this
-    # module emitted no `fhlogger` record and never advanced
-    # `Log-File-Rec-Written`, which is the incoherence OBS-010 names. The frozen
+    # FH log record on this path. Omitting it - emitting no `fhlogger` record and
+    # never advancing `Log-File-Rec-Written` - is that incoherence, so it
+    # is reproduced here. The frozen
     # source ALSO performs `Ca-Process-Logs` from five error arms [:L655, :L812,
     # :L925, :L1107, :L1146]; those five remain a recorded omission, because the
     # verbs they sit in do not receive `ACAS-DAL-Common-data` and inventing a
@@ -3351,7 +3307,7 @@ def ca_process_logs(
     ``WS-Log-Where`` and ``SQL-Msg``.
 
     ``Log-File-Rec-Written`` is advanced by one modulo a million - the range of the
-    frozen ``pic 9(6)`` [copybooks/Test-Data-Flags.cob:L20] - once per record, by the
+    frozen ``pic 9(6)`` [copybooks/Test-Data-Flags.cob:L18] - once per record, by the
     adapter. It lives in ``ACAS-DAL-Common-data``, which the CALLER owns and carries
     across calls, so it is part of the linkage this module reproduces rather than the
     logger's private state.

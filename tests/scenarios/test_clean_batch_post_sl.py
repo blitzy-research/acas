@@ -1,7 +1,7 @@
 """THE SALES CLEAN-BATCH STATE-PARITY TEST, AND ANOMALY A-1'S STATE WITNESS.
 
-⚠️ THIS FILE IS A-1's WITNESS, NOT ITS LOCK, and the header below says so wherever it
-matters (finding MJ-07). `GL-Posting-Close` writes nothing, so adding the missing period
+ THIS FILE IS A-1's WITNESS, NOT ITS LOCK, and the header below says so wherever it
+matters. `GL-Posting-Close` writes nothing, so adding the missing period
 at [sales/sl060.cbl:L1176] leaves an IDENTICAL `GLPOSTING-REC` and every assertion here
 still passes. The LOCK is
 `tests/arithmetic/test_double_entry_explosion.py`, which drives the shipped
@@ -16,12 +16,10 @@ asserts an EMPTY ORDERING-NORMALISED DIFF between the compiled COBOL oracle and 
 migrated Python cycle, which Agent Action Plan section 0.8.5 makes the only pass
 condition.
 
-THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports that none was
-provided, so there is no on-disk rules file to consult and no reader should look for
-one. The six binding rules R-1 to R-6 live in the Agent Action Plan itself, section
-0.7.2, and their exact wording is retrievable from the requirements via `review_prompt`.
-Where they are silent, enterprise-standard best practice applies and nothing has been
-invented. Each rule is named below at the site that honours it.
+THE SIX BINDING RULES R-1 to R-6 live in Agent Action Plan section 0.7.2, and their
+exact wording is retrievable from the requirements via `review_prompt`. Where they are
+silent, enterprise-standard best practice applies. Each rule is named below at the site
+that honours it.
 
 THE INVERTED PREMISE, WHICH GOVERNS THIS FILE ABOVE ALL OTHERS. Agent Action Plan
 section 0.8.2, verbatim: "There is no test suite: compiled COBOL execution is the
@@ -207,9 +205,9 @@ a preceding `move zero to work-b` at L504, increments at L510 and returns early 
 cleared date at L500-L501 - `compute-sales-pay` opens at [sales/sl100.cbl:L497] with its
 arithmetic at L507 and L511 and `csp-exit` at L516.
 
-⭐ THE DIVIDE SPELLINGS DIFFER AND THE ARITHMETIC DOES NOT, and the distinction is worth
-stating exactly because an earlier draft of this docstring called L511 an INVERTED divide
-and left a reader expecting a reciprocal. `divide work-b by sales-pay-activety giving
+THE DIVIDE SPELLINGS DIFFER AND THE ARITHMETIC DOES NOT, and the distinction is worth
+stating exactly because calling L511 an INVERTED divide leaves a reader expecting a
+reciprocal, which is wrong. `divide work-b by sales-pay-activety giving
 sales-pay-average` [sales/sl100.cbl:L511] and `divide sales-activety into work-2 giving
 sales-average` [sales/sl060.cbl:L827] both compute ACCUMULATOR / COUNTER: `DIVIDE X INTO
 Y GIVING Z` is Z = Y / X and `DIVIDE Y BY X GIVING Z` is Z = Y / X, so the two forms name
@@ -245,10 +243,10 @@ DRIFT IS SPECIFIC, NOT SYSTEMIC, and is handled field by field from the generate
 dictionary. THE SIGN IS LOST AT THE BRIDGE, not at the database, so the Python
 data-access layer reproduces the bridge's conversion rather than writing the computed
 value and letting the server object. Recorded as A-11 in
-`docs/migration/anomaly-log.md`, whose status entry is `REPRODUCED`: the narrowed value
-has since been MEASURED as the ABSOLUTE VALUE - magnitude first, then high-order
-truncation - under question `Q-3`. Measuring it did not repair it, and R-4 forbids
-repairing it, so A-11 stands.
+`docs/migration/anomaly-log.md`, whose status entry is `REPRODUCED`: the narrowed value is
+MEASURED as the ABSOLUTE VALUE - magnitude first, then high-order truncation - under
+question `Q-3`. Measuring it does not repair it, and R-4 forbids repairing it, so A-11
+stands.
 
 -------------------------------------------------------------------------------
 A-17 AND A-18 - RECORDED HERE BECAUSE A READER WILL LOOK FOR THEM
@@ -427,7 +425,7 @@ TEXTUAL REFERENCES ONLY: nothing here imports that document, stats its path or s
 its absence.
 
 `Q-3`  THE VALUE A NARROWED NEGATIVE PRODUCES. A-11 settles the SHAPE - the sign is lost
-       at the bridge - and the value stored has since been MEASURED through the compiled
+       at the bridge - and the value stored is MEASURED through the compiled
        handler, bridge and C interface: it is the ABSOLUTE VALUE, magnitude taken first
        and high-order digits truncated after. The generated dictionary therefore emits
        `A-11` ALONE on its 91 field entries across eleven tables, eleven of them in
@@ -449,9 +447,10 @@ its absence.
        SIGNAL AND NEVER SOMETHING TO SUPPRESS: no ignore-list resolves it, and the
        failure message names the identifier instead.
 
-       A third question on this route, `Q-CLI-TERMCODE-1-7`, remains OPEN and is
-       recorded for completeness: the 1..7 band is unreachable from `sl055` today, so
-       the Sales gate and Purchase's absent gate cannot yet be told apart.
+       A third question on this route, `Q-CLI-TERMCODE-1-7`, is SETTLED BY CENSUS and is
+       recorded for completeness: only 0, 4, 5, 8 and 9 are ever stored into
+       `WS-Term-Code` in the frozen tree, so the 1..7 band has no producer and the gate
+       is reproduced over the whole `pic 99` domain rather than over reachable values.
 
 The declination of `gl_end_of_cycle` is likewise oracle-reversible and is recorded in
 `harness/scenarios/period_end_totals.yaml`, on six grounds. Its consequence reaches this
@@ -659,20 +658,20 @@ SUBSYSTEM: Final[str] = "sales"
 # `88  FS-Cobol-Files-Used  value zero.` and `88  FS-MySql-Used  value 1.`, inside
 # `RDBMS-Flat-Statuses` [copybooks/wssystem.cob:L111]. Every handler gates on it -
 # [common/acas007.cbl:L316-L320] verbatim:
-#     L316       if       not FS-Cobol-Files-Used
-#     L317                move RDBMS-Flat-Statuses to FA-RDBMS-Flat-Statuses
-#     L318                perform  ba-Process-RDBMS
-#     L319                go to AA-Main-Exit
-#     L320       end-if.
+#  L316       if       not FS-Cobol-Files-Used
+#  L317                move RDBMS-Flat-Statuses to FA-RDBMS-Flat-Statuses
+#  L318                perform  ba-Process-RDBMS
+#  L319                go to AA-Main-Exit
+#  L320       end-if.
 # WWith zero the handler NEVER TOUCHES MySQL, both dumps come back empty, the diff exits
 # W0
 # and the run is a SILENT FALSE PASS. Hence the pin, and hence the assertion.
 FILE_SYSTEM_USED_MYSQL: Final[int] = 1
 
 # THE FAN-OUT SWITCH, [copybooks/wssystem.cob:L179-L181] verbatim:
-#     L179         05  IRS-Instead     pic x.
-#     L180             88  IRS-Used                   value "Y".
-#     L181             88  IRS-Both-Used              value "B".   *> 26/11/16
+#  L179         05  IRS-Instead     pic x.
+#  L180             88  IRS-Used                   value "Y".
+#  L181             88  IRS-Both-Used              value "B".   *> 26/11/16
 # THREE states, and THE THIRD HAS NO CONDITION NAME AT ALL - for a space both predicates
 # are simply False, which is pure General Ledger mode. Tested at three sites in each of
 # the four Sales and Purchase posting programs, on this route at
@@ -739,21 +738,21 @@ EXPECTED_STATUS_SUCCESS: Final[int] = 0
 
 # THE SIX FLAT FILES, each one a name the frozen loader script recognises, with its
 # loader traced to [common/masterLD.sh]:
-#     system.dat    -> the four-loader system block [common/masterLD.sh:L51-L87]:
-#                      `systemLD` L52, then `sys4LD` L61, then `finalLD` L70, then
-#                      `dfltLD` L79, in that fixed order. SYS4LD IS WHAT LOADS
-#                      SYSTOT-REC. Effectively mandatory: without the system record the
-#                      menu calls its interactive setup program and the runner blocks on
-#                      aa terminal, and the seeder refuses a scenario that omits it. It
-#                      ais
-#                      also what carries `Run-Date` [copybooks/wssystem.cob:L67] and the
-#                      fan-out switch [copybooks/wssystem.cob:L179-L181].
-#     analysis.dat  -> `analLD`      [common/masterLD.sh:L93]  -> ANALYSIS-REC
-#     invoice.dat   -> `slinvoiceLD` [common/masterLD.sh:L98]  -> SAINVOICE-REC AND
-#                      SAINV-LINES-REC, both from the one loader
-#     openitm3.dat  -> `otm3LD`      [common/masterLD.sh:L104] -> SAITM3-REC
-#     salesled.dat  -> `salesLD`     [common/masterLD.sh:L112] -> SALEDGER-REC
-#     value.dat     -> `valueLD`     [common/masterLD.sh:L116] -> VALUEANAL-REC
+#  system.dat    -> the four-loader system block [common/masterLD.sh:L51-L87]:
+#  `systemLD` L52, then `sys4LD` L61, then `finalLD` L70, then
+#  `dfltLD` L79, in that fixed order. SYS4LD IS WHAT LOADS
+#  SYSTOT-REC. Effectively mandatory: without the system record the
+#  menu calls its interactive setup program and the runner blocks on
+#  aa terminal, and the seeder refuses a scenario that omits it. It
+#  ais
+#  also what carries `Run-Date` [copybooks/wssystem.cob:L67] and the
+#  fan-out switch [copybooks/wssystem.cob:L179-L181].
+#  analysis.dat  -> `analLD`      [common/masterLD.sh:L93]  -> ANALYSIS-REC
+#  invoice.dat   -> `slinvoiceLD` [common/masterLD.sh:L98]  -> SAINVOICE-REC AND
+#  SAINV-LINES-REC, both from the one loader
+#  openitm3.dat  -> `otm3LD`      [common/masterLD.sh:L104] -> SAITM3-REC
+#  salesled.dat  -> `salesLD`     [common/masterLD.sh:L112] -> SALEDGER-REC
+#  value.dat     -> `valueLD`     [common/masterLD.sh:L116] -> VALUEANAL-REC
 #
 # The DECLARED ORDER is membership only: the seeder applies the frozen loader order
 # regardless, and the system block always runs first. Held here as a frozenset for that
@@ -1003,7 +1002,7 @@ def parity(protocol: Any) -> Any:
     # never asked the question at all, and the headline test below would otherwise
     # report that as a behavioural FAILURE. `reference_only` leaves the Python side's
     # status to that test, which owns it and says so under its own name.
-    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST (finding F-12). The
+    #  BOTH SIDES DROVE THE SAME ORDERED OPERATION LIST. The
     #  comparison below is between one COBOL run and one Python run, and it means
     #  nothing unless the two drove the same work in the same order - an empty diff
     #  between a short run and a full one being the most dangerous false pass this tier
@@ -1911,7 +1910,7 @@ def test_diff_exit_contract_is_honoured(
     AVAILABLE IN THIS TREE, so the mapping is exercised rather than trusted. Rule R-6
     makes an empty diff the pass condition ONLY when a comparison actually happened.
 
-    ⭐ DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
+    DRIVEN THROUGH THE SHIPPED COMPARISON, AND THROUGH ONE IMPLEMENTATION.
     `tests/conftest.py`'s `assert_diff_exit_contract` publishes two synthetic sides with
     `harness/dump_tables.py`'s own writer, canonicalises them with `harness/normalize.py`
     and compares them with `harness/diff_states.py` - once for each of the four cases.
@@ -2182,7 +2181,7 @@ def test_a1_missing_period_gl_posting_close_not_executed(
     "A defect reproduced is correct; a defect fixed is a failure."
 
     SO DO NOT ADD THE MISSING PERIOD - and note WHICH test catches you if you do
-    (finding MJ-07). NOT THIS ONE. A well-meaning correction to
+. NOT THIS ONE. A well-meaning correction to
     [sales/sl060.cbl:L1176], or a translation of `ca000-BL-Close` that "obviously"
     closes the posting file, changes which VERBS are performed and changes NO ROW,
     because a close writes nothing. This test would stay green. The lock is
@@ -2635,6 +2634,8 @@ def test_sign_narrowing_at_the_bridge_agrees(
         parity: The completed ten-stage run.
         harness: The three harness modules.
         frozen_schema: The parsed frozen schema. READ, never written.
+        withheld: The value-free stand-in for a dumped cell, so a failure message can
+            name a column without reproducing an accounting figure.
     """
     cobol_dump = _dump_for(parity.paths, SIDE_COBOL, SALES_LEDGER_TABLE, harness)
     python_dump = _dump_for(parity.paths, SIDE_PYTHON, SALES_LEDGER_TABLE, harness)
@@ -2785,6 +2786,8 @@ def test_dump_is_wellformed_on_both_sides(
         definition: The parsed scenario, for its DECLARED EFFECT. The comparison is
             bounded by all 22 in-scope tables; `EXPECTED_AFFECTED_TABLE_COUNT` is a
             fact about what this scenario declares it changes.
+        withheld: The value-free stand-in for a dumped cell, so a failure message can
+            name a column without reproducing an accounting figure.
     """
     in_scope: Mapping[str, Any] = harness.dump_tables.IN_SCOPE
 
@@ -2956,9 +2959,8 @@ def test_dump_is_wellformed_on_both_sides(
 def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, protocol: object) -> None:
     """THE PARAMETER ROW IS BOUNDED TWICE - by the dump, and by a digest of it.
 
-    WHAT THIS CLOSES. An earlier draft kept `SYSTEM-REC` off every scenario's
-    `affected_tables` and justified that by claiming no side writes it. That claim is
-    FALSE:
+    WHAT THIS CLOSES. The tempting shortcut is to keep `SYSTEM-REC` off every scenario's
+    `affected_tables` on the ground that no side writes it. THAT GROUND IS FALSE:
     `acas_posting/cli/args.py`'s `overrewrite` reproduces
     [general/general.cbl:L656-L672] and every one of the seven routes calls it, so the
     parameter row is written on BOTH sides of every scenario. Until this assertion
@@ -2994,11 +2996,10 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
-    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
-    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
-    counter -- that scenario has since been removed (findings M-09 and M-17), and the
-    observation is recorded because it is what established that half.
+    over the eight committed scenarios, which is all four `unchanged` ones. THE `changed`
+    HALF IS NOT COVERED BY ANY COMMITTED SCENARIO: it was established on a definition that
+    declared `changed` and moved the row by construction, its Phase 5 advancing the cycle
+    and rotating the quarter counter, and no scenario in `harness/scenarios/` does that.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 

@@ -93,11 +93,9 @@ the comparison must never be taken over a digit string or over encoded bytes.
 Encoded bytes appear in exactly one place in this file - the byte-identity
 assertion about NON-mutation - and that is a different question from equality.
 
-RULES, AND WHERE THEY COME FROM. There is NO user rules document for this project:
-`review_rules` reports that no user rules were provided. The six binding rules
-below are the ones the Technical Specification carries in its own section 0.7.2,
-and where the specification is silent this file holds to ordinary enterprise
-practice and invents nothing.
+RULES, AND WHERE THEY COME FROM. The six binding rules below are the ones the
+Technical Specification carries in its own section 0.7.2, and where the
+specification is silent this file holds to ordinary enterprise practice.
 
   R-1 No COBOL at runtime. This file starts no process, loads no shared object and
       imports nothing from `harness`; it needs no database, no MariaDB, no Docker
@@ -141,7 +139,7 @@ imports and therefore what it may assert:
     reinterpretation - and `acas_posting/dal/acas029_otm5.py` carries the same
     treatment at the bridge. Whether the compiled bridge agrees is `Q-3`, anomaly
     `A-11`, and it too has been measured: `Q-3` is `RESOLVED BY ORACLE`
-    (2026-08-07, finding F-19) - the magnitude is kept and the sign discarded, then
+    (2026-08-07) - the magnitude is kept and the sign discarded, then
     bounded by the receiving digit count, which is what the shipped layer does.
     `test_comp_binary.py` asserts that measurement and carries NO strict expected
     failure for it, because a strict `xfail` against a resolved question would
@@ -1103,7 +1101,7 @@ def test_a_negative_post_amount_loses_its_sign_in_the_unsigned_receiver() -> Non
     SURVIVES - the shipped store path's own behaviour, and the same treatment
     `acas_posting/dal/acas029_otm5.py` applies at the bridge. Whether the COMPILED
     bridge agrees was anomaly A-11's question Q-3, and it agrees: Q-3 is `RESOLVED
-    BY ORACLE` (2026-08-07, finding F-19) - the bridge stores the absolute value,
+    BY ORACLE` (2026-08-07) - the bridge stores the absolute value,
     bounded by the receiving digit count. The store asserted here is into working
     storage either way, so it does not turn on that answer.
 
@@ -1616,7 +1614,7 @@ def test_every_field_the_gate_touches_carries_dictionary_provenance() -> None:
 #  THE SHIPPED GATE
 #
 #  Every test above builds the gate out of `arithmetic` calls written in this file.
-#  That establishes what [general/gl051.cbl:L1096-L1133] MEANS, and it is the reason
+#  That establishes what [general/gl051.cbl:L1096-L1134] MEANS, and it is the reason
 #  `test_the_vat_enters_the_gross_before_the_comparison` can show the two orders
 #  disagreeing. What it cannot establish is that
 #  `acas_posting/programs/gl051_batch_control_check.py::_end_batch` still runs them
@@ -1641,9 +1639,8 @@ def test_every_field_the_gate_touches_carries_dictionary_provenance() -> None:
 #  tier-isolation-prefixed name it added in a `finally`. The pattern is the one
 #  `tests/conftest.py _load_harness_module` already uses for the harness modules.
 #
-#  THE IMPORT IS MANDATORY, NOT SKIPPABLE. An earlier revision used
-#  `pytest.importorskip`, so a driver-free host skipped this section silently. That
-#  was wrong twice over: `mysql-connector-python==26.7.0` is a HARD
+#  THE IMPORT IS MANDATORY, NOT SKIPPABLE. Using `pytest.importorskip`, so that a
+#  driver-free host skips this section silently, is wrong twice over: `mysql-connector-python==26.7.0` is a HARD
 #  `[project.dependencies]` entry and a hard `requirements.txt` pin, so the guarded
 #  state cannot arise for an installed package; and the control-total ordering
 #  asserted below is the gate the Agent Action Plan section 0.6.4 calls load-bearing,
@@ -1697,12 +1694,12 @@ def _is_tier_isolated_name(name: str) -> bool:
 def _shipped_gl051() -> Iterator[types.ModuleType]:
     """Import `gl051_batch_control_check` for one test, leaving no trace.
 
-    ⭐ THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
+    THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
 
-    NOT OPTIONAL. `pytest.importorskip` stood here, and it turned the one failure this
-    section exists to catch into a PASS. A shipped module that cannot be imported at
-    all - a syntax error, a circular import, a name it imports that no longer exists -
-    produced a SKIP, and a skipped test reads as green. The pinned MySQL driver the
+    NOT OPTIONAL. `pytest.importorskip` here would turn the one failure this section exists
+    to catch into a PASS: a shipped module that cannot be imported at all - a syntax error,
+    a circular import, a name it imports that no longer exists - would produce a SKIP, and
+    a skipped test reads as green. The pinned MySQL driver the
     reason text blamed is a hard requirement of `requirements.txt`, so its absence is a
     broken environment and not a supported configuration.
 
@@ -1965,11 +1962,11 @@ def test_the_shipped_gate_keeps_its_two_early_dispositions() -> None:
 def test_the_shipped_gate_leaves_no_driver_loaded() -> None:
     """Rule R-1 holds even though this section reaches a program module.
 
-    ⭐ AND THE IMPORT REALLY HAPPENS, which is what makes the claim worth making. The
-    loader used to memoise, so this guard imported nothing: the module was already
-    resident from an earlier test, the purge removed nothing, and "leaves no driver
-    loaded" was a statement about a module that had never left. The loader no longer
-    caches, so each `with` below performs a genuine import - asserted INSIDE the block
+    AND THE IMPORT REALLY HAPPENS, which is what makes the claim worth making. The
+    loader MUST NOT memoise, or this guard would import nothing: the module would already
+    be resident from an earlier test, the purge would remove nothing, and "leaves no driver
+    loaded" would be a statement about a module that had never left. The loader does not
+    cache, so each `with` below performs a genuine import - asserted INSIDE the block
     by reading live `sys.modules` - and the delta afterwards is a real measurement of
     what the purge removed.
     """
@@ -2017,13 +2014,6 @@ def test_the_shipped_gate_leaves_no_driver_loaded() -> None:
 
 
 # ==========================================================================
-#  MERGED GROUP - was tests/arithmetic/test_cli_seams_and_failure_paths.py
-#
-#  Relocated verbatim so that this directory holds exactly the fourteen test
-#  modules the Agent Action Plan section 0.3.1 inventory names. Nothing was
-#  rewritten: the group's own preamble follows, as its author wrote it, and
-#  every test below is the test that ran under the old file name.
-# ==========================================================================
 #
 #  The CLI boundary's failure paths, driven for real.
 #
@@ -2036,43 +2026,43 @@ def test_the_shipped_gate_leaves_no_driver_loaded() -> None:
 #
 #  FIVE SEAMS, and each is one an operator or a scenario depends on:
 #
-#    1. THE KEY-1 SYSTEM READ [acas_posting/cli/args.py, `aa010_get_system_recs`]. The menu
-#       shell reads `SYSTEM-REC` under `File-Key-No` 1 before it dispatches anything
-#       [general/general.cbl:L398-L418]. If that read fails, the migrated boundary logs, then
-#       CLOSES, then raises - and the pair it reports has to be THE READ'S, not the close's,
-#       because a close overwrites `Fs-Reply` on the same shared block
-#       [copybooks/wsfnctn.cob:L25]. Getting the order wrong turns a diagnosable failure into
-#       "FS-Reply 0".
+#  1. THE KEY-1 SYSTEM READ [acas_posting/cli/args.py, `aa010_get_system_recs`]. The menu
+#  shell reads `SYSTEM-REC` under `File-Key-No` 1 before it dispatches anything
+#  [general/general.cbl:L398-L418]. If that read fails, the migrated boundary logs, then
+#  CLOSES, then raises - and the pair it reports has to be THE READ'S, not the close's,
+#  because a close overwrites `Fs-Reply` on the same shared block
+#  [copybooks/wsfnctn.cob:L25]. Getting the order wrong turns a diagnosable failure into
+#  "FS-Reply 0".
 #
-#    2. THE VERB VOCABULARY THE MENU STATE SELECTS. `irs/irs.cbl` copies the handler-named
-#       facade [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob] and drives `acas000` by its HANDLER
-#       name [irs/irs.cbl:L499, L512], while the General, Sales and Purchase menus copy the
-#       entity-named one [copybooks/Proc-ACAS-FH-Calls.cob]. The two are NOT interchangeable:
-#       the handler-named open family carries its own error check and can end the menu
-#       program outright. The selection is a one-field decision on the menu state, and this
-#       file asserts which state picks which.
+#  2. THE VERB VOCABULARY THE MENU STATE SELECTS. `irs/irs.cbl` copies the handler-named
+#  facade [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob] and drives `acas000` by its HANDLER
+#  name [irs/irs.cbl:L499, L512], while the General, Sales and Purchase menus copy the
+#  entity-named one [copybooks/Proc-ACAS-FH-Calls.cob]. The two are NOT interchangeable:
+#  the handler-named open family carries its own error check and can end the menu
+#  program outright. The selection is a one-field decision on the menu state, and this
+#  file asserts which state picks which.
 #
-#    3. THE POSTING CYCLE'S TWO SHORT-CIRCUITS [acas_posting/cli/gl_post_cycle.py, `load08`].
-#       `gl070` raising term code 5 stops the cycle before `gl071` and `gl072`
-#       [general/general.cbl:L810-L811]; a SERIOUS error - above 7
-#       [general/general.cbl:L720-L721] - stops it wherever it happens. A cycle that ran
-#       `gl072` after `gl071` had failed would post from a work file that was never sorted,
-#       and `gl072` finds its accounts by SEQUENTIAL read [general/gl072.cbl:L410-L412], so
-#       the postings would go to the WRONG ACCOUNTS with no error at all.
+#  3. THE POSTING CYCLE'S TWO SHORT-CIRCUITS [acas_posting/cli/gl_post_cycle.py, `load08`].
+#  `gl070` raising term code 5 stops the cycle before `gl071` and `gl072`
+#  [general/general.cbl:L810-L811]; a SERIOUS error - above 7
+#  [general/general.cbl:L720-L721] - stops it wherever it happens. A cycle that ran
+#  `gl072` after `gl071` had failed would post from a work file that was never sorted,
+#  and `gl072` finds its accounts by SEQUENTIAL read [general/gl072.cbl:L408], so
+#  the postings would go to the WRONG ACCOUNTS with no error at all.
 #
-#    4. THE REQUIRED OPTIONS. Two routes refuse to run without an explicit answer: the
-#       General route needs `--run-date`, because rule R-6 forbids taking a date from the
-#       clock, and the IRS route needs `--clear-posting-file` or `--no-clear-posting-file`,
-#       because one of those answers DELETES EVERY ROW of the transfer table
-#       [irs/irs030.cbl:L1715-L1724]. An implied default for either would be an invented
-#       behaviour.
+#  4. THE REQUIRED OPTIONS. Two routes refuse to run without an explicit answer: the
+#  General route needs `--run-date`, because rule R-6 forbids taking a date from the
+#  clock, and the IRS route needs `--clear-posting-file` or `--no-clear-posting-file`,
+#  because one of those answers DELETES EVERY ROW of the transfer table
+#  [irs/irs030.cbl:L1715-L1724]. An implied default for either would be an invented
+#  behaviour.
 #
-#    5. THE CONFIGURATION CONTRACT'S STATUS CODES [acas_posting/cli/args.py SECTION 0]. The
-#       frozen parameter reader publishes 8 for "no source" and 1 for "malformed"
-#       [common/acas-get-params.cbl:L37-L42], and the boundary surfaces the error's own code
-#       so a caller can tell "not configured" from "misconfigured" without parsing text.
+#  5. THE CONFIGURATION CONTRACT'S STATUS CODES [acas_posting/cli/args.py SECTION 0]. The
+#  frozen parameter reader publishes 8 for "no source" and 1 for "malformed"
+#  [common/acas-get-params.cbl:L37-L42], and the boundary surfaces the error's own code
+#  so a caller can tell "not configured" from "misconfigured" without parsing text.
 #
-#  ⛔ NO DATABASE, NO COBOL, NO SUBPROCESS (R-1). Every test replaces the seam it is not
+#  NO DATABASE, NO COBOL, NO SUBPROCESS (R-1). Every test replaces the seam it is not
 #  about: the system verbs are a triple of callables, the three General Ledger programs are
 #  doubles, and no test resolves a real connection. The imports of `acas_posting.cli` pull
 #  `acas_posting.dal.facade` and the pinned driver in transitively, so every loader purges
@@ -2081,22 +2071,18 @@ def test_the_shipped_gate_leaves_no_driver_loaded() -> None:
 #
 #  THE RULES, as they bind this file (Agent Action Plan section 0.7.2):
 #
-#    R-1  No COBOL at runtime, no database.
-#    R-2  Zero binary floating point. Nothing here computes money; the one numeric family in
-#         play is exit statuses, which are `int`.
-#    R-3  ⛔ No added validation. The two required options are not a validation this
-#         migration invented - each replaces a frozen prompt that cannot be left
-#         unanswered - and the tests say so at the site.
-#    R-4  Reproduced, not repaired: the IRS route ABSORBS the facade copybook's `goback`
-#         [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L364] as a normal return, because that is
-#         what the frozen menu program does with it.
-#    R-5  Every test names the frozen line and the shipped function it drives.
-#    R-6  ⭐ The run date arrives through linkage and never from a clock, which is why
-#         `--run-date` is required rather than defaulted. Asserted here as a refusal.
-#
-#  ⚠ PROVENANCE OF RULES. There is no user rules document - `review_rules` returns exactly
-#  `No user rules provided.` The rules above are the Technical Specification's, section
-#  0.7.2, and nothing has been invented to fill the gap.
+#  R-1  No COBOL at runtime, no database.
+#  R-2  Zero binary floating point. Nothing here computes money; the one numeric family in
+#  play is exit statuses, which are `int`.
+#  R-3  No added validation. The two required options are not a validation this
+#  migration invented - each replaces a frozen prompt that cannot be left
+#  unanswered - and the tests say so at the site.
+#  R-4  Reproduced, not repaired: the IRS route ABSORBS the facade copybook's `goback`
+#  [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L364] as a normal return, because that is
+#  what the frozen menu program does with it.
+#  R-5  Every test names the frozen line and the shipped function it drives.
+#  R-6  The run date arrives through linkage and never from a clock, which is why
+#  `--run-date` is required rather than defaulted. Asserted here as a refusal.
 #
 # ==========================================================================
 
@@ -2194,8 +2180,8 @@ def _shipped(*dotted_names: str) -> Iterator[tuple[types.ModuleType, ...]]:
 class _SystemVerbDouble:
     """The three `acas000` verbs the menu shell drives, recording the keys it asked for.
 
-    ⭐ THE KEY IS READ OFF THE SHARED BLOCK AT CALL TIME, which is the whole mechanism
-    being tested: `_select_key` writes `File-Key-No` [copybooks/wsfnctn.cob:L44-L56] and
+    THE KEY IS READ OFF THE SHARED BLOCK AT CALL TIME, which is the whole mechanism
+    being tested: `_select_key` writes `File-Key-No` [copybooks/wsfnctn.cob:L44-L55] and
     the verb is then expected to act on THAT key. A double that took the key as an
     argument would test a different design.
 
@@ -2273,7 +2259,7 @@ def _install_verbs(args_module: types.ModuleType, double: _SystemVerbDouble) -> 
 def _namespace(args_module: types.ModuleType) -> argparse.Namespace:
     """The parsed namespace `aa010_get_system_recs` reads its pins from.
 
-    ⭐ BUILT BY THE SHIPPED ARGUMENT HELPERS, not hand-assembled. `_apply_cli_pins` reads
+    BUILT BY THE SHIPPED ARGUMENT HELPERS, not hand-assembled. `_apply_cli_pins` reads
     `ns.date_form` and moves it into `pic 9` [copybooks/wssystem.cob:L127], so a
     hand-made namespace with `None` in that attribute fails inside the semantics layer
     rather than testing anything - and building the namespace the way the routes build it
@@ -2301,7 +2287,7 @@ def _namespace(args_module: types.ModuleType) -> argparse.Namespace:
 
 
 def test_the_key_one_failure_reports_the_reads_pair_and_not_the_closes() -> None:
-    """⭐ THE READ'S STATUS SURVIVES THE CLOSE THAT FOLLOWS IT.
+    """THE READ'S STATUS SURVIVES THE CLOSE THAT FOLLOWS IT.
 
     `Fs-Reply` and `We-Error` live on ONE shared `File-Access` block
     [copybooks/wsfnctn.cob:L22-L38] that every verb writes, so the close issued after a
@@ -2386,7 +2372,7 @@ def test_a_successful_key_one_read_closes_and_returns_without_raising() -> None:
         #  A non-zero binary run date, so the assertion above is not comparing two zeroes.
         assert pinned.run_date > 0
 
-        #  ⭐ AND THE SUCCESS PATH CONTINUES PAST THE READ. `_apply_cli_pins` binds the
+        #  AND THE SUCCESS PATH CONTINUES PAST THE READ. `_apply_cli_pins` binds the
         #  six connection parameters onto the record it has just read
         #  [copybooks/wssystem.cob:L137-L144], which is why an absent contract fails HERE
         #  rather than at the read - the status-code tests in section 4 drive that half.
@@ -2501,7 +2487,7 @@ def test_the_general_menu_state_reads_the_totals_and_defaults_records_first() ->
 
 
 def test_the_menu_state_selects_the_vocabulary_its_frozen_menu_copies() -> None:
-    """⭐ ONE FIELD DECIDES WHICH FACADE PARAGRAPHS RUN, and it is not cosmetic.
+    """ONE FIELD DECIDES WHICH FACADE PARAGRAPHS RUN, and it is not cosmetic.
 
     `irs/irs.cbl` copies [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob] and performs
     `acas000-open-Input` [irs/irs.cbl:L499]; the General, Sales and Purchase menus copy
@@ -2637,7 +2623,7 @@ def test_all_three_phases_run_when_no_program_reports_a_disposition() -> None:
 
     THE CONTROL for the two short-circuit tests, and a claim in its own right: the order
     is load-bearing because `gl072` locates each posting's nominal account by SEQUENTIAL
-    read [general/gl072.cbl:L410-L412] and therefore depends on `gl071` having emitted
+    read [general/gl072.cbl:L408] and therefore depends on `gl071` having emitted
     the stream in nominal-key order.
     """
     with _shipped("acas_posting.cli.gl_post_cycle", "acas_posting.cli.args") as (
@@ -2662,7 +2648,7 @@ def test_the_abort_term_code_stops_the_cycle_before_gl071_and_gl072() -> None:
     written, which is Agent Action Plan section 0.6.5's second rejection class - and it
     only holds if the gate is a hard stop rather than a warning.
 
-    ⭐ FIVE IS NOT A SERIOUS ERROR. `is_serious_error` tests ABOVE seven
+    FIVE IS NOT A SERIOUS ERROR. `is_serious_error` tests ABOVE seven
     [general/general.cbl:L720], so the abort takes its own arm and not the error arm -
     asserted here by the term code surviving as 5 rather than being escalated.
     """
@@ -2684,12 +2670,12 @@ def test_the_abort_term_code_stops_the_cycle_before_gl071_and_gl072() -> None:
 
 
 def test_a_serious_error_from_gl071_stops_the_cycle_before_gl072() -> None:
-    """⭐⭐ THE SHORT-CIRCUIT THAT PREVENTS SILENT MISPOSTING.
+    """THE SHORT-CIRCUIT THAT PREVENTS SILENT MISPOSTING.
 
     `load00` tests `if ws-term-code > 7` after every dispatch
     [general/general.cbl:L720-L721], and `load08` returns as soon as one reports it. The
     consequence of getting this wrong is the worst kind in this codebase: `gl072` finds
-    each posting's account with a SEQUENTIAL read [general/gl072.cbl:L410-L412], so
+    each posting's account with a SEQUENTIAL read [general/gl072.cbl:L408], so
     running it after a FAILED sort posts to whatever account the unsorted stream happens
     to reach - with no error, no diagnostic and no way to tell from the tables that
     anything went wrong.
@@ -2758,16 +2744,17 @@ def test_a_serious_error_from_gl070_stops_the_cycle_before_gl071() -> None:
 
 
 def test_the_general_route_refuses_to_run_without_a_run_date() -> None:
-    """⭐ THERE IS NO DEFAULT RUN DATE, and that is rule R-6 made operational.
+    """THERE IS NO DEFAULT RUN DATE, and that is rule R-6 made operational.
 
-    Every date the migrated cycle uses arrives through linkage
-    [copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80 is the ONE clock read in the whole call
-    chain, and it lives in the menu shell]. If the CLI defaulted the run date to today,
+    Every date the migrated cycle uses arrives through linkage: all twelve in-scope
+    posting programs contain ZERO clock reads, and the read the CLI reproduces is the menu
+    shell's date service [copybooks/Proc-ACAS-Mapser-RDB.cob:L72-L80]. If the CLI
+    defaulted the run date to today,
     two runs of the same scenario would write different rows and the determinism
     requirement would be unenforceable - so `--run-date` is required and its omission is
     a usage error.
 
-    ⛔ NOT AN ADDED VALIDATION (R-3). The frozen menu obtains the date before it
+    NOT AN ADDED VALIDATION (R-3). The frozen menu obtains the date before it
     dispatches anything [general/general.cbl:L371]; requiring it at the boundary is where
     that acquisition went, not a new rule.
 
@@ -2797,7 +2784,7 @@ def test_the_general_route_refuses_to_run_without_a_run_date() -> None:
 
 
 def test_the_irs_route_requires_an_explicit_clear_posting_file_answer() -> None:
-    """⭐⭐ ONE ANSWER DELETES EVERY ROW OF THE TRANSFER TABLE, so neither is defaulted.
+    """ONE ANSWER DELETES EVERY ROW OF THE TRANSFER TABLE, so neither is defaulted.
 
     `irs030`'s end-of-job question [irs/irs030.cbl:L1715-L1724] decides whether the
     transfer file is cleared, and answering yes performs an open-output which for this
@@ -2860,7 +2847,7 @@ def test_an_absent_contract_raises_the_frozen_no_source_code() -> None:
     an empty mapping rather than manipulated, so the test does not depend on the host's own
     variables and cannot leak one.
 
-    ⭐ THE MESSAGE NAMES THE SIX VARIABLES, because the operator's next action is to set
+    THE MESSAGE NAMES THE SIX VARIABLES, because the operator's next action is to set
     them; and it carries NO VALUE, because a value could be a password.
     """
     with _shipped("acas_posting.cli.args") as (cli_args,):
@@ -2920,7 +2907,7 @@ def test_a_present_contract_resolves_as_the_frozen_reader_would() -> None:
 
 
 def test_the_malformed_code_is_published_and_surfaced_by_the_boundary() -> None:
-    """⚠ 1 IS PART OF THE FROZEN SET, AND THE SIX-FIELD RESOLVER NEVER RAISES IT.
+    """1 IS PART OF THE FROZEN SET, AND THE SIX-FIELD RESOLVER NEVER RAISES IT.
 
     [common/acas-get-params.cbl:L37-L42] publishes four codes, of which
     `resolve_rdbms_params` can express one: 8, "no source". The malformed code, 1,
@@ -3001,7 +2988,7 @@ def test_a_configuration_failure_is_reported_as_its_own_status_and_runs_nothing(
 def test_the_irs_route_absorbs_the_facade_goback_as_a_normal_return() -> None:
     """`goback` [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L364] ends the MENU program.
 
-    ⭐ WHY THIS IS REPRODUCED RATHER THAN CAUGHT DEFENSIVELY (R-4). The IRS facade
+    WHY THIS IS REPRODUCED RATHER THAN CAUGHT DEFENSIVELY (R-4). The IRS facade
     convention wraps each handler call in a per-handler error check, and on an
     unrecoverable open failure that check RETURNS FROM THE PROGRAM outright. `irs/irs.cbl`
     copies that same copybook [irs/irs.cbl:L1035], so the `goback` is a disposition of the
@@ -3074,12 +3061,12 @@ def test_an_unexpected_failure_at_the_irs_boundary_is_not_absorbed() -> None:
 # ---------------------------------------------------------------------------
 #  6.  THE END-OF-CYCLE ROUTE - `load09`, AND ITS THREE PROMOTED ANSWERS
 #
-#      `general/general.cbl` dispatches `gl080` from `load09.`
-#      [general/general.cbl:L817-L820] through the same shared `load00.` block
-#      [general/general.cbl:L711-L722]. The route carries the three interactive
-#      answers Agent Action Plan section 0.3.4 promotes to parameters, and TWO OF THEM
-#      DECIDE WHETHER THE DATABASE IS WRITTEN AT ALL - which is why the route refuses
-#      to run until both have been stated.
+#  `general/general.cbl` dispatches `gl080` from `load09.`
+#  [general/general.cbl:L817-L820] through the same shared `load00.` block
+#  [general/general.cbl:L711-L722]. The route carries the three interactive
+#  answers Agent Action Plan section 0.3.4 promotes to parameters, and TWO OF THEM
+#  DECIDE WHETHER THE DATABASE IS WRITTEN AT ALL - which is why the route refuses
+#  to run until both have been stated.
 # ---------------------------------------------------------------------------
 
 
@@ -3217,7 +3204,7 @@ def test_a_serious_error_from_gl080_is_returned_and_persists_the_records() -> No
 def test_the_end_of_cycle_route_refuses_until_both_answers_are_stated(
     argv: list[str],
 ) -> None:
-    """⭐⭐ TWO ANSWERS DECIDE WHETHER POSTED TRANSACTIONS ARE DELETED.
+    """TWO ANSWERS DECIDE WHETHER POSTED TRANSACTIONS ARE DELETED.
 
     `--disk-change-option 0` proceeds, which deletes posted transactions, stamps every
     batch, rolls the ledger quarters over and increments the accounting cycle; 9 aborts
@@ -3226,7 +3213,7 @@ def test_the_end_of_cycle_route_refuses_until_both_answers_are_stated(
     omission of either is argparse's usage error - status 2, indistinguishable from an
     omitted `--run-date`.
 
-    ⛔ NOT A VALIDATION OF THE ANSWER (R-3). Both values are equally acceptable and
+    NOT A VALIDATION OF THE ANSWER (R-3). Both values are equally acceptable and
     neither is rejected; what is refused is SILENCE. Rejecting one of them would be a
     check the frozen program has not got, and defaulting either would answer a
     destructive question on the operator's behalf.
@@ -3299,7 +3286,7 @@ def test_the_end_of_cycle_refusal_names_what_each_answer_decides(
 #  duplicated: `len(__all__)` read 72 against 65 distinct.
 #
 #  The module asserts this at import too. This test exists because that assert is
-#  stripped under `python -O`, and because a test states the property where a reviewer
+#  stripped under `python -O`, and because a test states the property where a reader
 #  looks for properties.
 def test_cli_args_publishes_each_public_name_once() -> None:
     """`args.__all__` holds no repeated entry, and exports nothing it lacks."""
@@ -3386,7 +3373,7 @@ def test_the_clear_answer_is_required_at_both_layers() -> None:
         f"{parameter.default!r}. The frozen prompt has no default -- the [Y] at "
         "[irs/irs030.cbl:L1716] is prompt text, the accept carries no WITH UPDATE, and "
         "L1718-L1719 re-prompt on anything but Y or N -- so a default here invents one, "
-        "and answering Y deletes every row of PSIRSPOST-REC (MN-05, finding CLI-05)."
+        "and answering Y deletes every row of PSIRSPOST-REC (MN-05)."
     )
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, (
         "clear_posting_file must stay keyword-only so a caller cannot supply the "
@@ -3401,10 +3388,10 @@ def test_no_module_claims_the_clear_answer_defaults_on() -> None:
     code assertion above cannot catch it and did not.
     """
     root = Path(__file__).resolve().parents[2]
-    # Phrases that assert a live default. A sentence EXPLAINING that an earlier draft
-    # had one, or that the file brief specifies one the module declines, is the
-    # historical record and is not a claim about the seam - so those are exempted by
-    # requiring the phrase to appear without a disclaiming neighbour on the same line.
+    # Phrases that assert a live default. A sentence EXPLAINING that a default would be
+    # wrong here, or that the file brief specifies one the module declines, is not a claim
+    # about the seam - so those are exempted by requiring the phrase to appear without a
+    # disclaiming neighbour on the same line.
     claims = (
         "on by default",
         "does default to `True`",
@@ -3437,27 +3424,27 @@ def test_no_module_claims_the_clear_answer_defaults_on() -> None:
 
 
 # ---------------------------------------------------------------------------
-#  8.  SEC-01 - THE CONFIGURATION-FAILURE STATUS IS AN INTEGER ON BOTH ROUTES
+#  8.  THE CONFIGURATION-FAILURE STATUS IS AN INTEGER ON BOTH ROUTES
 #
-#  ⭐ THE DEFECT THIS SECTION CLOSES. `RdbmsParamError.__init__` takes
+#  THE DEFECT THIS SECTION CLOSES. `RdbmsParamError.__init__` takes
 #  `(return_code: int, message: str)`. Two raise sites inside `_optional_seconds`
 #  passed them the other way round, so for a malformed `ACAS_DB_CONNECT_TIMEOUT`,
 #  `ACAS_DB_READ_TIMEOUT` or `ACAS_DB_WRITE_TIMEOUT` the exception carried the
 #  FORMATTED MESSAGE in `return_code` and the integer code in `str(error)`. Nothing
 #  raised at the point of the mistake. What happened instead:
 #
-#    * `report_configuration_failure` returned `error.return_code` - the string -
-#      as the route's status. Run directly, `python -m acas_posting.cli.<route>`
-#      handed that string to `SystemExit`, which prints it verbatim, so the
-#      "status" became a sentence and the shell saw 1 (CWE-704).
-#    * Run through the router, `__main__` applied `args.is_serious_error(term_code)`
-#      - `term_code > 7` - to a `str` and raised `TypeError`, whose traceback
-#      discloses installation paths and internals (CWE-209).
-#    * Both messages interpolated the raw value with `{raw!r}`, and these three
-#      variables are read from the same transport as `ACAS_DB_PASSWORD`, so a value
-#      pasted into the wrong variable reached the log (CWE-532).
+#  * `report_configuration_failure` returned `error.return_code` - the string -
+#  as the route's status. Run directly, `python -m acas_posting.cli.<route>`
+#  handed that string to `SystemExit`, which prints it verbatim, so the
+#  "status" became a sentence and the shell saw 1 (CWE-704).
+#  * Run through the router, `__main__` applied `args.is_serious_error(term_code)`
+#  - `term_code > 7` - to a `str` and raised `TypeError`, whose traceback
+#  discloses installation paths and internals (CWE-209).
+#  * Both messages interpolated the raw value with `{raw!r}`, and these three
+#  variables are read from the same transport as `ACAS_DB_PASSWORD`, so a value
+#  pasted into the wrong variable reached the log (CWE-532).
 #
-#  ⛔ NO ACCOUNTING BEHAVIOUR IS IN SCOPE HERE. Every assertion below is about the
+#  NO ACCOUNTING BEHAVIOUR IS IN SCOPE HERE. Every assertion below is about the
 #  DEPLOYMENT boundary - the three driver deadlines and the transport flags have no
 #  frozen counterpart at all, and are read before any statement with a COBOL
 #  counterpart runs (rules R-3, R-6).
@@ -3505,7 +3492,7 @@ def test_every_rdbms_param_error_carries_an_integer_return_code() -> None:
             )
         provoked.append(flag.value)
 
-        #  3. a malformed driver deadline - code 1, and the SEC-01 site.
+        #  3. a malformed driver deadline - code 1, and the configuration-failure site.
         for variable in _TIMEOUT_VARIABLES:
             for value in _MALFORMED_TIMEOUTS:
                 with pytest.raises(cli_args.RdbmsParamError) as deadline:
@@ -3518,7 +3505,7 @@ def test_every_rdbms_param_error_carries_an_integer_return_code() -> None:
             assert type(error.return_code) is int, (
                 f"return_code is {type(error.return_code).__name__} carrying "
                 f"{error.return_code!r}. RdbmsParamError takes "
-                f"(return_code, message) in that order (SEC-01)."
+                f"(return_code, message) in that order."
             )
             assert error.return_code in {
                 cli_args.RDB_RETURN_NO_SOURCE,
@@ -3527,7 +3514,7 @@ def test_every_rdbms_param_error_carries_an_integer_return_code() -> None:
             assert str(error) and not str(error).isdigit(), (
                 f"str(error) is {str(error)!r}, which is the shape a reversed "
                 f"argument pair produces: the integer code where the message "
-                f"belongs (SEC-01)."
+                f"belongs."
             )
 
 
@@ -3610,7 +3597,7 @@ def test_the_configuration_boundary_cannot_return_a_non_integer_status() -> None
         assert type(status) is int, (
             f"the boundary returned {status!r}, a "
             f"{type(status).__name__}. A route returns this value as its process "
-            f"exit status and the router compares it with `> 7` (SEC-01)."
+            f"exit status and the router compares it with `> 7`."
         )
         assert status == args.boundary_exit_status(broken)
         #  And the router's own predicate accepts it, which is the comparison that
@@ -3639,8 +3626,8 @@ def test_a_malformed_deadline_reaches_a_route_as_an_integer_status() -> None:
     `python -m acas_posting.cli.gl_post_cycle` reaches it, and once through
     `run_entry_point`, which is the single boundary both that guard and the package
     router pass through. The two statuses must be equal and both must be integers -
-    the divergence SEC-01 produced was exactly here, one route printing a sentence
-    as its status while the other raised `TypeError` comparing it with 7.
+    the divergence to guard against is exactly here, one route printing a sentence as
+    its status while the other raises `TypeError` comparing it with 7.
 
     The three General Ledger program modules are doubles that record every dispatch,
     and the list must stay empty on both passes: the refusal happens while the

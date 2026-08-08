@@ -33,7 +33,7 @@
 # column, an index or a constraint. operations is a strictly ordered list and
 # its steps run one at a time, matching the single-threaded COBOL.
 #
-# KEYS APPEAR IN A FIXED ORDER, identically in all nine scenario files, and
+# KEYS APPEAR IN A FIXED ORDER, identically in all eight scenario files, and
 # the file is UTF-8, ASCII-only, LF-terminated, two-space indented and free of
 # tabs. It carries no wall-clock reading, no host identity, no process id, no
 # random value and no absolute host path, so two captures of one scenario are
@@ -60,7 +60,7 @@ description: |
   docs/migration/anomaly-log.md, where the whole chain is recorded link by
   link with each link measured on GnuCOBOL 3.2 against MariaDB 10.11.7. It is
   cited by identifier here rather than only derived, because a defect that is
-  merely derived in passing is a defect nobody can cite (finding MJ-08); the
+  merely derived in passing is a defect nobody can cite; the
   derivation is kept below because a reader of this scenario needs it to hand.
   The cause is frozen and is not this harness's to fix: the compiled bridge
   loads thirteen host variables but never loads HV-POST-RRN
@@ -94,15 +94,12 @@ description: |
   below asserts.
 
   THE PHASE LABELS, AND WHY THEIR NUMBERING IS NOT EXECUTION ORDER
-  The programs label their own phases on screen:
-    [general/gl070.cbl:L284]  Phase - 1.  Batch Check
-    [general/gl070.cbl:L292]  Phase - 2.  Transaction Pre-process
-    [general/gl072.cbl:L274]  Phase - 4.  Transaction Update
-  gl071 displays only a wait message [general/gl071.cbl:L170] and is
-  unnumbered. Phase three is transaction DELETION and lives in gl080, which
-  executes AFTER phase four and which no scenario in this harness drives. The
-  numbering is preserved as found and is not renumbered.
-
+  The programs label their own phases on screen -- phase one and phase two at
+  [general/gl070.cbl:L284] and [general/gl070.cbl:L292], phase four at
+  [general/gl072.cbl:L274] -- while gl071 shows only a wait message
+  [general/gl071.cbl:L170] and is unnumbered. Phase THREE is transaction
+  deletion, lives in gl080 and executes AFTER phase four. The numbering is
+  preserved as found and is not renumbered.
   THE PINNED CLOCK -- TWO OBSERVABLES, NEVER A HOST READING
   clock.to_day pins the text date as the menu's to-day pic x(10) holds it, in
   DD/MM/CCYY form, and clock.run_date pins the binary Run-Date
@@ -162,7 +159,7 @@ description: |
        itself at [harness/run_cobol_scenario.sh acas_resolve_pinned_values] before stripping
        spaces so that both spellings converge.
   The remaining four are INERT on this General Ledger route and are present
-  only so that all nine scenario files share one system block and so the
+  only so that all eight scenario files share one system block and so the
   seeded system record is fully determined:
     period -- the cycles-per-quarter divisor, used only by gl080
       [copybooks/wssystem.cob:L64].
@@ -188,7 +185,7 @@ description: |
       [general/gl070.cbl:L486]; GL-Posting-Close at [general/gl070.cbl:L466].
     gl071 issues NONE. It is a pure SORT.
     gl072 issues exactly eight: GL-Batch-Open [general/gl072.cbl:L276],
-      GL-Nominal-Open [general/gl072.cbl:L277], GL-Batch-Rewrite
+      GL-Nominal-Open [general/gl072.cbl:L274], GL-Batch-Rewrite
       [general/gl072.cbl:L377], GL-Nominal-Rewrite [general/gl072.cbl:L382],
       GL-Nominal-Read-Next [general/gl072.cbl:L408], GL-Batch-Close
       [general/gl072.cbl:L441], GL-Nominal-Close [general/gl072.cbl:L442] and
@@ -217,22 +214,19 @@ description: |
   SYSTEM-REC AND SYSDEFLT-REC ARE COMPARED, AND ARE LISTED HERE AS THIS
   SCENARIO'S DECLARED EFFECT. Both sides end this scenario with byte-identical
   rows -- all 169 SYSTEM-REC columns included -- because the exit rewrite of
-  those two writes back what it loaded. Leaving them out, as this list
-  previously did, meant that a real program-level mutation of the system record
-  could not be observed at all: the comparison is bounded by all 22 in-scope
+  those two writes back what it loaded. Leaving them out would mean a real
+  program-level mutation of the system record could not be observed at all:
+  the comparison is bounded by all 22 in-scope
   tables, and this list is the scenario's DECLARED EFFECT rather than the bound.
 
   TWO CELLS OF SYSTEM-REC ARE WITHHELD FROM THE CAPTURE, AND ONLY TWO.
-  `RDBMS-Passwd pic x(12)' [copybooks/wssystem.cob:L139] and the frozen
-  schema's shorter PASS-WORD column are the database's own password as seeded,
-  and a dump is SELECT *, so a capture of the row would carry a credential into
-  committed diff evidence. harness/dump_tables.py's REDACTED_COLUMNS replaces
-  exactly those two cells, on BOTH sides, with one fixed marker -- which is why
-  this file declares neither field. That is not an ignore-list: the row is still
-  dumped and still diffed, every other column byte for byte, and withholding a
-  secret symmetrically cannot conceal a difference in anything the cycle
-  computes. An ignore-list in the diff stage remains forbidden outright.
-
+  `RDBMS-Passwd' [copybooks/wssystem.cob:L139] and the frozen schema's shorter
+  PASS-WORD column are the seeded database password, and a dump is SELECT *, so
+  harness/dump_tables.py's REDACTED_COLUMNS replaces those two cells, on BOTH
+  sides, with one fixed marker -- which is why this file declares neither field.
+  The row is still dumped and still diffed, every other column byte for byte, so
+  this is not an ignore-list, and an ignore-list in the diff stage remains
+  forbidden outright.
   AND THE ROW IS FINGERPRINTED AS WELL, ON EVERY SCENARIO AND ON BOTH SIDES.
   acas_resolve_fingerprint_tables appends SYSTEM-REC to the fingerprint list
   when a scenario has not declared it, so the pre/post digest pair exists
@@ -527,37 +521,24 @@ description: |
     rather than assume success.
 
   THE GENERAL LEDGER CAVEAT -- WHY EXPECTED VALUES COME ONLY FROM THE ORACLE
-  The maintainer records that he has not worked with General at all since it
-  was migrated to the current compiler [README.TXT:L50-L53], while the same
-  passage reports the other ledgers as tested. The General Ledger also
-  contributes the majority of the in-scope programs. It follows that no
-  expected value for this scenario may be derived from documentation or from
-  reasoning about intended behaviour: if the compiled cycle behaves
-  surprisingly, THE SURPRISE IS THE SPECIFICATION (rule R-6), and the
-  arbitration is recorded in docs/migration/ambiguity-resolutions.md.
-
+  The maintainer reports the other ledgers as tested but records no work on
+  General since it was migrated to the current compiler [README.TXT:L50-L53],
+  and General contributes most of the in-scope programs.
+  So no expected value for this scenario is derived from documentation or from
+  reasoning about intent: if the compiled cycle behaves surprisingly, THE
+  SURPRISE IS THE SPECIFICATION (rule R-6), and the arbitration is recorded in
+  docs/migration/ambiguity-resolutions.md.
   THE ACCEPTANCE PROTOCOL
-  TEN stages, in this order, one scenario at a time and nothing
-  alongside it. harness/normalize.py is the single registry and
-  `harness/normalize.py --print-stages' prints it, so this list is a restatement
-  and never the authority:
-    1 reset the schema and seed the scenario
-    2 run the compiled COBOL cycle
-    3 dump the COBOL state
-    4 normalise the COBOL dump
-    5 reset the schema and RE-SEED THE SAME SCENARIO -- the same fixture bytes, so
-      the Python cycle starts from the state the COBOL cycle started from and not
-      the state it left
-    6 run the migrated Python cycle
-    7 dump the Python state
-    8 normalise the Python dump
-    9 verify both captures are published -- BEFORE a single row is compared,
-      because two PARTIAL captures can produce an empty diff and so pass a
-      comparison that compared nothing
-    10 diff the two normalised trees
-  harness/build_oracle.sh and harness/seed.sh --build-fixtures come before stage 1 and are
-  not stages: the first runs once per image, the second once per change to a
-  scenario's seed records.
+  TEN stages, one scenario at a time and nothing alongside it.
+  `harness/normalize.py --print-stages' is the registry and the authority. The
+  two stages a reader would not guess are stage 5, which re-seeds THE SAME
+  FIXTURE BYTES so the Python cycle starts from the state the COBOL cycle
+  started from rather than the state it left, and stage 9, which verifies both
+  captures are published BEFORE a single row is compared, because two PARTIAL
+  captures produce an empty diff and so pass a comparison that compared nothing.
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures precede stage 1
+  and are not stages: the first runs once per image, the second once per change
+  to a scenario's seed records.
   The canonical command sequence is spelled out at
   [harness/docker-compose.yml "STAGES."]. AN EMPTY NORMALISED DIFF IS THE ONLY
   PASS CONDITION; a stage that exits non-zero has produced no evidence rather
@@ -566,14 +547,13 @@ description: |
   outcome is recorded in docs/migration/scenario-diff-evidence.md.
   Two runs of this scenario under the same pinned clock must additionally
   produce byte-identical dumps; that is what the determinism suite asserts.
-  This file's consumers are all present in the checkout:
-  the four documents under docs/migration/, the eight modules under
-  tests/scenarios/ (one per scenario), and harness/run_python_scenario.sh.
-  The seed FLAT FILES are deliberately not in the
-  checkout: the records are declared above under seed_records and
-  harness/seed.sh --build-fixtures builds the files from them inside the image, because
-  fifteen of the seventeen frozen loaders read ORGANIZATION INDEXED or RELATIVE
-  files whose on-disk form belongs to the Berkeley DB version that image carries.
+  This file's consumers are all in the checkout: the four documents under
+  docs/migration/, the eight modules under tests/scenarios/ and
+  harness/run_python_scenario.sh. Its seed FLAT FILES are not: the records are
+  declared above under seed_records and harness/seed.sh --build-fixtures builds
+  the files inside the image, because fifteen of the seventeen frozen loaders
+  read ORGANIZATION INDEXED or RELATIVE files whose on-disk form belongs to the
+  Berkeley DB version that image carries.
 
   THE CONSUMER CONTRACT -- WHY SOME VALUES APPEAR UNDER TWO KEYS
   This file serves consumers with two different reading strategies, so a few
@@ -615,25 +595,11 @@ description: |
   map is empty.
 
   LOCATOR PROVENANCE
-  Every line number cited above was read directly out of the frozen source in
-  this checkout rather than copied from a plan, and several planning citations
-  were found to be off by one or misattributed. The ones corrected here are
-  worth knowing when cross-reading: the phase-one and phase-two labels are at
-  [general/gl070.cbl:L284] and [general/gl070.cbl:L292]; the terminate-code
-  raise is at [general/gl070.cbl:L289] and not the line above it; the two cycle
-  filters are at [general/gl070.cbl:L312-L313] and
-  [general/gl070.cbl:L457-L458] with the extra status conditions at
-  [general/gl070.cbl:L460-L463]; the qualified references are at
-  [general/gl070.cbl:L497], [general/gl070.cbl:L521] and
-  [general/gl070.cbl:L525]; the sort spans [general/gl071.cbl:L172-L178] with
-  its first key at [general/gl071.cbl:L173]; the phase-four label is at
-  [general/gl072.cbl:L274]; the two silent skips are at
-  [general/gl072.cbl:L291-L292] and [general/gl072.cbl:L306-L307]; and the
-  sequential nominal read is a single statement at [general/gl072.cbl:L408].
-  THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common,
-  copybooks, general, sales, purchase, irs, stock or mysql is a defect in the
-  migration however harmless it looks.
-
+  Every line number cited above was read out of the frozen source in this
+  checkout; docs/migration/traceability.md carries the corrected-locator record.
+  THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common, copybooks,
+  general, sales, purchase, irs, stock or mysql is a defect in the migration
+  however harmless it looks.
 subsystem: general
 
 # Read by [harness/run_cobol_scenario.sh acas_resolve_operations] as the default for its
@@ -646,7 +612,7 @@ clock:
   run_date: 155127
 
 # Flat mirrors of the clock block, required by
-# [harness/run_cobol_scenario.sh acas_resolve_pinned_values] and [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
+# [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
 run_date_text: "21/09/2025"
 run_date_binary: 155127
 
@@ -662,7 +628,7 @@ system:
   p_flag_p: 2
 
 # Flat mirrors of the two system values the COBOL runner reads directly:
-# [harness/run_cobol_scenario.sh acas_resolve_pinned_values] and [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
+# [harness/run_cobol_scenario.sh acas_resolve_pinned_values].
 date_form: 1
 irs_instead: " "
 
@@ -896,7 +862,7 @@ seed_records:
   # Four nominal-ledger accounts: the debit and credit sides of the batch's single
   # double entry, the VAT control account the third leg posts to, and one untouched
   # account so the diff has a row that must NOT move. gl072 finds each of these by
-  # a SEQUENTIAL read [general/gl072.cbl:L410-L412], so the order they are written
+  # a SEQUENTIAL read [general/gl072.cbl:L408], so the order they are written
   # in is load-bearing and they are declared in ascending key order.
   ledger.dat:
     - WS-Ledger-Nos: "1000"

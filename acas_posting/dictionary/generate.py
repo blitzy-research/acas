@@ -235,9 +235,26 @@ _RULE_PRESENCE_AND_ONE_SIDED: Final[str] = (
     "visible in notes even though declared_lengths carries each distinct length once, in "
     "first-stated order, as the schema requires; then the other 01-level records it declares, "
     "any in-scope copybook whose items are identical to its own, any bridge that COPYs it "
-    "with the line that does so, and every spelling of a SIGN clause it uses. On an entry: "
-    "the reason it reaches no column, the drift details, the load and unload facts, and the "
-    "maintainer's own words where the source carries a comment about that field."
+    "with the line that does so, and every spelling of a SIGN clause it uses. On an entry, "
+    "only facts no structured member already carries: the drift details, the load and unload "
+    "facts, and the maintainer's own words where the source carries a comment about that "
+    "field. THE COPYBOOK-ONLY TAXONOMY IS PUBLISHED STRUCTURALLY RATHER THAN IN PROSE, and "
+    "this is the rule for reading it. A field with in_copybook true and in_bridge and "
+    "in_column false reaches no column, and which of the four kinds it is follows from its "
+    "own members: is_filler true means a FILLER, which names no value; redefines non-null "
+    "means a REDEFINES alternative view of storage another item already declares, and so "
+    "does a null redefines whose parent_group chain reaches an ancestor with one, which is "
+    "the commoner case because a subordinate of a redefining group carries no clause of its "
+    "own; is_group true means a group item whose subordinate items carry the values; and none "
+    "of those means a plain field the bridge does not carry. No such field is dropped - it is "
+    "recorded and flagged - and no entry restates in prose what those members already say. "
+    "THE MIRROR CASE READS THE SAME WAY. in_copybook false with in_bridge and in_column "
+    "true means NO COPYBOOK DECLARES THE COLUMN: it exists in the bridge host-variable "
+    "group and in the frozen dump alone, its derivation.kind is BRIDGE_DERIVED, and it is "
+    "in this dictionary because the bridge - not the copybook - is the authoritative "
+    "record-layout to table mapping, which meta.authority states verbatim. Fourteen "
+    "columns read that way, three of them the date components of IRSPOSTING-REC that no "
+    "copybook mentions at all."
 )
 
 _RULE_DRIFT_DETECTION: Final[str] = (
@@ -252,7 +269,17 @@ _RULE_DRIFT_DETECTION: Final[str] = (
     "its. name compares the copybook data-name, the host-variable name with its HV or HV1 "
     "prefix removed, and the column name, case-insensitively. Each set flag adds one sentence "
     "to details naming the views and what each says. A flag is a record of disagreement and "
-    "never a resolution of it: no view is corrected, preferred or collapsed (R-4)."
+    "never a resolution of it: no view is corrected, preferred or collapsed (R-4). WHAT A "
+    "SIGNEDNESS NARROWING ACTUALLY STORES was measured rather than reasoned about, and is "
+    "recorded here once for every entry it applies to. Where the copybook is signed and the "
+    "host variable is not, GnuCOBOL 3.2.0 stores the ABSOLUTE VALUE and then truncates it to "
+    "the host variable's digit count rather than wrapping it: a signed source of -1 stores 1, "
+    "-1000 stores 1000, -2147483648 stores 2147483648, and -123456 into a four-digit unsigned "
+    "host variable stores 3456, which is what +123456 stores too. The sign is discarded and "
+    "the magnitude survives, so the debit-versus-credit sense of the statistic is gone. That "
+    "is question Q-3, resolved by measurement, and anomaly A-11, reproduced rather than "
+    "corrected - which is why each affected entry carries A-11 in anomaly_refs and a note "
+    "citing the measurement, and none of them carries Q-3 as though it were still open."
 )
 
 _RULE_DIGITS_AND_SCALE: Final[str] = (
@@ -288,7 +315,10 @@ _RULE_USAGE_INHERITANCE: Final[str] = (
     "it at L41-L44 carry no usage on their own picture lines, and copybooks/wssys4.cob:L9 and "
     "L20 do the same for twenty period totals. Reading usage from the picture line alone "
     "would class all of them as DISPLAY and every stored value would be wrong. A PIC X item "
-    "is recorded as ALPHANUMERIC and an item with subordinates and no picture as GROUP."
+    "is recorded as ALPHANUMERIC and an item with subordinates and no picture as GROUP. The "
+    "inheritance is published through those four members alone and is never restated as prose "
+    "on the inheriting entry: the members carry the declaring group's own line, which prose "
+    "repeated per entry would only paraphrase."
 )
 
 _RULE_BRIDGE_DERIVED_COLUMNS: Final[str] = (
@@ -340,7 +370,7 @@ _RULE_PROGRAM_SOURCE_ENTRIES: Final[str] = (
     "data declaration has one shape wherever it is written, so digits, scale, signedness, "
     "sign position and storage class are derived for these fields exactly as they are for "
     "every other field and none of them is hand-bound (R-5). Their bridge and column views "
-    "are recorded as ABSENT rather than searched for: copybooks/wsnames.cob:L14-L17 names "
+    "are recorded as ABSENT rather than searched for: copybooks/wsnames.cob:L15-L16 names "
     "pretrans.tmp and postrans.tmp as transient work files, no bridge COPYs these records "
     "and the frozen dump declares no table for them, so presence.in_program_source is true "
     "with in_copybook, in_bridge and in_column all false, one_sided is true by construction, "
@@ -393,11 +423,19 @@ _BINDING_RULE_SUMMARIES: Final[tuple[str, ...]] = (
     ),
     (
         "Compiled behaviour is the tie-breaker. Where reading the source cannot settle a "
-        "question the entry carries an ambiguity_refs identifier and says in notes what is "
-        "unresolved, instead of guessing an answer. Two such questions land directly here: "
+        "question the entry carries an ambiguity_refs identifier rather than a guessed answer, "
+        "and once measurement settles the question the identifier is withdrawn and the measured "
+        "fact is published in its place - because publishing a settled question as an open one "
+        "misreports it just as badly as guessing. Two identifiers are published: Q-4, on the "
+        "entries of the record whose two declared lengths contradict each other, and Q-6, on "
+        "the one column whose bridge source records the maintainer's own doubt. Both were put "
+        "to the compiled program and both are now RESOLVED BY ORACLE, so each entry carries the "
+        "identifier as the trail to the measurement rather than as an open item. A third, Q-3 - "
         "what a negative binary value becomes once it has passed through an unsigned host "
-        "variable into an unsigned column, and which of a record's two contradictory declared "
-        "lengths governs the record that is actually read."
+        "variable into an unsigned column - was published here until it was measured; it is "
+        "withdrawn, and the measured store now lives once in derivation_rules.drift_detection "
+        "with a note on each affected entry citing it. Anomaly A-11 stays regardless: measuring "
+        "the sign loss did not repair it (R-4)."
     ),
 )
 
@@ -2055,44 +2093,28 @@ def _derivation_of(root: Path, table: str, copybook: model.CopybookField | None,
 
 # STAGE 4b - notes, anomaly references and ambiguity references Notes are composed
 # mechanically from the facts already gathered and never editorially.
+#
+# EMISSION POLICY. A note is emitted only where it carries a fact that NO structured
+# member of the entry already carries. Every general derivation rule lives once in
+# meta.derivation_rules, never once per entry: presence and the copybook-only taxonomy
+# in presence_and_one_sided, the measured effect of signedness narrowing in
+# drift_detection, group-declared storage in usage_inheritance, and the inline
+# work-file records in program_source_entries. So there is no note restating that a
+# field reaches no column (presence and one_sided say it), that it is a FILLER, a
+# REDEFINES view or a group (is_filler, redefines - directly or through a redefining
+# ancestor reachable by parent_group - and is_group say it), that its storage class was
+# inherited (usage_declared_at, usage_inherited_from and usage_group_source say it, with
+# a source locator the prose did not carry), or which condition names it declares
+# (condition_names says it, with a locator per name).
 
 _WARNING_RE: Final[re.Pattern[str]] = re.compile(r"(?i)\bwarning\b")
 
-_NOTE_COPYONLY_FILLER: Final[str] = (
-    "Copybook-only field: a FILLER, which names no value and reaches no column. "
-    "Recorded and flagged rather than dropped."
-)
-_NOTE_COPYONLY_REDEFINES: Final[str] = (
-    "Copybook-only field: a REDEFINES alternative view of storage another item already "
-    "declares. Recorded and flagged rather than dropped."
-)
-_NOTE_COPYONLY_GROUP: Final[str] = (
-    "Copybook-only field: a group item whose subordinate items carry the values. "
-    "Recorded and flagged rather than dropped."
-)
-_NOTE_COPYONLY_PLAIN: Final[str] = (
-    "Copybook-only field: declared in the copybook but carried by no bridge host "
-    "variable and stored in no column. Recorded and flagged rather than dropped."
-)
-_NOTE_NO_COPYBOOK: Final[str] = (
-    "No copybook declares this column: it exists in the bridge host-variable group and "
-    "in the frozen schema only. This is why the bridge, not the copybook, is the "
-    "authoritative record-layout to table mapping for this migration."
-)
 _NOTE_SIGN_LOST: Final[str] = (
-    "Signed in the copybook and unsigned in the bridge host variable, so a negative "
-    "value loses its sign at the bridge, before any SQL runs, and not at the database. "
-    "MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved): the ABSOLUTE VALUE is "
-    "stored, and it is then truncated to the host variable's digit count rather than "
-    "wrapped - a signed source of -1 stores 1, -1000 stores 1000, -2147483648 stores "
-    "2147483648, and -123456 into a four-digit unsigned host variable stores 3456, "
-    "which is what +123456 stores too. So the sign is discarded and the magnitude "
-    "survives; the debit-versus-credit sense of the statistic is gone, which is "
-    "anomaly A-11 and is reproduced rather than corrected."
-)
-_NOTE_SIGN_REVERSED: Final[str] = (
-    "The views disagree on signedness; each is recorded exactly as it is declared and "
-    "none is preferred or corrected."
+    "Signed in the copybook and unsigned in the bridge host variable, so this field "
+    "loses the sign of a negative value at the bridge, before any SQL runs, and not at "
+    "the database. MEASURED against GnuCOBOL 3.2.0 (question Q-3, resolved); "
+    "meta.derivation_rules.drift_detection carries the measured store. That is anomaly "
+    "A-11, reproduced rather than corrected."
 )
 _NOTE_NOT_UNLOADED: Final[str] = (
     "%s is never moved back into the record after a read, so a value read from the "
@@ -2106,16 +2128,11 @@ _NOTE_NOT_INITIALISED: Final[str] = (
     "%s issues no INITIALIZE of %s before loading it, unlike the bridges that use a "
     "dedicated bb000-HV-Load section."
 )
-_NOTE_USAGE_INHERITED: Final[str] = (
-    "The item carries no USAGE clause of its own; it inherits %s from the group %s "
-    "declared at %s. Reading usage from the picture line alone would class it as DISPLAY."
-)
 _NOTE_DDL_COMMENT: Final[str] = 'The column carries the DDL comment "%s".'
 _NOTE_COLUMN_DEFAULT: Final[str] = (
     "The column declares DEFAULT %s - the only column-level default in the in-scope part "
     "of the frozen dump."
 )
-_NOTE_CONDITION_NAMES: Final[str] = "Condition names declared on this item: %s."
 _NOTE_VARIANT: Final[str] = (
     "%s declares an identical item at the same line; the two copybooks are variants of "
     "one layout and this entry cites %s, the first in path order."
@@ -2139,15 +2156,6 @@ _NOTE_GUARD_COMMENT: Final[str] = (
 _NOTE_FRAGMENT: Final[str] = (
     "%s is a single-declaration COPY fragment that %s textually includes into its %s record."
 )
-_NOTE_PROGRAM_SOURCE: Final[str] = (
-    "Program-source field: declared inline in %s, in the program's own FILE SECTION "
-    "under an %s entry rather than in any copybook. The record is a transient General "
-    "Ledger work file, so no bridge host variable carries this field and no column "
-    "stores it - the absence is "
-    "recorded rather than searched for. It is catalogued anyway because %s locates a "
-    "nominal-ledger account by sequential read and therefore depends on the widths and the "
-    "order these records fix."
-)
 _NOTE_PROGRAM_SOURCE_REPEAT: Final[str] = (
     "%s declares a record named %s at %s as well. The two are separate physical "
     "declarations rather than two spellings of one, so both are recorded and this entry's "
@@ -2161,9 +2169,9 @@ _NOTE_PROGRAM_SOURCE_GROUP: Final[str] = (
 
 #: Notes are emitted in this fixed order so the document is byte-reproducible (R-6).
 _NOTE_ORDER: Final[tuple[str, ...]] = (
-    "PROGRAM_SOURCE", "COPYONLY", "NO_COPYBOOK", "SIGN_LOST", "SIGN_REVERSED",
+    "PROGRAM_SOURCE", "SIGN_LOST",
     "NOT_LOADED", "NOT_UNLOADED", "NOT_INITIALISED", "DDL_COMMENT", "COLUMN_DEFAULT",
-    "GUARD_COMMENT", "SCB_DOUBT", "OCCURS", "CONDITION_NAMES", "USAGE_INHERITED",
+    "GUARD_COMMENT", "SCB_DOUBT", "OCCURS",
     "SIGN_CLAUSE", "VARIANT", "FRAGMENT",
 )
 
@@ -2330,9 +2338,10 @@ def _notes_and_refs(root: Path, draft: _EntryDraft,
     if draft.program_source is not None:
         source = draft.program_source
         record = item.record
-        section = _program_source_span(source.file, record)[0]
-        add("PROGRAM_SOURCE", _NOTE_PROGRAM_SOURCE % (source.file, section,
-                                                      _SEQUENTIAL_READ_LOCATOR))
+        # No note that the field is program-source: presence.in_program_source and
+        # program_source.file say it, sources.program_sources carries the record's FD or
+        # SD introducer and its record-level notes, and
+        # meta.derivation_rules.program_source_entries states the rule once.
         siblings = _program_source_siblings(source.file, record)
         for other in siblings:
             add("PROGRAM_SOURCE", _NOTE_PROGRAM_SOURCE_REPEAT % (
@@ -2344,24 +2353,16 @@ def _notes_and_refs(root: Path, draft: _EntryDraft,
                     add("PROGRAM_SOURCE", _NOTE_PROGRAM_SOURCE_GROUP % other)
         if record in _ORDERING_CRITICAL_RECORDS:
             anomalies.append("A-14")
-    elif column is None:
-        if copybook.is_filler:
-            add("COPYONLY", _NOTE_COPYONLY_FILLER)
-        elif (copybook.redefines is not None
-                or _redefines_lineage(root, copybook.file, item)):
-            add("COPYONLY", _NOTE_COPYONLY_REDEFINES)
-        elif copybook.is_group:
-            add("COPYONLY", _NOTE_COPYONLY_GROUP)
-        else:
-            add("COPYONLY", _NOTE_COPYONLY_PLAIN)
-    else:
+    elif column is not None:
         view = host.view
-        if copybook is None:
-            add("NO_COPYBOOK", _NOTE_NO_COPYBOOK)
+        # No note where no copybook declares the column: presence.in_copybook false with
+        # in_bridge and in_column true says exactly that, derivation.kind is
+        # BRIDGE_DERIVED, and meta.authority states once why the bridge is the
+        # authoritative mapping. See derivation_rules.presence_and_one_sided.
         if draft.drift.signedness and copybook is not None:
             if copybook.signed and not view.signed:
                 # Q-3 IS NO LONGER OPEN and is therefore no longer recorded as an
-                # ambiguity (finding F-19). The compiled oracle was asked directly
+                # ambiguity. The compiled oracle was asked directly
                 # what a negative value becomes in an unsigned host variable, and it
                 # answered: the absolute value, truncated to the receiving digit
                 # count. The note above carries the measurement.
@@ -2379,8 +2380,9 @@ def _notes_and_refs(root: Path, draft: _EntryDraft,
                 # the measurement the answer, so continuing to publish Q-3 on these
                 # entries would misreport a settled question as an open one.
                 anomalies.append("A-11")
-            else:
-                add("SIGN_REVERSED", _NOTE_SIGN_REVERSED)
+            # The other direction - unsigned in the copybook, signed at the bridge -
+            # gets no note: drift.signedness and drift.details already name every view
+            # and what each says, and neither is preferred or corrected (R-4).
         if not view.loaded_from_record:
             add("NOT_LOADED", _NOTE_NOT_LOADED % (view.name, view.hv_group_name,
                                                   view.source, draft.bridge))
@@ -2414,12 +2416,10 @@ def _notes_and_refs(root: Path, draft: _EntryDraft,
             anomalies.append("A-7")
 
     if copybook is not None:
-        if copybook.condition_names:
-            add("CONDITION_NAMES", _NOTE_CONDITION_NAMES % ", ".join(
-                "%s = %s" % (name.name, name.value) for name in copybook.condition_names))
-        if copybook.usage_declared_at is model.UsageDeclaredAt.GROUP:
-            add("USAGE_INHERITED", _NOTE_USAGE_INHERITED % (
-                copybook.usage, copybook.usage_inherited_from, copybook.usage_group_source))
+        # No note for condition names or for group-declared storage: condition_names
+        # carries every 88-level with its own locator, and usage, usage_declared_at,
+        # usage_inherited_from and usage_group_source carry the inheritance with the
+        # declaring group's line. Prose would restate both with less information.
         if copybook.sign_clause_text is not None:
             add("SIGN_CLAUSE", _NOTE_SIGN_CLAUSE % copybook.sign_clause_text)
         if column is None:
@@ -2473,7 +2473,7 @@ _PSNOTE_INTRODUCER: Final[str] = (
 _PSNOTE_TRANSIENT: Final[str] = (
     "Transient scratch storage: no bridge COPYs this record and the frozen dump declares no "
     "table for it, so every field of it is recorded with its bridge and column views absent "
-    "rather than searched for. copybooks/wsnames.cob:L14-L17 names the two General Ledger "
+    "rather than searched for. copybooks/wsnames.cob:L15-L16 names the two General Ledger "
     "work files pretrans.tmp and postrans.tmp and annotates both as belonging to gl071."
 )
 _PSNOTE_ALSO_DECLARED: Final[str] = (
@@ -2734,7 +2734,7 @@ def _build_entries(root: Path, schema: _SchemaFacts,
 
     # Pass 2: ONE ENTRY PER PHYSICAL DECLARATION the columns did not consume.
     #
-    # ⭐ EVERY physical declaration, not one per signature (finding M-18). `_signature`
+    # EVERY physical declaration, not one per signature. `_signature`
     # deliberately omits the file, so two variant copybooks that declare the same item at
     # the same line share one signature - copybooks/plwsoi5B.cob and
     # copybooks/plwsoi5C.cob are byte-identical apart from 5C's active
@@ -2750,9 +2750,9 @@ def _build_entries(root: Path, schema: _SchemaFacts,
     # closure order - keeps the plain `<record>.<name>' key and takes part in the existing
     # `#<line>' collision rule unchanged; every further copy is qualified with `@<file
     # stem>', which cannot collide with any plain key because no record or field name
-    # contains `@'. So the 1061 keys that existed before this change are byte-identical
-    # after it, the record modules' citations keep resolving, and exactly the six missing
-    # declarations are added.
+    # contains `@'. So the 1061 unqualified keys are byte-identical to what the plain
+    # rule alone produces, the record modules' citations keep resolving, and exactly the
+    # six otherwise-missing declarations are added.
     groups: dict[tuple[object, ...], list[_CopybookItem]] = {}
     for rel in order:
         for item in fields[rel]:
@@ -2849,12 +2849,13 @@ def _assert_declaration_closure(
 ) -> None:
     """Refuse to emit a dictionary that omits any physical copybook declaration (R-5).
 
-    ⭐ THE POPULATION IS THE MULTISET OF DECLARATIONS IN THE FROZEN FILES, not a total.
-    Finding M-18 was invisible to a total: 1001 declarations existed and 1001 entries
-    carried a copybook view, yet `copybooks/plwsoi5C.cob` had ONE entry for its seven
-    declarations while `copybooks/irswsnl.cob` had twenty entries for its fourteen -
-    six OCCURS-expanded views making up the exact shortfall. So this compares the two
-    SETS, file by file and line by line, and names what is missing.
+    THE POPULATION IS THE MULTISET OF DECLARATIONS IN THE FROZEN FILES, not a total.
+    A total cannot see a shortfall in one file that a surplus in another conceals:
+    `copybooks/plwsoi5C.cob` has seven declarations and `copybooks/irswsnl.cob`
+    fourteen, but six OCCURS-expanded views inflate the latter's entry count by
+    exactly the amount the former's is short, so both counts agree while the mapping
+    is wrong. This therefore compares the two SETS, file by file and line by line,
+    and names what is missing.
 
     Args:
         order: The copybook closure, in the order it was parsed.
@@ -3108,7 +3109,7 @@ def _coverage(entries: tuple[model.DictionaryEntry, ...]) -> model.Coverage:
         copybook_fields_covered=sum(1 for entry in entries if entry.copybook is not None),
         #  DISTINCT PHYSICAL DECLARATIONS, keyed by locator and name, so an OCCURS item
         #  bound by several columns counts ONCE however many entries cite it. Rule R-5's
-        #  closure is about this number; the tally above is about entries (finding M-18).
+        #  closure is about this number; the tally above is about entries.
         copybook_declarations_covered=len({
             (str(entry.copybook.source), str(entry.copybook.name))
             for entry in entries if entry.copybook is not None

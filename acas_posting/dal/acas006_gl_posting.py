@@ -959,7 +959,7 @@ def _split_post_key(hv_post_key: Decimal) -> tuple[int, int]:
     numerically on the way, which is what makes this the mirror of
     :func:`_join_post_key` rather than its inverse.
 
-    ⭐ MEASURED, AND IT IS NEITHER OF THE TWO READINGS THE MIGRATION CONSIDERED. The
+    MEASURED, AND IT IS NEITHER OF THE TWO READINGS THE MIGRATION CONSIDERED. The
     open question was whether the group takes the FIRST ten decimal digits of the host
     variable or the LAST ten. It takes neither: it takes eight BYTES. A probe declared
     both operands exactly as the frozen sources declare them, set the host variable to
@@ -2105,7 +2105,7 @@ def mt_ca_process_logs(
     same fields is emitted instead, by the ONE adapter every handler and bridge in
     this layer shares - :func:`acas_posting.dal.status.log_file_handler_record`.
 
-    ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L20] IS ADVANCED, and
+    ``Log-File-Rec-Written`` [copybooks/Test-Data-Flags.cob:L18] IS ADVANCED, and
     leaving it alone was a defect rather than a decision: ``fhlogger`` owns the
     counter but the counter itself lives in ``ACAS-DAL-Common-data``, which this
     function is handed and which the caller keeps, so an untouched field made the

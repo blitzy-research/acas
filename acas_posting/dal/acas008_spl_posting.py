@@ -324,7 +324,7 @@ def cobol_group_image(key: WsIrsPostKey) -> str:
 
 
 def group_move_to_binary(image: str, size: int = _KEY_HOST_VARIABLE_BYTES) -> int:
-    """``move <group> to <binary>`` - a RAW BYTE REINTERPRETATION, measurement M-1.
+    """``move <group> to <binary>`` - a RAW BYTE REINTERPRETATION, MEASURED.
 
     Reproduces ``move WS-IRS-Post-Key to HV-IRS-POST-KEY``
     [common/slpostingMT.cbl:L1001]. The sending operand is a GROUP item, so COBOL treats
@@ -353,7 +353,7 @@ def binary_move_to_group(
     size: int = _KEY_HOST_VARIABLE_BYTES,
     group_length: int = _KEY_GROUP_LENGTH,
 ) -> str:
-    """``move <binary> to <group>`` - the reverse raw byte move, measurement M-4.
+    """``move <binary> to <group>`` - the reverse raw byte move, MEASURED.
 
     Reproduces ``move HV-IRS-POST-KEY to WS-IRS-Post-Key``
     [common/slpostingMT.cbl:L1029]. The RECEIVING operand is the group this time, so the
@@ -384,7 +384,7 @@ def binary_move_to_group(
 def numeric_display_value(image: str) -> int:
     """The value of a zoned-decimal ``pic 9(n)`` item, whatever bytes it holds.
 
-    Measurement M-4. After the group move above, ``WS-IRS-Batch`` and ``WS-IRS-Post-
+    MEASURED. After the group move above, ``WS-IRS-Batch`` and ``WS-IRS-Post-
     Number`` contain arbitrary bytes rather than ASCII digits, yet the compiled program
     still yields a DEFINED value for them: the low nibble of each byte, folded left to
     right.
@@ -402,7 +402,7 @@ def numeric_display_value(image: str) -> int:
 
 
 def ws_mysql_edit(value: Decimal | int) -> str:
-    """Render a host variable through ``WS-MYSQL-EDIT``, measurement M-2.
+    """Render a host variable through ``WS-MYSQL-EDIT``, MEASURED.
 
     Reproduces ``move <host variable> to WS-MYSQL-EDIT``, which the generated
     ``bb200-Insert`` performs before every numeric column
@@ -485,7 +485,7 @@ def function_trim(text: str) -> str:
 
     Returns:
         The trimmed value - the empty string when the input is all spaces, per
-            measurement M-3.
+            MEASURED.
     """
     return text.strip(" ")
 
@@ -517,7 +517,7 @@ class Renderer(enum.Enum):
     TRIM_TRAILING = "TRIM(hv,TRAILING)"
     EDIT_11_10 = "TRIM(WS-MYSQL-EDIT(11:10))"
     #: money columns. Assembles the decimal point by hand and never reads position 1, so
-    #: THE SIGN IS LOST, measurement M-2.
+    #: THE SIGN IS LOST, MEASURED.
     EDIT_14_07_DOT_22_02 = 'TRIM(WS-MYSQL-EDIT(14:07)) "." WS-MYSQL-EDIT(22:02)'
     EDIT_18_03 = "TRIM(WS-MYSQL-EDIT(18:03))"
 
@@ -1527,7 +1527,7 @@ def ca_process_logs(
         # Every call site tests `Testing-1` first, so this cannot normally be false.
         return
     log = file_access.logging_data
-    #  THE ONE ADAPTER, and two fields fewer than this record used to carry:
+    #  THE ONE ADAPTER, carrying two of the frozen record's fields:
     #  `WS-File-Key` is the IRS posting key and `WS-Log-Where` is the `WHERE` clause
     #  built around it. `sanitise_for_log` escaped and bounded both and removed
     #  nothing (CWE-532).
@@ -1546,7 +1546,7 @@ def ca_process_logs(
         sql_state=log.sql_state,
         dal_common=dal_common,
     )
-    #  `Log-File-Rec-Written` [copybooks/Test-Data-Flags.cob:L20] IS NOW ADVANCED BY
+    #  `Log-File-Rec-Written` [copybooks/Test-Data-Flags.cob:L18] IS NOW ADVANCED BY
     #  THE ADAPTER ABOVE, not assigned 1 here. Assigning 1 was wrong twice over: the
     #  field is a COUNT of records written, so a second record must leave 2, and the
     #  field is `pic 9(6)`, so the count wraps at a million rather than pinning. The

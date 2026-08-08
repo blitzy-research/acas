@@ -3,28 +3,20 @@
 PROVENANCE. `common/ACAS.cbl`, 772 lines, `program-id. ACAS.`
 [common/ACAS.cbl:L80] - the system-selection menu, the outermost program of the
 frozen system. Agent Action Plan section 0.4.1.1 states this module's whole
-mandate in one line:
-
-    acas_posting/__main__.py | CREATE | common/ACAS.cbl | Top-level router
-    mirroring the system-selection menu, MINUS ALL SCREEN I/O
-
-`pyproject.toml` declares no `[project.scripts]`, so `python -m acas_posting` is
-the single documented way into the package and this module is what makes it
-work. Field-level traceability for every name below lives in
+mandate in one line: "Top-level router mirroring the system-selection menu, MINUS
+ALL SCREEN I/O". `pyproject.toml` declares no `[project.scripts]`, so
+`python -m acas_posting` is the single documented way into the package.
+Field-level traceability for every name below lives in
 `docs/migration/traceability.md`.
 
 WHAT IS ACTUALLY BEING MIGRATED. `ACAS.cbl` is a screen program wrapped around
-one dispatch table. Section 0.3.4 of the plan gives a three-way rule for
-removing the presentation layer, and almost every statement in the file falls
-under its first or third branch: a diagnostic display with no database effect
-becomes a log record, a prompt that gates a database write becomes an argument,
-and a prompt that merely pauses for acknowledgement is dropped - keeping the
-control transfer where one sits in an error path, and dropping only the pause.
-Two things survive that filter, and they are the whole of this module:
-
-  1. the dispatch table [common/ACAS.cbl:L558-L566], and
-  2. the termination-code convention `load00` applies to what it called
-     [common/ACAS.cbl:L573-L583].
+one dispatch table, and section 0.3.4's three-way rule removes almost all of it: a
+diagnostic display with no database effect becomes a log record, a prompt that
+gates a database write becomes an argument, and a prompt that merely pauses is
+dropped - keeping the control transfer where one sits in an error path. Two things
+survive that filter, and they are the whole of this module: the dispatch table
+[common/ACAS.cbl:L558-L566] and the termination-code convention `load00` applies
+to what it called [common/ACAS.cbl:L573-L583].
 
 THE DISPATCH TABLE, VERBATIM [common/ACAS.cbl:L558-L566]::
 
@@ -37,58 +29,37 @@ THE DISPATCH TABLE, VERBATIM [common/ACAS.cbl:L558-L566]::
              depending on z.
 
 decoded by the maintainer's own comment immediately above it
-[common/ACAS.cbl:L552-L556]::
+[common/ACAS.cbl:L552-L556] - `A=irs=08 , B=sales=02 , C=purchase=03 ,
+D=General=01 , E=stock=04 , F=none, G=none, H=none= 5,6,7 Not avail for O/S
+versions.` - so the live selections are::
 
-    A=irs=08 , B=sales=02 , C=purchase=03 , D=General=01 ,
-    E=stock=04 ,
-    F=none, G=none, H=none= 5,6,7 Not avail for O/S versions.
+    A  IRS      load08 L627  "irs"       -> subsystem `irs`
+    B  Sales    load02 L591  "sales"     -> subsystem `sales`
+    C  Purchase load03 L597  "purchase"  -> subsystem `purchase`
+    D  General  load01 L585  "general"   -> subsystem `general`
+    E  Stock    load04 L603  "stock"     OMITTED - out of scope
+    X  Exit     L512-L514    -           OMITTED - see `overclose`
+    Z  Setup    L527-L539    "sys002"    OMITTED - out of scope
 
-so the live selections and the program name each `loadNN` moves into
-`WS-Called` are:
-
-    ==========  ==============  ==========  ==========================
-    Selection   Paragraph       WS-Called   Disposition here
-    ==========  ==============  ==========  ==========================
-    A  IRS      load08 L627     "irs"       subsystem `irs`
-    B  Sales    load02 L591     "sales"     subsystem `sales`
-    C  Purchase load03 L597     "purchase"  subsystem `purchase`
-    D  General  load01 L585     "general"   subsystem `general`
-    E  Stock    load04 L603     "stock"     OMITTED - out of scope
-    X  Exit     L512-L514       -           OMITTED - see `overclose`
-    Z  Setup    L527-L539       "sys002"    OMITTED - out of scope
-    ==========  ==============  ==========  ==========================
-
-FOUR SUBSYSTEMS, NOT SEVEN. The letters are documented above and in each
+FOUR SUBSYSTEMS, NOT SEVEN. The letters are documented here and in each
 subparser's help text rather than accepted as aliases, because an alias would
-appear among argparse's own choice list and this router publishes exactly four
-subsystem names and exactly seven operations - no eighth route exists.
+appear among argparse's own choice list; this router publishes exactly four
+subsystem names and exactly seven operations, and no eighth route exists.
 
-THE TWO LEVELS. `ACAS.cbl` chooses a subsystem and calls its menu; that menu
-then chooses an operation from its own `loadNN` table. A command line supplies
-both selections at once, so this router is two levels deep and the seven
-operations correspond one-for-one to the subsystem menus' own paragraphs::
+THE TWO LEVELS. `ACAS.cbl` chooses a subsystem and calls its menu; that menu then
+chooses an operation from its own `loadNN` table. A command line supplies both at
+once, so the seven operations correspond one-for-one to the subsystem menus' own
+paragraphs. The `_ROUTES` table below carries each pairing with its COBOL
+paragraph and locator, and `docs/migration/traceability.md` section 14.5 carries
+the same seven rows.
 
-    general  post-cycle    -> cli.gl_post_cycle
-                              load08.    [general/general.cbl:L805-L815]
-    general  end-of-cycle  -> cli.gl_end_of_cycle
-                              load09.    [general/general.cbl:L817-L821]
-    sales    invoice-post  -> cli.sl_invoice_post
-                              load07.    [sales/sales.cbl:L756-L768]
-    sales    cash-post     -> cli.sl_cash_post
-                              load11.    [sales/sales.cbl:L792-L796]
-    purchase order-post    -> cli.pl_order_post
-                              load08.    [purchase/purchase.cbl:L752-L762]
-    purchase payment-post  -> cli.pl_payment_post
-                              load12.    [purchase/purchase.cbl:L786-L790]
-    irs      post          -> cli.irs_post
-                              Main-Loop. [irs/irs.cbl:L666-L672]
-
-A LABEL CORRECTION, RECORDED SO IT IS NOT "CORRECTED" BACK. The Sales
-invoice-posting chain is `load07.` [sales/sales.cbl:L756-L768], whose paragraph
-label carries the maintainer's own inline `*> Sales trans posting`. Two planning
+ A LABEL CORRECTION, RECORDED SO IT IS NOT "CORRECTED" BACK. The Sales
+invoice-posting chain is `load07.` [sales/sales.cbl:L756-L768], whose label
+carries the maintainer's own inline `*> Sales trans posting`. Two planning
 documents call it `load08`; `load08.` [sales/sales.cbl:L770-L774] actually
 dispatches `sl080`, Payment Input, which plan section 0.2.2 places out of scope.
-`acas_posting/cli/__init__.py` carries the same correction.
+`acas_posting/cli/sl_invoice_post.py` gives the four-way evidence and
+`docs/migration/traceability.md` records it as C-06.
 
 THIS ROUTER DELEGATES ITS ARGUMENTS AND OWNS NONE OF THEM, and that is a
 reproduction rather than a convenience. `load00` calls the subsystem with no
@@ -99,123 +70,102 @@ parameters at all - its `USING` clause is commented out in the source
 
 The parameters appear one level down, in the subsystem menus. So this router
 parses the subsystem and the operation and forwards every remaining argument
-verbatim to the chosen entry point, which owns its own parser. Three
-consequences follow, all of them wanted:
+verbatim to the chosen entry point, which owns its own parser. Three consequences
+follow, all of them wanted:
 
   * `01 WS-Calling-Data` [copybooks/wscall.cob:L6-L14] is bound in exactly one
     place, `acas_posting.cli.args`, and is not redefined here;
-  * the three linkage shapes cannot be flattened, because no option declared
-    here could be forced onto a route that does not take it - pass a
-    calling-data option to the IRS route and the ROUTE refuses it, which is the
-    shape asserting itself rather than this router policing it; and
+  * the three linkage shapes cannot be flattened, because no option declared here
+    could be forced onto a route that does not take it - pass a calling-data
+    option to the IRS route and the ROUTE refuses it, which is the shape asserting
+    itself rather than this router policing it; and
   * `--help` after an operation reaches that route's own parser, so the help a
-    reader sees is the route's real contract and never a second copy of it.
+    reader sees is the route's real contract and never a second copy of it. One
+    visible consequence: the delegated help names itself
+    `python -m acas_posting.cli.<module>`, because the parser answering is the
+    route's. Both spellings are real invocations - every entry point carries its
+    own `__main__` guard - and the route's `prog` is left alone rather than
+    rewritten, because a second source for it is exactly the drift this delegation
+    exists to prevent.
 
-    One visible consequence of that last point: the delegated help names itself
-    `python -m acas_posting.cli.<module>` rather than
-    `python -m acas_posting <subsystem> <operation>`, because the parser
-    answering is the route's. Both spellings are real invocations - every entry
-    point carries its own `__main__` guard - and the route's `prog` is left
-    alone rather than rewritten, because a second source for it is exactly the
-    drift this delegation exists to prevent.
-
-THREE LINKAGE SHAPES, NOT ONE (plan section 0.1.1)::
-
-    General Ledger   4  ws-calling-data, system-record, to-day, file-defs
-                        [general/general.cbl:L711-L721]
-    Sales / Purchase 5  the same four plus WS-System-Record-4
-                        [sales/sales.cbl:L698-L716]
-                        [purchase/purchase.cbl:L691-L708]
-    IRS              3  IRS-System-Params, WS-System-Record, file-defs -
-                        no calling-data block and no `to-day`
-                        [irs/irs.cbl:L666-L672], [irs/irs030.cbl:L552-L554]
-
-On the third shape, note what "no run date" does and does not mean: it is true
-of the PARAMETER LIST and false of the DATA, because two run-date fields still
-reach `irs030` inside the two records it is passed. `cli.args` owns that
-distinction; this router neither restates nor overrides it.
+THREE LINKAGE SHAPES, NOT ONE (plan section 0.1.1): General Ledger four
+parameters [general/general.cbl:L711-L721]; Sales / Purchase five, the same four
+plus `WS-System-Record-4` [sales/sales.cbl:L698-L716],
+[purchase/purchase.cbl:L691-L708]; IRS three - `IRS-System-Params`,
+`WS-System-Record`, `file-defs`, with no calling-data block and no `to-day`
+[irs/irs.cbl:L666-L672], [irs/irs030.cbl:L552-L554]. On that third shape, note
+what "no run date" does and does not mean: it is true of the PARAMETER LIST and
+false of the DATA, because two run-date fields still reach `irs030` inside the two
+records it is passed. `cli.args` owns that distinction; this router neither
+restates nor overrides it.
 
 NO UNIFORM GATE IS IMPOSED HERE, AND THE THREE THAT EXIST DISAGREE. A later
-reader must not "tidy" them into one:
-
-    General Ledger  `if ws-term-code = 5 go to display-menu`
-                    [general/general.cbl:L810-L811] - so `gl071` and `gl072`
-                    never run at all; a hard gate between phases, not a warning
-    Sales           `if ws-term-code not = zero go to display-menu`
-                    [sales/sales.cbl:L761-L762], [sales/sales.cbl:L765-L766] -
-                    a DIFFERENT predicate for the same idea
-    Purchase        NO GATE - the equivalent lines are commented out in the
-                    source [purchase/purchase.cbl:L755-L758]
-
-Each gate belongs to its own entry point. This module holds only `load00`'s
-`> 7` test, which is a different test again and is applied to every route
-alike, exactly as `ACAS.cbl` applies it to every subsystem alike.
+reader must not "tidy" them into one: General Ledger tests
+`if ws-term-code = 5 go to display-menu` [general/general.cbl:L810-L811], so
+`gl071` and `gl072` never run at all; Sales tests `not = zero`
+[sales/sales.cbl:L761-L762], [sales/sales.cbl:L765-L766], a DIFFERENT predicate
+for the same idea; Purchase has NO GATE, its equivalent lines being commented out
+[purchase/purchase.cbl:L755-L758]. Each belongs to its own entry point. This
+module holds only `load00`'s `> 7` test, a different test again, applied to every
+route alike exactly as `ACAS.cbl` applies it to every subsystem alike.
 
 RECORDED OMISSIONS - listed so that a reader comparing the two trees does not
-conclude something was lost (rule R-5 requires deliberate omissions be recorded
-as omissions):
+conclude something was lost (rule R-5):
 
-  * Stock Control, `load04.` [common/ACAS.cbl:L603-L607], `move "stock" to
-    ws-called` - plan section 0.2.2 excludes `stock/**` in its entirety.
+  * Stock Control, `load04.` [common/ACAS.cbl:L603-L607] - plan section 0.2.2
+    excludes `stock/**` in its entirety.
   * System Setup, `call-system-setup.` [common/ACAS.cbl:L527-L539], `move
-    "sys002" to ws-called` at L534 - plan section 0.2.2 lists
-    `common/sys002.cbl` under non-posting utilities. No route reaches it.
-  * `(J) Project-Z` [common/ACAS.cbl:L496], `(F) Order Entry`
-    [common/ACAS.cbl:L498], `(G) Payroll` [common/ACAS.cbl:L499] and
-    `(H) Epos` [common/ACAS.cbl:L501] are COMMENTED OUT in the frozen source
-    and are not live selections. Their paragraphs `load05`, `load06`, `load07`
-    and `load09` [common/ACAS.cbl:L609-L636] survive but are unreachable: the
-    dispatch table sends slots 6, 7 and 8 to `loadsr2` [common/ACAS.cbl:L560].
-  * The `sl830` autogen leg, live at [sales/sales.cbl:L759] and already
-    commented out on the Purchase side [purchase/purchase.cbl:L755-L758] -
-    plan section 0.2.2 excludes the `sl800`..`sl830` series, so the Sales
-    invoice route covers `sl055` then `sl060` only.
+    "sys002" to ws-called` at L534 - section 0.2.2 lists `common/sys002.cbl`
+    under non-posting utilities. No route reaches it.
+  * `(J) Project-Z` [common/ACAS.cbl:L496], `(F) Order Entry` [:L498],
+    `(G) Payroll` [:L499] and `(H) Epos` [:L501] are COMMENTED OUT in the frozen
+    source and are not live selections. Their paragraphs `load05`, `load06`,
+    `load07` and `load09` [common/ACAS.cbl:L609-L636] survive but are
+    unreachable: the dispatch table sends slots 6, 7 and 8 to `loadsr2`
+    [common/ACAS.cbl:L560].
+  * The `sl830` autogen leg, live at [sales/sales.cbl:L759] and already commented
+    out on the Purchase side [purchase/purchase.cbl:L755-L758] - section 0.2.2
+    excludes the `sl800`..`sl830` series, so the Sales invoice route covers
+    `sl055` then `sl060` only.
   * `load12.` [general/general.cbl:L835-L855], `gl100` then `gl105`, and the
     SECOND `if ws-term-code = 5` gate at [general/general.cbl:L844] - report
-    programs, out of scope. Nothing here routes to it.
+    programs, out of scope.
   * Every trace of the screen: `Display-Menu.` [common/ACAS.cbl:L427], the
-    copyright and program banners [common/ACAS.cbl:L436-L440],
-    [common/ACAS.cbl:L466-L467], the option displays
-    [common/ACAS.cbl:L489-L504], `accept menu-reply ... auto UPPER`
-    [common/ACAS.cbl:L510], the `loadsr`/`loadsr2` "Sorry" diagnostics
-    [common/ACAS.cbl:L642-L652], `load23.` [common/ACAS.cbl:L637-L640] and
-    `main-exit. stop run.` [common/ACAS.cbl:L654-L655].
+    banners [:L436-L440], [:L466-L467], the option displays [:L489-L504],
+    `accept menu-reply ... auto UPPER` [:L510], the `loadsr`/`loadsr2` "Sorry"
+    diagnostics [:L642-L652], `load23.` [:L637-L640] and
+    `main-exit. stop run.` [:L654-L655].
   * BOTH CLOCK READS, deliberately and by rule. `accept wsb-time from time`
-    [common/ACAS.cbl:L470] and `accept wsa-date from date`
-    [common/ACAS.cbl:L478] feed the banner and nothing else - no database
-    effect, no control flow - so under plan section 0.3.4 they are presentation
-    and are dropped. This module therefore reads no clock at all, and neither
-    supplies nor defaults a run date: rule R-6 requires two runs of one
+    [common/ACAS.cbl:L470] and `accept wsa-date from date` [:L478] feed the banner
+    and nothing else - no database effect, no control flow - so section 0.3.4
+    makes them presentation. This module therefore reads no clock at all and
+    neither supplies nor defaults a run date: rule R-6 requires two runs of one
     scenario to be byte-identical, and a router that defaulted the date would
     break that outright. Every route takes its run date as a required argument.
-  * The presentation date conversion `Conv-date.` [common/ACAS.cbl:L441-L463]
-    and `zz060-Convert-Date` [common/ACAS.cbl:L657-L680], which reformat
-    between UK, USA and International forms for display only.
+  * The presentation date conversions `Conv-date.` [common/ACAS.cbl:L441-L463] and
+    `zz060-Convert-Date` [:L657-L680], which reformat between UK, USA and
+    International forms for display only.
   * `gl051`'s control-total gate has NO entry point anywhere in `cli`, because
     plan section 0.4.1.1 lists none; it is reached as a library function,
-    `acas_posting.programs.gl051_batch_control_check`. The frozen system
-    reaches the whole interactive `gl051` through `load06.`
+    `acas_posting.programs.gl051_batch_control_check`. The frozen system reaches
+    the whole interactive `gl051` through `load06.`
     [general/general.cbl:L790-L797], of which only the `end-batch` block
-    [general/gl051.cbl:L1096-L1133] is in scope.
-  * The version banner is not re-surfaced as an option. It is a display with no
-    database effect, so plan section 0.3.4 makes it a diagnostic rather than an
-    interface; `__version__` is reused from `acas_posting` in the help text
-    below rather than re-declared or exposed as a second flag.
+    [general/gl051.cbl:L1096-L1134] is in scope.
+  * The version banner is not re-surfaced as an option - a display with no
+    database effect, so section 0.3.4 makes it a diagnostic rather than an
+    interface; `__version__` is reused from `acas_posting` in the help text below
+    rather than re-declared or exposed as a second flag.
 
-WHAT THIS MODULE MAY IMPORT (plan section 0.4.3). `acas_posting` itself, for
-the version; `acas_posting.cli.*`; and the standard library. It must not, and
-does not, import `programs`, `dal`, `records`, `cobol` or `dictionary` - it
-sits above `cli` and reaches a program only through an entry point, exactly as
-`ACAS.cbl` reaches `gl070` only through `general.cbl`.
-
-NO COBOL RUNS HERE, AND NOTHING HERE CAN REACH ANY (rule R-1). There is no
-process launch, no foreign-function binding, no compiler lookup and no import
-of the sibling comparison tree - which is a sibling of this package precisely so
-that no import path to it exists. In particular this router publishes NO switch
-that would run the frozen programs, or run them alongside these and diff the
-result: it is the one place such an option would look reasonable, and it would
-violate R-1 outright. Comparison belongs entirely to that sibling tree, which
-drives this package from outside and is never reached from within it.
+WHAT THIS MODULE MAY IMPORT (plan section 0.4.3): `acas_posting` itself for the
+version, `acas_posting.cli.*`, and the standard library. Not `programs`, `dal`,
+`records`, `cobol` or `dictionary` - it sits above `cli` and reaches a program
+only through an entry point, exactly as `ACAS.cbl` reaches `gl070` only through
+`general.cbl`. Under rule R-1 there is no process launch, no foreign-function
+binding, no compiler lookup and no import of the sibling comparison tree, which
+is a sibling precisely so that no import path to it exists. In particular this
+router publishes NO switch that would run the frozen programs, or run them
+alongside these and diff the result: it is the one place such an option would look
+reasonable, and it would violate R-1 outright.
 
 Execution is strictly sequential and single-threaded, matching the original: one
 selection, run once, and no option offering to run two of anything at a time.
@@ -255,7 +205,7 @@ LOG_LEVEL_NAMES: Final[tuple[str, ...]] = (
 
 #  The level a run uses when `--log-level` is not given. INFO, so that the phase
 #  announcements the frozen programs DISPLAY - "Phase - 1. Batch Check"
-#  [general/gl070.cbl:L283] and its siblings - are visible and the file-handler
+#  [general/gl070.cbl:L284] and its siblings - are visible and the file-handler
 #  trace is not.
 DEFAULT_LOG_LEVEL: Final[str] = "INFO"
 
@@ -408,8 +358,7 @@ _SUBSYSTEMS: Final[tuple[_Subsystem, ...]] = (
 #  sections 0.3.1 and 0.4.1.1 name the seven modules; these are the only routes
 #  that exist, and there is no eighth. `acas_posting.cli.args` is the ninth
 #  module of that package and is deliberately NOT a route: it is the library the
-#  routes use, and its SECTION 0 carries the connection-parameter reader that
-#  used to be a tenth module (finding M-01).
+#  routes use, and its SECTION 0 carries the connection-parameter reader.
 _ROUTES: Final[tuple[_Route, ...]] = (
     _Route(
         subsystem="general",

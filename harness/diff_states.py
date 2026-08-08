@@ -150,16 +150,16 @@ MANIFEST_FILENAME: Final[str] = "_manifest.json"
 # so tolerating a manifest written before it existed would defeat the check.
 MANIFEST_VERSION: Final[int] = 3
 
-# ⭐ THE EXACT MANIFEST SHAPE THIS TOOL REQUIRES (finding F-45)
+# THE EXACT MANIFEST SHAPE THIS TOOL REQUIRES
 #
-# This tool used to check three things about a manifest: that it parsed, that its
-# version matched, and that its `tables` list agreed with the files beside it. Every
-# other key it read with `.get()`, so a manifest MISSING a key it depended on -- or
-# carrying an extra one nobody wrote deliberately -- reached the comparison and the
-# comparison produced a verdict. The keys it reads are the ones that establish WHICH
-# CAPTURE this is: the scenario, the side, the provenance and the attestation. A
-# manifest that does not carry them is not a manifest of a capture this tool can render
-# a verdict on, and reading it defensively was the wrong shape of defence: the right
+# Checking only that a manifest parses, that its version matches and that its `tables`
+# list agrees with the files beside it -- and reading every other key with `.get()` --
+# would let a manifest MISSING a key this tool depends on, or carrying an extra one
+# nobody wrote deliberately, reach the comparison and get a verdict. The keys read here
+# are the ones that establish WHICH CAPTURE this is: the scenario, the side, the
+# provenance and the attestation. A manifest that does not carry them is not a manifest
+# of a capture this tool can render a verdict on, and reading it defensively is the
+# wrong shape of defence: the right
 # one is to require the shape and refuse anything else.
 MANIFEST_REQUIRED_KEYS: Final[tuple[str, ...]] = (
     "manifest_version",
@@ -189,7 +189,7 @@ PROVENANCE_KEYS: Final[tuple[str, ...]] = (
 # The provenance fields the TWO SIDES must agree on before a single row is compared.
 #
 #   run_id                one attempt. Unequal means stages of two different attempts
-#                         were assembled into one verdict (finding F-37).
+#                         were assembled into one verdict.
 #   scenario_file_sha256  one definition. Unequal means the affected-table list that
 #                         BOUNDS the comparison, or the fan-out switch that decides
 #                         which tables a run touches, was edited between the two legs.
@@ -207,7 +207,7 @@ PROVENANCE_MUST_MATCH: Final[tuple[str, ...]] = (
     "frozen_schema_sha256",
 )
 
-# ⭐ THE DETERMINISM CONTRACT IS THE MIRROR IMAGE OF THE PARITY CONTRACT.
+# THE DETERMINISM CONTRACT IS THE MIRROR IMAGE OF THE PARITY CONTRACT.
 #
 # tests/determinism/test_two_runs_byte_identical.py proves AAP section 0.8.5's fourth
 # criterion -- "two runs of the same scenario under the same pinned clock produce
@@ -245,7 +245,7 @@ ATTESTATION_REQUIRED_KEYS: Final[tuple[str, ...]] = (
     "detail",
 )
 
-# The verdict manifest's own name and keys (finding F-35).
+# The verdict manifest's own name and keys.
 VERDICT_FILENAME: Final[str] = "verdict.json"
 VERDICT_VERSION: Final[int] = 1
 VERDICT_KEYS: Final[tuple[str, ...]] = (
@@ -1366,7 +1366,7 @@ def _file_digest(path: Path) -> str:
 def _manifest_fingerprint(directory: Path | str) -> str:
     """Return the SHA-256 of a tree's completeness manifest, for the summary.
 
-    THE REASON THIS EXISTS (OBS-016, rule R-6). The manifest is what lets this
+    THE REASON THIS EXISTS (rule R-6). The manifest is what lets this
     module claim both trees were captured whole, so the claim is only as good as
     the reader's ability to check that the manifest quoted in the evidence is the
     manifest that was actually read. A digest binds the two; a file name does
@@ -1462,7 +1462,7 @@ def _verify_tree(directory: Path, label: str) -> dict[str, Any]:
             f"that the verdict is evidence (rule R-6)."
         )
 
-    # ⭐ THE EXACT SHAPE, NOT A DEFENSIVE READ (finding F-45). See
+    # THE EXACT SHAPE, NOT A DEFENSIVE READ. See
     # MANIFEST_REQUIRED_KEYS: every key below establishes WHICH capture this is, and a
     # manifest missing one is not a manifest this tool can render a verdict on.
     missing_keys = [key for key in MANIFEST_REQUIRED_KEYS if key not in manifest]
@@ -1624,7 +1624,7 @@ def verify_trees(
             f"between two unrelated runs says nothing about the migration."
         )
 
-    # ⭐ THE SIDES MUST BE THE SIDES THEY CLAIM TO BE. Two captures both labelled
+    # THE SIDES MUST BE THE SIDES THEY CLAIM TO BE. Two captures both labelled
     # `cobol' would compare a tree against itself and be identical by construction.
     left_side = left_manifest.get("side")
     right_side = right_manifest.get("side")
@@ -1676,8 +1676,7 @@ def assert_same_provenance(
 
     Three provenance fields and one attestation field must be equal before a single row
     is compared. See PROVENANCE_MUST_MATCH for what each inequality would mean, and
-    below for why the seed identity is the most important of the four (findings F-22,
-    F-37, F-45).
+    below for why the seed identity is the most important of the four.
 
     Args:
         left_manifest: The COBOL side's verified manifest.
@@ -1774,7 +1773,7 @@ def assert_same_provenance(
                 f"about the migration."
             )
 
-    # ⭐ THE FIELDS A DETERMINISM PAIR MUST DISAGREE ABOUT.
+    # THE FIELDS A DETERMINISM PAIR MUST DISAGREE ABOUT.
     #
     # Two captures carrying ONE run id are one capture read twice, and a tree always
     # equals itself -- the same false pass the identical-directory guard refuses, just
@@ -1807,7 +1806,7 @@ def assert_same_provenance(
                     f"binding a DIFFERENT run id to each."
                 )
 
-    # ⭐ THE EXACT SEED IDENTITY (finding F-22)
+    # THE EXACT SEED IDENTITY
     #
     # This is the field that makes the pass condition mean what it claims. The
     # comparison's whole premise is that both cycles started from BYTE-FOR-BYTE the
@@ -1869,11 +1868,11 @@ def assert_attested(
     another scenario, or a status that means the harness itself failed all arrive here
     as `attested: false` with the reason recorded, and all three are refused.
 
-    ⭐ WHAT IS *NOT* REFUSED, AND WHY THAT MATTERS MOST. A run that COMPLETED and found
+    WHAT IS *NOT* REFUSED, AND WHY THAT MATTERS MOST. A run that COMPLETED and found
     a behavioural difference - `harness/run_python_scenario.sh` exiting 69 after every
     operation ran and every post-run assertion was taken - is attested as COMPARABLE.
-    An earlier revision refused it along with the harness faults, and the effect was
-    perverse: the one situation in which a human most needs to know which tables, rows
+    Refusing it along with the harness faults would be perverse: the one situation in
+    which a human most needs to know which tables, rows
     and columns differ is exactly the situation in which the differ declined to say. The
     state that run left IS the finding. So it is compared, and its disposition is
     ANNOUNCED here so that the verdict which follows cannot be mistaken for a clean
@@ -2217,7 +2216,7 @@ def _validate_table_selection(tables: Sequence[str]) -> tuple[str, ...]:
 
 
 # ---------------------------------------------------------------------------
-#  ⭐ THE SHARED SCENARIO PARSER IS RESOLVED BY PATH, NOT BY NAME (finding MJ-17).
+#  THE SHARED SCENARIO PARSER IS RESOLVED BY PATH, NOT BY NAME.
 #
 #  `harness/normalize.py` is a SIBLING FILE, not an installed package, so a bare
 #  `import normalize` resolves only when this directory already sits on `sys.path`.
@@ -2238,12 +2237,12 @@ def _validate_table_selection(tables: Sequence[str]) -> tuple[str, ...]:
 def _load_scenario_yaml_module() -> Any:
     """Load the sibling module that owns the shared scenario parser, by path.
 
-    The parser lives in `harness/normalize.py` (finding M-05): it was
+    The parser lives in `harness/normalize.py`: it was
     `harness/scenario_yaml.py`, which is not one of the harness paths the Agent Action
     Plan section 0.3.1 inventory names, and the canonicalisation module is where the
     other definitions every consumer must agree on already live.
 
-    ⭐ REGISTERED IN `sys.modules` BEFORE EXECUTION, and removed again if execution
+    REGISTERED IN `sys.modules` BEFORE EXECUTION, and removed again if execution
     fails. Not optional: the module declares `@dataclass` classes with `slots=True`,
     which rebuilds each class and makes `dataclasses` look the defining module up by
     name - so an unregistered module fails with an `AttributeError` raised from inside
@@ -2310,7 +2309,7 @@ def scenario_expects_empty_state(path: Path | str | None) -> bool:
     try:
         import yaml
 
-        #  ⭐ THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17).
+        #  THE SHARED DUPLICATE-REJECTING LOADER.
         #  `yaml.safe_load` applies last-one-wins to a repeated key, silently, and a
         #  scenario definition carries the destructive answers, the fan-out switch
         #  that decides which tables a run touches and the comparison bound. Imported
@@ -2382,7 +2381,7 @@ def scenario_tables(path: Path | str) -> tuple[str, ...]:
     try:
         import yaml
 
-        #  ⭐ THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17).
+        #  THE SHARED DUPLICATE-REJECTING LOADER.
         #  `yaml.safe_load` applies last-one-wins to a repeated key, silently, and a
         #  scenario definition carries the destructive answers, the fan-out switch
         #  that decides which tables a run touches and the comparison bound. Imported
@@ -3032,7 +3031,7 @@ def verdict_path_for(report_path: Path | None) -> Path | None:
 def invalidate_verdict(target: Path) -> None:
     """Remove any verdict manifest already at `target`, before comparing anything.
 
-    THE REASON THIS EXISTS (finding F-35, rule R-6). The verdict manifest is the
+    THE REASON THIS EXISTS (rule R-6). The verdict manifest is the
     machine-readable claim that a scenario reached parity, and
     `docs/migration/scenario-diff-evidence.md` cites one per scenario. A stale manifest surviving an error path
     would therefore let a run that never reached the comparison inherit the previous
@@ -3068,7 +3067,7 @@ def _provenance_field(
         The recorded value, or None when there is no manifest or no such key. None
         is meaningful in the published verdict: it says this comparison carried no
         provenance, which is what stops a reader claiming parity from
-        it (finding F-15).
+        it.
     """
     if manifest is None:
         return None
@@ -3114,7 +3113,7 @@ def build_verdict(
 ) -> dict[str, Any]:
     """Build the machine-readable verdict manifest for a completed comparison.
 
-    THE REASON THIS EXISTS (finding F-35). Before this, a pass was signalled only by
+    THE REASON THIS EXISTS. Before this, a pass was signalled only by
     exit status 0 and a zero-byte `diff.txt`, and nothing downstream could tell a run
     that compared twenty-two tables and found no difference from a run whose
     `diff.txt` happened to be absent or empty for some other reason. The verdict
@@ -3154,8 +3153,8 @@ def build_verdict(
             scenario = recorded_scenario
 
     # `verify_trees` has already refused any comparison whose two sides disagree on
-    # run id, scenario-file digest, frozen-schema digest or seed marker (findings F-45
-    # and F-22), so reading them from the COBOL side alone records the value BOTH
+    # run id, scenario-file digest, frozen-schema digest or seed marker, so reading them
+    # from the COBOL side alone records the value BOTH
     # sides carry rather than picking one of two.
     recorded: dict[str, Any] = {
         "verdict_version": VERDICT_VERSION,
@@ -3319,7 +3318,7 @@ def publish_verdict(
         _warn(
             f"{exc}. The comparison itself COMPLETED and its exit status is "
             f"unaffected, but with no {VERDICT_FILENAME} this run cannot be "
-            f"reported as protocol evidence (finding F-15)."
+            f"reported as protocol evidence."
         )
         return None
     _progress(f"{_PROG}: verdict {outcome} published to {written}")
@@ -3425,7 +3424,7 @@ def summarise(
     elif report_digest is None:
         pointer = f"the differing values are in {report_path} (mode 0600)"
     else:
-        # THE POINTER IS BOUND TO THE BYTES (rule R-6, OBS-016's requirement
+        # THE POINTER IS BOUND TO THE BYTES (rule R-6's requirement
         # applied to this artifact as well as to the manifests).
         pointer = (
             f"the differing values are in {report_path} (mode 0600, "
@@ -3702,12 +3701,12 @@ def build_parser() -> argparse.ArgumentParser:
             "removes, so a verdict taken this way is not evidence."
         ),
     )
-    #  `--stdout-detail` USED TO BE DECLARED HERE AND IS DELIBERATELY GONE.
-    #  Its whole effect was to put every differing value - live accounting data,
-    #  each beside its primary key - onto stdout, which the composed recipe
-    #  collects as a container log. That is the same content this module
-    #  otherwise protects with `O_EXCL`, `O_NOFOLLOW` and mode 0600, so having a
-    #  flag that published it made the protection optional. There is now no path
+    #  THERE IS DELIBERATELY NO `--stdout-detail` FLAG, AND ADDING ONE WOULD
+    #  UNDO THIS MODULE'S PROTECTION. Its effect would be to put every differing
+    #  value - live accounting data, each beside its primary key - onto stdout,
+    #  which the composed recipe collects as a container log. That is the same
+    #  content this module otherwise protects with `O_EXCL`, `O_NOFOLLOW` and
+    #  mode 0600, so such a flag would make the protection optional. There is no path
     #  and no option that puts a value on stdout: the detail always goes to a
     #  0600 file - `--out FILE` when one is named, a private fallback
     #  directory otherwise - and stdout always carries the value-free summary
@@ -3977,7 +3976,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             # INVALIDATE THE ACCEPTED OUTPUT NOW, before a dump is read. Both
             # artifacts: a stale verdict manifest is the more dangerous of the two,
             # because it IS this run's published parity claim
-            # (findings F-35 and F-15).
+            #.
             invalidate_report(report_path)
             stale_verdict = verdict_path_for(report_path)
             if stale_verdict is not None:
@@ -3999,7 +3998,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             # --allow-unattested reaches the identity gate too: a capture whose run
             # stage published nothing carries no run id and no seed marker by
             # construction, so enforcing their PRESENCE here would make that waiver
-            # unusable. Their EQUALITY is still enforced (findings F-22, F-45).
+            # unusable. Their EQUALITY is still enforced.
             manifests = verify_trees(
                 left,
                 right,
@@ -4114,7 +4113,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # THE PASS CONDITION. Not one byte on stdout.
         #
         # The verdict manifest is published HERE and not merely implied by the exit
-        # status (finding F-35). A zero-byte diff.txt and status 0 cannot be told
+        # status. A zero-byte diff.txt and status 0 cannot be told
         # apart from a run whose report was never written, so the pass states itself:
         # how many tables were compared, the run id both sides carried, and the seed
         # identity they were both seeded from.
@@ -4157,7 +4156,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     report_digest = _report_digest_or_none(report_path)
 
-    # Published on the DIFFERENT outcome too (finding F-35). A difference is
+    # Published on the DIFFERENT outcome too. A difference is
     # evidence: it is what an ambiguity resolution cites when the compiled oracle is
     # interrogated, so it gets the same machine-readable artifact the pass gets.
     publish_verdict(

@@ -8,11 +8,9 @@ owns the `Net` formulation, and the two files divide the subject on a fact rathe
 than on taste: `Gross` ends with a destructive subtract and `Net` does not.
 
 PROVENANCE OF RULES - READ FIRST
-    There is NO user rules document for this project. `review_rules` returns exactly
-    "No user rules provided.", read to the end of the document. The six binding
-    rules R-1 .. R-6 live in the Technical Specification section 0.7.2 and are
-    restated below wherever they bite. Nothing here is invented to fill the gap:
-    where the specification is silent, enterprise-standard practice applies.
+    The six binding rules R-1 .. R-6 live in the Technical Specification section
+    0.7.2 and are restated below wherever they bite. Where the specification is
+    silent, enterprise-standard practice applies.
 
 THE FROZEN SPECIFICATION, VERBATIM
     `irs/irs030.cbl` lines 1556-1567, exactly as they stand in the checkout:
@@ -47,7 +45,7 @@ THE FROZEN SPECIFICATION, VERBATIM
         percentage-to-multiplier conversion. There is no `vat` helper, no
         `percentage` helper and no `round_to_pence` helper in
         `acas_posting.cobol.arithmetic`, and this file deliberately does not invent
-        one: the formula is spelled out at each site so a reviewer can diff it
+        one: the formula is spelled out at each site so a reader can diff it
         against the COBOL line by eye.
 
     3.  L1564 IS A DESTRUCTIVE, UN-`ROUNDED` SUBTRACT that reduces `post-amount` IN
@@ -113,7 +111,7 @@ THE Q- IDS THIS FILE USES (rule R-6)
         `1.175`, and `1000.00 / 1.175` repeats forever - is exactly the value
         section 0.6.8 warns about. Its literal is NOT guessed here and never was:
         it is looked up in `ORACLE_CAPTURED_PENNIES`, and that table is now
-        POPULATED from the compiled oracle (finding F-19). Four rows were measured
+        POPULATED from the compiled oracle. Four rows were measured
         on GnuCOBOL 3.2.0 under the frozen statement, and the `117.55` row is the
         discriminating one - it reads 17.51, which only extended precision with a
         single rounding at the store produces. A capture identity that is still
@@ -300,21 +298,21 @@ class OracleCaptureUnavailable(AssertionError):
     behaviour the arbiter, so an uncaptured figure is an OPEN QUESTION that must stay
     visible in the report rather than being quietly stepped over.
 
-    ⭐ EVERY OPERAND PAIR THIS FILE ASSERTS IS NOW CAPTURED (finding F-19), so nothing
+    EVERY OPERAND PAIR THIS FILE ASSERTS IS NOW CAPTURED, so nothing
     raises this today and no `xfail` marks it. It stays because the guard is the reason
     a figure can never be GUESSED: add an assertion for new operands and it fails until
     someone measures them, which is the intended cost.
     """
 
 
-# THE ORACLE CAPTURE TABLE - POPULATED FROM A COMPILED RUN (finding F-19).
+# THE ORACLE CAPTURE TABLE - POPULATED FROM A COMPILED RUN.
 #
 # Every figure below was PRINTED BY GnuCOBOL 3.2.0, the compiler the maintainer targets
 # [common/comp-common.sh:L9], from a program that reproduces the frozen statement and
 # the frozen field declarations verbatim and nothing else:
 #
 #     01 post-amount     pic s9(7)v99 sign is leading.   [copybooks/irswspost.cob:L14]
-#     01 vat-amount      pic s9(7)v99 sign is leading.   [copybooks/irswspost.cob:L19]
+#     01 vat-amount      pic s9(7)v99 sign is leading.   [copybooks/irswspost.cob:L18]
 #     01 ws-vat-current  pic 99v99.                      [irs/irs030.cbl:L277]
 #
 #     compute vat-amount rounded =
@@ -602,27 +600,15 @@ def gross_vat(
     `rounded=True` because the statement is written `compute vat-amount rounded`.
     This is one of the five ROUNDED sites in the whole migrated cycle.
 
-    Args:
-        post_amount: The gross figure.
-        rate: The VAT percentage.
-        receiving: The `vat-amount` descriptor - the IRS one or the GL one.
-
-    ⭐ THE STATEMENT IS NO LONGER PERFORMED HERE. This function used to call
-    `arithmetic.compute(gross_expression(...), ...)` - the production primitive, but
-    over an expression written in THIS FILE - which made the file a second source for
-    [irs/irs030.cbl:L1562-L1563]. Twenty-five assertions consumed it, so twenty-five
-    assertions were checking a copy of the statement against the reasoning that
-    produced the copy; had the shipped section's parenthesisation drifted, none would
-    have failed.
-
-    It now drives the SHIPPED section that owns the statement -
-    `irs030_posting._gross_section` for the IRS receiving field, or
+    THE STORE IS MADE BY THE SHIPPED SECTION, NEVER BY AN EXPRESSION WRITTEN HERE,
+    so this file cannot become a second source for [irs/irs030.cbl:L1562-L1563]. The
+    driver selects `irs030_posting._gross_section` for the IRS receiving field or
     `gl051_batch_control_check._gross` for the General Ledger twin
-    [general/gl051.cbl:L796] - selected by the descriptor the caller names, so a store
-    is never reported from a module that does not make it. `gross_expression` survives
-    and is still called directly by the intermediate-precision assertions, whose
-    subject is the EVALUATION ORDER rather than the store: those need the three nesting
-    levels as separate callables, which a completed store cannot give them.
+    [general/gl051.cbl:L796] by the descriptor the caller names, so a store is never
+    reported from a module that does not make it. `gross_expression` remains, and is
+    called directly by the intermediate-precision assertions, whose subject is the
+    EVALUATION ORDER rather than the store: those need the three nesting levels as
+    separate callables, which a completed store cannot give them.
 
     Args:
         post_amount: The gross figure.
@@ -1139,7 +1125,7 @@ def test_non_terminating_quotient_penny_matches_the_compiled_oracle(
     an EMPTY `ORACLE_CAPTURED_PENNIES` and report the open question through
     `xfail(strict=True)` rather than assert a guess.
 
-    THE CAPTURE HAS LANDED (finding F-19). See the commentary above
+    THE CAPTURE HAS LANDED. See the commentary above
     `ORACLE_CAPTURED_PENNIES` for the probe program, the compiler and flags, and the
     verbatim output. The two figures asserted here - 148.94 and -148.94 - are what
     GnuCOBOL 3.2.0 printed, not what this file computed.
@@ -1153,7 +1139,7 @@ def test_non_terminating_quotient_penny_matches_the_compiled_oracle(
     added here without a capture fails LOUDLY instead of silently asserting a derived
     figure.
     """
-    # oracle: MEASURED on GnuCOBOL 3.2.0, finding F-19; see ORACLE_CAPTURED_PENNIES for
+    # oracle: MEASURED on GnuCOBOL 3.2.0; see ORACLE_CAPTURED_PENNIES for
     # the probe and its verbatim output.  spec: [irs/irs030.cbl:L1562-L1564]
     expected = oracle_penny(capture_id)
 
@@ -1914,12 +1900,12 @@ def is_tier_isolated_name(name: str) -> bool:
 def shipped_module(dotted_name: str) -> Iterator[types.ModuleType]:
     """Import a shipped module FOR REAL for one test, leaving `sys.modules` as found.
 
-    ⭐ THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
+    THE IMPORT IS NOT OPTIONAL, AND IT IS NOT MEMOISED. Both of those are the point.
 
-    NOT OPTIONAL. `pytest.importorskip` stood here, and it turned the one failure this
-    section exists to catch into a PASS. A shipped module that cannot be imported at
-    all - a syntax error, a circular import, a name it imports that no longer exists -
-    produced a SKIP, and a skipped test reads as green. The pinned MySQL driver the
+    NOT OPTIONAL. `pytest.importorskip` here would turn the one failure this section exists
+    to catch into a PASS: a shipped module that cannot be imported at all - a syntax error,
+    a circular import, a name it imports that no longer exists - would produce a SKIP, and
+    a skipped test reads as green. The pinned MySQL driver the
     reason text blamed is a hard requirement of `requirements.txt`, so its absence is a
     broken environment and not a supported configuration; `importlib.import_module`
     lets the `ImportError` reach pytest as the FAILURE it is.
@@ -1933,7 +1919,7 @@ def shipped_module(dotted_name: str) -> Iterator[types.ModuleType]:
     every tier-isolated name the import added is removed and the residue is asserted
     empty.
 
-    ⭐ WHY EVICTION RATHER THAN A "MUST BE ABSENT" ASSERTION. Two remediations meet here
+    WHY EVICTION RATHER THAN A "MUST BE ABSENT" ASSERTION. Two remediations meet here
     and both are kept. One drives the SHIPPED sections from this file's own helpers -
     `gross_vat` and `net_of_vat` import `acas_posting.programs.irs030_posting` in
     function scope so the figures are production behaviour rather than a re-implementation
@@ -2223,11 +2209,11 @@ def test_the_shipped_gross_paragraph_leaves_a_sub_half_penny_amount_alone() -> N
 def test_the_shipped_gross_paragraph_leaves_no_driver_loaded() -> None:
     """Rule R-1 holds even though this section reaches a program module.
 
-    ⭐ AND THE IMPORT REALLY HAPPENS, which is what makes the claim worth making. The
-    loader used to memoise, so this guard imported nothing: the module was already
-    resident from an earlier test, the purge removed nothing, and "leaves no driver
-    loaded" was a statement about a module that had never left. The loader no longer
-    caches, so each `with` below performs a genuine import - asserted INSIDE the block
+    AND THE IMPORT REALLY HAPPENS, which is what makes the claim worth making. The
+    loader MUST NOT memoise, or this guard would import nothing: the module would already
+    be resident from an earlier test, the purge would remove nothing, and "leaves no driver
+    loaded" would be a statement about a module that had never left. The loader does not
+    cache, so each `with` below performs a genuine import - asserted INSIDE the block
     by reading live `sys.modules` - and the delta afterwards is a real measurement of
     what the purge removed.
     """
@@ -2281,7 +2267,7 @@ def test_the_shipped_gross_paragraph_leaves_no_driver_loaded() -> None:
 # ===========================================================================
 #  THE CONFORMANCE LOCK - `net_of_vat` AGAINST THE SHIPPED SECTION'S SECOND STORE
 #
-#  ⭐ WHY THIS IS A LOCK AND NOT A REDIRECTION. `gross_vat` above was redirected
+#  WHY THIS IS A LOCK AND NOT A REDIRECTION. `gross_vat` above was redirected
 #  outright: it takes the same inputs the shipped section takes, so it can simply call
 #  it. `net_of_vat` cannot be, and the reason is a real difference rather than an
 #  inconvenience - it takes an ALREADY-COMPUTED `vat_amount` as a parameter, which is

@@ -309,8 +309,9 @@ class WsPurchRecord:
 
     purch_unapplied: Decimal = field(**_dec_spec("Purch-Unapplied", _locator(52)))
 
-    # 03 Purch-Stats-Date pic 9(4). *> added 15/01/18. [copybooks/wspl.cob:L53] A NEW
-    # ANOMALY: this field reaches NO host variable and NO column.
+    # 03 Purch-Stats-Date pic 9(4). *> added 15/01/18. [copybooks/wspl.cob:L53] Reaches
+    # NO host variable and NO column: the dictionary entry records it copybook-only rather
+    # than searching for a carrier it does not have.
     purch_stats_date: int = field(**_int_spec("Purch-Stats-Date", _locator(53)))
 
     # 03 filler pic x(12). [copybooks/wspl.cob:L54] The trailing FILLER, declared rather

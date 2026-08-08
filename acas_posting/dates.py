@@ -417,7 +417,7 @@ def maps04(ws: Maps03Ws) -> None:
         or (int(days_text) < 1 or int(days_text) > 31)
         or (int(month_text) < 1 or int(month_text) > 12)
     ):
-        # Class 3 -> Main-Exit [common/maps04.cbl:L146]. ANOMALY #16: u_bin is NOT
+        # Class 3 -> Main-Exit [common/maps04.cbl:L146]. ANOMALY A-16: u_bin is NOT
         # written. Returning here leaves whatever the caller put there, and that is the
         # entire rejection signal.
         return
@@ -435,7 +435,7 @@ def maps04(ws: Maps03Ws) -> None:
     test_date9 = _zoned_decimal_value(test_date)
 
     if test_date_yyyymmdd(test_date9) != 0:
-        # Class 3 -> Main-Exit [common/maps04.cbl:L154]. ANOMALY #16 again, on the
+        # Class 3 -> Main-Exit [common/maps04.cbl:L154]. ANOMALY A-16 again, on the
         # second and independent reject path: u_bin is NOT written here either.
         # "31/02/2025" reaches exactly this point.
         return
@@ -482,7 +482,7 @@ def ws_unpack(ws: Maps03Ws) -> None:
 def maps03(ws: Maps03Ws) -> None:
     """Reproduce the wrapper section named `maps03`, carried by gl070 and gl051.
 
-    ANOMALY #22: the section is named after the interface copybook while its exit label
+    ANOMALY A-22: the section is named after the interface copybook while its exit label
     is `maps04-exit`, named after the program it calls.
     """
     maps04(ws)
@@ -732,7 +732,7 @@ def zz050_test_date(
 ) -> None:
     """Reproduce the `zz050-test-date` paragraph [general/gl051.cbl:L1200-L1203].
 
-    ⭐ THE CALLER PRE-ZERO.
+    THE CALLER PRE-ZERO.
     """
     maps03_ws.u_date = _alphanumeric_move(ws.ws_date, DATE_TEXT_LENGTH)
 
@@ -818,7 +818,7 @@ def zz050_validate_date_gl051(
             overwritten.
         maps03_ws: the shared linkage record, written by `zz050_test_date`.
         date_form: `System-Record.Date-Form` on entry.
-        wrapper: `maps03` for gl051 - the anomaly #22 spelling. Required and never
+        wrapper: `maps03` for gl051 - the anomaly A-22 spelling. Required and never
             defaulted.
 
     Returns:

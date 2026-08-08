@@ -7,10 +7,9 @@
 # artifacts -- `pyproject.toml` and `requirements.txt` -- with no wildcard, and
 # section 0.5.1 states the dependency inventory as ONE table covering all five
 # named packages: mysql-connector-python, SQLAlchemy, pytest, pytest-cov and
-# PyYAML. This file was previously split into three (`requirements.txt`,
-# `requirements-harness.txt`, `requirements-dev.txt`), which added two manifests
-# the plan does not name. The three are consolidated here, byte-for-byte on every
-# pin and every hash, and the two extra files are removed. The SECTIONS below
+# PyYAML. Splitting it into three (`requirements.txt`, `requirements-harness.txt`,
+# `requirements-dev.txt`) would add two manifests the plan does not name, so the whole
+# inventory is consolidated here, byte-for-byte on every pin and every hash. The SECTIONS below
 # preserve what the split expressed -- which set a distribution belongs to -- as
 # structure inside one file rather than as three files, so `pyproject.toml`'s
 # optional-dependency groups still have a one-to-one reading here.

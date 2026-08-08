@@ -863,9 +863,9 @@ def _initialize_oi_header(*, with_filler: bool) -> OiHeader:
     :L1123, :L1277] and the plain form at one [:L1384] - the widest such split in the
     checkout.
     """
-    # NO RECORD HERE. `initialize` displays nothing, and the equivalence argument the
-    # record used to carry is an argument about the SOURCE, which belongs in this
-    # docstring - where it is - and not in a line emitted once per record initialised.
+    # NO RECORD HERE. `initialize` displays nothing, and the equivalence argument is
+    # about the SOURCE, so it belongs in this docstring - where it is - rather than in
+    # a line emitted once per record initialised.
     return OiHeader(
         oi_key=OiKey(
             oi_customer=OiCustomer(oi_nos=" " * 6, oi_check=0),
@@ -1323,12 +1323,12 @@ class _BridgeWorkingStorage:
     #: certificate, no key, no verification mode - so the compiled system's
     #: transport is plaintext to whatever host the row names.
     #:
-    #: ⭐ ``None`` MEANS "USE THE ONE INSTALLED POLICY", which
+    #: ``None`` MEANS "USE THE ONE INSTALLED POLICY", which
     #: ``connection.mysql_1000_open`` resolves from
-    #: ``connection.connection_policy()``. An earlier revision defaulted this field
-    #: to ``TransportSecurity(isolated_oracle=True)`` so that the container-hosted
-    #: comparison database could be reached; that made THIS handler the only one of
-    #: the twenty that declared a policy of its own, which is precisely the
+    #: ``connection.connection_policy()``. Defaulting this field to
+    #: ``TransportSecurity(isolated_oracle=True)`` so that the container-hosted
+    #: comparison database could be reached would make THIS handler the only one of
+    #: the twenty declaring a policy of its own, which is precisely the
     #: inconsistency the single boundary exists to remove - the same run would then
     #: have declared different things depending on which table it touched. The
     #: declaration now belongs to the deployment, is made once at the entry point,
@@ -1419,7 +1419,7 @@ def _write_status(
     """``move <n> to fs-reply`` / ``move <n> to WE-Error`` - and return the pair.
 
     ``We-Error`` is ``pic 999`` and ``Fs-Reply`` is ``pic 99``
-    [copybooks/wsfnctn.cob:L23-L38], so both are unsigned display integers.
+    [copybooks/wsfnctn.cob:L22-L41], so both are unsigned display integers.
     """
     reply = _as_fs_reply(fs_reply)
     file_access.fs_reply = int(reply)
@@ -1460,7 +1460,7 @@ def _write_sql_fields(
 ) -> None:
     """Write the three diagnostic fields, each truncated into its declared width.
 
-    ``SQL-Err``, ``SQL-Msg`` and ``SQL-State`` [copybooks/wsfnctn.cob:L44-L56]; the
+    ``SQL-Err``, ``SQL-Msg`` and ``SQL-State`` [copybooks/wsfnctn.cob:L44-L55]; the
     widths come from ``dal/status.py`` so every handler module truncates identically.
     Messages are passed through :func:`sanitise_for_log` first, because a driver message
     can quote the statement and a statement can quote a value.
@@ -2047,13 +2047,13 @@ def ba020_process_open(context: _BridgeContext) -> tuple[int, int]:
         set     Cursor-Not-Active to true                 [:L467]
         go      to ba999-end.                             [:L468]
 
-    ⭐ THE OPEN MODE IS NEVER CONSULTED. ``Access-Type`` distinguishes input, i-o, output
+    THE OPEN MODE IS NEVER CONSULTED. ``Access-Type`` distinguishes input, i-o, output
     and extend for the flat-file handler, and this paragraph reads none of them: a
     connection is a connection. That is the mechanism behind anomaly N-noopenoutput - an
     Open+Output through the DAL path is a plain connect and DELETES NOTHING, unlike
     ``acas008``, which coerces the function to delete-all [common/acas008.cbl:L313-L319].
 
-    ⭐ ONLY THE PRIMARY CURSOR IS FLAGGED INACTIVE at [:L467]. ``Most-Cursor-Set-2`` and
+    ONLY THE PRIMARY CURSOR IS FLAGGED INACTIVE at [:L467]. ``Most-Cursor-Set-2`` and
     ``Most-Cursor-Set-3`` keep whatever they held across the CALL, so an open following a
     sorted read leaves that sorted cursor believing it is still active - the same
     one-of-three asymmetry as anomaly N-ba998-frees-primary-only, at the other end of the
@@ -2066,9 +2066,9 @@ def ba020_process_open(context: _BridgeContext) -> tuple[int, int]:
     ]
 
     rdb = context.file_access.rdb_data
-    #  THE ENDPOINT IS CLASSIFIED, NOT NAMED. This record used to carry the schema,
-    #  the host, the port and the socket path. Withholding the user and the password was
-    #  not enough: the four that remained are the deployment's own identity, they differ
+    #  THE ENDPOINT IS CLASSIFIED, NOT NAMED. The frozen record names the schema, the
+    #  host, the port and the socket path, and withholding only the user and the
+    #  password is not enough: those four are the deployment's own identity, they differ
     #  between every environment - so two runs of the same scenario could not produce the
     #  same line - and they are exactly what an attacker reading a log wants (CWE-532).
     #  `transport_category` answers the one question a record has to answer about a
@@ -2171,7 +2171,7 @@ def ba020_process_open(context: _BridgeContext) -> tuple[int, int]:
 def ba030_process_close(context: _BridgeContext) -> tuple[int, int]:
     """``ba030-Process-Close.`` - [common/otm3MT.cbl:L474-L486]. Free, then disconnect.
 
-    ⭐ THE ``perform`` AT [:L476] IS NOT A ``go to``, AND THE DIFFERENCE IS LOAD-BEARING.
+    THE ``perform`` AT [:L476] IS NOT A ``go to``, AND THE DIFFERENCE IS LOAD-BEARING.
     """
     # `if Cursor-Active perform ba998-Free.` [:L475-L476]. PERFORM, so the fall-through
     # into `ba999-end` does NOT happen here.
@@ -2202,7 +2202,7 @@ def _capture_driver_error(context: _BridgeContext, result: _CommandResult) -> No
 def ba040_process_read_next(context: _BridgeContext) -> tuple[int, int]:
     """``ba040-Process-Read-Next.`` - [common/otm3MT.cbl:L488-L562]. SELECT, then fetch.
 
-    ⭐ ``K`` AND ``L`` ARE COMPUTED AND NEVER USED. The predicate embeds a LITERAL low
+    ``K`` AND ``L`` ARE COMPUTED AND NEVER USED. The predicate embeds a LITERAL low
     key, not a slice of the record, so the offset and length fetched at [:L495-L496] are
     dead here.
     """
@@ -2268,7 +2268,7 @@ def _fetch_one_row(
 ) -> tuple[int, int]:
     """The body shared, statement for statement, by ``ba041``, ``ba141`` and ``ba151``.
 
-    ⭐ THREE END-OF-FILE PATHS, THREE DIFFERENT ``WS-File-Key`` VALUES, ONE STATUS PAIR.
+    THREE END-OF-FILE PATHS, THREE DIFFERENT ``WS-File-Key`` VALUES, ONE STATUS PAIR.
     ``"EOF"`` is the real one; ``"EOF2"`` is guarded by ``*> no data but should not
     happen here`` [:L615]; ``"EOF3"`` by ``*> should not happen as tested prior``
     [:L635].
@@ -2342,7 +2342,7 @@ def ba041_reread(context: _BridgeContext) -> tuple[int, int]:
 def ba050_process_read_indexed(context: _BridgeContext) -> tuple[int, int]:
     """``ba050-Process-Read-Indexed.`` - [common/otm3MT.cbl:L646-L755]. One row, by key.
 
-    ⭐⭐ ANOMALY N-read-indexed-23: THE KEY-NOT-FOUND STATUS IS ``23``, NOT ``21``, AND
+    ANOMALY N-read-indexed-23: THE KEY-NOT-FOUND STATUS IS ``23``, NOT ``21``, AND
     THE TWO BRIDGES DISAGREE. This one writes ``move 23 to fs-Reply`` with the comment
     ``*> could also be 21 or 14``.
     """
@@ -2414,7 +2414,7 @@ def ba050_process_read_indexed(context: _BridgeContext) -> tuple[int, int]:
 def ba060_process_start(context: _BridgeContext) -> tuple[int, int]:
     """``ba060-Process-Start.`` - [common/otm3MT.cbl:L756-L861]. Position, do not fetch.
 
-    ⭐⭐ ANOMALY N-start-997-vs-998: THE HANDLER AND THE BRIDGE DISAGREE ON THE SAME
+    ANOMALY N-start-997-vs-998: THE HANDLER AND THE BRIDGE DISAGREE ON THE SAME
     GUARD. ``if access-type < 5 or > 8`` appears in both, and the handler moves 998
     [common/acas019.cbl:L437-L448] while the bridge moves 997 [:L762].
     """
@@ -2494,7 +2494,7 @@ def ba060_process_start(context: _BridgeContext) -> tuple[int, int]:
 def ba070_process_write(context: _BridgeContext) -> tuple[int, int]:
     """``ba070-Process-Write.`` - [common/otm3MT.cbl:L862-L889]. Load, insert, classify.
 
-    ⭐ ``WE-Error`` IS NEVER SET ON THE FAILURE PATH. It was zeroed at [:L866] and the
+    ``WE-Error`` IS NEVER SET ON THE FAILURE PATH. It was zeroed at [:L866] and the
     failure branch moves 99 into ``fs-reply`` alone, so a failed insert reports ``(99,
     0)`` - a hard error with no error code.
     """
@@ -2573,7 +2573,7 @@ def ba080_process_delete(context: _BridgeContext) -> tuple[int, int]:
 def ba090_process_rewrite(context: _BridgeContext) -> tuple[int, int]:
     """``ba090-Process-Rewrite.`` - [common/otm3MT.cbl:L944-L988]. Load, update, classify.
 
-    ⭐ ANOMALY N-punctuation, on the procedural side. [:L946] and [:L947] are indented
+    ANOMALY N-punctuation, on the procedural side. [:L946] and [:L947] are indented
     FOUR spaces where every neighbouring statement uses five, so the two lines sit one
     column left of the block they belong to. Cosmetic, recorded, not normalised.
     """
@@ -2627,7 +2627,7 @@ def _sorted_read_next(
 ) -> tuple[int, int]:
     """The body ``ba140`` and ``ba150`` share, statement for statement.
 
-    ⭐⭐ ANOMALY N-sorted-order-is-a-syntax-error. THREE INDEPENDENT DEFECTS COMPOUND
+    ANOMALY N-sorted-order-is-a-syntax-error. THREE INDEPENDENT DEFECTS COMPOUND
     HERE.
     """
     state = context.slot_state(slot)
@@ -2752,23 +2752,23 @@ def ba100_bad_function(context: _BridgeContext) -> tuple[int, int]:
         move     99 to Fs-Reply.                                 [:L1301]
         go       to ba999-end.                                   [:L1302]
 
-    ⭐ THE BRIDGE SAYS 990 AND THE HANDLER SAYS 999 FOR THE SAME CONDITION. ``acas019``'s
+    THE BRIDGE SAYS 990 AND THE HANDLER SAYS 999 FOR THE SAME CONDITION. ``acas019``'s
     ``aa100-Bad-Function`` moves 999 [common/acas019.cbl:L528] - and carries the identical
     "Houston" comment. So an unrecognised function code reports ``(99, 999)`` on the
     flat-file path and ``(99, 990)`` on the DAL path. ``dal/status.py`` publishes 990 as
     ``UNKNOWN_UNEXPECTED`` and 999 as ``NOT_USED``; each side keeps its own.
 
-    ⭐ 992 - ``INVALID_FUNCTION`` - is what the vocabulary reserves for exactly this, and
+    992 - ``INVALID_FUNCTION`` - is what the vocabulary reserves for exactly this, and
     NEITHER program uses it. Recorded; not substituted.
 
-    ⭐ ``ba100`` IS REACHED ONE WAY ONLY here, from ``when other``. The handler reaches its
+    ``ba100`` IS REACHED ONE WAY ONLY here, from ``when other``. The handler reaches its
     equivalent TWO ways - ``when other`` and an unconditional fall-through at
     [common/acas019.cbl:L305] - see :func:`aa100_bad_function`.
 
     Transfers: ``go to ba999-end``, Class 3.
     """
     # ONE ERROR, through the shared reporter. `File-Function` is an operation code
-    # from the frozen vocabulary [copybooks/wsfnctn.cob:L88-L118], not business data, so
+    # from the frozen vocabulary [copybooks/wsfnctn.cob:L88-L116], not business data, so
     # it stays - the reporter renders it as its own field.
     log_handler_failure(
         _LOG,
@@ -2788,7 +2788,7 @@ def ba100_bad_function(context: _BridgeContext) -> tuple[int, int]:
 def ba998_free(context: _BridgeContext) -> None:
     """``ba998-Free.`` - [common/otm3MT.cbl:L1309-L1319]. Release the result set.
 
-    ⭐⭐ ANOMALY N-ba998-frees-primary-only. THE PARAGRAPH ALWAYS CLEARS ``Most-Cursor-
+    ANOMALY N-ba998-frees-primary-only. THE PARAGRAPH ALWAYS CLEARS ``Most-Cursor-
     Set``, THE PRIMARY FLAG - never ``-2``, never ``-3``.
     """
     context.file_access.logging_data.ws_no_paragraph = BRIDGE_PARAGRAPH_NUMBERS[
@@ -2802,7 +2802,7 @@ def ba998_free(context: _BridgeContext) -> None:
 def ba999_end(context: _BridgeContext) -> tuple[int, int]:
     """``ba999-end.`` - [common/otm3MT.cbl:L1321-L1326], then ``ba999-exit``.
 
-    ⭐ THE BRIDGE DOES LOG, AND THE HANDLER DOES NOT - on the DAL path. ``acas019``'s
+    THE BRIDGE DOES LOG, AND THE HANDLER DOES NOT - on the DAL path. ``acas019``'s
     ``Ca-Process-Logs`` carries its comment on the label line itself: ``*> Not called on
     DAL access as it does it already`` [common/acas019.cbl:L623]. Anomaly N-nolog-on-
     dal.
@@ -2825,7 +2825,7 @@ def ba999_exit(context: _BridgeContext) -> tuple[int, int]:
 def bb200_insert(context: _BridgeContext) -> _CommandResult:
     """``bb200-Insert Section.`` - [common/otm3MT.cbl:L1418-L1798].
 
-    ⭐ EVERY COLUMN IS NAMED ON EVERY INSERT - never a subset. Combined with ``initialize
+    EVERY COLUMN IS NAMED ON EVERY INSERT - never a subset. Combined with ``initialize
     TD-SAITM3-REC`` at the head of the load, that is what lets every column of this
     table be declared ``NOT NULL``.
     """
@@ -2873,13 +2873,13 @@ def otm3mt_ca_process_logs(context: _BridgeContext) -> None:
     ``WS-Log-Where`` is a SQL predicate carrying that key as a literal; both are CWE-532 in
     a log and neither is needed to act on a failure.
 
-    ⭐ THE HANDLER HAS A PARAGRAPH OF THE SAME NAME [common/acas019.cbl:L623] which is NOT
+    THE HANDLER HAS A PARAGRAPH OF THE SAME NAME [common/acas019.cbl:L623] which is NOT
     called on this path, per the comment on its own label line. So one CALL produces one
     log record, from here. Anomaly N-nolog-on-dal.
     """
     logging_data = context.file_access.logging_data
     #  `Log-File-Rec-Written` IS NOW ADVANCED, NOT PINNED. Assigning 1 was wrong
-    #  twice over: the field is `pic 9(6)` [copybooks/Test-Data-Flags.cob:L20], so it
+    #  twice over: the field is `pic 9(6)` [copybooks/Test-Data-Flags.cob:L18], so it
     #  counts to 999999 and wraps, and it lives in `ACAS-DAL-Common-data`, which the
     #  CALLER owns and carries across calls - so pinning it to 1 discarded every count
     #  the rest of the cycle had accumulated. The adapter advances it by one, modulo one
@@ -2987,7 +2987,7 @@ def aa010_main(context: _HandlerContext) -> tuple[int, int]:
     """``aa010-main.`` - [common/acas019.cbl:L236-L305]. Log identity, guard, branch,
     dispatch.
 
-    ⭐ ANOMALY N-logsystem5-meaning: the legend on [:L240] says ``5=Invoice``, matching
+    ANOMALY N-logsystem5-meaning: the legend on [:L240] says ``5=Invoice``, matching
     ``acas016:L248``, while ``acas013:L298`` and ``acas015:L291`` both say ``5=Stock``
     for the same code. Four handlers, two legends, one vocabulary.
     """
@@ -3041,7 +3041,7 @@ def _aa010_key_guard(context: _HandlerContext) -> tuple[int, int] | None:
     """``evaluate File-Function`` at [common/acas019.cbl:L245-L259] - the key guard,
     VERBATIM::
 
-    ⭐ ANOMALY N-996-comment: the comment beside the 996 is a VERBATIM COPY of the one
+    ANOMALY N-996-comment: the comment beside the 996 is a VERBATIM COPY of the one
     beside the 998, ending in the wrong number's worth of alignment - ``*> file seeks
     key type out of range 996``.
 
@@ -3059,7 +3059,7 @@ def _aa010_key_guard(context: _HandlerContext) -> tuple[int, int] | None:
             # ONE ERROR, through the shared reporter: the guard returns 99 to the
             # caller, so it is a failure and WARNING was below the level an operator
             # watches. `File-Key-No` and `File-Function` are operation codes from the
-            # frozen vocabulary [copybooks/wsfnctn.cob:L88-L118], not business data.
+            # frozen vocabulary [copybooks/wsfnctn.cob:L88-L116], not business data.
             log_handler_failure(
                 _LOG,
                 program=HANDLER_PROGRAM_ID,
@@ -3187,7 +3187,7 @@ def aa040_process_read_next(context: _HandlerContext) -> tuple[int, int]:
     """``aa040-Process-Read-Next.`` - [common/acas019.cbl:L359-L388]. Sequential, with a
     STOP.
 
-    ⭐⭐ ANOMALY N-stop: ``stop "Cobol File EOF"`` at [:L371] HALTS THE PROGRAM AND WAITS
+    ANOMALY N-stop: ``stop "Cobol File EOF"`` at [:L371] HALTS THE PROGRAM AND WAITS
     FOR THE OPERATOR, on the second read past end of file. Its own comment says ``*> for
     testing`` and it was never removed.
     """
@@ -3245,7 +3245,7 @@ def aa041_move_inv_data(context: _HandlerContext) -> None:
     """``aa041-Move-Inv-Data.`` - [common/acas019.cbl:L390-L393]. The logging key,
     VERBATIM::
 
-    ⭐⭐ ANOMALY N-aa041-move-inv-data: THIS PARAGRAPH NAME EXISTS IN NO OTHER HANDLER.
+    ANOMALY N-aa041-move-inv-data: THIS PARAGRAPH NAME EXISTS IN NO OTHER HANDLER.
     """
     context.ws_temp_ed.ws_temp_ed_2 = int(context.file_record.oi3_key.oi3_invoice)
     context.ws_temp_ed.ws_temp_ed_1 = _cobol_move_alphanumeric(
@@ -3381,7 +3381,7 @@ def aa060_process_start(context: _HandlerContext) -> tuple[int, int]:
 def aa070_process_write(context: _HandlerContext) -> tuple[int, int]:
     """``aa070-Process-Write.`` - [common/acas019.cbl:L490-L498].
 
-    ⭐ 22 IS DUPLICATE-KEY, and it is the ONLY status this paragraph can report besides
+    22 IS DUPLICATE-KEY, and it is the ONLY status this paragraph can report besides
     zero: an ISAM ``write``'s ``invalid key`` on a keyed file means the key already
     exists.
     """
@@ -3404,7 +3404,7 @@ def aa070_process_write(context: _HandlerContext) -> tuple[int, int]:
 def aa080_process_delete(context: _HandlerContext) -> tuple[int, int]:
     """``aa080-Process-Delete.`` - [common/acas019.cbl:L500-L509].
 
-    ⭐ 21 HERE AND 22 IN ``aa070``, for the mirror-image condition. A write fails because
+    21 HERE AND 22 IN ``aa070``, for the mirror-image condition. A write fails because
     the key EXISTS and reports duplicate-key; a delete fails because the key does NOT
     exist and reports invalid-key-on-start. Both leave ``WE-Error`` at zero.
     """
@@ -3425,7 +3425,7 @@ def aa080_process_delete(context: _HandlerContext) -> tuple[int, int]:
 def aa090_process_rewrite(context: _HandlerContext) -> tuple[int, int]:
     """``aa090-Process-Rewrite.`` - [common/acas019.cbl:L511-L521].
 
-    ⭐ ANOMALY N-punctuation, THE HANDLER'S INSTANCE: ``end-rewrite`` at [:L520] has NO
+    ANOMALY N-punctuation, THE HANDLER'S INSTANCE: ``end-rewrite`` at [:L520] has NO
     TERMINATING PERIOD, where ``aa070``'s ``end-write.`` [:L496] and ``aa080``'s ``end-
     delete.`` [:L507] both do.
     """
@@ -3447,7 +3447,7 @@ def aa090_process_rewrite(context: _HandlerContext) -> tuple[int, int]:
 def aa100_bad_function(context: _HandlerContext) -> tuple[int, int]:
     """``aa100-Bad-Function.`` - [common/acas019.cbl:L524-L529].
 
-    ⭐ 999 HERE, 990 IN THE BRIDGE for the identical condition [common/otm3MT.cbl:L1300]
+    999 HERE, 990 IN THE BRIDGE for the identical condition [common/otm3MT.cbl:L1300]
     - and both programs carry the SAME "Houston" comment, so the divergence is a copy
     that was edited on one side only.
     """
@@ -3471,7 +3471,7 @@ def aa100_bad_function(context: _HandlerContext) -> tuple[int, int]:
 def aa999_main_exit(context: _HandlerContext) -> tuple[int, int]:
     """``aa999-main-exit.`` - [common/acas019.cbl:L531-L534].
 
-    ⭐ THIS IS THE FLAT-FILE PATH'S LOGGING POINT, and it is NOT reached on the DAL path
+    THIS IS THE FLAT-FILE PATH'S LOGGING POINT, and it is NOT reached on the DAL path
     - the RDB branch leaves for ``AA-Main-Exit`` at [:L265], which is BELOW this
     paragraph. Anomaly N-nolog-on-dal.
     """
@@ -3499,7 +3499,7 @@ def aa_exit(context: _HandlerContext) -> tuple[int, int]:
 def ba_process_rdbms(context: _HandlerContext) -> None:
     """``ba-Process-RDBMS section.`` - [common/acas019.cbl:L543-L549]. A bare section head.
 
-    ⭐ THE SECTION IS ENTERED AT ``ba010-Test-WS-Rec-Size``, NOT AT ``ba012``, AND THE
+    THE SECTION IS ENTERED AT ``ba010-Test-WS-Rec-Size``, NOT AT ``ba012``, AND THE
     DIFFERENCE IS THE LOG FILE NUMBER.
     """
     ba010_test_ws_rec_size(context)
@@ -3513,7 +3513,7 @@ def ba_process_rdbms(context: _HandlerContext) -> None:
 def ba010_test_ws_rec_size(context: _HandlerContext) -> None:
     """``ba010-Test-WS-Rec-Size.`` - [common/acas019.cbl:L551-L557]. ONE statement.
 
-    ⭐ THE PARAGRAPH IS NAMED FOR WORK IT DOES NOT DO. Its three comment lines describe
+    THE PARAGRAPH IS NAMED FOR WORK IT DOES NOT DO. Its three comment lines describe
     the record-size test, and the test itself is in ``ba012-Test-WS-Rec-Size-2`` below.
     All this paragraph does is renumber the log file.
     """
@@ -3578,7 +3578,7 @@ def ba012_test_ws_rec_size_2(context: _HandlerContext) -> bool:
 def ba015_test_ends(context: _HandlerContext) -> None:
     """``ba015-Test-Ends.`` - [common/acas019.cbl:L601-L617]. The bridge CALL, inline.
 
-    ⭐ ANOMALY N-nobadal: THERE IS NO ``ba020-*`` PARAGRAPH IN THIS HANDLER. The bridge
+    ANOMALY N-nobadal: THERE IS NO ``ba020-*`` PARAGRAPH IN THIS HANDLER. The bridge
     CALL is inline here, which is the ``acas008``/``acas015``/``acas016`` shape;
     ``acas005``/``acas006``/``acas007``/``acas012`` route it through a separate
     paragraph. Reproduced by NOT creating a ``ba020_process_dal`` function.
@@ -3594,7 +3594,7 @@ def ba_rdbms_exit(context: _HandlerContext) -> None:
     ``ba015-Test-Ends`` falls into it. ``exit section`` returns to the ``perform
     ba-Process-RDBMS`` at [:L264], after which ``aa010-main`` transfers to ``AA-Main-Exit``.
 
-    ⭐ IT DOES NOT LOG. ``Ca-Process-Logs`` is BELOW it at [:L623] and is reached only by an
+    IT DOES NOT LOG. ``Ca-Process-Logs`` is BELOW it at [:L623] and is reached only by an
     explicit ``perform`` - which nothing on this path issues. Anomaly N-nolog-on-dal: the
     bridge's ``ba999-end`` already logged.
 
@@ -3610,14 +3610,14 @@ def ba_rdbms_exit(context: _HandlerContext) -> None:
 def acas019_ca_process_logs(context: _HandlerContext) -> None:
     """``Ca-Process-Logs.`` in ``acas019`` - [common/acas019.cbl:L623-L627], VERBATIM::
 
-    ⭐⭐ ANOMALY N-nolog-on-dal, STATED BY THE MAINTAINER ON THE LABEL LINE ITSELF. The
+    ANOMALY N-nolog-on-dal, STATED BY THE MAINTAINER ON THE LABEL LINE ITSELF. The
     comment is not above the paragraph, it is ON it: ``*> Not called on DAL access as it
     does it already``. So this paragraph runs on the FLAT-FILE path only, from
     ``aa999-main-exit`` [:L533] and from ``aa030``'s second, deliberate call [:L356]. On the
     DAL path the bridge's ``ba999-end`` logs instead [common/otm3MT.cbl:L1323-L1324], which
     is why one CALL yields exactly one record.
 
-    ⭐ THE NAME IS QUALIFIED BY PROGRAM only because ``otm3MT`` declares a paragraph of the
+    THE NAME IS QUALIFIED BY PROGRAM only because ``otm3MT`` declares a paragraph of the
     same name - see :func:`otm3mt_ca_process_logs` for the reasoning. Two names in each
     program are qualified; every other paragraph keeps its own.
 

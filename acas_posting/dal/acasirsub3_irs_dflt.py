@@ -41,19 +41,13 @@ because Agent Action Plan section 0.3.1 fixes the boundary at the handler:
 
 HOW TO READ A LOCATOR IN THIS FILE
 ==================================
-Two forms appear, and the rule relating them is exact so that the record is
-machine-checkable as rule R-5 requires:
-
-* ``[<path>:L<n>]`` or ``[<path>:L<n>-L<m>]`` names the file outright.
-* ``[:L<n>]`` continues **the file named by the nearest preceding locator of the
-  first form**, reading the file top to bottom. Nothing else resolves it - not
-  the enclosing function, not the section heading.
-
-Every one of the 579 locators here was verified against that single rule: each
-resolves to a real file and to a line inside it, and no locator token is ever
-split across two lines, so a reader and a script arrive at the same answer.
-Where an incidental citation of some other file would have hijacked the
-continuation, the following locator is written out in full instead.
+``[<path>:L<n>]`` and ``[<path>:L<n>-L<m>]`` name the file outright. ``[:L<n>]``
+continues **the file named by the nearest preceding locator of the first form**,
+reading top to bottom - not the enclosing function and not the section heading.
+Every locator here resolves to a real file and a real line under that one rule,
+none is split across a line break, and where an incidental citation of another
+file would have hijacked the continuation the next locator is written out in
+full.
 
 PROVENANCE, AND CORRECTIONS TO THE CITED SPANS
 ==============================================
@@ -77,125 +71,91 @@ against second-hand notes is not misled:
 
 FIELD-TO-DICTIONARY MAPPING (RULE R-5)
 ======================================
-Agent Action Plan section 0.8.1 makes the ordering a directive: "Data
-dictionary first. ... every Python field definition cites its entry. This
-ordering is a directive, not a preference - it is what prevents fields being
-transcribed by eye." Every field here is therefore resolved through
-:mod:`acas_posting.dictionary.loader` at import time, never transcribed.
-
-The mapping is one-to-many in one direction and zero-to-one in the other:
-
-===================  ==========================  ==================  =========
-Dictionary key       Copybook field              Host variable       Column
-===================  ==========================  ==================  =========
-``...DEF-REC-KEY``   **NONE - bridge only**      ``9(03)`` COMP      tinyint(2)
-``...DEF-ACS``       ``Def-Acs pic 9(5)``        ``9(05)`` COMP      decimal(5,0)
-``...DEF-CODES``     ``Def-Codes pic xx``        ``X(2)``            char(2)
-``...DEF-VAT``       ``Def-Vat pic x``           ``X(1)``            char(1)
-===================  ==========================  ==================  =========
+Agent Action Plan section 0.8.1 makes the ordering a directive: "Data dictionary
+first. ... every Python field definition cites its entry." Every field here is
+resolved through :mod:`acas_posting.dictionary.loader` at import time, never
+transcribed, and the four-row copybook/host-variable/column table is in
+``docs/migration/traceability.md`` under ``IRSDFLT-REC``. Four local facts about
+that mapping do not live there:
 
 * Three copybook fields each map to one column but are **subscripted 1..33**
   [copybooks/irswsdflt.cob:L10-L12], which is what makes one record 32 rows.
-* ``DEF-REC-KEY`` maps to **no copybook field whatsoever**. It is the
-  ``OCCURS`` subscript materialised as a column, derived by the bridge at
-  [common/irsdfltMT.cbl:L637-L639] on write and [:L689-L691] on rewrite. This
-  is the **second** instance in this package of the bridge-only-column finding
-  that Agent Action Plan section 0.1.1 raises; the plan names only the first
-  (``POST4-DAY`` / ``POST4-MONTH`` / ``POST4-YEAR`` in ``irspostingMT``). It is
-  also the single strongest local argument for the plan's rule, quoted in
-  section 0.8.2: "The maintainer's one-way COBOL-to-MySQL bridge defines the
-  authoritative record-layout <-> table mapping - it is the data dictionary for
-  this migration." A migration driven from the copybook alone would omit this
-  table's primary key.
-* ``records/irs_dflt.py`` states the division of labour explicitly and defers
-  to this module: "the ``acasirsub3`` handler module owns the subscript-to-key
-  mapping in both directions". :func:`_load_host_variables` and
-  :func:`_unload_row_into` are the two directions.
+* ``DEF-REC-KEY`` maps to **no copybook field whatsoever**. It is the ``OCCURS``
+  subscript materialised as a column, derived by the bridge at
+  [common/irsdfltMT.cbl:L637-L639] on write and [:L689-L691] on rewrite - the
+  **second** instance in this package of the bridge-only-column finding Agent
+  Action Plan section 0.1.1 raises, the plan naming only the first (``POST4-DAY``
+  / ``POST4-MONTH`` / ``POST4-YEAR`` in ``irspostingMT``). It is also the
+  strongest local argument for the plan's rule that the bridge is the
+  authoritative mapping: a migration driven from the copybook alone would omit
+  this table's PRIMARY KEY.
+* ``records/irs_dflt.py`` defers the subscript-to-key mapping to this module in
+  both directions; :func:`_load_host_variables` and :func:`_unload_row_into` are
+  those two directions.
 * This table has **no monetary column and no signed field at all**, so none of
-  the signedness drift catalogued in Agent Action Plan section 0.6.2 applies
-  here. The one drift present is a USAGE change: the copybook declares
-  ``DISPLAY``, the host variable ``COMP``, the column ``DECIMAL``. It is read
-  from ``loader.drift_for`` rather than asserted, and it is the reason
-  ``DEF-ACS`` has **two** correct Python types rather than one, each on its own
-  side of a boundary. Rule R-2 fixes the transport type from the column, so the
-  value bound into a statement and read back out of one is a scale-zero
-  :class:`~decimal.Decimal` - ``decimal(5,0) unsigned``
-  [mysql/ACASDB.sql:L191] is a ``decimal`` column, not an integer type, despite
-  holding an account number. The generated dictionary gives the *copybook field*
-  the INT storage class, because ``pic 9(5)`` is unsigned with no ``V``, and
-  ``records/irs_dflt.py`` declares ``def_acs`` an ``int`` accordingly. This
+  section 0.6.2's signedness drift applies. The one drift is a USAGE change -
+  copybook ``DISPLAY``, host variable ``COMP``, column ``DECIMAL``, read from
+  ``loader.drift_for`` rather than asserted - and it is why ``DEF-ACS`` has TWO
+  correct Python types, one on each side of a boundary. Rule R-2 fixes the
+  transport type from the column, so what is bound and fetched is a scale-zero
+  :class:`~decimal.Decimal` (``decimal(5,0) unsigned`` [mysql/ACASDB.sql:L191] is
+  a ``decimal`` column despite holding an account number), while the dictionary
+  gives the COPYBOOK FIELD the INT storage class because ``pic 9(5)`` is unsigned
+  with no ``V``, and ``records/irs_dflt.py`` declares ``def_acs`` an ``int``. This
   module converts at the boundary in both directions rather than overruling
-  either: :func:`_load_host_variables` widens the truncated integer to
-  ``Decimal`` and :func:`_unload_row_into` narrows the fetched ``Decimal`` back.
-  Both routes are exact, because every layer agrees on scale zero - so the
-  stored row is identical either way and nothing passes through a binary float.
+  either, and both routes are exact because every layer agrees on scale zero - so
+  the stored row is identical either way and nothing passes through a binary
+  float.
 
 THE THIRTY-FOUR ANOMALIES
 =========================
 Rule R-4 is unconditional: "A defect reproduced is correct; a defect fixed is a
-failure." Section 0.7.4 C-4 adds the mechanism - "a comment at each
-reproduction site citing the COBOL locator". Anomalies **A1-A34** are each
-reproduced below with such a comment. The four that dominate the module's
-shape:
-
-* **A1 - a failed write always reports success.** The handler clears the
-  write's status and retries it as a rewrite [common/acasirsub3.cbl:L484-L492];
-  the rewrite then unconditionally clears its error fields after its loop
-  [common/irsdfltMT.cbl:L736-L738]. Neither layer alone would fully hide the
-  error; together they do. This is the module's headline defect and it spans
-  two files, which is why error handling here must be traced across the
-  handler/bridge boundary before concluding what the caller sees.
-* **A2 - 33 declared, 32 handled.** The copybook was widened from 32 to 33
-  *specifically* for the in-scope IRS posting program - "to support temp.
-  default 33 in postings (irs030)" [copybooks/irswsdflt.cob:L7] - and the
-  record length comments corroborate it independently (256 bytes = 32 x 8 at
-  [:L6], 264 = 33 x 8 at [:L7]). Yet both write loops stop at 32
-  [common/irsdfltMT.cbl:L626] [:L678] and the read *rejects* a key above 32
-  [:L575-L583]. Entry 33 can never reach the database and, if present, stops
-  the read. ``irs030``'s 33rd default lives only in memory.
-* **A3 - a fetched key above 32 moves the key VALUE into ``WE-Error``** and
-  does not set ``FS-Reply`` [common/irsdfltMT.cbl:L575-L583], so a row 33
-  reports ``WE-Error = 33`` - a row number masquerading as an error code.
-* **A7 - the post-read status reset is commented out**
-  [common/irsdfltMT.cbl:L613-L614], so a table holding fewer than 32 rows
-  returns end-of-file ``(10, 10)`` even though every available row was loaded
-  correctly.
+failure." Section 0.7.4 C-4 adds the mechanism - "a comment at each reproduction
+site citing the COBOL locator". Anomalies **A1-A34** are each reproduced with
+such a comment, and each is stated in full there rather than twice; the four that
+dominate the module's shape are A1 (a failed write always reports success,
+because the handler retries it as a rewrite and the rewrite clears its own error
+fields), A2 (33 defaults declared, 32 handled, so ``irs030``'s 33rd lives only in
+memory), A3 (a fetched key above 32 moves the key VALUE into ``WE-Error``, a row
+number masquerading as an error code) and A7 (the post-read status reset is
+commented out, so a short table returns end-of-file even though every row
+loaded). A1 is the one to trace first, because it spans the handler/bridge
+boundary and neither layer alone hides the error.
 
 TWO CORRECTED ANOMALIES - MEASURED, NOT RECEIVED
 ================================================
 Rule R-6 makes compiled behaviour the arbiter and section 0.6.8 requires the
 bridge's conversions be "measured rather than assumed". Applying that to the
-anomaly list itself falsified two of its claims. Both corrections matter,
-because acting on either claim as received would have *introduced* a defect
-into a module whose entire purpose is to introduce none.
+anomaly list itself falsified two of its claims. Both corrections matter, because
+acting on either as received would have *introduced* a defect into a module whose
+purpose is to introduce none.
 
 * **A20 as stated is wrong.** The claim was that this bridge's three-way
   duplicate test (``1062``, ``1022``, SQLSTATE ``23000``
-  [common/irsdfltMT.cbl:L651-L653]) is richer than ``glpostingMT``'s
-  single ``23000`` test. ``glpostingMT.cbl:L818-L820`` in fact carries the
-  identical three-way rule, and a census of all twenty in-scope bridges shows
-  **sixteen of twenty** test all three; only ``dfltMT``, ``finalMT``,
-  ``sys4MT`` and ``slpostingMT`` omit the SQLSTATE test. So this bridge uses
-  the MAJORITY form, not a divergent one. The surviving true statement - that
-  duplicate-detection practice varies by bridge and must be resolved per
-  bridge - is honoured by resolving it here from this bridge's own source. The
-  shared helper :func:`~acas_posting.dal.status.is_duplicate_key_bridge_level`
-  implements exactly this rule, so reusing it introduces no behavioural change;
-  it is used, and the equivalence is asserted at the call site.
+  [common/irsdfltMT.cbl:L651-L653]) is richer than ``glpostingMT``'s single
+  ``23000`` test. ``glpostingMT.cbl:L818-L820`` carries the identical three-way
+  rule, and a census of all twenty in-scope bridges shows **sixteen of twenty**
+  test all three; only ``dfltMT``, ``finalMT``, ``sys4MT`` and ``slpostingMT``
+  omit the SQLSTATE test. This bridge therefore uses the MAJORITY form, not a
+  divergent one. The surviving true statement - that practice varies by bridge
+  and must be resolved per bridge - is honoured by resolving it from this
+  bridge's own source, and
+  :func:`~acas_posting.dal.status.is_duplicate_key_bridge_level` implements
+  exactly that rule, so reusing it changes no behaviour; the equivalence is
+  asserted at the call site.
 * **A21 has no behavioural effect at all.** The two error-number comparisons
-  really are padded differently - a THREE-CHARACTER literal ``"0  "`` at
-  [common/irsdfltMT.cbl:L647] and a FOUR-CHARACTER ``"0   "`` at [:L723], so two
-  trailing spaces against three - and the divergence is *authored* rather than a
-  translator artifact, appearing identically pre-translation at
-  [common/irsdfltMT.scb:L612] and [:L688]. But ``Ws-Mysql-Error-Number`` is
-  ``pic x(5)`` [copybooks/mysql-variables.cpy:L84], so COBOL space-pads both
-  literals to the same five characters and the two tests are the same test.
-  There are also FOUR such sites, not two: [common/irsdfltMT.cbl:L526],
-  [:L589] and [:L647] carry the three-character literal and only [:L723] carries
-  the four-character one. VERIFIED by reading all four lines of the frozen file.
-  Reproducing them as two different
-  predicates would have created a difference the compiled program does not
-  have. One predicate is used, and both source literals are recorded at it.
+  really are padded differently - a THREE-CHARACTER ``"0  "`` at
+  [common/irsdfltMT.cbl:L647] against a FOUR-CHARACTER ``"0   "`` at [:L723] -
+  and the divergence is *authored* rather than a translator artifact, appearing
+  identically pre-translation at [common/irsdfltMT.scb:L612] and [:L688]. But
+  ``Ws-Mysql-Error-Number`` is ``pic x(5)``
+  [copybooks/mysql-variables.cpy:L84], so COBOL pads both literals to five
+  characters and the two tests are the same test. There are also FOUR such
+  sites, not two: [common/irsdfltMT.cbl:L526], [:L589] and [:L647] carry the
+  three-character literal and only [:L723] the four-character one, verified by
+  reading all four lines of the frozen file. Reproducing them as two predicates
+  would have created a difference the compiled program does not have; one
+  predicate is used and both source literals are recorded at it.
 
 A third received claim - that the ``Testing-2`` display gate is unique to the
 rewrite - is also false: it gates the read as well, at
@@ -253,57 +213,50 @@ CONVENTION DRIFT RECORDED FOR TRACEABILITY (A25, A28, A29, A33, A34)
 ====================================================================
 Five of the thirty-four anomalies have no executable reproduction site: they are
 facts about how the frozen source is *written*, not about what it *does*. Rule
-R-4 still requires each to be recorded with its locator, and rule R-5 requires
-the record to be a document rather than something left implicit, so they are
-inventoried here and repeated in the traceability footer.
+R-4 still requires each to be recorded with its locator and rule R-5 requires the
+record to be a document, so they are inventoried here; the traceability footer's
+anomaly table points back at this section rather than restating them.
 
 * **A25 - the FD record is a flat, unstructured byte blob.** ``01 Record-3 pic
-  x(264)`` [common/acasirsub3.cbl:L113], with no copybook and no fields at all,
-  where every other handler in the package declares a structured FD. All
-  structure lives in the linkage record instead; 264 bytes matches 33 x 8
-  exactly [copybooks/irswsdflt.cob:L7]. Nothing here structures it, because the
-  flat path is omitted entire.
+  x(264)`` [common/acasirsub3.cbl:L113], no copybook and no fields, where every
+  other handler declares a structured FD. All structure lives in the linkage
+  record instead; 264 bytes is 33 x 8 exactly [copybooks/irswsdflt.cob:L7].
 * **A28 - ``ba020-Call-DAL`` is the fourth DAL-call naming variant in the
-  package** [common/acasirsub3.cbl:L521-L526]. The others are
+  package** [common/acasirsub3.cbl:L521-L526]; the others are
   ``ba020-Process-DAL`` (``acas005``, ``acas006``, ``acas007``, ``acas012``,
-  ``acasirsub1``), ``ba020-Call`` (``acas013``), and no paragraph at all - an
-  inline ``call`` - in eight handlers. Only three of the handler's five linkage
-  parameters cross to the bridge [common/acasirsub3.cbl:L522-L525], with the
-  family's habitual blank line inside the argument list.
-* **A29 - the handler and the bridge disagree on the record's name.** The
-  handler copies the layout ``replacing Default-Record by
-  WS-IRS-Default-Record`` [common/acasirsub3.cbl:L141] and passes it under that
-  name [:L525]; the bridge copies the same copybook **without any ``replacing``
-  clause** [common/irsdfltMT.cbl:L340], confirmed pre-translation at
+  ``acasirsub1``), ``ba020-Call`` (``acas013``), and an inline ``call`` with no
+  paragraph in eight handlers. Only three of the handler's five linkage
+  parameters cross to the bridge [:L522-L525].
+* **A29 - the handler and the bridge disagree on the record's name.** The handler
+  copies the layout ``replacing Default-Record by WS-IRS-Default-Record``
+  [common/acasirsub3.cbl:L141] and passes it under that name [:L525]; the bridge
+  copies the same copybook with **no ``replacing`` clause**
+  [common/irsdfltMT.cbl:L340], confirmed pre-translation at
   [common/irsdfltMT.scb:L330], and receives it as ``Default-Record``
-  [common/irsdfltMT.cbl:L362]. One storage layout, two names across a ``CALL``
-  boundary - the third such instance in the package, after ``plinvoiceMT`` and
-  ``irsnominalMT``. Python has one object and one name, so the divergence
-  survives only as this note.
-* **A33 - the logging comments contradict themselves.**
-  ``Ca-Process-Logs`` is annotated "Not called on DAL access as it does it
-  already" [common/acasirsub3.cbl:L534] yet is performed explicitly FIVE times
-  inside ``ba015`` [:L436] [:L454] [:L465] [:L487] [:L511], each marked "temp
-  only during testing". Alongside it: a ``Testing-2`` gate
-  [common/irsdfltMT.cbl:L715-L717] where every other hook in both files uses
-  ``Testing-1``; "should test if select worked first??????" with six question
-  marks [common/irsdfltMT.cbl:L536], marking that the cursor is flagged active
-  without verifying the ``SELECT``; and "COULD LET caller module deal with these
-  errors !!!!!!!" with seven exclamation marks [common/acasirsub3.cbl:L383],
-  beside the record-size abort that does exactly the opposite.
+  [common/irsdfltMT.cbl:L362] - one storage layout under two names across a
+  ``CALL``, the third such instance in the package after ``plinvoiceMT`` and
+  ``irsnominalMT``. Python has one object and one name, so it survives only here.
+* **A33 - the logging comments contradict themselves.** ``Ca-Process-Logs`` is
+  annotated "Not called on DAL access as it does it already"
+  [common/acasirsub3.cbl:L534] yet is performed FIVE times inside ``ba015``
+  [:L436] [:L454] [:L465] [:L487] [:L511], each marked "temp only during
+  testing". With it: a ``Testing-2`` gate [common/irsdfltMT.cbl:L715-L717] where
+  every other hook in both files uses ``Testing-1``; "should test if select
+  worked first??????" [:L536], marking that the cursor is flagged active without
+  verifying the ``SELECT``; and "COULD LET caller module deal with these errors
+  !!!!!!!" [common/acasirsub3.cbl:L383], beside a record-size abort that does the
+  opposite.
 * **A34 - the ``IR9xx`` space has gaps in at least three places.** This handler
   owns ``IR917``-``IR919`` only [common/acasirsub3.cbl:L135-L137]; ``IR901`` and
-  ``IR902`` are duplicated verbatim from ``acasirsub1``
-  [common/acasirsub3.cbl:L133-L134]; ``IR903``-``IR916`` are absent here, and
-  ``IR903``-``IR905`` are absent from ``acasirsub1`` too; and ``IR914`` is
-  missing from the IRS facade copybook's own header list
+  ``IR902`` are duplicated verbatim from ``acasirsub1`` [:L133-L134];
+  ``IR903``-``IR916`` are absent here and ``IR903``-``IR905`` from ``acasirsub1``
+  too; and ``IR914`` is missing from the IRS facade copybook's own header list
   [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L11]. With it: the doubly-commented
-  line ``*>*> 27/07/16 16:30`` [common/acasirsub3.cbl:L251]; **both spellings of
-  the translator's name three lines apart in this one file** - ``JCs`` at
-  [common/acasirsub3.cbl:L420] and ``JC`` at [:L423], where
+  ``*>*> 27/07/16 16:30`` [common/acasirsub3.cbl:L251]; both spellings of the
+  translator's name three lines apart - ``JCs`` [:L420] and ``JC`` [:L423], where
   ``acasirsub1.cbl:L748`` writes only ``JCs``; and ``function Length`` then
-  ``function length`` on adjacent lines [common/acasirsub3.cbl:L377] [:L380], a
-  copy-paste this handler shares with ``common/acas029.cbl``.
+  ``function length`` on adjacent lines [:L377] [:L380], a copy-paste shared with
+  ``common/acas029.cbl``.
 
 DELIBERATE OMISSIONS - RECORDED AS OMISSIONS (RULE R-5, SECTION 0.5.3)
 =====================================================================
@@ -314,62 +267,52 @@ DELIBERATE OMISSIONS - RECORDED AS OMISSIONS (RULE R-5, SECTION 0.5.3)
   flat ``READ``/``WRITE`` verbs themselves are not reimplemented. What IS
   reproduced is the flat *dispatch shape*, published as
   :data:`FLAT_PATH_DISPATCH`, because that is where anomaly A11 lives.
-* **The commented-out flat open and close** [common/acasirsub3.cbl:L220-L256]
-  - roughly 38 lines of fully formed dead code, and with them the error codes
-  ``997`` [:L232] and ``1`` [:L226] and the trace numbers ``201`` [:L222] and
-  ``202`` [:L248], all unreachable in this handler. Declared as dead constants
-  so the omission is visible, never executed. Includes the doubly-commented
-  line ``*>*> 27/07/16 16:30`` [:L251] - a comment that was itself commented
-  out.
-* **The flat read's create-if-missing fallback** [:L266-L273] - on a failed
-  open it closes, opens output, initialises, writes and closes. Part of the
-  flat record path, and omitted with it.
+* **The commented-out flat open and close** [common/acasirsub3.cbl:L220-L256] -
+  some 38 lines of fully formed dead code, and with them error codes ``997``
+  [:L232] and ``1`` [:L226] and trace numbers ``201`` [:L222] and ``202``
+  [:L248], all unreachable here. Declared as dead constants so the omission is
+  visible, never executed.
+* **The flat read's create-if-missing fallback** [:L266-L273] - on a failed open
+  it closes, opens output, initialises, writes and closes. Omitted with the flat
+  path.
 * **All presentation.** The ``display``/``accept`` pairs behind ``IR901``,
-  ``IR902``, ``IR917``, ``IR918``, ``IR919`` [:L130-L137] and the bridge's
-  ``SM901`` [common/irsdfltMT.cbl:L313]; the two ``Testing-2`` screen displays
-  [:L516-L518] [:L715-L717]; ``accept ws-env-lines from lines`` [:L365], which
-  reads the terminal height; and the screen section [:L342-L357]. Agent Action
-  Plan section 0.3.4 gives the rule: a diagnostic display with no database
-  effect becomes a log record, an accept that merely pauses for
-  acknowledgement is dropped, and **the control transfer around it is
-  preserved**. The record-size gate's abort is preserved exactly for that
-  reason.
+  ``IR902``, ``IR917``, ``IR918``, ``IR919`` [:L130-L137], the bridge's ``SM901``
+  [common/irsdfltMT.cbl:L313], the two ``Testing-2`` displays [:L516-L518]
+  [:L715-L717], ``accept ws-env-lines from lines`` [:L365] reading the terminal
+  height, and the screen section [:L342-L357]. Section 0.3.4's rule applies: a
+  diagnostic display becomes a log record, a pause-only accept is dropped, and
+  **the control transfer around it is preserved** - which is why the record-size
+  gate's abort survives exactly.
 * **``Ca-Process-Logs``** [common/acasirsub3.cbl:L534-L538] and
-  [common/irsdfltMT.cbl:L908-L912], both of which ``call "fhlogger"``.
-  ``common/fhlogger.cbl`` is explicitly out of scope (section 0.2.2) and rule
-  R-1 forbids calling any COBOL program, so the hook becomes a Python log
-  record at the sites the frozen source reaches it and nothing at the sites it
-  does not - which is itself observable behaviour, see A30.
-* **``Def-Group``** [copybooks/irswsdflt.cob:L9], the ``OCCURS`` group name,
-  and **``Record-3 pic x(264)``** [common/acasirsub3.cbl:L113], the flat FD
-  record. Neither has a column or a host variable. The FD record being a flat,
-  unstructured byte blob rather than a structured copybook is unique to this
-  handler in the package (A25).
+  [common/irsdfltMT.cbl:L908-L912], both of which ``call "fhlogger"`` - out of
+  scope per section 0.2.2 and forbidden by R-1, so the hook becomes a Python log
+  record at the sites the frozen source reaches and nothing at the sites it does
+  not, which is itself observable (A30).
+* **``Def-Group``** [copybooks/irswsdflt.cob:L9], the ``OCCURS`` group name, and
+  **``Record-3 pic x(264)``** [common/acasirsub3.cbl:L113], the flat FD record.
+  Neither has a column or a host variable.
 * **The lock-retry ladder** reached through ``COPY "mysql-procedures.cpy"``
   [common/irsdfltMT.cbl:L751]. Its only ``perform`` is commented out at
-  [copybooks/mysql-procedures.cpy:L167], so ``WE-Error 910`` is unreachable
-  and a lock surfaces as ``(99, 911)``. The ladder is reproduced as dead by
-  not reaching it, exactly as the frozen source does not reach it.
+  [copybooks/mysql-procedures.cpy:L167], so ``WE-Error 910`` is unreachable and a
+  lock surfaces as ``(99, 911)``. Reproduced as dead by not reaching it.
 
 WHAT IS DELIBERATELY *NOT* OPTIMISED
 ====================================
-The thirty-two statements are issued one at a time, in the loop's order, and
-are never batched into a multi-row ``INSERT``, a single ``UPDATE`` or an
-``executemany``. Section 0.3.3 objects to an ORM on exactly this ground, that
-it "would obscure the exact statement ordering that the state diff is
-sensitive to", and section 0.8.4 settles the wider question: "Any performance
-work is therefore out of scope by construction, not merely unrequested." No
-transaction is opened either - the frozen source has none, and
-``dal/connection.py`` owns the autocommit policy.
+The thirty-two statements are issued one at a time in the loop's order, never
+batched into a multi-row ``INSERT``, a single ``UPDATE`` or an ``executemany``:
+section 0.3.3 objects to an ORM on exactly this ground, that it "would obscure
+the exact statement ordering that the state diff is sensitive to", and section
+0.8.4 settles the wider question - "Any performance work is therefore out of
+scope by construction". No transaction is opened either; the frozen source has
+none and ``dal/connection.py`` owns the autocommit policy.
 
 Identifiers are quoted through
-:func:`~acas_posting.dal.connection.quote_identifier` without exception,
-because every table and column name in this schema contains a hyphen and is a
-syntax error unquoted. Values travel as bound ``%s`` parameters, which is the
-package's transport rule and yields the identical logical statement and stored
-value while removing an injection route the frozen source left open; the
-COBOL's own double-quoted literal text is recorded alongside each statement so
-the two can be compared.
+:func:`~acas_posting.dal.connection.quote_identifier` without exception, because
+every table and column name in this schema contains a hyphen and is a syntax
+error unquoted. Values travel as bound ``%s`` parameters, which yields the
+identical logical statement and stored value while removing an injection route
+the frozen source left open; the COBOL's own literal text is recorded alongside
+each statement so the two can be compared.
 
 DETERMINISM (RULE R-6)
 ======================
@@ -1351,7 +1294,7 @@ def _ba040_process_read_next(
         # reproduction of the paragraph and is performed where the linkage allows it,
         # at the common exit in :func:`dispatch` [:L347-L350]. A hand-rolled record
         # here stood for the paragraph without its field set, without its level and
-        # without advancing `Log-File-Rec-Written`, which is the incoherence OBS-010
+        # without advancing `Log-File-Rec-Written`, which is the incoherence
         # names; the omission is listed in `docs/migration/traceability.md`.
 
 
@@ -1421,7 +1364,7 @@ def _ba070_process_write(
         # reproduction of the paragraph and is performed where the linkage allows it,
         # at the common exit in :func:`dispatch` [:L347-L350]. A hand-rolled record
         # here stood for the paragraph without its field set, without its level and
-        # without advancing `Log-File-Rec-Written`, which is the incoherence OBS-010
+        # without advancing `Log-File-Rec-Written`, which is the incoherence
         # names; the omission is listed in `docs/migration/traceability.md`.
 
         # Each failing row's status is stashed and `fs-reply` is CLEARED "for next loop
@@ -1506,7 +1449,7 @@ def _ba090_process_rewrite(
         # reproduction of the paragraph and is performed where the linkage allows it,
         # at the common exit in :func:`dispatch` [:L347-L350]. A hand-rolled record
         # here stood for the paragraph without its field set, without its level and
-        # without advancing `Log-File-Rec-Written`, which is the incoherence OBS-010
+        # without advancing `Log-File-Rec-Written`, which is the incoherence
         # names; the omission is listed in `docs/migration/traceability.md`.
 
 
@@ -1550,10 +1493,10 @@ def _no_op_open_or_close(file_access: FileAccess, *, is_close: bool) -> StatusPa
 def open_(file_access: FileAccess) -> StatusPair:
     """``fn-open`` with ``fn-i-o``. A no-op returning ``(0, 0)``.
 
-    Reached from ``acasirsub3-Open`` [copybooks/Proc-ZZ100-ACAS-IRS-
-    Calls.cob:L223-L227], the only verb besides ``Open-Input`` whose reply the IRS
-    facade checks - and, on a non-zero reply, the only kind of failure that makes the
-    facade return from the program outright [:L364].
+    Reached from ``acasirsub3-Open``
+    [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L223-L227], the only verb besides ``Open-Input``
+    whose reply the IRS facade checks - and, on a non-zero reply, the only kind of failure that
+    makes the facade return from the program outright [:L364].
 
     Args:
         file_access: Receives ``(0, 0)``.
@@ -1742,7 +1685,7 @@ def read_next(
     # reproduction of the paragraph and is performed where the linkage allows it,
     # at the common exit in :func:`dispatch` [:L347-L350]. A hand-rolled record
     # here stood for the paragraph without its field set, without its level and
-    # without advancing `Log-File-Rec-Written`, which is the incoherence OBS-010
+    # without advancing `Log-File-Rec-Written`, which is the incoherence
     # names; the omission is listed in `docs/migration/traceability.md`.
 
 
@@ -1841,7 +1784,7 @@ def write(
     # reproduction of the paragraph and is performed where the linkage allows it,
     # at the common exit in :func:`dispatch` [:L347-L350]. A hand-rolled record
     # here stood for the paragraph without its field set, without its level and
-    # without advancing `Log-File-Rec-Written`, which is the incoherence OBS-010
+    # without advancing `Log-File-Rec-Written`, which is the incoherence
     # names; the omission is listed in `docs/migration/traceability.md`.
 
 
@@ -1899,7 +1842,7 @@ def rewrite(
     # reproduction of the paragraph and is performed where the linkage allows it,
     # at the common exit in :func:`dispatch` [:L347-L350]. A hand-rolled record
     # here stood for the paragraph without its field set, without its level and
-    # without advancing `Log-File-Rec-Written`, which is the incoherence OBS-010
+    # without advancing `Log-File-Rec-Written`, which is the incoherence
     # names; the omission is listed in `docs/migration/traceability.md`.
     # `go to ba-RDBMS-Exit` [:L512]. Class 3 -> return.
     return saved_fs_reply, saved_we_error
@@ -2025,12 +1968,12 @@ def ca_process_logs(
     handler in this package shares, at one level, with one field set. Before it, this
     module stood the paragraph up nine different times as nine hand-rolled records,
     each with its own fields and its own level and none of them advancing the
-    counter, which is the incoherence OBS-010 names.
+    counter, which is the incoherence described above.
 
     ``WS-File-Key`` is WITHHELD: on this table it is ``DEF-REC-KEY``, and the
     safe-event schema admits no record key (CWE-532). So are ``WS-Log-Where`` and
     ``SQL-Msg``. ``Log-File-Rec-Written`` is advanced by one modulo a million - the
-    range of the frozen ``pic 9(6)`` [copybooks/Test-Data-Flags.cob:L20] - once per
+    range of the frozen ``pic 9(6)`` [copybooks/Test-Data-Flags.cob:L18] - once per
     record, by the adapter.
 
     Args:

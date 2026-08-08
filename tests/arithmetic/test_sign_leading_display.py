@@ -19,18 +19,16 @@ they are the four things a migration of this cycle can silently get wrong:
      near-identical, so a dictionary keyed by field name alone would merge them; this
      module proves the dictionary refuses an unqualified key outright.
   3. THE LEADING-SIGN BYTE LENGTH IS NOW SETTLED, by measurement against GnuCOBOL
-     3.2.0 (finding F-19): an INCLUDED leading sign is overpunched into the leading
+     3.2.0: an INCLUDED leading sign is overpunched into the leading
      digit and costs NO byte, so `pic s9(7)v99 sign is leading` is NINE bytes. Only
      `SIGN LEADING SEPARATE` buys a byte, at ten, and no in-scope field declares it.
      The width is therefore asserted as a fact; see Q-5.2 below for the measurement.
   4. THE TRAILING-SIGN BYTE LENGTH *IS* SETTLED, from the maintainer's own running
      byte offsets, and is asserted as a plain fact.
 
-THERE IS NO USER RULES DOCUMENT FOR THIS PROJECT. `review_rules` reports that none was
-provided, so there is no on-disk rules file and no reader should look for one. The six
-binding rules R-1 to R-6 live in the Agent Action Plan section 0.7.2 and their exact
-wording is retrievable from the requirements via `review_prompt`. Summarised in this
-module's own words, each named at the site that honours it:
+THE SIX BINDING RULES R-1 to R-6 live in Agent Action Plan section 0.7.2 and their
+exact wording is retrievable from the requirements via `review_prompt`. Summarised in
+this module's own words, each named at the site that honours it:
 
     R-1  No COBOL at runtime. This module runs on a bare host: no Docker, no MariaDB,
          no GnuCOBOL, no `cobc`, no `cobcrun`, no subprocess and no FFI. Its only
@@ -58,7 +56,7 @@ module's own words, each named at the site that honours it:
     R-6  Compiled behaviour is the tie-breaker, AND THIS IS THE PRIMARY R-6 SITE IN
          THE FOLDER. Where the frozen sources support two readings, the compiled
          program decides between them - it is never guessed at and never skipped.
-         Q-5.2 has now been MEASURED (finding F-19) and Reading B wins, so there is no
+         Q-5.2 has now been MEASURED and Reading B wins, so there is no
          `xfail` in this file: the measurement is asserted and the refuted reading is
          asserted against, so a change back to it fails by name.
 
@@ -86,7 +84,7 @@ THE TWO `Q-` IDS THIS MODULE TOUCHES, both named by acas_posting/cobol/usage.py:
              [copybooks/wspost.cob:L27-L28] runs 86 -> 96, both ten bytes for a ten
              digit `pic s9(8)v99`. So an included sign costs nothing there.
 
-           THE ORACLE HAS NOW MEASURED IT, AND READING B WINS (finding F-19).
+           THE ORACLE HAS NOW MEASURED IT, AND READING B WINS.
            GnuCOBOL 3.2.0, no dialect flag and no arithmetic directive, exactly as
            every ACAS compile line invokes it:
 
@@ -879,7 +877,7 @@ def test_descriptor_width_delegates_to_the_storage_module() -> None:
 def test_leading_sign_byte_length_is_the_digit_count_q_5_2() -> None:
     """Q-5.2 is SETTLED: a leading-sign DISPLAY item costs its digits and no more.
 
-    ARBITRATED AGAINST THE COMPILED ORACLE (rule R-6, finding F-19), which is what the
+    ARBITRATED AGAINST THE COMPILED ORACLE (rule R-6), which is what the
     question asked for. Two readings disagreed by exactly one byte and this test used
     to assert the losing one under `xfail(strict=True)` so the suite could stay green
     while the question was open. It is open no longer.
