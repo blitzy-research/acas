@@ -398,7 +398,7 @@ def _build_parser() -> argparse.ArgumentParser:
     #  process-listing leak besides. Deployment security is resolved ONCE, outside
     #  the accounting path, from the same contract the six connection parameters
     #  come from: `args.install_connection_policy` reads it through
-    #  `cli/rdbms_params.resolve_transport_policy` while the linkage is bound, and
+    #  `cli/args.resolve_transport_policy` while the linkage is bound, and
     #  every handler observes the installed policy without being told. It decides
     #  no posted figure, so it cannot make two runs of one scenario differ (R-6).
 

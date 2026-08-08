@@ -126,7 +126,7 @@ modelled but never exercised:
         field; their only occurrences are in copybooks/mysql-variables.cpy, the
         bridge row-count scaffolding, which declares no record at all.
 
-    data_dictionary/acas_posting_dictionary.json - 1061 entries, 22 tables
+    data_dictionary/acas_posting_dictionary.json - 1067 entries, 22 tables
         LEADING_INCLUDED   4 - the two amount fields of each of the two IRS
                                posting records
         TRAILING_INCLUDED  2 - GLPOSTING-REC.POST-AMOUNT and GLPOSTING-REC.VAT-AMOUNT

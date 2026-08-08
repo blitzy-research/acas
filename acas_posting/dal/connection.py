@@ -711,7 +711,7 @@ class InsecureTransportError(ConnectionPolicyError):
 #: that never ends produces no different table state, only a run that cannot be
 #: told apart from a slow one. So every open, read and write is bounded, and the
 #: deployment may raise or lower each through
-#: `acas_posting.cli.rdbms_params.TRANSPORT_CONNECT_TIMEOUT_VARIABLE` and its two
+#: `acas_posting.cli.args.TRANSPORT_CONNECT_TIMEOUT_VARIABLE` and its two
 #: siblings. The values are the same ones that module publishes as its defaults;
 #: they are restated here rather than imported because the data-access layer must
 #: not depend on the entry-point layer (Agent Action Plan section 0.4.3), and
@@ -877,11 +877,11 @@ class ConnectionPolicy:
             batch process yields no different table state, only a run that never
             returns and that outside the harness's own deadline cannot be told
             apart from a long one. Resolved from
-            ``rdbms_params.TRANSPORT_CONNECT_TIMEOUT_VARIABLE``.
+            ``acas_posting.cli.args.TRANSPORT_CONNECT_TIMEOUT_VARIABLE``.
         read_timeout_seconds: The driver's per-read deadline, in whole seconds.
-            Resolved from ``rdbms_params.TRANSPORT_READ_TIMEOUT_VARIABLE``.
+            Resolved from ``acas_posting.cli.args.TRANSPORT_READ_TIMEOUT_VARIABLE``.
         write_timeout_seconds: The driver's per-write deadline, in whole seconds.
-            Resolved from ``rdbms_params.TRANSPORT_WRITE_TIMEOUT_VARIABLE``.
+            Resolved from ``acas_posting.cli.args.TRANSPORT_WRITE_TIMEOUT_VARIABLE``.
     """
 
     transport: TransportSecurity | None = None

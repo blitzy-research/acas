@@ -57,6 +57,13 @@ readonly EX_CONCURRENT=88     # another reset holds the sequential lock
 readonly EX_TIMEOUT=89        # a client or the delegated seed exceeded its deadline
 readonly EX_TARGET=90         # the target is not a proven harness-owned disposable database
 readonly EX_FIXTURE=91        # the re-seed did not reuse the scenario's staged fixture
+#  EVIDENCE UNAVAILABLE (finding SEC-02, moved here by finding M-06). Distinct from
+#  every difference status on purpose: a difference is a finding ABOUT the migration,
+#  whereas this means nothing was compared at all because the oracle cannot arbitrate.
+#  Conflating the two is how a missing specification gets reported as a passing one --
+#  or as a failing one, which is no better. It is checked BEFORE this script drops a
+#  single table, so a refusal leaves the database untouched.
+readonly EX_EVIDENCE_UNAVAILABLE=77
 
 # This script streams 33 `DROP TABLE IF EXISTS` + 33 `CREATE TABLE` pairs at
 # whatever server the environment names.
@@ -287,6 +294,13 @@ ACAS_RESET_SEED_DIR=''           # --seed-dir, forwarded verbatim to seed.sh. It
                                  # not -- see acas_resolve_fixture_root.
 ACAS_RESET_DRY_RUN=0             # --dry-run
 ACAS_RESET_SCENARIO=''           # optional positional scenario file
+ACAS_RESET_HARNESS=''            # this script's own directory, resolved in acas_main
+#  Set by --accept-transformed-oracle. 0 refuses a transformed oracle outright; 1
+#  proceeds for DIAGNOSIS, and the run is then not a parity claim.
+ACAS_RESET_ACCEPT_TRANSFORMED_ORACLE=0
+#  Raised once a transformed oracle has been accepted, so every later report can say so
+#  regardless of what any comparison finds.
+ACAS_RESET_ORACLE_IS_DIAGNOSTIC=0
 ACAS_RESET_LOG=''                # $ACAS_OUT/reset/reset.log
 ACAS_RESET_LOCK=''               # $ACAS_OUT/.reset_db.lock, held for the run
 ACAS_RESET_LOCK_HELD=0           # 1 once this process owns the lock
@@ -312,8 +326,8 @@ acas_compose_seed_argv() {
     ACAS_RESET_SEED_ARGV+=("--data-dir" "$ACAS_RESET_DATA_DIR")
   fi
   # It has to be reachable from HERE and not only from seed.sh directly, because the
-  # ten-stage protocol reaches the seed through this script -- harness/run_parity.sh
-  # stages 1 and 5 are both `reset_db.sh <scenario>' -- so a fixture that could only be
+  # ten-stage protocol reaches the seed through this script -- stages 1 and 5 are both
+  # `reset_db.sh <scenario>' -- so a fixture that could only be
   # named on seed.sh's own command line would be unusable from the protocol it was built
   # for.
   if [[ -n "$ACAS_RESET_SEED_DIR" ]]; then
@@ -1088,7 +1102,7 @@ acas_usage() {
 harness/reset_db.sh -- drop, re-apply the frozen ACASDB schema verbatim, re-seed.
 
 Stages 1 and 5 of the TEN-stage parity protocol. The canonical stage list is
-harness/parity_stages.sh; print it with `harness/run_parity.sh --print-stages'.
+harness/normalize.py; print it with `harness/normalize.py --print-stages'.
 
     seed -> run(COBOL) -> dump -> normalise -> RE-SEED -> run(Python) -> dump
     -> normalise -> verify published -> diff
@@ -1175,7 +1189,7 @@ Options:
                       DEFAULTED, and rarely needed: with a scenario named and this
                       option omitted, it resolves to the CANONICAL FIXTURE ROOT --
                       $ACAS_FIXTURES if set, otherwise $ACAS_DATA/fixtures -- plus the
-                      scenario name, which is exactly where harness/build_fixtures.sh
+                      scenario name, which is exactly where harness/seed.sh --build-fixtures
                       writes. Pass it only for a fixture built somewhere else.
                       A default is necessary rather than convenient: a scenario's own
                       seed_dir resolves relative to the scenario file, which sits in
@@ -1183,9 +1197,8 @@ Options:
                       and an omission used to fail only AFTER all 33 tables had been
                       dropped and re-applied.
                       Reachable from here and not only from seed.sh because the
-                      ten-stage protocol seeds through this script --
-                      harness/run_parity.sh stages 1 and 5 are both
-                      reset_db.sh <scenario>.
+                      ten-stage protocol seeds through this script -- stages 1
+                      and 5 are both reset_db.sh <scenario>.
   --dry-run           Print the plan -- the file to be applied, its asserted
                       invariants, the verification queries and the seed command
                       -- and exit without executing anything or touching the
@@ -1319,6 +1332,15 @@ acas_parse_args() {
           'the ACAS_DATA volume instead.'
         shift
         ;;
+      --accept-transformed-oracle)
+        #  ⭐ ACKNOWLEDGE A TRANSFORMED ORACLE FOR DIAGNOSIS ONLY. Without it a build
+        #  whose attestation says `oracle-source-is-frozen no' is refused outright with
+        #  EX_EVIDENCE_UNAVAILABLE, because rule R-6 makes the COMPILED PROGRAM the
+        #  specification and rule R-4 requires its defects reproduced rather than
+        #  repaired -- so an empty diff against a repaired oracle would claim the
+        #  migrated cycle matches a PATCHED system.
+        ACAS_RESET_ACCEPT_TRANSFORMED_ORACLE=1
+        shift ;;
       --seed-dir)
         [[ $# -ge 2 ]] || acas_die "$EX_USAGE" '--seed-dir requires a path.'
         ACAS_RESET_SEED_DIR="$2"
@@ -1826,6 +1848,482 @@ acas_assert_seed_script() {
   acas_note 'sanctioned use of compiled COBOL under R-1'
 }
 
+# compiler versions, and a digest over the compiled module set. Two of its options
+# can substitute the bytes the oracle is built from -- ACAS_PRESQL2_SHA256 accepts a
+# replacement archive, and ACAS_COBMYSQLAPI_OBJ reuses an already-compiled object --
+# and the package ships two SUPERSEDED API sources that must not be used, so a
+# renamed old API could otherwise define the specification unnoticed. The build
+# records that as a fact; refusing it is this gate's job, which keeps the build
+# script debuggable and the evidence path strict.
+#
+# FIVE THINGS ARE CHECKED, and the fourth is the one that makes the first three
+# worth having:
+#   1. the attestation EXISTS -- a partial or --only build leaves none;
+#   2. it is the version this script understands;
+#   3. `overrides-used' is `no';
+#   4. the module-set digest still matches the modules ON DISK, recomputed here the
+#      same way the build computed it. Without this an attestation would only
+#      describe some build, not the artifacts stage 2 is about to execute;
+#   5. the SOURCE-TRANSFORMATION DISCLOSURE is present and is REPORTED with the run.
+#
+# ⭐ ON THE FIFTH (finding CR-01). harness/build_oracle.sh edits the BUILD COPY of
+# frozen sources in a declared set of places -- connectivity and IF-scope repairs
+# without which the compiled cycle cannot reach MySQL at all. A version 1 attestation
+# said nothing about them, so `overrides-used no' read as "this is the unmodified
+# oracle" for a build that was not, and an empty diff drawn against it was presented as
+# parity with the frozen behavioural specification. Version 2 publishes
+# `oracle-source-is-frozen', a transform count, a set digest and one record per
+# transformed path with its frozen and build digests.
+#
+# THIS SCRIPT DOES NOT REFUSE A TRANSFORMED ORACLE, and that is a deliberate choice
+# rather than an omission: refusing would leave the project with NO oracle and
+# therefore no evidence of any kind, since the transformations are what make the
+# compiled cycle reach the database. What it does instead is refuse to be QUIET about
+# it -- the count and the set digest are logged before stage 1 and again in the closing
+# summary, so every verdict this script produces carries the disclosure beside it and
+# no reader can mistake it for a verdict against the untouched checkout.
+# =============================================================================
+readonly ACAS_RESET_ATTESTATION_BASENAME='oracle-attestation.txt'
+readonly ACAS_RESET_ATTESTATION_VERSION='2'
+
+# Populated by acas_assert_oracle_attestation and reported in the summary.
+ACAS_RESET_SOURCE_IS_FROZEN=''
+ACAS_RESET_SOURCE_TRANSFORMS=''
+ACAS_RESET_TRANSFORM_DIGEST=''
+readonly -a ACAS_RESET_ORACLE_DIRS=(common general irs purchase sales stock)
+
+#  IDENTICAL to acas_module_set_digest in harness/build_oracle.sh, deliberately:
+#  every *.so under the six build directories, sorted by path, each hashed, and the
+#  whole listing hashed again. If the two ever drift the gate fails closed, which is
+#  the safe direction.
+acas_reset_module_set_digest() {
+  local dir
+  {
+    for dir in "${ACAS_RESET_ORACLE_DIRS[@]}"; do
+      find "$ACAS_BUILD/$dir" -maxdepth 1 -type f -name '*.so' -print 2>/dev/null
+    done
+  } | LC_ALL=C sort | while IFS= read -r module; do
+    sha256sum "$module" 2>/dev/null || printf 'UNREADABLE  %s\n' "$module"
+  done | sha256sum | cut -d' ' -f1
+}
+
+acas_assert_oracle_attestation() {
+  [[ -n "${ACAS_BUILD-}" ]] || acas_die "$EX_PRECONDITION" \
+    'ACAS_BUILD is unset, so the oracle build tree cannot be located and its' \
+    'provenance cannot be verified.' \
+    'harness/docker-compose.yml sets ACAS_BUILD: /build.'
+
+  local attestation="$ACAS_BUILD/$ACAS_RESET_ATTESTATION_BASENAME"
+  #  AN ABSENT ATTESTATION IS EVIDENCE UNAVAILABLE, NOT A BEHAVIOURAL DIFFERENCE.
+  #  build_oracle.sh writes it as the LAST act of a full run, so its absence means no
+  #  oracle was produced -- and on this checkout that is the MEASURED outcome of the
+  #  default frozen build, not a hypothetical: a zero-transformation build of the
+  #  frozen sources fails with exit 74 because 22 of the frozen common/*MT.cbl
+  #  bridges `copy "ACAS-SQLstate-error-list.cob"' and that member is absent from the
+  #  checkout and from presql2-latest.zip alike. See README-python-migration.md
+  #  section 8.7. Reporting that as EX_PRECONDITION would file it alongside "you
+  #  forgot to build", when what it actually means is that the specification cannot
+  #  presently be compiled and NOTHING WAS COMPARED.
+  [[ -f "$attestation" ]] || acas_die "$EX_EVIDENCE_UNAVAILABLE" \
+    "ORACLE UNAVAILABLE: no provenance attestation exists, so no compiled specification was produced." \
+    "  attestation        $attestation (absent)" \
+    'THIS IS NOT A BEHAVIOURAL DIFFERENCE. Nothing was compared, so nothing is' \
+    'known about whether the Python cycle agrees with the frozen COBOL.' \
+    'Stage 2 runs the compiled COBOL and its output IS the specification, so this' \
+    'script will not set up a comparison against whatever modules happen to be lying' \
+    'in the build tree.' \
+    'build_oracle.sh writes the attestation as the last act of a FULL five-step run,' \
+    'so an absent file means the oracle was never built, was built with --only or' \
+    '--from and is therefore only partly this repository'"'"'s, or FAILED TO BUILD.' \
+    'ON THIS CHECKOUT THE DEFAULT FROZEN BUILD FAILS, and that is measured rather' \
+    'than predicted: 22 frozen common/*MT.cbl bridges copy ACAS-SQLstate-error-list.cob,' \
+    'which exists in neither the checkout nor presql2-latest.zip. The member carries' \
+    'the SQLSTATE-to-FS-Reply mapping that DEFINES the oracle'"'"'s rejection behaviour,' \
+    'and rejection behaviour is precisely what this migration must reproduce, so it' \
+    'cannot be fabricated (R-3, R-4) and must be supplied by the maintainer.' \
+    'Build it: harness/build_oracle.sh   (see README-python-migration.md section 8.7)'
+
+  local version='' overrides='' recorded_digest='' recorded_count=''
+  local presql_actual='' presql_pinned='' digest_override='' matches_pin=''
+  local redirected='' provenance='' cobc_version='' key value
+  while IFS=$'\t' read -r key value; do
+    case "$key" in
+      attestation-version)     version="$value" ;;
+      overrides-used)          overrides="$value" ;;
+      module-set-sha256)       recorded_digest="$value" ;;
+      module-count)            recorded_count="$value" ;;
+      presql2-sha256)          presql_actual="$value" ;;
+      presql2-pinned-sha256)   presql_pinned="$value" ;;
+      presql2-digest-override) digest_override="$value" ;;
+      presql2-matches-pin)     matches_pin="$value" ;;
+      cobmysqlapi-redirected)  redirected="$value" ;;
+      cobmysqlapi-provenance)  provenance="$value" ;;
+      cobc-version)            cobc_version="$value" ;;
+      oracle-source-is-frozen) ACAS_RESET_SOURCE_IS_FROZEN="$value" ;;
+      source-transforms)       ACAS_RESET_SOURCE_TRANSFORMS="$value" ;;
+      source-transform-set-sha256) ACAS_RESET_TRANSFORM_DIGEST="$value" ;;
+    esac
+  done < "$attestation"
+
+  [[ "$version" == "$ACAS_RESET_ATTESTATION_VERSION" ]] || acas_die "$EX_PRECONDITION" \
+    "the attestation at $attestation declares version '${version:-<none>}'; this script understands version $ACAS_RESET_ATTESTATION_VERSION." \
+    'A format this script cannot read is refused rather than partly believed.' \
+    'Rebuild the oracle with the matching harness/build_oracle.sh.'
+
+  if [[ "$overrides" != 'no' ]]; then
+    acas_die "$EX_PRECONDITION" \
+      'THIS ORACLE'"'"'S IDENTITY WAS NOT ESTABLISHED FROM THE REVIEWED SOURCES ALONE,' \
+      'so it cannot produce evidence.' \
+      "  attestation             $attestation" \
+      "  overrides-used          ${overrides:-<unrecorded>}" \
+      "  presql2-digest-override ${digest_override:-<unrecorded>}" \
+      "  presql2-matches-pin     ${matches_pin:-<unrecorded>}" \
+      "  cobmysqlapi-redirected  ${redirected:-<unrecorded>}" \
+      "  cobmysqlapi-provenance  ${provenance:-<unrecorded>}" \
+      "  presql2 archive digest  ${presql_actual:-<unrecorded>}" \
+      "  pinned digest           ${presql_pinned:-<unrecorded>}" \
+      'ACAS_PRESQL2_SHA256 accepts a replacement preSQL archive, and the translator' \
+      'in it is what turns every *MT.scb into the *MT.cbl bridge that is actually' \
+      'compiled. Pointing ACAS_COBMYSQLAPI_OBJ away from the image-built object' \
+      'substitutes the C interface that every bridge, handler and loader links, and' \
+      'the vendored package also ships two SUPERSEDED variants of that source which' \
+      'must not be used. Any of these lets ambient configuration decide what the' \
+      'behavioural specification IS.' \
+      'Note that ACAS_COBMYSQLAPI_OBJ pointing at the image'"'"'s own object is NOT an' \
+      'override -- harness/Dockerfile.gnucobol builds it there from the vendored' \
+      'source with the recovered rule, and reusing it is the normal case.' \
+      'Rebuild without them: harness/build_oracle.sh' \
+      'To replace either legitimately, make it a REVIEWED SOURCE CHANGE -- update the' \
+      'vendored archive and ACAS_PRESQL2_SHA256_EXPECTED together -- rather than' \
+      'setting a variable at run time.'
+  fi
+
+  #  THE ARCHIVE DIGEST MUST EQUAL ITS PIN, re-derived here from the two values the
+  #  attestation records rather than taken from the producer's own verdict. A
+  #  producer that computed `overrides-used' wrongly cannot smuggle a substituted
+  #  archive past this, because the mismatch is visible in the record itself.
+  if [[ -z "$presql_actual" || -z "$presql_pinned" || "$presql_actual" != "$presql_pinned" ]]; then
+    acas_die "$EX_PRECONDITION" \
+      'THE preSQL ARCHIVE DOES NOT MATCH ITS PIN, so the translator that generated' \
+      'every *MT.cbl bridge is not the reviewed one.' \
+      "  attestation        $attestation" \
+      "  archive digest     ${presql_actual:-<unrecorded>}" \
+      "  pinned digest      ${presql_pinned:-<unrecorded>}" \
+      'Rebuild the oracle from the vendored archive: harness/build_oracle.sh' \
+      'If the archive was updated deliberately, update ACAS_PRESQL2_SHA256_EXPECTED' \
+      'in harness/build_oracle.sh in the same commit.'
+  fi
+
+  #  THE C INTERFACE MUST HAVE COME FROM THE VENDORED SOURCE. Exactly two answers
+  #  are legitimate: the image built it (harness/Dockerfile.gnucobol:L478-L479), or
+  #  step 2 compiled it during this build. Anything else -- including an unresolved
+  #  path -- means the object every bridge links is of unestablished origin.
+  case "$provenance" in
+    image-built-from-vendored-source|compiled-from-vendored-source-this-run) : ;;
+    *)
+      acas_die "$EX_PRECONDITION" \
+        'THE cobmysqlapi.o C INTERFACE IS OF UNESTABLISHED ORIGIN, so the object that' \
+        'every bridge, handler and loader links cannot be traced to the vendored source.' \
+        "  attestation        $attestation" \
+        "  provenance         ${provenance:-<unrecorded>}" \
+        "  redirected         ${redirected:-<unrecorded>}" \
+        'Legitimate values are image-built-from-vendored-source and' \
+        'compiled-from-vendored-source-this-run.' \
+        'Rebuild the oracle: harness/build_oracle.sh'
+      ;;
+  esac
+
+  #  THE ATTESTATION MUST DESCRIBE THE MODULES STAGE 2 WILL ACTUALLY EXECUTE.
+  local measured
+  measured="$(acas_reset_module_set_digest)"
+  [[ "$measured" == "$recorded_digest" ]] || acas_die "$EX_PRECONDITION" \
+    'THE COMPILED MODULES DO NOT MATCH THE ATTESTATION, so its provenance does not' \
+    'describe the oracle this run would execute.' \
+    "  attestation        $attestation" \
+    "  recorded digest    ${recorded_digest:-<unrecorded>}  (${recorded_count:-?} module(s))" \
+    "  measured digest    $measured" \
+    'Every *.so under the six build directories is hashed, sorted by path, and the' \
+    'listing hashed again, so a single replaced, added or removed module changes' \
+    'this value. Rebuild the oracle: harness/build_oracle.sh'
+
+  #  THE DISCLOSURE MUST BE PRESENT. An attestation of the right version that omits it
+  #  is a producer that did not look, and silence about whether the sources were
+  #  transformed is exactly the condition finding CR-01 names.
+  case "$ACAS_RESET_SOURCE_IS_FROZEN" in
+    yes|no) : ;;
+    *)
+      acas_die "$EX_PRECONDITION" \
+        'THE ATTESTATION DOES NOT STATE WHETHER THE ORACLE WAS COMPILED FROM THE FROZEN' \
+        'SOURCES, so it cannot support a claim about the frozen behavioural specification.' \
+        "  attestation              $attestation" \
+        "  oracle-source-is-frozen  ${ACAS_RESET_SOURCE_IS_FROZEN:-<unrecorded>}" \
+        'Rebuild the oracle: harness/build_oracle.sh'
+      ;;
+  esac
+
+  acas_log "oracle provenance verified: $attestation"
+  acas_note "no identity override; cobmysqlapi.o ${provenance}; preSQL archive matches its pin; ${recorded_count:-?} module(s), set digest $measured; toolchain ${cobc_version:-unknown}"
+
+  if [[ "$ACAS_RESET_SOURCE_IS_FROZEN" == 'yes' ]]; then
+    acas_log 'oracle sources: the frozen checkout, with no build-copy transformation'
+    return 0
+  fi
+
+  #  ⭐ A TRANSFORMED ORACLE IS REFUSED, NOT WARNED ABOUT (finding SEC-02)
+  #
+  #  This used to be a warning, and a warning was not enough. Rule R-6 makes the
+  #  COMPILED PROGRAM the behavioural specification and rule R-4 requires its defects to
+  #  be REPRODUCED rather than repaired. The catalogued transforms repair IF scope,
+  #  connection lifetime and stale reply status in the frozen programs - so a build that
+  #  applies them has repaired the specification, and an empty diff against it says the
+  #  migrated cycle matches a PATCHED system. That is not the claim this protocol
+  #  exists to make, and publishing it as though it were is the evidence-integrity
+  #  defect itself.
+  #
+  #  Refusing is reported as EVIDENCE UNAVAILABLE, with its own exit status, because it
+  #  must never be confused with a behavioural difference: a difference is a finding
+  #  about the migration, and this is the absence of anything to find it against.
+  if (( ! ACAS_RESET_ACCEPT_TRANSFORMED_ORACLE )); then
+    acas_die "$EX_EVIDENCE_UNAVAILABLE" \
+      'EVIDENCE UNAVAILABLE: THE ORACLE WAS COMPILED FROM TRANSFORMED SOURCES.' \
+      "  attestation              $attestation" \
+      "  oracle-source-is-frozen  no" \
+      "  transformed files        ${ACAS_RESET_SOURCE_TRANSFORMS:-?}" \
+      "  transform-set digest     ${ACAS_RESET_TRANSFORM_DIGEST:-<unrecorded>}" \
+      '' \
+      'THIS IS NOT A BEHAVIOURAL DIFFERENCE. Nothing was compared. The compiled' \
+      'program IS the behavioural specification (rule R-6) and its defects must be' \
+      'reproduced rather than repaired (rule R-4), so an oracle whose sources were' \
+      'repaired cannot arbitrate anything: an empty diff against it would say the' \
+      'migrated cycle matches a PATCHED system, which is not the claim this protocol' \
+      'makes.' \
+      '' \
+      'Every transformed path is listed in the attestation with its frozen and build' \
+      'digests and the reason for it, and the frozen checkout itself is untouched.' \
+      '' \
+      'To obtain evidence, build a frozen oracle - which is now the DEFAULT:' \
+      '    harness/build_oracle.sh' \
+      'See README-python-migration.md section 8.7 for what that does on this' \
+      'checkout, which is measured rather than predicted.' \
+      '' \
+      'To drive the cycle against this oracle for DIAGNOSIS, acknowledge it:' \
+      '    harness/reset_db.sh --accept-transformed-oracle ...' \
+      'The run then proceeds and every verdict it prints is marked NO PARITY CLAIM.'
+  fi
+
+  ACAS_RESET_ORACLE_IS_DIAGNOSTIC=1
+  acas_warn "PROCEEDING AGAINST A TRANSFORMED ORACLE BECAUSE --accept-transformed-oracle WAS GIVEN. ${ACAS_RESET_SOURCE_TRANSFORMS:-?} build-copy file(s) differ from the frozen checkout (transform-set digest ${ACAS_RESET_TRANSFORM_DIGEST:-<unrecorded>}), each listed in $attestation with its frozen and build digests and its reason. NO VERDICT FROM THIS RUN IS A PARITY CLAIM, and the summary will say so however the comparison turns out: the oracle is a diagnostic build, not the frozen specification."
+}
+
+
+# =============================================================================
+# ⭐ AN EVIDENCE RUN REFUSES EVERY DESTRUCTIVE-TARGET BYPASS (findings MJ-18, M-06)
+#
+# This script is TWO things, and the difference decides which options it may honour.
+# As stages 1 and 5 of the parity protocol it drops and re-applies every table in the
+# schema a verdict will be drawn from. As the general administrative reset it is also
+# the tool an operator uses on a throwaway database of their own, and for that it
+# offers documented escape hatches: ACAS_DB_ALLOWED_SCHEMAS extends the disposable-
+# SCHEMA allow-list, ACAS_DB_DISPOSABLE_HOSTS extends the disposable-HOST allow-list,
+# and ACAS_RESET_ACKNOWLEDGE_DESTRUCTIVE / --acknowledge-destructive assert a target is
+# disposable without proof -- that last one short-circuiting BOTH the static check and
+# the server-side sentinel, so with it set this script will drop a database that
+# carries no disposability declaration at all.
+#
+# Those hatches are legitimate for administration and WRONG for evidence: a verdict
+# drawn from a database nobody proved was throwaway is a verdict about an unknown
+# state. So the two roles are separated by the RUN ITSELF rather than by a wrapper.
+# ACAS_PARITY_RUN_ID is what makes ten separate invocations one protocol run -- bound by
+# tests/conftest.py's `bound_run_id` for the composed protocol, exported by the operator
+# for a hand-driven one (README-python-migration.md section 8) -- and on any run
+# carrying it every hatch is REFUSED. Unbound, the hatches remain, because then this is
+# the administrative tool and not a protocol stage.
+#
+# WHY THIS IS STRONGER THAN WHAT IT REPLACES. The refusal used to live in the deleted
+# harness/run_parity.sh, which could only guard the stages IT drove: a hand-driven
+# stage 1 honoured every hatch. Here the guard travels with the stage, so a
+# hand-driven protocol run is scoped exactly as a composed one is.
+#
+# REFUSED, NOT SILENTLY UNSET. An operator who set one deliberately is told the
+# evidence path will not honour it, rather than left believing it applied.
+# =============================================================================
+readonly -a ACAS_RESET_EVIDENCE_BYPASSES=(
+  ACAS_DB_ALLOWED_SCHEMAS
+  ACAS_DB_DISPOSABLE_HOSTS
+  ACAS_RESET_ACKNOWLEDGE_DESTRUCTIVE
+  ACAS_RESET_ACKNOWLEDGE
+)
+
+acas_assert_no_evidence_bypass() {
+  #  UNBOUND MEANS ADMINISTRATIVE USE, so nothing is refused.
+  [[ -n "$ACAS_RESET_RUN_ID" ]] || return 0
+
+  local name present=''
+  for name in "${ACAS_RESET_EVIDENCE_BYPASSES[@]}"; do
+    if [[ -n "${!name-}" ]]; then
+      present+="${present:+, }$name"
+    fi
+  done
+  [[ -z "$present" ]] || acas_die "$EX_PRECONDITION" \
+    "a destructive-target bypass is set on a protocol-bound run: $present." \
+    "This run carries ACAS_PARITY_RUN_ID='$ACAS_RESET_RUN_ID', so it is stage 1 or" \
+    'stage 5 of the parity protocol and the state it creates will be compared. It' \
+    'therefore aims only at a target that PROVES it is disposable, and will not' \
+    'honour a widened allow-list or an unproven acknowledgement.' \
+    'ACAS_DB_ALLOWED_SCHEMAS and ACAS_DB_DISPOSABLE_HOSTS extend the two' \
+    'disposability allow-lists; ACAS_RESET_ACKNOWLEDGE_DESTRUCTIVE and' \
+    '--acknowledge-destructive bypass the static check AND the server-side sentinel' \
+    'proof, so with one set this script would drop a database that cannot prove it is' \
+    'disposable and a verdict would be drawn from whatever it contained.' \
+    'Unset it and re-run. To reset a different target deliberately, invoke this' \
+    'script WITHOUT a bound run id -- it is the general administrative tool and it' \
+    'keeps those options on purpose. Evidence production does not.'
+
+  acas_note "protocol-bound run ($ACAS_RESET_RUN_ID): every destructive-target bypass is refused, so the target must prove it is disposable"
+}
+
+
+# =============================================================================
+# EVERY DECLARED SEED FILE IS CHECKED BEFORE STAGE 1 OPENS A CONNECTION
+#
+# harness/seed.sh already refuses a missing declared file (75). This is not a
+# duplicate of that check -- it is the same check moved EARLIER, and the difference
+# is what the operator is left with. seed.sh runs inside stage 1, AFTER
+# harness/reset_db.sh has dropped and re-applied the whole frozen schema, so a
+# fixture that was never built costs a wiped database before anything says so. Here
+# the run refuses before stage 1 starts and the database is untouched.
+#
+# It reads the scenario through the SAME hardened, length-prefixed transport
+# harness/seed.sh uses, and for the same reason: the values come from a data file and
+# reach a shell loop. See the emitter's own docstring in harness/seed.sh.
+# =============================================================================
+acas_assert_seed_files() {
+  local parsed rc=0
+  parsed="$(python3 - "$ACAS_RESET_SCENARIO" "$ACAS_RESET_HARNESS" <<'SEEDLIST'
+"""Emit the scenario's declared seed file names, control-free and length-prefixed.
+
+The grammar is harness/seed.sh's, minus the SEED_DIR record this caller does not
+need -- it has already resolved the runtime location itself:
+
+    BEGIN<TAB>1
+    COUNT<TAB><n>
+    SEED_FILE<TAB><byte length><TAB><name>     (n times, in declared order)
+    END<TAB><n>
+
+Exit 0 parsed, 3 unreadable or not a mapping, 4 no seed file list, 5 an unusable
+seed file name.
+"""
+
+import re
+import sys
+
+#  THE SHARED DUPLICATE-REJECTING LOADER (finding MJ-17): a shadowed `seed_files`
+#  key would stage a fixture the definition does not appear to declare. argv[2] is
+#  the harness directory, passed in because a heredoc has no __file__.
+sys.path.insert(0, sys.argv[2])
+
+import normalize
+import yaml
+
+BARE_NAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
+
+path = sys.argv[1]
+try:
+    with open(path, 'r', encoding='utf-8') as handle:
+        document = normalize.load_scenario_yaml(handle.read())
+except (OSError, yaml.YAMLError) as error:
+    sys.stderr.write('cannot parse %s: %s\n' % (path, error))
+    raise SystemExit(3)
+if not isinstance(document, dict):
+    sys.stderr.write('%s is not a YAML mapping\n' % path)
+    raise SystemExit(3)
+
+files = document.get('seed_files', document.get('seed-files'))
+if not isinstance(files, (list, tuple)) or not files:
+    sys.stderr.write('%s declares no seed_files list\n' % path)
+    raise SystemExit(4)
+
+names = []
+for entry in files:
+    if not isinstance(entry, str) or not BARE_NAME.match(entry):
+        sys.stderr.write('seed file %r in %s is not a plain file name\n'
+                         % (entry, path))
+        raise SystemExit(5)
+    names.append(entry)
+
+sys.stdout.write('BEGIN\t1\n')
+sys.stdout.write('COUNT\t%d\n' % len(names))
+for entry in names:
+    sys.stdout.write('SEED_FILE\t%d\t%s\n' % (len(entry), entry))
+sys.stdout.write('END\t%d\n' % len(names))
+SEEDLIST
+  )" || rc=$?
+  if (( rc != 0 )); then
+    acas_die "$EX_PRECONDITION" \
+      "the scenario's seed_files list could not be read from $ACAS_RESET_SCENARIO." \
+      "  reported: ${parsed:-<no output>}"
+  fi
+
+  local key len value begin_seen=0 declared='' ending=''
+  local -a wanted=()
+  while IFS=$'\t' read -r key len value; do
+    case "$key" in
+      BEGIN)
+        [[ "$len" == '1' ]] || acas_die "$EX_PRECONDITION" \
+          "seed transport version '$len' is not the version this reader speaks."
+        begin_seen=1
+        ;;
+      COUNT) declared="$len" ;;
+      END)   ending="$len" ;;
+      SEED_FILE)
+        [[ "$len" =~ ^[0-9]+$ ]] || acas_die "$EX_PRECONDITION" \
+          "a SEED_FILE record carries a non-numeric length field ('$len')."
+        (( ${#value} == len )) || acas_die "$EX_PRECONDITION" \
+          "a SEED_FILE record decoded to ${#value} byte(s) where it declares $len."
+        [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || acas_die \
+          "$EX_PRECONDITION" \
+          "the decoded seed file name '$value' is not a plain file name."
+        wanted+=("$value")
+        ;;
+      '') : ;;
+      *)
+        acas_die "$EX_PRECONDITION" "unknown seed transport record '$key'."
+        ;;
+    esac
+  done <<<"$parsed"
+
+  (( begin_seen == 1 )) || acas_die "$EX_PRECONDITION" \
+    'the seed transport stream carries no BEGIN record.'
+  [[ "$declared" =~ ^[0-9]+$ && "$ending" =~ ^[0-9]+$ ]] || acas_die \
+    "$EX_PRECONDITION" 'the seed transport stream carries no numeric COUNT and END.'
+  (( declared == ending && ${#wanted[@]} == declared )) || acas_die \
+    "$EX_PRECONDITION" \
+    "the seed transport disagrees with itself: COUNT $declared, END $ending, ${#wanted[@]} decoded."
+
+  [[ -d "$ACAS_RESET_SEED_DIR" ]] || acas_die "$EX_PRECONDITION" \
+    "the scenario's fixture directory does not exist: $ACAS_RESET_SEED_DIR" \
+    "Build it first: harness/seed.sh --build-fixtures $ACAS_RESET_SCENARIO" \
+    'Checked HERE rather than in stage 1 so that a missing fixture does not cost' \
+    'a dropped and re-applied schema before anything reports it.'
+
+  local name absent=0
+  for name in "${wanted[@]}"; do
+    if [[ ! -f "$ACAS_RESET_SEED_DIR/$name" || ! -r "$ACAS_RESET_SEED_DIR/$name" ]]; then
+      printf 'FATAL: declared seed file is missing or unreadable: %s\n' \
+        "$ACAS_RESET_SEED_DIR/$name" >&2
+      absent=1
+    fi
+  done
+  (( absent == 0 )) || acas_die "$EX_PRECONDITION" \
+    "the scenario declares seed files that are not in $ACAS_RESET_SEED_DIR." \
+    "Rebuild the fixture: harness/seed.sh --build-fixtures $ACAS_RESET_SCENARIO" \
+    'A missing file would leave its table empty and the resulting dump would' \
+    'still look like a successful seed.'
+
+  acas_log "seed fixture verified: ${#wanted[@]} declared file(s) present in $ACAS_RESET_SEED_DIR"
+}
+
+
 # The optional scenario positional. Checked for readability here so a typo
 # fails before 33 tables are dropped, rather than after.
 acas_assert_scenario() {
@@ -1859,11 +2357,11 @@ acas_assert_scenario() {
 # read-only tree -- AFTER this script had already dropped and re-applied all 33
 # tables. Defaulting removes that way of composing the protocol wrongly.
 #
-# ONE RULE, THREE DERIVATIONS. harness/build_fixtures.sh WRITES the fixtures and owns
-# the rule -- its `ACAS_BF_OUT' default is the single statement of it. This script and
-# harness/run_parity.sh derive it identically for the shell side, and
+# ONE RULE, THREE DERIVATIONS. harness/seed.sh --build-fixtures WRITES the fixtures and owns
+# the rule -- its `ACAS_BF_OUT' default is the single statement of it. This script
+# derives it identically for the shell side, and
 # tests/conftest.py's scenario_fixture_dir() for the pytest side;
-# tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py asserts that the
+# tests/arithmetic/test_comp_binary.py asserts that the
 # three agree, because a comment would not keep them in step.
 #
 # ONLY WITH A SCENARIO. Without one this script re-seeds from the ambient data
@@ -1913,7 +2411,7 @@ acas_target_is_local() {
 # ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED.
 # `1|true|yes|on' is affirmative and `|0|false|no|off' is negative, matched
 # case-insensitively; the identical set lives in
-# acas_posting/cli/rdbms_params.py as AFFIRMATIVE_SPELLINGS / NEGATIVE_SPELLINGS
+# acas_posting/cli/args.py as AFFIRMATIVE_SPELLINGS / NEGATIVE_SPELLINGS
 # and is read there by read_declared_flag, so one exported value cannot mean two
 # different things to the two halves of the harness. Anything else STOPS the run
 # rather than resolving to either answer: the value governs whether a credential
@@ -1930,7 +2428,7 @@ acas_plaintext_declared() {
     'Use 1, true, yes or on for yes; 0, false, no or off for no; or leave it' \
     'unset. The same closed set is read by harness/build_oracle.sh,' \
     'harness/seed.sh, harness/reset_db.sh, harness/run_cobol_scenario.sh,' \
-    'harness/run_python_scenario.sh and acas_posting/cli/rdbms_params.py.'
+    'harness/run_python_scenario.sh and acas_posting/cli/args.py.'
 }
 
 # Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this
@@ -3348,6 +3846,24 @@ acas_print_plan() {
 
 # MAIN Strictly sequential (R-3). No stage is backgrounded and none is
 # parallelised. Nothing here writes to $ACAS_REPO.
+# ⭐ A DIAGNOSTIC RESET SAYS SO, ON EVERY EXIT PATH THAT SUCCEEDS. The gate above may
+# be waived with --accept-transformed-oracle, and a run made under that waiver has set
+# up a comparison against a REPAIRED specification. That is legitimate for diagnosis and
+# is not a parity claim, so it is stated here rather than left in the operator's memory:
+# every later stage reads this script's output to know what state it created.
+acas_reset_disclose_diagnostic_oracle() {
+  (( ACAS_RESET_ORACLE_IS_DIAGNOSTIC )) || return 0
+  printf '\n'
+  printf 'NO PARITY CLAIM: this reset was made with --accept-transformed-oracle, so the\n'
+  printf 'compiled oracle was built from TRANSFORMED sources (%s file(s), transform-set\n' \
+    "${ACAS_RESET_SOURCE_TRANSFORMS:-?}"
+  printf 'digest %s). Rule R-6 makes the compiled program the behavioural\n' \
+    "${ACAS_RESET_TRANSFORM_DIGEST:-<unrecorded>}"
+  printf 'specification and rule R-4 requires its defects reproduced rather than repaired,\n'
+  printf 'so an empty diff drawn against this oracle would say the migrated cycle matches\n'
+  printf 'a PATCHED system. Use these captures for DIAGNOSIS only.\n'
+}
+
 acas_main() {
   acas_parse_args "$@"
 
@@ -3365,6 +3881,25 @@ acas_main() {
   acas_assert_environment
   acas_open_log
 
+  #  THIS SCRIPT'S OWN DIRECTORY, so the seed-file pre-flight below can reach the
+  #  shared scenario parser without a $PATH search or a guessed checkout layout.
+  ACAS_RESET_HARNESS="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  readonly ACAS_RESET_HARNESS
+
+  #  ⭐ THE ORACLE-PROVENANCE GATE RUNS BEFORE A SINGLE TABLE IS DROPPED (finding
+  #  M-06 moved it here from the deleted driver; finding SEC-02 is why it exists).
+  #  This script is stages 1 and 5: it destroys the database in order to set up a
+  #  comparison. If the compiled specification cannot arbitrate that comparison there
+  #  is nothing to set up, so the refusal belongs HERE, before the destruction --
+  #  which is also what lets docs/migration/scenario-diff-evidence.md record the
+  #  measured behaviour as "refused before stage 1, so no database was touched".
+  acas_assert_oracle_attestation
+
+  #  ⭐ AND SO DOES THE BYPASS REFUSAL, for the same reason: it decides WHICH TARGET
+  #  this run is permitted to destroy, so it has to be settled before the two
+  #  disposability checks it would otherwise be able to waive.
+  acas_assert_no_evidence_bypass
+
   acas_assert_disposable_static
 
   acas_assert_scenario
@@ -3373,6 +3908,10 @@ acas_main() {
   fi
   acas_assert_frozen_schema
   acas_assert_seed_script
+  #  AFTER the fixture root has been resolved by acas_assert_scenario, and STILL before
+  #  the drop: a fixture that was never built costs a wiped database if it is only
+  #  discovered inside the re-seed.
+  acas_assert_seed_files
 
   if (( ACAS_RESET_DRY_RUN )); then
     acas_print_plan
@@ -3420,6 +3959,7 @@ acas_main() {
       "$ACAS_RESET_EXPECT_TABLES"
     printf 'This state is NOT comparable with a dump taken after the COBOL cycle: run\n'
     printf 'without --schema-only for the full stage-5 contract.\n'
+    acas_reset_disclose_diagnostic_oracle
     exit "$EX_OK"
   fi
 
@@ -3427,6 +3967,7 @@ acas_main() {
     "$ACAS_RESET_EXPECT_TABLES"
   printf 'verified, and re-seeded. Both cycles now start from identical state.\n'
   printf 'Next: run the Python cycle, then harness/dump_tables.py.\n'
+  acas_reset_disclose_diagnostic_oracle
   exit "$EX_OK"
 }
 

@@ -621,7 +621,7 @@ TABLE_OF_KEYNAMES: Final[Mapping[str, tuple[KeyOfReference, ...]]] = (
             #  So the declared metadata is carried as declared (R-4: reproduce, do not
             #  adjudicate), the open half is named here rather than left for a reader to
             #  discover, and no test claims parity ON THIS POINT --
-            #  tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py asserts
+            #  tests/arithmetic/test_comp_binary.py asserts
             #  only that what is carried MATCHES the frozen declaration.
             # -----------------------------------------------------------------
             "GLPOSTING-REC": (

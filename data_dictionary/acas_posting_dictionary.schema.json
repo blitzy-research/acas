@@ -78,13 +78,14 @@
     },
     "entryKey": {
       "type": "string",
-      "description": "An entry's stable identifier, qualified so no two records can be conflated by field name: TABLE-NAME.COLUMN-NAME where a column backs the field, else COPYBOOK-RECORD.FIELD-NAME. Names appear exactly as the frozen sources spell them - hyphens kept, case not folded. A trailing #<line> disambiguates a name that repeats inside one record, such as filler.",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*\\.[A-Za-z0-9][A-Za-z0-9-]*(#[0-9]+)?$",
+      "description": "An entry's stable identifier, qualified so no two records can be conflated by field name: TABLE-NAME.COLUMN-NAME where a column backs the field, else COPYBOOK-RECORD.FIELD-NAME. Names appear exactly as the frozen sources spell them - hyphens kept, case not folded. Two optional tails disambiguate rather than describe: @<file stem> names the declaring copybook and appears only on the second and later physical declarations of one signature, which is how the variant pair copybooks/plwsoi5B.cob and copybooks/plwsoi5C.cob - identical apart from one commented-out COPY - each keep an entry per declaration as rule R-5 requires; and a trailing #<line> disambiguates a name that repeats inside one record, such as filler. Both may occur together, file stem first.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*\\.[A-Za-z0-9][A-Za-z0-9-]*(@[A-Za-z0-9][A-Za-z0-9-]*)?(#[0-9]+)?$",
       "examples": [
         "GLPOSTING-REC.POST-RRN",
         "IRSPOSTING-REC.POST4-DAY",
         "PSIRSPOST-REC.IRS-POST-AMOUNT",
-        "WS-Ledger-Record.filler#37"
+        "WS-Ledger-Record.filler#37",
+        "Open-Item-Record-5.oi5-supplier@plwsoi5C"
       ]
     },
     "tableName": {
@@ -1556,6 +1557,7 @@
         "columns_covered",
         "host_variables_covered",
         "copybook_fields_covered",
+        "copybook_declarations_covered",
         "program_source_fields_covered",
         "one_sided_entry_keys"
       ],
@@ -1608,7 +1610,12 @@
         },
         "copybook_fields_covered": {
           "type": "integer",
-          "description": "Entries whose copybook view is present, including fillers, redefines alternatives and group items. Deliberately not equal to columns_covered: the copybooks declare items that reach no column, and the bridges derive columns that no copybook declares.",
+          "description": "Entries whose copybook view is present, including fillers, redefines alternatives and group items. Deliberately not equal to columns_covered: the copybooks declare items that reach no column, and the bridges derive columns that no copybook declares. Deliberately not equal to copybook_declarations_covered either, because an OCCURS declaration bound by several columns yields one entry per occurrence and all of them cite the one declaration.",
+          "minimum": 0
+        },
+        "copybook_declarations_covered": {
+          "type": "integer",
+          "description": "DISTINCT PHYSICAL DECLARATIONS in the frozen copybooks that at least one entry cites, counted by (source locator, name) pair so an OCCURS item bound by six columns counts once. This is the figure rule R-5's field-level closure is about, and it is published separately from copybook_fields_covered precisely because the two can disagree: an entry tally can look complete while two entries cite one declaration and another declaration has none, which is the defect finding M-18 recorded. The generator refuses to emit a document in which any parsed declaration is uncited, so a reader comparing this figure against the declaration count of the copybook closure is checking a guarantee rather than a hope.",
           "minimum": 0
         },
         "program_source_fields_covered": {

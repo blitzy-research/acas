@@ -94,13 +94,15 @@ read back by a LATER operation [purchase/pl100.cbl:L564]. All four run inside a
 SINGLE stage 2 and a single stage 6, one at a time (R-3), with NO dump between them,
 so the diff proves the CUMULATIVE effect of the sequence.
 
-`gl_end_of_cycle` (gl080) IS DELIBERATELY NOT DRIVEN BY THIS SCENARIO. ⚠️ NARROWED:
-this previously read "here or in any other scenario file", which is FALSE -
-`harness/scenarios/end_of_cycle_gl.yaml` drives it, with its own affected-table list
-and its own suite in `tests/scenarios/test_end_of_cycle_gl.py`. The scenario file this
-paragraph cites had already been corrected to say so
-[harness/scenarios/period_end_totals.yaml "It is not absent from the directory"]; this
-restatement was the stale copy left behind. gl080 is Phase 3 (Transaction Deletion)
+`gl_end_of_cycle` (gl080) IS DELIBERATELY NOT DRIVEN BY THIS SCENARIO, and is now
+driven by no committed scenario at all. ⚠️ TWICE CORRECTED, both times by fact: this
+read "here or in any other scenario file", which became false when
+`harness/scenarios/end_of_cycle_gl.yaml` was added with its own affected-table list and
+its own suite; findings M-09 and M-17 then removed that definition, because the Agent
+Action Plan's inventory names EIGHT scenario definitions and eight scenario tests. So
+the original sentence is true again -- for a different reason, which is why the history
+is kept rather than the wording simply reverted. gl080's own effects are covered in the
+arithmetic tier; see the A-2/A-3 note below. gl080 is Phase 3 (Transaction Deletion)
 plus Phase 5 (End of Period
 Processing), it promotes THREE interactive answers, and driving it would make the
 totals attribution ambiguous - whereas section 0.6.4's nine write sites make the
@@ -360,8 +362,8 @@ THE TEN-STAGE PROTOCOL, AND THE THREE-WAY EXIT CONTRACT
 
 EIGHT LOGICAL STAGES, TEN NUMBERED ONES. Agent Action Plan section 0.3.2 fixes the
 order as "seed, run, dump, normalize, reset, run, dump, diff" - eight. The driver
-`harness/run_parity.sh` numbers ten, reading the list from
-`harness/parity_stages.sh`, because it makes BOTH normalisations and the publication
+The PROTOCOL numbers ten, reading the list from
+`harness/normalize.py`, because it makes BOTH normalisations and the publication
 check explicit rather than implied. Nothing was added to the protocol; where older
 prose says "stage 8" it means today's stage 10, the diff. The runners' own
 `Check n/8' headings are their internal preflight checks and are not protocol
@@ -1833,8 +1835,10 @@ def test_scenario_definition_preconditions(
         [general/gl080.cbl:L328], which belongs to `gl_end_of_cycle` - an operation
         none of THIS file's four routes dispatches. ⚠️ NARROWED: this previously said
         `gl_end_of_cycle` "is driven by no scenario at all", which is false.
-        `end_of_cycle_gl` drives it, and the divide is emphatically NOT inert there -
-        it is what selects the quarter.
+        a dedicated `end_of_cycle_gl` scenario drove it, and the divide is emphatically
+        NOT inert in gl080 - it is what selects the quarter. That scenario was removed by
+        findings M-09 and M-17, so the divide is now exercised only in the arithmetic
+        tier, which is where the out-of-range subscript has to stay anyway.
       `date_form == 1`  UK dd/mm/yyyy, matching the pinned text, whose digits are never
         reordered to match the form.
       THE CLOCK  both observables, against the `pinned_clock` fixture and against this
@@ -2282,7 +2286,8 @@ def test_ok_to_post_answers_are_pinned(
             f"{SCENARIO}: `{key}:` is declared and must not be. None of its routes is "
             f"on this path - the transfer-file clear belongs to the IRS route and the "
             f"three end-of-cycle answers to `gl_end_of_cycle`, which THIS scenario does "
-            f"not drive (`end_of_cycle_gl` does). Leaving it unstated is what keeps "
+            f"not drive and which no committed scenario drives. Leaving it unstated is "
+            f"what keeps "
             f"this scenario's inputs exactly "
             f"the inputs the frozen cycle takes (R-3)."
         )
@@ -3391,11 +3396,12 @@ def test_a2_a3_quarter_handling_is_not_reconciled_here(
         `tests/arithmetic/test_gl080_cycle_divide_rounded.py` and is deliberately never
         driven through the compiled oracle, because an out-of-range subscript is a write
         into adjacent storage whose effect is undefined.
-      A-3, the second rotating quarter counter, is ALSO witnessed in TABLE STATE by
-        `end_of_cycle_gl`, whose suite asserts it as a positive fact
-        [tests/scenarios/test_end_of_cycle_gl.py "ANOMALY A-3, asserted as a positive
-        fact about the state"] - seeding the counter and the subscript to disagree and
-        observing that the subscript writes Q1 while the counter writes Ledger-Last.
+      A-3, the second rotating quarter counter, WAS also witnessed in TABLE STATE, by a
+        dedicated `end_of_cycle_gl` scenario that seeded the counter and the subscript to
+        disagree and observed the subscript writing Q1 while the counter wrote
+        Ledger-Last. That scenario was removed by findings M-09 and M-17, so the
+        table-state witness is gone and the arithmetic pin is what remains - stated here
+        rather than left for a reader to discover by following a dead reference.
     Both remain locked arithmetically in
     `tests/arithmetic/test_gl080_cycle_divide_rounded.py`.
 
@@ -3514,9 +3520,11 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight scenarios that existed when the measurement was taken, which is all
-    four `unchanged` ones; the ninth, `end_of_cycle_gl`, declares `changed` and moves the
-    row by construction, Phase 5 advancing the cycle and rotating the quarter counter.
+    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
+    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
+    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
+    counter -- that scenario has since been removed (findings M-09 and M-17), and the
+    observation is recorded because it is what established that half.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 

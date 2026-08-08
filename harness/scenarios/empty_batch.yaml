@@ -3,8 +3,9 @@
 #
 # SCENARIO empty_batch -- the DEGENERATE-INPUT BOUNDARY CASE of the General
 # Ledger posting cycle, and the last of the eight scenario definitions the
-# protocol MANDATES (Agent Action Plan section 0.8.5); a ninth, end_of_cycle_gl,
-# was added afterwards to reach gl080 and is an addition beyond the mandate. One closed, waiting
+# protocol MANDATES (Agent Action Plan section 0.8.5) -- which are now exactly the
+# eight this directory holds, a ninth having been added to reach gl080 and then
+# removed by findings M-09 and M-17. One closed, waiting
 # General Ledger batch that carries NO transactions is run through the whole
 # cycle, gl070 -> gl071 -> gl072. The cycle must complete, must raise no term
 # code, and must post nothing.
@@ -652,8 +653,8 @@ description: |
 
   THE ACCEPTANCE PROTOCOL
   TEN stages, in this order, one scenario at a time and nothing
-  alongside it. harness/parity_stages.sh is the single registry and
-  `harness/run_parity.sh --print-stages' prints it, so this list is a restatement
+  alongside it. harness/normalize.py is the single registry and
+  `harness/normalize.py --print-stages' prints it, so this list is a restatement
   and never the authority:
     1 reset the schema and seed the scenario
     2 run the compiled COBOL cycle
@@ -669,7 +670,7 @@ description: |
       because two PARTIAL captures can produce an empty diff and so pass a
       comparison that compared nothing
     10 diff the two normalised trees
-  harness/build_oracle.sh and harness/build_fixtures.sh come before stage 1 and are
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures come before stage 1 and are
   not stages: the first runs once per image, the second once per change to a
   scenario's seed records.
   An EMPTY normalised diff is the pass condition, and the evidence is recorded
@@ -813,7 +814,7 @@ expected_status:
 # It is NOT the bound of the comparison. The capture and the diff are bounded by
 # ALL 22 IN-SCOPE TABLES -- `harness/dump_tables.py --all-in-scope` at stages 3
 # and 7 and `harness/diff_states.py --all-in-scope` at stage 10, which
-# `harness/run_parity.sh` and `tests/conftest.py` both pass. A bound drawn from
+# both a hand-driven run and `tests/conftest.py` pass. A bound drawn from
 # what a scenario EXPECTS to move cannot show a difference in anything it did not
 # expect to move, and an empty diff is the single pass condition (AAP section
 # 0.8.5). In particular both cycles perform the menu's own `overrewrite.'
@@ -831,7 +832,7 @@ affected_tables:
 # =============================================================================
 # THE SEED RECORDS
 # =============================================================================
-# Built into the declared flat files by harness/make_fixtures.py, which generates
+# Built into the declared flat files by harness/dump_tables.py --make-fixtures, which generates
 # a COBOL writer per file, compiles it against the FROZEN copybooks and calls the
 # FROZEN handler to write. The layouts are not restated here and cannot drift.
 #

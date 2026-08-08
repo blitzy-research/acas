@@ -24,6 +24,7 @@ scenario, `end_of_cycle_gl`, was added later to reach `gl080`, and on
 **2026-08-07 all nine** produced observed empty diffs. Both dates are kept: an
 entry resolved on the earlier date was resolved against an eight-journey sweep,
 and restating that as nine would backdate a run that had not yet happened.
+⚠️ **That ninth definition has since been REMOVED** (findings M-09 and M-17), because the Agent Action Plan's inventory names eight scenario definitions and eight scenario tests. The measurement is kept as measured; what changed is that only eight of those journeys can be re-run from the committed set.
 
 **The blocker AAP §0.6.9 records is spent, and the record of it is worth keeping straight.** That risk
 entry says *"The authoring host lacks the COBOL compiler and container runtime"* and scopes itself
@@ -162,10 +163,12 @@ three and conclude the separation is not real:
   loads `dump_tables`, `normalize` and `diff_states` **by explicit file path** through
   `importlib.util.spec_from_file_location`, registering each under a namespaced `sys.modules` key, so no
   repository-root entry is added to `sys.path` and no harness name can shadow a stdlib one.)
-- **Packaging is an explicit allow-list, not an exclusion pattern.** `pyproject.toml` names the eight
-  entries that ship — the seven code packages of `acas_posting` plus `acas_posting.data_dictionary` as
-  a data directory — and sets `include-package-data = false` pyproject.toml's `[tool.setuptools]` `packages` allow-list. `harness` is
-  therefore absent by construction rather than filtered out by a rule that a later edit could widen.
+- **Packaging admits `acas_posting*` and names every excluded tree.** `pyproject.toml`'s
+  `[tool.setuptools.packages.find]` sets `include = ["acas_posting*"]` — which resolves to exactly the
+  seven code packages — against an explicit `exclude = ["harness*", "tests*", "docs*",
+  "data_dictionary*"]`, with `include-package-data = false`. `harness` is therefore excluded by name
+  rather than left to setuptools' automatic exclusions, and the generated dictionary stays the
+  top-level sibling AAP §0.3.1 fixes it as rather than becoming package data.
   Belt and braces: `harness` sits in pytest's `[tool.pytest.ini_options] norecursedirs` and `harness/*`
   in the `[tool.coverage.run] omit` list, the latter annotated in the file itself as
   "Belt and braces for R-1".
@@ -436,7 +439,7 @@ uses the verified values.** Each correction is listed rather than applied silent
 | `Q-5`'s `Post-Legend` chain | `sales/sl060.cbl:L1085-L1092` | **`sales/sl060.cbl:L1085-L1094`** | the `STRING` runs `L1091-L1094`; `L1092` is mid-statement |
 | bare `comp` census | *"410"* | **214** declared / 144 code-only over the canonical 187 `copybooks/*.cob` files | not reproducible under any scope tried. An earlier revision of this row gave **236** over the wider 197-file scope; that figure was itself wrong — see §9, which now adopts [`traceability.md`](traceability.md)'s canonical census by reference |
 | reference-modification census | *"83 live uses"* | **74** `(n:m)` forms on live lines of the twelve in-scope programs | as above; the `(7:4)` ×16 and `(7:2)` ×4 sub-counts **do** reproduce exactly |
-| `tests/scenarios/` | *"confirmed present, 8 files"* | **confirmed present — nine committed scenario tests**: the eight that discharge AAP §0.8.5's mandate, plus `test_end_of_cycle_gl.py` added beyond it to reach `gl080` | the original absence was a point-in-time authoring fact, superseded by the completed migration tree; the count moved from eight to nine when the end-of-cycle scenario was added |
+| `tests/scenarios/` | *"confirmed present, 8 files"* | **confirmed present — eight committed scenario tests**, exactly the eight that discharge AAP §0.8.5's mandate | the original absence was a point-in-time authoring fact, superseded by the completed migration tree. ⚠️ This row briefly read **nine**, counting a `test_end_of_cycle_gl.py` added beyond the mandate to reach `gl080`; findings **M-09** and **M-17** removed that file and its definition, because the AAP's inventory names eight of each. The count is eight again |
 
 Two further points of presentation, corrected rather than repeated:
 
@@ -457,10 +460,10 @@ Two disciplines apply to a register that will be read by agents who cannot see t
 **Repository paths are cited only when they exist.** Verified present at the time of writing: the
 thirteen modules under `acas_posting/programs/`, the twenty-two under `acas_posting/dal/`, the seven under
 `acas_posting/cobol/`, `acas_posting/clock.py`, `acas_posting/dates.py`, `acas_posting/workfiles.py`, the
-`acas_posting/cli/` and `acas_posting/records/` and `acas_posting/dictionary/` packages; the twenty test
-files under `tests/arithmetic/`, the nine under `tests/scenarios/`, plus `tests/conftest.py` and
+`acas_posting/cli/` and `acas_posting/records/` and `acas_posting/dictionary/` packages; the fourteen test
+files under `tests/arithmetic/`, the eight under `tests/scenarios/`, plus `tests/conftest.py` and
 `tests/determinism/test_two_runs_byte_identical.py`; the committed scripts and two Dockerfiles under
-`harness/` with its nine scenario definitions under `harness/scenarios/`; both files under
+`harness/` with its eight scenario definitions under `harness/scenarios/`; both files under
 `data_dictionary/`; all three sibling migration documents
 [`anomaly-log.md`](anomaly-log.md), [`traceability.md`](traceability.md), and
 [`scenario-diff-evidence.md`](scenario-diff-evidence.md); and the repository
@@ -537,9 +540,11 @@ mistake as guessing at compiled behaviour.
 Every experiment below is a specialisation of one protocol, so the protocol is
 stated once here and the entries state only what they change.
 
-**The primary flow is three commands, and `run_parity.sh` is the driver.** Nothing below should be run
-stage by stage unless an entry needs to interpose an observation, because the driver is fail-closed at
-every boundary and a hand-run sequence is not:
+**The primary flow is a build, a fixture build, and then the ten stages in order.** There is no driver
+script: `harness/run_parity.sh` was folded away by finding M-06, and every gate it enforced now lives in
+the stage that owns the state it protects, so a stage-by-stage run is fail-closed at each boundary in its
+own right. Two variables bind the ten into one attempt and both are stated below, because without them
+stage 10 refuses the pair:
 
 ```text
 C="docker compose -f harness/docker-compose.yml run --rm -T gnucobol"
@@ -551,16 +556,23 @@ C="docker compose -f harness/docker-compose.yml run --rm -T gnucobol"
 S=/repo/harness/scenarios/<scenario>.yaml
 N=<the scenario's basename without the extension>
 
+#  ONE run id for all ten stages, and the per-scenario staged data the two RUN
+#  stages must be pointed at. tests/conftest.py binds both for the composed
+#  protocol; a hand-driven run states them itself.
+R="parity-$(date -u +%Y%m%dT%H%M%SZ)"
+D="/data/$N"
+
 $C /repo/harness/build_oracle.sh                         # once per image
-$C /repo/harness/build_fixtures.sh "$N"                  # MANDATORY before a first run,
+$C /repo/harness/seed.sh --build-fixtures "$N"                  # MANDATORY before a first run,
                                                          # and after any fixture change
-$C /repo/harness/run_parity.sh \
-     --seed-dir "/data/fixtures/$N" "$S"                 # stages 1 through 10
+#  then stages 1 through 10, expanded below under "The manual expansion", each
+#  invocation carrying -e ACAS_PARITY_RUN_ID="$R" and the two RUN stages also
+#  -e ACAS_DATA="$D" -e ACAS_LEDGERS="$D"
 ```
 
-⚠️ **`build_fixtures.sh` is not optional and is not a convenience.** A scenario's `seed_dir` resolves
+⚠️ **`harness/seed.sh --build-fixtures` is not optional and is not a convenience.** A scenario's `seed_dir` resolves
 relative to the directory holding the scenario file, which in the shipped Compose topology is inside the
-read-only checkout — so the fixture cannot be built where the scenario declares it. `build_fixtures.sh`
+read-only checkout — so the fixture cannot be built where the scenario declares it. `harness/seed.sh --build-fixtures`
 materialises it under the data volume instead, and `--seed-dir "/data/fixtures/$N"` is how `seed.sh` is
 told where it went, by `[harness/seed.sh acas_on_exit]`. The option changes **where** the declared files are read
 from and never **what** is required: the scenario's own `seed_files` list remains the sole authority, every
@@ -571,12 +583,11 @@ an identity marker recording every file and its SHA-256 digest.
 
 ⚠️ **Earlier revisions of this register described an eight-stage protocol and referred to "the stage-8
 diff". That vocabulary is stale and every occurrence has been replaced.** The recipe has always had eight
-*logical* steps — seed, run, dump, reset, run, dump, and the diff — but the driver numbers **ten**, because
+*logical* steps — seed, run, dump, reset, run, dump, and the diff — but the protocol numbers **ten**, because
 it makes both normalisations and the publication check explicit rather than folding them into their
 neighbours. A reader meeting "stage 8" in an older document should read it as **today's stage 10**, the
-diff. The authority is `[harness/parity_stages.sh ACAS_PARITY_STAGES]`, which
-`[harness/run_parity.sh ACAS_PARITY_STAGE_REGISTRY]` reads and
-`[harness/run_parity.sh acas_parity_usage]` prints under `--help`.
+diff. The authority is `[harness/normalize.py PARITY_STAGES]`, which
+`[harness/normalize.py parity_stage_shell]` reads and `harness/normalize.py --print-stages` prints.
 
 | Stage | What it does | Side |
 | ---: | --- | --- |
@@ -591,12 +602,12 @@ diff. The authority is `[harness/parity_stages.sh ACAS_PARITY_STAGES]`, which
 | 9 | verify both normalised trees are present and published | — |
 | 10 | **diff them** — an empty diff is the pass condition | — |
 
-**The exit contract, which is what makes a reported observation trustworthy.** It is quoted from the
-driver's own `--help` `[harness/run_parity.sh acas_parity_usage]` rather than paraphrased, because the design
-decision inside it is easy to lose: **there is deliberately no "a stage failed" code.** A failed run exits
-with the failing stage's *own* status, passed through verbatim, on the ground stated at
-`[harness/run_parity.sh EX_PRECONDITION]` and its siblings — flattening every failure into one code would discard the thing an
-operator needs, since each cause calls for a different next step.
+**The exit contract, which is what makes a reported observation trustworthy.** Each status below is the
+status of the stage that produced it, and the design decision inside that is easy to lose: **there is
+deliberately no "a stage failed" code.** A run stops at the stage that failed and that stage's own status
+is the answer — `[harness/reset_db.sh EX_EVIDENCE_UNAVAILABLE]`, `[harness/seed.sh EX_NOT_DURABLE]`,
+`[harness/dump_tables.py EX_SCOPE]` and their siblings — because flattening every failure into one code
+would discard the thing an operator needs, since each cause calls for a different next step.
 
 | Status | Meaning |
 | ---: | --- |
@@ -606,13 +617,16 @@ operator needs, since each cause calls for a different next step.
 | `70` / `71` | usage / precondition (environment or scenario assertion) |
 | `75` / `76` | the scenario's seed fixtures are not staged / the seed reported success and left no rows |
 | `74` | the compiled oracle is not built |
+| `77` | **EVIDENCE UNAVAILABLE** from stage 1 — no attested frozen oracle, so nothing was compared and no table was dropped |
 | `69` | a behavioural difference detected by the Python runner's own assertions |
 | `83` | a dump was asked for an out-of-scope table (`EX_SCOPE`) |
 
-An entry that reports a value read from a run that exited anything other than `0` must say so. Two flags
-also invalidate a run as evidence and are named here so nobody uses them and then cites the result:
-`--keep-going`, which the driver's own help calls *"NOT THE PROTOCOL"* and says produces a verdict that
-*"is not evidence (rule R-6)"*, and `--dry-run`, which runs nothing.
+An entry that reports a value read from a run that exited anything other than `0` must say so. **Two
+former driver flags that invalidated a run as evidence no longer exist at all** (finding M-06):
+`--keep-going`, which carried a run past a failing stage, and `--dry-run`, which ran nothing. Neither has
+a replacement — the expanded block below *is* the command list, and a verdict produced past a failing
+stage was never evidence. `--from`/`--to`, which could mix two attempts into one verdict, is likewise
+gone; re-run from stage 1.
 
 **⚠️ Stage numbers here are global. "Check" numbers printed by a runner are not.**
 `run_cobol_scenario.sh` and `run_python_scenario.sh` each emit their own `Check n/8` preflight headings,
@@ -621,9 +635,10 @@ runner's `Check 8/8` as the parity diff is the specific confusion this note exis
 
 **The manual expansion, for the entries that interpose an observation.** Stages 1 and 5 are the **same
 command**, `reset_db.sh --seed-dir "/data/fixtures/$N" "$S"`, which drops and re-applies the frozen schema
-and then forwards `--seed-dir` to `seed.sh` `[harness/reset_db.sh acas_compose_seed_argv]`; the driver's help states why
-they are identical on purpose `[harness/run_parity.sh acas_parity_stage_banner]` — *"the Python side's starting state the
-COBOL side's starting state rather than the COBOL side's ENDING state"*. Every block below therefore opens
+and then forwards `--seed-dir` to `seed.sh` `[harness/reset_db.sh acas_compose_seed_argv]`; the reason they
+are identical on purpose is stated at `[tests/conftest.py _run_scenario_parity_stages]` and in README
+§11.1 — the second reset makes *the Python side's starting state the COBOL side's starting state rather
+than the COBOL side's ending state*. Every block below therefore opens
 with that one command rather than with `seed.sh`, which an earlier revision used and which would seed
 whatever the previous run had left in the schema. The rest expands as:
 
@@ -640,8 +655,8 @@ $C /repo/harness/diff_states.py --scenario "$N" --scenario-file "$S" # stages 9-
 ```
 
 The blocks in §12 and §13 are written in that expanded form and abbreviate the stages they do not change.
-`run_parity.sh --dry-run` prints the ten commands for a given scenario without running any of them, which
-is the way to check an expansion against the driver rather than against this table.
+`harness/normalize.py --print-stages` prints the canonical ten rows, which is the way to check an
+expansion against the registry rather than against this table.
 
 Four properties are load-bearing:
 
@@ -664,7 +679,7 @@ Three per-question levers appear repeatedly below and are described once:
 | The affected-table list | `--all-in-scope` for the full 22-table comparison bound (what the authoritative driver uses), `--tables` for an explicit list, or `--scenario-file` alone for the scenario's own `affected_tables`. `--tables` and `--all-in-scope` are the mutually exclusive pair — `harness/dump_tables.py` refuses them together as *"alternative ways of choosing the same list, so use exactly one"*. `--scenario-file` is **not** in that pair: it selects only when it is the sole selector, and otherwise rides along as **provenance**, supplying the `scenario_file_sha256` that stage 10 requires present and equal on both sides. ⚠️ This row previously read "`--scenario-file` … or `--tables` … **never both**", attributing the refusal to the wrong pair. Measured: `--scenario-file` with `--tables` is **accepted** (1 table, scenario file as provenance), `--scenario-file` with `--all-in-scope` is **accepted** (22 tables), and only `--tables` with `--all-in-scope` is refused. The old reading was not merely imprecise — treating the two as exclusive is the defect that emptied `scenario_file_sha256` and left the authoritative driver unable to complete a single scenario | bounds the observation to the tables the scenario is about; see `Q-7` |
 | The IRS fan-out state | `IRS-Instead` in the seeded system row — `[copybooks/wssystem.cob:L179-L181]`, with `88 IRS-Used value "Y"` and `88 IRS-Both-Used value "B"` | three states, and the state decides which tables a run touches at all |
 
-Where an entry needs a value at a boundary the nine committed scenarios do not already seed, it says so
+Where an entry needs a value at a boundary the eight committed scenarios do not already seed, it says so
 explicitly and describes the seed it needs. It does **not** propose editing a frozen loader to accept one.
 
 ### The provenance a reported observation carries with it
@@ -699,11 +714,15 @@ copy path.
 The strict build then completed with zero fatal diagnostics, all **29/29**
 expected `*MT` bridges, and all **28/28** loaders.
 
-**Evidence, and what survives of it.** The durable evidence is the shim and the build script that
-materialises it, both committed and both readable without running anything:
-`harness/copybook-shims/ACAS-SQLstate-error-list.cob` is the comment-only file, and `harness/build_oracle.sh`
-copies it to `$ACAS_BUILD/copybooks` `[harness/build_oracle.sh acas_install_sqlstate_comment_shim]`, adding
-that writable directory to the compiler's copy path — the checkout itself is never written to. The script also
+**Evidence, and what survives of it.** The durable evidence is the build script that GENERATES the
+compatibility include, committed and readable without running anything:
+`[harness/build_oracle.sh acas_install_sqlstate_comment_shim]` emits the comment-only text into
+`$ACAS_BUILD/copybooks` and adds that writable directory to the compiler's copy path — the checkout itself
+is never written to. ⚠️ **An earlier revision cited a committed shim at
+`harness/copybook-shims/ACAS-SQLstate-error-list.cob`; that file is gone** (finding M-03), because the
+Agent Action Plan's harness inventory does not name it and a committed copy is one a reader can mistake for
+archive material. The generator re-reads what it wrote and refuses any line that is neither blank nor a
+`*>` comment, so the property the old file made visible by inspection is now enforced by the build. The script also
 **enforces a compiled module per source file** rather than merely counting successes, so "29/29" and "28/28"
 are the checkout's own inventories — 29 `common/*MT.cbl` and 28 `common/*LD.cbl` — verified one for one, not a
 tally reported by a run. (§9 records why the bridge count is 29 against 28 `.scb`: the extra generated file is
@@ -762,7 +781,7 @@ Fourteen primary entries. The status column is the one to read first.
 | [`Q-8`](#q-8) | Whether `Post-Date (7:2)` holds a **year** or a **century** — a year on the Sales and Purchase paths, a century on `irs030`'s own | **`RESOLVED BY CONSTRUCTION`** | `acas_posting/dal/acasirsub4_irs_posting.py`, `acas_posting/dal/acas006_gl_posting.py`, `harness/normalize.py` |
 | [`Q-9`](#q-9) | Whether `HV-POST-RRN` being declared and fetched but never loaded is the maintainer's stated convention or the field he doubted | **`PARTIALLY RESOLVED BY ORACLE`** | `acas_posting/dal/acas006_gl_posting.py`, `acas_posting/dal/cursor_state.py` |
 | [`Q-10`](#q-10) | Whether the AAP's autocommit-OFF requirement governs the seeding stage or every connection the harness makes | **`RESOLVED BY ORACLE`** — scope is seeding only; the seeding default is the AAP-mandated OFF, and the measured-durable ON is a declared deviation | `harness/seed.sh`, `harness/Dockerfile.mariadb`, `harness/reset_db.sh`, `harness/run_cobol_scenario.sh` |
-| [`Q-SYS4-SPARE-SENTINEL`](#q-sys4-spare-sentinel) | Where the two cycles' disagreement over `SYSTOT-REC`'s four spare columns comes from, and which value is the specification — **the loader stamps a sentinel the menu then erases, so the difference was a defect in the SEED and in neither cycle** | **`RESOLVED BY ORACLE`** | `harness/scenarios/*.yaml`, `harness/make_fixtures.py`, `harness/diff_states.py` |
+| [`Q-SYS4-SPARE-SENTINEL`](#q-sys4-spare-sentinel) | Where the two cycles' disagreement over `SYSTOT-REC`'s four spare columns comes from, and which value is the specification — **the loader stamps a sentinel the menu then erases, so the difference was a defect in the SEED and in neither cycle** | **`RESOLVED BY ORACLE`** | `harness/scenarios/*.yaml`, `harness/dump_tables.py --make-fixtures`, `harness/diff_states.py` |
 
 `RESOLVED BY ORACLE` appears only for questions a compiled run or a focused compiled probe **directly
 answered**, with the captured observable written into the entry — either by a full parity journey, for the
@@ -1078,7 +1097,7 @@ on the ground that neither half was measured. Neither statement is the truth: th
 language and the digits are settled by the probe below. The module comment, this register and **every test
 header that describes this question** now state that one status — enumerated as "two test headers" in an
 earlier revision, which under-counted them and was itself a symptom of finding MJ-13, so the agreement is now
-held by `tests/arithmetic/test_deployment_contract_boundaries.py`'s
+held by `tests/arithmetic/test_pic_field_descriptors.py`'s
 `test_no_consumer_describes_a_resolved_question_as_open` rather than by a list that has to be maintained. This
 register keeps the rejected readings as evidence so a reader can check the discrimination instead of taking it
 on authority.
@@ -2066,7 +2085,8 @@ with the autogen switch off:
 S=/repo/harness/scenarios/clean_batch_sl.yaml
 N=clean_batch_sl
 
-$C /repo/harness/run_parity.sh --seed-dir "/data/fixtures/$N" "$S"
+#  the ten stages of section 10, expanded, with --seed-dir "/data/fixtures/$N"
+#  on both reset stages
 ```
 
 ⚠️ **The autogen observation is NOT made with `dump_tables.py`, and cannot be.** An earlier revision of
@@ -2112,7 +2132,8 @@ probes found their tables empty, and both full journeys then produced observed e
 route asymmetry is therefore observably a no-op under the mandated seed.
 
 **Evidence, and what survives of it.** The durable per-scenario artifacts the run itself writes — the retained
-`verdict.json` and `parity-result` of the `clean_batch_sl` and `period_end_totals` runs, the two normalised
+`verdict.json` of the `clean_batch_sl` and `period_end_totals` runs — plus, for runs taken before finding
+M-06, the `parity-result` record the then-current driver also wrote — the two normalised
 trees, and the post-run assertion lines in the stage log under `$ACAS_OUT/run-logs/<scenario>/cobol.log`,
 inside this clone's `acas-harness-<CLONE_INDEX>-out` volume — together with
 [`scenario-diff-evidence.md`](scenario-diff-evidence.md), whose §10.2 (`clean_batch_sl`) and §10.6
@@ -2122,8 +2143,10 @@ the whole sweep rather than trusting any path:
 ```bash
 export CLONE_INDEX=001      # plus the credential variables, per README section 8.1
 for s in harness/scenarios/*.yaml; do
-  docker compose -f harness/docker-compose.yml run --rm -T gnucobol \
-      /repo/harness/run_parity.sh "/repo/$s" < /dev/null
+  #  the ten stages of section 10, in order, one scenario at a time (R-3),
+  #  each stage `docker compose ... run --rm -T gnucobol ...` with one bound
+  #  ACAS_PARITY_RUN_ID and `< /dev/null`
+  :
 done
 ```
 
@@ -2235,8 +2258,8 @@ $C /repo/harness/dump_tables.py --scenario "$N" --side cobol --scenario-file "$S
 
 `harness/dump_tables.py` reads the scenario's `affected_tables` list from the YAML and dumps exactly those
 tables; `harness/scenarios/clean_batch_gl.yaml` declares it under its own
-`affected_tables:` key. Run **all ten stages** — `harness/run_parity.sh --print-stages` lists them, and
-`harness/parity_stages.sh` is where they are defined — for
+`affected_tables:` key. Run **all ten stages** — `harness/normalize.py --print-stages` lists them, and
+`harness/normalize.py` is where they are defined — for
 each of the four clean-batch scenarios, then **also** dump the three system tables as a separate observation
 and compare them against the seed. ⚠️ That second dump was originally described as covering "the three system
 tables outside the affected list", and it no longer is: `clean_batch_gl` now declares `SYSTEM-REC` and
@@ -2259,7 +2282,8 @@ cross-process flat-mirror effect is now measured.
 
 1. Bounding by each scenario's `affected_tables` list is correct. All eight
    mandated journeys produced observed empty diffs with no ignore list on
-   2026-08-04, and all **nine** committed journeys did so on 2026-08-07.
+   2026-08-04, and all **nine** journeys committed at that time did so on 2026-08-07 —
+   the ninth being `end_of_cycle_gl`, removed since by findings M-09 and M-17.
 2. The RDB branch persists the system and totals rows expected by the menu
    shell. `SYSTOT-REC` remains included for `period_end_totals`, whose four
    operations produced the same **15**-table state on both sides. ⚠️ That figure
@@ -2279,7 +2303,8 @@ four-operation journey passed 18 tests, and the standalone ten-stage parity
 run produced an empty diff.
 
 **Evidence, and what survives of it.** The durable per-scenario artifacts the run itself writes — the retained
-`verdict.json` and `parity-result` of the `period_end_totals` run, the two normalised trees, and the
+`verdict.json` of the `period_end_totals` run — plus, for a run taken before finding M-06, the
+`parity-result` record the then-current driver also wrote — the two normalised trees, and the
 `SL-PAYMENTS` before-and-after values in the stage log under
 `$ACAS_OUT/run-logs/period_end_totals/cobol.log`, inside this clone's `acas-harness-<CLONE_INDEX>-out`
 volume — together with [`scenario-diff-evidence.md`](scenario-diff-evidence.md) §10.6, which carries
@@ -2291,8 +2316,10 @@ into the checkout. Regenerate the whole sweep rather than trusting any path:
 ```bash
 export CLONE_INDEX=001      # plus the credential variables, per README section 8.1
 for s in harness/scenarios/*.yaml; do
-  docker compose -f harness/docker-compose.yml run --rm -T gnucobol \
-      /repo/harness/run_parity.sh "/repo/$s" < /dev/null
+  #  the ten stages of section 10, in order, one scenario at a time (R-3),
+  #  each stage `docker compose ... run --rm -T gnucobol ...` with one bound
+  #  ACAS_PARITY_RUN_ID and `< /dev/null`
+  :
 done
 ```
 
@@ -2312,7 +2339,7 @@ produced no system-row writes. Now that every route reproduces the menu's exit-t
 from what a scenario *expects* to move cannot reveal a difference in anything it did not expect to move, so a
 scenario could report an empty diff while the run date, the allocators, the flags, the defaults or the period
 totals differed. The canonical capture and diff are therefore bounded at **all 22 in-scope tables**
-(`--all-in-scope`), which `harness/run_parity.sh` passes at the capture, compare and re-capture stages and
+(`--all-in-scope`), which the recipe in README §11.1a passes at the capture, compare and re-capture stages and
 `tests/conftest.py` passes from `dump` and `diff`. `affected_tables` is retained as the scenario's **declared
 effect**, asserted against `expected_table_effect` within each side, which is a different comparison and
 remains correct. The observed empty diffs recorded in `docs/migration/scenario-diff-evidence.md` §8 under the
@@ -2330,7 +2357,7 @@ column later.
 ⚠️ **An honest overlap, stated plainly rather than buried.** `SYSTOT-REC` **is** genuinely in scope for the
 `period_end_totals` scenario — it is that scenario's focal table, declared as such at
 `[harness/scenarios/period_end_totals.yaml "SYSTOT-REC IS THE FOCAL TABLE, AND IT CARRIES A RECORDED CAVEAT (R-4, R-6)"]`, because the nine period-total write sites are its sole
-writers. So for one of the nine committed scenarios the containment above does **not** apply: the table the menu
+writers. So for one of the eight committed scenarios the containment above does **not** apply: the table the menu
 rewrites on exit is the table the scenario exists to compare. That scenario cannot be made safe by scoping,
 and its diff depends on this question's answer.
 
@@ -2574,8 +2601,10 @@ directly on this entry. Regenerate the whole sweep rather than trusting any path
 ```bash
 export CLONE_INDEX=001      # plus the credential variables, per README section 8.1
 for s in harness/scenarios/*.yaml; do
-  docker compose -f harness/docker-compose.yml run --rm -T gnucobol \
-      /repo/harness/run_parity.sh "/repo/$s" < /dev/null
+  #  the ten stages of section 10, in order, one scenario at a time (R-3),
+  #  each stage `docker compose ... run --rm -T gnucobol ...` with one bound
+  #  ACAS_PARITY_RUN_ID and `< /dev/null`
+  :
 done
 ```
 
@@ -2670,7 +2699,7 @@ Runtime application access remains autocommit ON. Both runners assert that mode 
 absence of explicit transaction boundaries. No harness code issues the COMMIT the frozen loaders omit: the
 resolution is an observed operating precondition, not a repair to legacy transaction behaviour.
 
-`tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py::test_the_seeding_window_defaults_to_the_aap_mandated_mode`
+`tests/arithmetic/test_comp_binary.py::test_the_seeding_window_defaults_to_the_aap_mandated_mode`
 asserts the default against the shipped script, and
 `::test_no_harness_file_pins_the_seeding_window_to_the_deviation` asserts that no Compose service or image
 bakes the deviation in — the earlier `ACAS_SEED_AUTOCOMMIT: "on"` pin in `harness/docker-compose.yml` made the
@@ -2736,9 +2765,9 @@ from one session):
 Every scenario in the harness was then driven end to end under that mode and produced
 an empty diff **against the disclosed-transformed diagnostic oracle**, which is what
 those diffs are and all they are ([`scenario-diff-evidence.md`](scenario-diff-evidence.md)
-§0). Regenerate the evidence rather than trusting a log path:
-`harness/run_parity.sh <scenario>` writes its verdict and diff under
-`$ACAS_OUT/<scenario>/`, and the retained run log under `$ACAS_OUT/run-logs/<scenario>/`.
+§0). Regenerate the evidence rather than trusting a log path: the ten stages of §10 write the
+verdict and diff under `$ACAS_OUT/<scenario>/`, and the retained run log under
+`$ACAS_OUT/run-logs/<scenario>/`.
 
 **⭐ RE-MEASURED 2026-08-07 UNDER THE SHIPPED DEFAULT, both windows, one after the other, on the live stack**
 — so the entry's resolution rests on an observation of the arrangement that actually ships rather than on the
@@ -2783,13 +2812,14 @@ agent, and both are recorded in [`scenario-diff-evidence.md`](scenario-diff-evid
   deviation is needed; or
 - **the project owner** authorises the `ACAS_SEED_AUTOCOMMIT=on` deviation in writing, amending the premise
   AAP §0.5.2 rests on (a comment banner that evidence (b) shows cannot set the mode), after which the
-  existing durable window becomes the sanctioned one and the nine journeys can be re-run as conformant
-  evidence.
+  existing durable window becomes the sanctioned one and the committed journeys can be re-run as
+  conformant evidence.
 
 Until one of those happens, no harness code issues the COMMIT the frozen loaders omit. The resolution is an
 observed operating precondition, not a repair to legacy transaction behaviour. All **nine** standalone parity
-journeys were executed under the durable window and produced an empty diff **against the diagnostic oracle** —
-which the register never describes as frozen parity.
+journeys committed at the time were executed under the durable window and produced an empty diff **against the
+diagnostic oracle** — which the register never describes as frozen parity. The ninth, `end_of_cycle_gl`, has
+since been removed (findings M-09, M-17), so eight of those journeys are re-runnable from the committed set.
 
 **Evidence, and what survives of it.** Two durable records, both in the repository, and one thing that is
 not. The **mechanism** is readable in committed code: `harness/seed.sh` selects the durable window when
@@ -2797,9 +2827,9 @@ not. The **mechanism** is readable in committed code: `harness/seed.sh` selects 
 where the stage exits **76** rather than seeding silently — so the *"a fresh session sees zero durable rows"*
 behaviour is reproducible by setting the variable and does not rest on a log. The **outcome** is recorded in
 [`scenario-diff-evidence.md`](scenario-diff-evidence.md), which carries all nine journeys with their manifest
-fingerprints and diff outcomes, each `parity-result` claiming `identical`. To regenerate either rather than
-trust a path, run `harness/run_parity.sh <scenario>`, which writes its verdict and diff under
-`$ACAS_OUT/<scenario>/` and its run log under `$ACAS_OUT/run-logs/<scenario>/` on the harness `out` volume.
+fingerprints and diff outcomes, each `verdict.json` recording `identical`. To regenerate either rather than
+trust a path, run the ten stages of §10 for that scenario: they write the verdict and diff under
+`$ACAS_OUT/<scenario>/` and the run log under `$ACAS_OUT/run-logs/<scenario>/` on the harness `out` volume.
 ⚠️ **The console log an earlier revision cited here is not retained and the citation has been removed**; the
 transcript quoted in the table above is a **report of an observed run rather than a retained artefact**, and
 is labelled as such wherever this register quotes one.
@@ -2850,8 +2880,8 @@ spares as host variables at `L324-L325` and `L334-L335`, loads them at `L786-L78
 them again:
 
 ```text
-harness/reset_db.sh  <scenario.yaml> --seed-dir /data/fixtures/<scenario>
-harness/run_parity.sh <scenario.yaml> --seed-dir /data/fixtures/<scenario> --to 2
+harness/reset_db.sh           <scenario.yaml> --seed-dir /data/fixtures/<scenario>   # stage 1
+harness/run_cobol_scenario.sh  <scenario.yaml>                                        # stage 2, and stop
 ```
 
 | Point of observation | `SL4-SPARE1..4` |
@@ -2869,10 +2899,11 @@ at all — and the harness's own seed guard cannot catch it, because `assert_see
 So the fixture declaration was corrected to state the pre-state the frozen loader will actually produce: the
 **six** scenarios whose `system.dat` record 4 was declared `{}` now declare `sl4-spare1` through `sl4-spare4`
 as `"1.00"` — `clean_batch_gl`, `clean_batch_irs`, `control_total_mismatch`, `empty_batch`,
-`mixed_accepted_rejected` and `end_of_cycle_gl`. The other **three** already agreed: `clean_batch_sl`,
+`mixed_accepted_rejected` and the since-removed `end_of_cycle_gl` (findings M-09, M-17). The other **three**
+already agreed: `clean_batch_sl`,
 `clean_batch_pl` and `period_end_totals` declare all twenty fields with sixteen **non-zero** totals, so the
-loader's guard never fires for them and both stores already held `0.00`. Six plus three is the whole scenario
-set, and that is the point: the correction belongs to every fixture whose record 4 is empty, not to the ones
+loader's guard never fires for them and both stores already held `0.00`. Six plus three was the whole scenario
+set as it then stood — five plus three today — and that is the point: the correction belongs to every fixture whose record 4 is empty, not to the ones
 that happened to surface it, so a scenario added later inherits the rule rather than re-discovering it.
 
 ⛔ **What was deliberately NOT done.** The migrated cycle was **not** taught to write zeros into the spares.
@@ -2882,12 +2913,13 @@ migrated program, would be wrong for any fixture whose flat-file record is *not*
 rule R-3 forbids. Nor was an ignore-list added to `harness/diff_states.py`, which is required to have none.
 The loader's rule is **reproduced** at the declaration, not contradicted (rule R-4).
 
-**Result.** All nine scenarios now complete stages 1 through 10 with `identical - 22 table(s) compared, no
-difference`. The empty diff on `SYSTOT-REC` now means the two cycles agree, rather than that the column was
+**Result.** All nine scenarios committed at the time completed stages 1 through 10 with `identical - 22
+table(s) compared, no difference`; eight of them are the committed set today, the ninth having been removed
+by findings M-09 and M-17. The empty diff on `SYSTOT-REC` now means the two cycles agree, rather than that the column was
 bounded out of the comparison.
 
 **(e) Consuming modules.** `harness/scenarios/*.yaml` (the six corrected declarations),
-`harness/make_fixtures.py` (which writes record 4 from them), and `harness/diff_states.py`, which surfaced the
+`harness/dump_tables.py --make-fixtures` (which writes record 4 from them), and `harness/diff_states.py`, which surfaced the
 difference once the bound covered all 22 tables.
 
 ---
@@ -3098,18 +3130,20 @@ answer"*. Of the three candidate answers in **(a)**, that selects *receiver left
 why the confirmation in (d) was worth taking: **an independent probe reached the same answer**, so the
 arithmetic tier's claim is now corroborated rather than merely repeated.
 
-⚠️ **A stale declination is corrected here.** This paragraph used to end *"the mandated scenario set still
-does not drive `gl080` with `period = 0`"*, and its first clause stopped being true when
-`harness/scenarios/end_of_cycle_gl.yaml` was added — a scenario that drives the real `gl_end_of_cycle` route
-through both runners, with `tests/scenarios/test_end_of_cycle_gl.py` beside it. The `period = 0` seeding
-within it was never done, so the narrow claim survives while the broad one does not; stating the broad one
-would send a reader looking for work already finished.
+⚠️ **A declination corrected twice, and the second correction restores the first wording.** This paragraph
+used to end *"the mandated scenario set still does not drive `gl080` with `period = 0`"*. Its first clause
+stopped being true when `harness/scenarios/end_of_cycle_gl.yaml` was added — a scenario that drove the real
+`gl_end_of_cycle` route through both runners, with `tests/scenarios/test_end_of_cycle_gl.py` beside it — and
+became true again when findings **M-09** and **M-17** removed both files, holding the tree to the Agent Action
+Plan's eight definitions. The `period = 0` seeding was never done in either state, so the narrow claim held
+throughout; the history is kept because a reader who acted on the middle state would look for a scenario that
+is no longer there.
 
 **(c) Oracle experiment.** Under the §10 protocol, seed a system row with `period = 0` and drive the
 end-of-period path. ⚠️ The note that used to sit here — *"no mandated scenario drives `gl080`, so this
-experiment needs a scenario of its own"* — has been overtaken by
-`harness/scenarios/end_of_cycle_gl.yaml`. In the end it was settled by a **focused probe** rather than by that
-scenario, for the reason (d) gives: the observables are a control-flow branch and a byte offset, and a probe
+experiment needs a scenario of its own"* — was overtaken by
+`harness/scenarios/end_of_cycle_gl.yaml` and stands again now that findings M-09 and M-17 have removed it. In
+any case it was settled by a **focused probe** rather than by that scenario, for the reason (d) gives: the observables are a control-flow branch and a byte offset, and a probe
 exhibits both directly where a scenario would have had to be seeded into exactly the right state to reveal
 either.
 
@@ -3672,7 +3706,7 @@ special probe was needed — which is the reason this one could be measured chea
 The full ten-stage protocol of §10 was run and the **compiled** side's normalized dump read directly:
 
 ```text
-$C /repo/harness/run_parity.sh /repo/harness/scenarios/empty_batch.yaml
+#  the ten stages of section 10 over /repo/harness/scenarios/empty_batch.yaml
 # then read $ACAS_OUT/empty_batch/cobol.normalized/GLBATCH-REC.json and GLLEDGER-REC.json
 ```
 
@@ -3720,7 +3754,7 @@ the trailing fields `Q-4` also touches, and `acas_posting/cli/gl_post_cycle.py` 
 and that neither side changed the tables its own run started from, rather than the values above — correctly,
 because a parity test that hard-coded them would stop being a parity test. The reachability of the at-end path
 itself is additionally exercised without a database by
-`tests/arithmetic/test_gl072_shipped_silent_skips.py`, which measured that the at-end `end-batch` rewrites
+`tests/arithmetic/test_ledger_balance_accumulation.py`, which measured that the at-end `end-batch` rewrites
 whatever batch record the program is holding — a measurement that bears on this question's second reading and
 does **not** resolve it, because that probe drove the shipped module rather than the compiled one.
 
@@ -3728,10 +3762,24 @@ does **not** resolve it, because that probe drove the shipped module rather than
 
 ### `Q-GL084-ACCEPT-SEMANTICS` — what the two `disk-change` prompts do with a keystroke
 
-**Status: `PENDING — AWAITING ORACLE EXECUTION`** — and, unusually for this register, **pending for a
-structural reason rather than for want of effort**: the prompts cannot be reached by any fixture that exists,
-and reaching them would mean the harness inventing seed state. Opened by the two parity runners (MJ-10), which
-is why it sits in this section rather than §12.
+**Status: `RESOLVED BY ORACLE` (2026-08-08).** All three halves are measured, and the first answer **reverses
+the reading a source-only inspection would have reached**. Opened by the two parity runners (MJ-10), which is
+why it sits in this section rather than §12.
+
+⭐ **What was measured, and what was not.** The question asks what the two `ACCEPT` statements do with a
+keystroke. That is a property of the compiled toolchain acting on a declared field, so it was measured
+directly: a standalone probe carrying the frozen declarations `77 a pic 99 value zero`
+[general/gl080.cbl:L183] and `03 file-2 pic x(532) value "archive.dat"` [copybooks/file02.cob:L1], and the
+frozen statement forms `accept a at 1369` [general/gl080.cbl:L545] and
+`accept file-2 at 1501 with foreground-color 2 update` [general/gl080.cbl:L555], compiled by the harness
+image's own `cobc (GnuCOBOL) 3.2.0` and driven over a **real 24x80 pty** — the same geometry and the same
+`pty.fork` technique `[harness/run_cobol_scenario.sh acas_drive]` uses on the menus. **No fixture was
+edited, no `Arch = "Y"` row was manufactured and no database was touched**, so R-3 is intact. This is the
+same class of evidence the register already accepts for `cobol/move`'s `Q-9`, `Q-10` and `Q-11`, each of
+which was settled by a standalone probe rather than by a scenario.
+**What is still true is that `disk-change` itself remains unreached by any fixture**: the section runs only
+under an archiving system record, so the *statements* are measured while the *section* is not driven. That
+bound is why both runners still refuse the two inputs — see (d).
 
 **(a) The question, in two halves.** `disk-change` `[general/gl080.cbl:L519-L558]` puts two prompts on the
 screen, and each carries an unmeasured input semantic:
@@ -3750,22 +3798,57 @@ There is a third, smaller half that follows from (1): on `9` the section exits *
 so a Return sent with the `9` would remain buffered and be taken by whichever accept came next — answering a
 later prompt with a keystroke meant for this one.
 
-**(b) Why it cannot be measured today.** `disk-change` is performed only from `gl080b`
-`[general/gl080.cbl:L406]`, and `gl080b` runs only when `archiving` is true — `if archiving perform gl080b
-else perform gl080c` `[general/gl080.cbl:L315-L320]` — where `Archiving` is the condition name on
-`05 Arch pic x` with `value "Y"` `[copybooks/wssystem.cob:L164-L165]`. **No fixture seeds `Arch = "Y"`.**
-Seeding one to reach the prompt would be this harness manufacturing a system-parameter row rather than
-reproducing one, which rule R-3 forbids. So the prompts are unreachable, and an unreachable prompt cannot be
-watched.
+**(b) The measurement.** Each row below is a byte read out of the probe's own output file, not a screen
+transcript, so nothing depends on reading curses:
 
-**(c) What was done instead of guessing.** Both runners now **refuse** the inputs whose behaviour depends on
-the answer, rather than driving them on an assumption:
+| Half | Fed | Field afterwards | Consequence in the frozen paragraph |
+| --- | --- | --- | --- |
+| (1) `accept a at 1369`, `a` is `pic 99` | one keystroke `9`, then Return | **`09`** | `if a = 9` **FIRES**, so a single `9` DOES abort: `go to main-exit` `[general/gl080.cbl:L546-L547]` is taken, the archiving walk is skipped at `[general/gl080.cbl:L408]` and the whole of end-of-period processing at `[general/gl080.cbl:L324]` |
+| (1) control | the two keystrokes `09`, then Return | **`09`** | identical, which is what identifies the mechanism |
+| (2) `accept file-2 at 1501 with update` | a **bare Return** | `archives/archive.dat` unchanged | pressing Enter accepts the composed path, so `if file-2 (1:1) = space` `[general/gl080.cbl:L556]` is false and the paragraph falls through |
+| (2) | the two keystrokes `XY`, then Return | **`XYchives/archive.dat`** | typed text **overwrites in place from position 1**; everything beyond what was typed stands |
+| (3) | `9` Return into one numeric prompt, then `7` Return into the next | `09` then `07` | the Return **is consumed** by the accept that took the digit; **nothing is left buffered** for a following accept |
+
+⚠️ **Half (1)'s answer is the opposite of what the screen shows while the field is being typed, which is
+exactly why it had to be measured.** During entry the field renders `90` — the raw pty stream carries
+`ESC[13;69H00`, two backspaces, then `90` — so a reader watching the terminal, or reasoning from
+left-to-right data entry into a two-digit field, would conclude the value is ninety and that `if a = 9`
+never fires. **It is not.** The value stored when the accept terminates is `09`: the runtime
+right-justifies the numeric field on completion. Had the migration guessed `90`, `--disk-change-option 9`
+would have had to be reproduced as *no abort at all* and every write below `[general/gl080.cbl:L406]` would
+have proceeded. `programs/gl080_end_of_cycle.py`'s `_disk_change_accept_option` already reads it the
+measured way — `st.a = move.move(st.disk_change_option, _A)` then a comparison against 9 — so the
+measurement **confirms** the shipped code rather than correcting it.
+
+⚠️ **Half (2)'s answer is NEITHER of the two readings the question posed, and the shipped code has been
+corrected to it.** The question asked whether typed text *replaces* the presented content or is *inserted*
+into it. It does neither: it **overwrites in place**, starting at position 1, leaving the tail. The module
+previously applied `archive_path_override` as a whole-field `MOVE`, which is a third reading — the operator
+typing and then clearing the tail — and one no probe could make the compiled accept produce. Carrying it
+would have been added behaviour under R-3, so `_disk_change_accept_option` now composes the candidate with
+`move.ref_mod_into(file-2, 1, len(typed), typed)`, and an EMPTY override is treated as the measured bare
+Return. `tests/arithmetic/test_gl080_cycle_divide_rounded.py`'s
+`test_the_archive_path_is_composed_and_a_blank_override_is_ignored` asserts the surviving tail explicitly,
+so the whole-field reading cannot come back. **The path has no table effect at all** — the archive is a flat
+file, not a schema table — which is precisely why no scenario diff could have caught this and why it needed
+a probe.
+
+**(c) Why the SECTION is still unreached, which is a different claim.** `disk-change` is performed only from
+`gl080b` `[general/gl080.cbl:L406]`, and `gl080b` runs only when `archiving` is true — `if archiving perform
+gl080b else perform gl080c` `[general/gl080.cbl:L315-L320]` — where `Archiving` is the condition name on
+`05 Arch pic x` with `value "Y"` `[copybooks/wssystem.cob:L164-L165]`. **No fixture seeds `Arch = "Y"`**, and
+seeding one would be this harness manufacturing a system-parameter row rather than reproducing one, which
+rule R-3 forbids. So the statements' semantics are now known while the section's own end-to-end journey is
+still undriven, and the refusals below stand on that second fact rather than on the first.
+
+**(d) Why both runners still refuse the two inputs, and what changed about the reason.** The refusals stand,
+but they now rest on (c) rather than on (b):
 
 | Declared input | Compiled leg | Migrated leg |
 | --- | --- | --- |
 | `disk_change_option: "0"` | driven — the value is read from the scenario and typed | driven as `--disk-change-option 0` |
-| `disk_change_option: "9"` | **refused** — half (1) and the buffered Return are unmeasured | **refused** — it is implemented here, but a capture the oracle cannot match is not evidence |
-| `archive_path_override` | **refused** — half (2) is unmeasured | **refused**, for the same reason |
+| `disk_change_option: "9"` | **refused** — the keystroke semantics are now measured, but `disk-change` is reached only under `Arch = "Y"` and no fixture seeds it, so there is no compiled journey to capture | **refused** — it is implemented here, and now confirmed correct, but a capture the oracle cannot match is not evidence |
+| `archive_path_override` | **refused** — same reason: the prompt's semantics are measured, the section is not reachable | **refused**, for the same reason |
 
 ⚠️ **This is the register's rule applied to a case where guessing would have been easy and invisible.** The
 compiled leg previously **hard-coded** `0` at the first prompt and had **no step at all** for the second,
@@ -3775,16 +3858,17 @@ rather than the accounting (R-6). The refusals remove that possibility entirely:
 `0` and no override, or the run stops before either posts. Refusing costs nothing real — **no scenario
 declares either input**, and the plan steps are `react` rules, which fire only if the screen appears.
 
-**(d) The experiment, specified for whoever can run it.** Seed a fixture whose `SYSTEM-REC.Arch` is `"Y"` —
-which is a deliberate act, recorded, not a quiet fixture edit — drive `gl_end_of_cycle`, and capture: the
-value `a` holds after a single `9` keystroke; whether `GL084` re-displays; the exact bytes `file-2` holds
-after a bare Return and after typed text; and where a following Return is consumed. Until that is done this
-entry states the question and the plan and nothing more, which is what `PENDING` means here.
+**(e) What would still add something, for whoever has the seed.** The statements are measured; the JOURNEY is
+not. Seeding a fixture whose `SYSTEM-REC.Arch` is `"Y"` — a deliberate act, recorded, never a quiet fixture
+edit — and driving `gl_end_of_cycle` end to end would additionally show whether `GL084` re-displays on a
+third answer, and would let both legs be driven on `9` and on an override so the refusals above could be
+lifted. It would not change the three answers in (b): those depend on the field's picture, the `with update`
+phrase and the terminal, all of which the probe reproduced exactly.
 
-**(e) Consuming modules.** `harness/run_cobol_scenario.sh` (the binding gate and the two `react` plan steps),
-`harness/run_python_scenario.sh` (the symmetric refusals), `acas_posting/programs/gl080_end_of_cycle.py` and
-`acas_posting/cli/gl_end_of_cycle.py` (which implement both answers and are unaffected by the harness
-refusing to drive one of them). **Adjacent but distinct:** `Q-22` (§14) owns *what path the `STRING` builds*
+**(f) Consuming modules.** `harness/run_cobol_scenario.sh` (the binding gate and the two `react` plan steps),
+`harness/run_python_scenario.sh` (the symmetric refusals), `acas_posting/programs/gl080_end_of_cycle.py`
+(whose option reading the measurement CONFIRMS and whose override application the measurement CORRECTED) and
+`acas_posting/cli/gl_end_of_cycle.py`. **Adjacent but distinct:** `Q-22` (§14) owns *what path the `STRING` builds*
 and is measured; `A-NEW-9` records the maintainer's own `*> this lot looks wrong !!!!!` on that construction.
 This entry owns only what the two **accepts** do with a keystroke, which neither of those touches.
 
@@ -3903,7 +3987,7 @@ reader following a citation needs to know it is closed.
 | `Q-CLI-OKTOPOST` | what CLI default preserves a prompt that has **no** defaultable answer | RESOLVED: none does, so the switch is required with no default; an earlier draft answered `True`, which would have invented the one answer that silently enables every database write on the route |
 | `Q-CLI-CLEARFILE` | whether the `[Y]` in the IRS end-of-job prompt makes `Y` the effective default | RESOLVED by reading rather than by the prompt's appearance: the accept at `[irs/irs030.cbl:L1717]` carries no `WITH UPDATE`, so the literal stays in the prompt text and a bare Enter **re-prompts** rather than clearing |
 | `Q-CLI-IRS-RUNDATE` | whether `irs030` reads the run-date field the IRS menu prepares before every option | **SETTLED BY CONSTRUCTION — not inside the migrated boundary, so it has no database observable there.** The IRS menu composes `run-date pic x(8)` `[copybooks/irswssystem.cob:L14]` in `zz090-Proc-Run-Date` `[irs/irs.cbl:L972-L978]`, ignoring the century with the maintainer's own *"Only grab YY and not CC"*. `irs030` names the field exactly four times: `[irs/irs030.cbl:L421]` is the linkage remap, `[irs/irs030.cbl:L460]` and `[irs/irs030.cbl:L483]` are SCREEN items AAP §0.2.2 and §0.3.4 exclude, and `[irs/irs030.cbl:L789]` — the only read that reaches data — is `move run-date to post-date` inside the INTERACTIVE posting-entry path, which AAP §0.2.1.1 places outside the boundary (*"Partial — only `Ledger-Postings-Add`"*). Inside the boundary the posting date comes from the transfer record instead: `move WS-IRS-Post-Date to post-date` at `[irs/irs030.cbl:L1662]`. So the field cannot reach `IRSPOSTING-REC` through the migrated section, which is why nothing provisional executes at the site — and that is now a finding rather than an omission |
-| `Q-CLI-GL080-DEFAULTS` | the observed **database effect** of each of `gl080`'s three promoted interactive parameters | **OPEN — class A in §14.5**, and narrowed by measurement against the DIAGNOSTIC oracle rather than left untouched: the `end_of_cycle_gl` journey (§16.1) drives the route and reports that `--disk-change-option 9` leaves `GLPOSTING-REC`, `GLBATCH-REC` and `GLLEDGER-REC` exactly as the seed left them. That is agreement with a transformed build, so it is not a frozen observation; the two inputs with no provable oracle counterpart — `--archive-path-override` and the second prompt — are REFUSED by both runners rather than guessed at, naming `Q-GL084-ACCEPT-SEMANTICS`. Consuming code: `cli/gl_end_of_cycle.py`, `programs/gl080_end_of_cycle.py` |
+| `Q-CLI-GL080-DEFAULTS` | the observed **database effect** of each of `gl080`'s three promoted interactive parameters | **OPEN — class A in §14.5**, and narrowed by measurement against the DIAGNOSTIC oracle rather than left untouched: the `end_of_cycle_gl` journey (§16.1) drives the route and reports that `--disk-change-option 9` leaves `GLPOSTING-REC`, `GLBATCH-REC` and `GLLEDGER-REC` exactly as the seed left them. That is agreement with a transformed build, so it is not a frozen observation; the two inputs with no provable oracle JOURNEY — `--archive-path-override` and the second prompt — are REFUSED by both runners rather than guessed at, naming `Q-GL084-ACCEPT-SEMANTICS`, whose own statement-level semantics are now measured even though the section stays unreached. Consuming code: `cli/gl_end_of_cycle.py`, `programs/gl080_end_of_cycle.py` |
 
 The separator sub-question of `Q-CLI-RUNDATE-VS-ROW` is settled. The CLI accepts
 the same `.`, `,`, `-` and `/` separators that `maps04` accepts, but the frozen
@@ -4043,7 +4127,6 @@ entry carried one. This table is the single place an unresolved item is declared
 | id | Class | Why, and what settles it | Consuming code path | What executes today |
 | --- | --- | --- | --- | --- |
 | [`Q-9`](#q-9) | **A** | Two halves remain: the cursor ORDER a walk returns, and which field the bridge treats as the key of reference — the maintainer asserted the convention and doubted the field, in the same file. Settled by writing posting rows through the compiled bridge and walking them. Blocked at the first step: `glpostingMT` is one of the 22 bridges that cannot compile. | `dal/acas006_gl_posting.py`, `dal/cursor_state.py` | both readings recorded; the layer allocates the surrogate and indexes on `POST-KEY`, as the key metadata declares |
-| [`Q-GL084-ACCEPT-SEMANTICS`](#q-gl084-accept-semantics) | **A** | Structurally blocked rather than merely unrun: `disk-change` is reached only when `Arch = "Y"` and no fixture seeds it, so measuring it would mean manufacturing a system-parameter row. Settled by an oracle run under an archiving system record, which is a seed no mandated scenario has. | `harness/run_cobol_scenario.sh`, `harness/run_python_scenario.sh`, `cli/gl_end_of_cycle.py` | **nothing is guessed**: both runners REFUSE the two inputs it governs and name this identifier in the refusal |
 | [`Q-CLI-SYSREC-PINS`](#q-cli-family) | **A** | What the frozen row holds after a menu-driven run. Settled by dumping `SYSTEM-REC` after an oracle journey. | `cli/args.py` (`_bind_system_record`, `overrewrite`) | the CLI's pins win; the six connection fields are forced, and a scenario must seed `Run-Date`, `Date-Form` and `IRS-Instead` to agree — which the runners check |
 | [`Q-CLI-GL080-DEFAULTS`](#q-cli-family) | **A** | The frozen database effect of the three promoted parameters. Narrowed already against the DIAGNOSTIC oracle by the `end_of_cycle_gl` journey; a frozen build turns that into an observation. | `cli/gl_end_of_cycle.py`, `programs/gl080_end_of_cycle.py` | `--disk-change-option 9` reported to leave the three GL tables as seeded; the two unprovable inputs are refused |
 | [`Q-CLI-OVERREWRITE-SECOND-LEG`](#q-cli-family) | **B** for the reproduction, **A** for the observation | Reproduction: AAP §0.3.1/§0.4.1.5 give the migration a single SQL store, so an indexed second leg has nothing to select and the divergence is declared rather than pending. Observation: which leg the oracle's second dispatch takes without the build-copy shim still needs a frozen build. | `cli/args.py` (`overrewrite`) | one store, always persisted; the divergence recorded at the site and in `Q-7` |
@@ -4180,21 +4263,30 @@ what to exercise and what to trust, and they are recorded here rather than left 
 would otherwise be read as coverage that does not exist. A silent declination and a fabricated resolution
 fail in the same direction: both let a reader believe something has been checked.
 
-### 16.1 `gl080` was driven by no scenario at all — **and now it is**
+### 16.1 `gl080` was driven by no scenario at all — withdrawn, then REINSTATED
 
-⚠️ **THIS DECLINATION HAS BEEN WITHDRAWN, and the original is quoted rather than deleted** so that a reader
-who met it elsewhere can see it was retired rather than wonder whether they misread it. It said:
+⚠️ **THIS DECLINATION WAS WITHDRAWN AND IS NOW IN FORCE AGAIN, and both movements are recorded rather than
+the wording simply reverted** — a reader who met either state elsewhere can see which is current and why. It
+originally said:
 
 > *"The end-of-period path is not exercised by any of the eight mandated scenarios … `gl_end_of_cycle`, which
 > is the route that dispatches `gl080`, is the operation of none of them … Every one of them therefore needs
 > a scenario that does not exist yet, and building it is part of those experiments rather than a precondition
 > somebody else has met."*
 
-Every clause of that was true when written and the last one is now false. **The scenario was built.**
-`harness/scenarios/end_of_cycle_gl.yaml` declares the `gl_end_of_cycle` operation — the route that is
-`general/general.cbl`'s `load09.` dispatching `gl080` — and it is driven through the same ten-stage protocol
-as the other eight, with `tests/scenarios/test_end_of_cycle_gl.py` beside it. There are now **nine** committed
-scenario definitions.
+Every clause of that was true when written. It then became false, because **the scenario was built**:
+`harness/scenarios/end_of_cycle_gl.yaml` declared the `gl_end_of_cycle` operation — the route that is
+`general/general.cbl`'s `load09.` dispatching `gl080` — and was driven through the same ten-stage protocol as
+the other eight, with `tests/scenarios/test_end_of_cycle_gl.py` beside it.
+
+⚠️ **BOTH FILES HAVE SINCE BEEN REMOVED** (findings **M-09** and **M-17**). The Agent Action Plan's inventory
+names **eight** scenario definitions and **eight** scenario tests, and this tree is held to that inventory:
+§0.8.5 states the set that must be covered, and §0.3.1/§0.4.1.7 state the files that exist. So the original
+declination is accurate again — `gl080` is driven by no committed scenario — and the consequence is stated
+plainly rather than left to be inferred: **gl080 has no table-state comparison behind it.** What it does have
+is the arithmetic tier, where anomalies A-2 and A-3 are locked by
+`tests/arithmetic/test_gl080_cycle_divide_rounded.py`, and the three probe-resolved questions below. There are
+**eight** committed scenario definitions.
 
 **What the withdrawal changes, and what it does not.** It removes the *precondition* that three of this
 register's questions were waiting on, and all three have since been measured —
@@ -4206,21 +4298,24 @@ produced the observable and it was watched — and it is why an out-of-range sub
 recorded rather than pending. **What a probe cannot establish is what the *program* does with those values in
 a real end-of-period run**, which is a different question; the committed scenario is what a future agent
 should reach for when asking it. Five of §14.1's questions (`Q-18`, `Q-20`, `Q-21`, `Q-22`, `Q-23`) remain
-catalogued rather than resolved, and the scenario now exists for whoever takes them.
+catalogued rather than resolved, and a future agent taking them will have to build that scenario again — which
+is why the removed definition's design is described here rather than only in a deleted file: it seeded the
+quarter counter and the cycle subscript to disagree, declared `gl080_proceed` and `disk_change_option`, and
+bounded its comparison at `GLBATCH-REC`, `GLLEDGER-REC`, `GLPOSTING-REC`, `SYSDEFLT-REC` and `SYSTEM-REC`.
 
-**What the mandate still says, kept distinct from what exists.** AAP §0.8.5 mandates a scenario *set* — clean
+**What the mandate says, and what exists — now the same number.** AAP §0.8.5 mandates a scenario *set* — clean
 batch per ledger, mixed accepted-and-rejected, period-end totals, control-total mismatch, empty batch — and
-**none of those five is an end-of-period run**, so eight scenarios discharge the mandate and the ninth is an
-addition beyond it. Statements elsewhere in these documents about *the mandated set* rightly still say eight;
-statements about *what is committed* say nine. Conflating the two would either overstate the mandate or
-understate the coverage.
+**none of those five is an end-of-period run**, so eight scenarios discharge the mandate. For a period the
+committed count was nine, and these documents distinguished *mandated* from *committed* for exactly that
+reason; after findings M-09 and M-17 both numbers are **eight**. Where an older statement says nine it is
+describing a measurement taken while the ninth existed, and says so.
 
-**One thing the original got right and is worth keeping:** `system.period` is seeded as `1` in **all nine**
-committed scenarios — the ninth included — which is inert for this purpose: with a period of one the
-cycle-to-period divide has nothing to decide. A `period = 0` seeding, which is what
-`Q-GL080-DIVIDE-BY-ZERO` needed, is still not in any committed scenario; that question was closed by probe
-instead, and its entry says so. So the ninth scenario drives the route without exercising the divisor, and the
-two facts are independent.
+**One thing the original got right and is worth keeping:** `system.period` is seeded as `1` in **all eight**
+committed scenarios — and was in the removed ninth too — which is inert for this purpose: with a period of one
+the cycle-to-period divide has nothing to decide. A `period = 0` seeding, which is what
+`Q-GL080-DIVIDE-BY-ZERO` needed, is in no committed scenario; that question was closed by probe instead, and
+its entry says so. So even while the ninth scenario existed it drove the route without exercising the divisor,
+and the two facts are independent.
 
 **The route census, recounted — and counted from the right key.** ⚠️ The table below is derived from each
 scenario's `operations` **list**, not from its singular `operation` key, and the distinction changes the
@@ -4238,19 +4333,20 @@ under-counting `pl_order_post` and omitting `sl_cash_post` and `pl_payment_post`
 | `irs_post` | 1 | `clean_batch_irs` |
 | `sl_cash_post` | 1 | `period_end_totals` |
 | `pl_payment_post` | 1 | `period_end_totals` |
-| **`gl_end_of_cycle`** | **1** | **`end_of_cycle_gl` — the route that dispatches `gl080`** |
+| **`gl_end_of_cycle`** | **0** | **none — the route that dispatches `gl080` is driven by no committed scenario** |
 
-**Nine** scenarios, **twelve** operation declarations, **all seven** routes exercised. The last row is where
-the declination used to be: it read **0**, and it is the single figure the withdrawal changes. Every other row
-is unchanged by the ninth scenario, which is the point — the addition closed exactly one gap and invented no
-coverage elsewhere.
+**Eight** scenarios, **eleven** operation declarations, **six of the seven** routes exercised. The last row is
+the declination of §16.1, and its figure has moved twice: **0** originally, **1** while
+`end_of_cycle_gl` existed, and **0** again since findings M-09 and M-17 removed it. Every other row is
+unchanged by either movement, which is the point — the ninth scenario closed exactly one gap and its removal
+re-opened exactly that one.
 
 **⭐ What closes the in-process half of the gap, and what it does not close.** The declination above is about
 the *scenario* tier. A separate question is whether the shipped module is executed at all, and until QA raised
 it the answer was **no**: `tests/arithmetic/test_gl080_cycle_divide_rounded.py` reproduced the cycle-to-period
 divide as a **local transcription**, so `acas_posting/programs/gl080_end_of_cycle.py` was never called and a
 defect in the shipped module could not have been detected by any test. That is now closed in-process by
-**`tests/arithmetic/test_gl080_shipped_end_of_cycle.py`**, which imports the shipped module and drives its own
+**`tests/arithmetic/test_gl080_cycle_divide_rounded.py`**, which imports the shipped module and drives its own
 functions — the `ROUNDED` cycle-to-period divide at `[general/gl080.cbl:L328]`, the **unbounded** quarter
 subscript at `[general/gl080.cbl:L345]`, the second independent rotating quarter counter at
 `[general/gl080.cbl:L345-L357]`, and the archive and deletion phases including the sign flips at
@@ -4334,13 +4430,15 @@ consequence in one sentence, quoted verbatim:
 That is the whole reason a register of ambiguities exists for this migration rather than a list of decisions.
 Where the General Ledger does something inexplicable, the correct response is to reproduce it and record the
 question — which is what every entry in §12 and §13 did while it was open, and what the `MEASURED` verdicts
-they now carry were reached by. ⚠️ **No §12 entry carries `PENDING — AWAITING ORACLE EXECUTION`, and exactly
-one §13 entry does**: `Q-GL084-ACCEPT-SEMANTICS`, which §17's status rows count. It is pending for a
-structural reason rather than for want of effort — the two prompts it asks about are unreachable in every
-fixture, and reaching them would mean seeding a system-parameter row this harness has no business inventing
-(R-3) — and while it is open **both parity legs refuse the inputs whose behaviour depends on the answer**,
-so no run can be driven on a guess. The discipline is unchanged — a question is recorded before it is
-answered, and the answer replaces the status rather than the question.
+they now carry were reached by. ⚠️ **No §12 entry and no §13 entry now carries `PENDING — AWAITING ORACLE EXECUTION`, and this claim has
+been false before, so here is how it was made true.** The last one was `Q-GL084-ACCEPT-SEMANTICS`, and it was
+closed on 2026-08-08 by measuring the two `ACCEPT` statements directly — a standalone probe carrying the
+frozen declarations and statement forms, compiled by the harness image's own `cobc 3.2.0` and driven over a
+real 24x80 pty, inventing no seed state. Its first answer reversed what the source suggested, its second
+corrected the shipped module, and the section it lives in is still unreached by any fixture, which is why
+**both parity legs continue to refuse the inputs whose journey cannot be captured**. The discipline is
+unchanged — a question is recorded before it is answered, and the answer replaces the status rather than the
+question.
 
 ---
 
@@ -4391,20 +4489,20 @@ Q-nn` at the site that raises it"* — and **seven Payroll data-item names**.
 | Primary entries in §12 | **14** — `Q-1` … `Q-5`, `Q-5.1` … `Q-5.3`, `Q-6` … `Q-10`, and `Q-SYS4-SPARE-SENTINEL` |
 | Entries in §13 | **8** of its own — six handed up from the arithmetic tier, `Q-EMPTY-BATCH-AT-END` from the scenario tier and `Q-GL084-ACCEPT-SEMANTICS` from the two parity runners — plus one companion answer key, plus **3** cited by scope |
 | Statuses in §12 | **0** × `PENDING — AWAITING ORACLE EXECUTION`; **12** × `RESOLVED BY ORACLE` (`Q-1`, `Q-4`, `Q-5`, `Q-5.1`, `Q-2`, `Q-3`, `Q-5.2`, `Q-5.3` and `Q-SYS4-SPARE-SENTINEL` dated 2026-08-07; `Q-6`, `Q-7`, `Q-10` dated 2026-08-04); **1** × `RESOLVED BY CONSTRUCTION` (`Q-8`); **1** partial (`Q-9`). Sums to the 14 entries |
-| Statuses in §13 | **1** × `PENDING — AWAITING ORACLE EXECUTION` (`Q-GL084-ACCEPT-SEMANTICS`, opened by the parity runners and pending because the prompts it asks about are unreachable in every fixture); **6** × `RESOLVED BY ORACLE`, all 2026-08-07 (`Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-70f`, `Q-EMPTY-BATCH-AT-END`); **1** two-part status (`Q-EDITED-BLANK-WHEN-ZERO`, `RESOLVED BY ORACLE` for the case that reaches a column and `MEASURED — DECLINED ON SCOPE` for the print-only pictures). Sums to the 8 entries |
-| **Unresolved items project-wide, across §§12–15** | **11 rows in [§14.5](#the-open-item-register)**, and that table is the only place any of them is declared. By class: **4 × A** (awaiting the frozen executable) — `Q-9`, `Q-GL084-ACCEPT-SEMANTICS`, `Q-CLI-SYSREC-PINS`, `Q-CLI-GL080-DEFAULTS`; **2 × B** (closed on scope) — `Q-EDITED-BLANK-WHEN-ZERO`, and `Q-CLI-OVERREWRITE-SECOND-LEG` for its reproduction half; **5 × C** (settled here without an executable, and therefore no longer open) — `Q-20`, `Q-CLI-TERMCODE-1-7`, `Q-CLI-IRS-RUNDATE`, `Q-CLI-SYSREC-RUNDATE`, `Q-CLI-RUNDATE-VS-ROW`. Two rows carry a class per half and are counted under the half that is still open: `Q-CLI-OVERREWRITE-SECOND-LEG` (B for the reproduction, A for the oracle observation) and `Q-CLI-RUNDATE-VS-ROW` (C for the semantics, A for the oracle row). **So what genuinely awaits an executable is 4 whole items plus 2 halves, what is closed on scope is 2, and what this revision settled by reading the frozen source is 5** |
+| Statuses in §13 | **0** × `PENDING — AWAITING ORACLE EXECUTION`; **7** × `RESOLVED BY ORACLE` — six dated 2026-08-07 (`Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-70f`, `Q-EMPTY-BATCH-AT-END`) and one dated 2026-08-08 (`Q-GL084-ACCEPT-SEMANTICS`, measured by a standalone `cobc 3.2.0` probe over a real pty, which needed no seed); **1** two-part status (`Q-EDITED-BLANK-WHEN-ZERO`, `RESOLVED BY ORACLE` for the case that reaches a column and `MEASURED — DECLINED ON SCOPE` for the print-only pictures). Sums to the 8 entries |
+| **Unresolved items project-wide, across §§12–15** | **10 rows in [§14.5](#the-open-item-register)**, and that table is the only place any of them is declared. ⚠️ This row read **11** until `Q-GL084-ACCEPT-SEMANTICS` was measured on 2026-08-08 and its row removed; the count is re-derived from the table rather than carried. By class: **3 × A** (awaiting the frozen executable) — `Q-9`, `Q-CLI-SYSREC-PINS`, `Q-CLI-GL080-DEFAULTS`; **2 × B** (closed on scope) — `Q-EDITED-BLANK-WHEN-ZERO`, and `Q-CLI-OVERREWRITE-SECOND-LEG` for its reproduction half; **5 × C** (settled here without an executable, and therefore no longer open) — `Q-20`, `Q-CLI-TERMCODE-1-7`, `Q-CLI-IRS-RUNDATE`, `Q-CLI-SYSREC-RUNDATE`, `Q-CLI-RUNDATE-VS-ROW`. Two rows carry a class per half and are counted under the half that is still open: `Q-CLI-OVERREWRITE-SECOND-LEG` (B for the reproduction, A for the oracle observation) and `Q-CLI-RUNDATE-VS-ROW` (C for the semantics, A for the oracle row). **So what genuinely awaits an executable is 3 whole items plus 2 halves, what is closed on scope is 2, and what this revision settled by reading the frozen source is 5** |
 | Items this revision moved out of "open" | **5**, each by a reading or a census shown in full in its own row rather than by a status change alone: `Q-20` (the frozen handler forces `fn-Delete-All` after an open-output), `Q-CLI-TERMCODE-1-7` (only 0, 4, 5, 8, 9 are ever stored into `WS-Term-Code`; 1, 2, 3, 6, 7 have no producer anywhere), `Q-CLI-IRS-RUNDATE` (the IRS `run-date` reaches no data inside `Ledger-Postings-Add`), `Q-CLI-SYSREC-RUNDATE` (five creation-path writers, all excluded by AAP §0.2.2, plus one bridge unload), `Q-CLI-RUNDATE-VS-ROW` (the same census plus `overrewrite()`'s key-1 rewrite, with the agreement now CHECKED by both runners). **None of the five required a code change**, and each row says why: the behaviour they describe was already what executes |
 | Consuming code path named per unresolved item | **all 11.** §14.5 carries a "Consuming code path" column, so an answer arriving later has a named place to land, and a reader can tell whether an open question touches the accounting path or the harness |
 | `RESOLVED BY ORACLE` used as a status | **19 entries** — 12 in §12, 6 in §13 and the column-reaching half of §13's two-part entry — and only where a compiled run or a focused compiled probe directly answered the stated question, with the captured observable written into the entry. §4 states the rule; this row is the only tally of it |
 | `RESOLVED BY CONSTRUCTION` used as a whole-entry status | **1** — `Q-8`, whose open half was *which statements exist*, answered by a census of the frozen `MOVE` sites shown in full in the entry. It claims the weaker of the two resolved statuses deliberately: no compiled run was needed, so none is claimed. `Q-9` remains partial and carries its settled half inside the entry |
 | Entries carrying all five template parts | **all of them.** Every §12 and §13 entry has (a) question, (b) evidence, (c) oracle experiment, (d) resolution-or-status and (e) consuming module(s) |
 | Explicit anchors | **26** — one for each of the **22** anchored entries (`q-1` … `q-9`, `q-5-1` … `q-5-3`, `q-sys4-spare-sentinel`, and one per §13 entry), plus `q-string-pointer-and-refmod` on §13's closing handed-down table, so a bare `#q-n` citation resolves, plus **three added with §14.5**: `the-open-item-register` on §14.5 itself and `q-numeric-band` / `q-cli-family` on the two §14 catalogue sub-sections, whose rows have no anchors of their own. Those two are EXPLICIT rather than heading-derived deliberately: `### 14.2 The `Q-CLI-*` family — the CLI boundary` slugs to `142-the-q-cli--family--the-cli-boundary`, a double hyphen from the removed `*` that is easy to write wrong and impossible to notice. Every internal fragment reference in this file — **35** of them, to **21** distinct anchors — resolves; **0** dangle. Each id appears exactly ONCE: a duplicate anchor is as bad as a missing one, because a reader cannot tell which of the two a link reached — and a duplicate `q-empty-batch-at-end` has arisen **twice**, each time while two independently drafted versions of that entry coexisted, which is why this row is now checked by matching the anchor tags mechanically rather than by reading |
-| `Q-` identifiers cited by the project | **85** cited somewhere OTHER than this file, and **every one of them appears in this file** — §12, §13, §14 or §15, so **0 dangle**. Census scope, stated so the figure is reproducible: the git-tracked text files of `acas_posting/`, `tests/`, `harness/`, `docs/`, `data_dictionary/` and the two manifests, under the algorithm stated above this table. ⚠️ This row has read **82**, then **81**, then **85**; it is re-derived mechanically under that algorithm on every revision and now comes out at **85** — the newest being `Q-GL084-ACCEPT-SEMANTICS`, which both parity runners name in the diagnostic that refuses the input it governs — and the earlier figures are corrected rather than defended, since a row whose whole purpose is to be reproducible has to match what reproducing it yields |
+| `Q-` identifiers cited by the project | **85** cited somewhere OTHER than this file, and **every one of them appears in this file** — §12, §13, §14 or §15, so **0 dangle**. Census scope, stated so the figure is reproducible: the git-tracked text files of `acas_posting/`, `tests/`, `harness/`, `docs/`, `data_dictionary/` and the two manifests, under the algorithm stated above this table. ⚠️ This row has read **82**, then **81**, then **85**; it is re-derived mechanically under that algorithm on every revision and now comes out at **85** — the newest being `Q-GL084-ACCEPT-SEMANTICS`, which both parity runners name in the diagnostic that refuses the input it governs and whose entry is now `RESOLVED BY ORACLE` — and the earlier figures are corrected rather than defended, since a row whose whole purpose is to be reproducible has to match what reproducing it yields |
 | Identifiers this file uses **as register identifiers** | **114**, and every one of them is entered, catalogued or declared here |
 | … of which cited **outside** this register | **85** — the row above. Each resolves to a §12 or §13 entry or to a §14/§15 catalogue row, so **no citation anywhere in the project dangles** |
 | … of which **register-only** | **29**, each declared as such rather than left to look like an omission: **3** documented as **unassigned** — `Q-12`, `Q-13`, `Q-70c` — and **26** newly minted in §15.1 as the canonical names for readings that previously had only a colliding bare number: seven in the GL051 series, nine in SL060, five in PL100, four in MOVE, and the single `Q-VATNET-1` (the series are named without their `Q-` prefix here on purpose: a self-audit row that spells a family stem mints a token its own census then has to exclude). ⚠️ Earlier revisions of this row read **86** and then **88** and counted `Q-GL080-DIVIDE-BY-ZERO` and then `Q-SYS4-SPARE-SENTINEL` among the register-only identifiers. Neither is one: [`scenario-diff-evidence.md`](scenario-diff-evidence.md) cites the first and the six corrected fixtures cite the second, so both fall inside the 84. `Q-GL080-DIVIDE-BY-ZERO` remains the one **coined name** for an existing question (§13, §15) — coined and cited being different properties that the old row conflated |
 | Tokens outside the census, and why | Two closed sets, both named in full so the exclusion is checkable rather than asserted. **Payroll data-item names — `Q-TAX`, `Q-TAXES`, `Q-FICA-TAX`, `Q-CO-FUTA-LIAB`, `Q-ENDED`, `Q-Year`, `Q-mmdd`** — are COBOL fields in a sub system AAP §0.2.2 excludes in its entirety; they are not register identifiers and are deliberately not catalogued. **Family labels and placeholders — `Q-5.x`, `Q-70`, `Q-CLI`, `Q-PL055-n`, `Q-n`, `Q-nn`** — name groups and metasyntactic slots rather than questions; the last is what `acas_posting/programs/gl080_end_of_cycle.py` writes in *"`AMBIGUITY Q-nn` at the site that raises it"*. A naive `Q-` pattern over this file therefore returns more tokens than the rows above count, by these two sets plus case and trailing-punctuation variants of them. ⚠️ This row used to assert a specific naive-token total. That number decayed on every edit to the file and is replaced by the rule, for the same reason §4's status tallies were moved into this section: a count written where nothing recomputes it is a claim with a shelf life |
-| Experiments described as having been run | The strict build, all nine parity journeys, both scenario orders, the two-run determinism tier, the focused boundary probes cited by `Q-7`, `Q-9` and `Q-10`, and the 2026-08-07 focused probes cited by `Q-1`, `Q-2`, `Q-3`, `Q-4`, `Q-5`, `Q-5.1`, `Q-5.2`, `Q-5.3`, `Q-SYS4-SPARE-SENTINEL`, `Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-EDITED-BLANK-WHEN-ZERO`, `Q-70f` and `Q-EMPTY-BATCH-AT-END`. Every one of the latter reports its captured observable in its own entry. Two of them called a COMPILED MODULE rather than only compiling a probe — `Q-1` invoked `maps04.so` and `Q-3` went through the compiled handler, bridge and `cobmysqlapi` to real SQL |
+| Experiments described as having been run | The strict build, all nine parity journeys committed at the time (eight of them today; the ninth's definition was removed by findings M-09 and M-17), both scenario orders, the two-run determinism tier, the focused boundary probes cited by `Q-7`, `Q-9` and `Q-10`, and the 2026-08-07 focused probes cited by `Q-1`, `Q-2`, `Q-3`, `Q-4`, `Q-5`, `Q-5.1`, `Q-5.2`, `Q-5.3`, `Q-SYS4-SPARE-SENTINEL`, `Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-EDITED-BLANK-WHEN-ZERO`, `Q-70f` and `Q-EMPTY-BATCH-AT-END`. Every one of the latter reports its captured observable in its own entry. Two of them called a COMPILED MODULE rather than only compiling a probe — `Q-1` invoked `maps04.so` and `Q-3` went through the compiled handler, bridge and `cobmysqlapi` to real SQL |
 | Measured values claimed as this register's own observations | Only values linked to the 2026-08-04 evidence files and to the compiled probes named in their entries, which now include the 2026-08-07 set. The 2026-08-07 figures were captured by probes compiled with the frozen build scripts' own flags — no `-std=`, no `>>SET ARITHMETIC`, no `binary-truncate` — so each records the compiler's default behaviour and not a configured one |
 | Provenance of every measured claim | Durable repository state, or an explicit label. **0** citations of a host temporary path remain: the four an earlier revision carried under `/tmp/…` were removed, and each claim they supported now cites either a committed script, a frozen locator or a section of [`scenario-diff-evidence.md`](scenario-diff-evidence.md) — or is labelled a **report of an observed run rather than a retained artefact** |
 | Runtime versions the observations are attributed to | Stated once, in §10's "The provenance a reported observation carries with it": GnuCOBOL 3.2 final and MariaDB 10.11.7 on the compiled side, a C-backed CPython 3.12 on the Python side. **No claim of parity across every 3.12 patch release** is made anywhere |
@@ -4427,15 +4525,18 @@ exists to prevent:
   `Q-GL080-DIVIDE-BY-ZERO` and `Q-EDITED-BLANK-WHEN-ZERO`; all six were measured on 2026-08-07. It was then
   rewritten to say that *"no §12 or §13 entry now carries `PENDING — AWAITING ORACLE EXECUTION`"* — which was
   **false when written**, and falsified by this file's own tally three rows above it: `Q-GL084-ACCEPT-SEMANTICS`
-  carries exactly that status in §13, and has since it was entered. Both errors are recorded rather than
-  quietly overwritten, because a self-audit that hides its own misses is worth nothing.
+  carried exactly that status in §13 from the day it was entered until 2026-08-08. Both errors are recorded
+  rather than quietly overwritten, because a self-audit that hides its own misses is worth nothing — and the
+  second claim became true only when the question was actually measured, which is the right way for a false
+  claim to be settled.
 
-  **The accurate statement, derived from the one status algorithm at the head of this section.** §13 carries
-  **one** `PENDING — AWAITING ORACLE EXECUTION` entry, `Q-GL084-ACCEPT-SEMANTICS`; §12 carries **one** partial,
-  `Q-9`; and §§12–15 together carry **11** unresolved items, every one of them declared with a class and a
-  consuming code path in [§14.5](#the-open-item-register) — **4** awaiting the frozen executable, **2** closed
-  on scope, **5** settled here by reading the frozen source. Anyone checking this claim should count §14.5's
-  rows and compare them with the three status rows above; they are derived from each other and must agree.
+  **The accurate statement, derived from the one status algorithm at the head of this section.** §13 now
+  carries **no** `PENDING — AWAITING ORACLE EXECUTION` entry, because `Q-GL084-ACCEPT-SEMANTICS` was measured
+  on 2026-08-08 by a standalone probe that invented no seed state; §12 carries **one** partial, `Q-9`; and
+  §§12–15 together carry **10** unresolved items, every one of them declared with a class and a consuming code
+  path in [§14.5](#the-open-item-register) — **3** awaiting the frozen executable, **2** closed on scope, **5**
+  settled here by reading the frozen source. Anyone checking this claim should count §14.5's rows and compare
+  them with the three status rows above; they are derived from each other and must agree.
 
   **What is still not claimed is that being answered is the same as being closed.** Three distinctions survive
   the promotions, and flattening them would be the failure this file exists to prevent:

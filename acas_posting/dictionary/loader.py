@@ -44,16 +44,11 @@ import os
 import stat
 import sys
 from collections.abc import Mapping
-from importlib import resources
 from pathlib import Path
 from types import MappingProxyType
 from typing import ClassVar, Final, Protocol
 
-from acas_posting import (
-    DATA_DICTIONARY_PATH,
-    DATA_DICTIONARY_SEARCH_PATH,
-    PACKAGE_DATA_DICTIONARY_DIR,
-)
+from acas_posting import DATA_DICTIONARY_PATH, DATA_DICTIONARY_SEARCH_PATH
 from acas_posting.dictionary.model import (
     ENTRY_KEY_PATTERN,
     REPO_PATH_PATTERN,
@@ -232,51 +227,28 @@ _MAX_DOCUMENT_BYTES: Final[int] = 32 * 1024 * 1024
 _MAX_DOCUMENT_DEPTH: Final[int] = 64
 
 
-#: The artifact's file name, taken from the repository constant so that the packaged
-#: candidate and the repository candidate can never name different files.
+#: The artifact's file name, taken from the repository constant so that this module and
+#: `acas_posting.DATA_DICTIONARY_PATH` can never name different files.
 _DOCUMENT_NAME: Final[str] = DATA_DICTIONARY_PATH.name
-
-
-def _packaged_document_dir() -> Path | None:
-    """This distribution's own copy of the dictionary directory, or None.
-
-    Asked of `importlib.resources` rather than assembled from `__file__`, because the
-    packaged copy's location is a property of how the distribution was installed and
-    `importlib.resources` is the interface that knows it. `resources.files()` returns a
-    Traversable rooted at the package.
-
-    Returns:
-        The absolute directory holding the PACKAGED copy of the artifact, or None when
-            this distribution is not one that keeps its data on a real filesystem.
-    """
-    try:
-        root = resources.files("acas_posting")
-    # Exotic import machinery only - excluded from coverage because no ordinary
-    # installation reaches it.
-    except (ImportError, TypeError):  # pragma: no cover
-        return PACKAGE_DATA_DICTIONARY_DIR
-    if isinstance(root, Path):
-        return root / PACKAGE_DATA_DICTIONARY_DIR.name
-    return None
 
 
 def _default_document_candidates() -> tuple[Path, ...]:
     """The absolute paths the DEFAULT document may occupy, in the order to try.
 
     The order comes from `acas_posting.DATA_DICTIONARY_SEARCH_PATH` and is not re-
-    decided here.
+    decided here. That tuple holds exactly ONE entry - the committed repository sibling
+    `data_dictionary/`, fixed there by Agent Action Plan section 0.3.1 - because the
+    artifact is never relocated into this package and never shipped as package data:
+    `pyproject.toml` names `data_dictionary*` in its packaging exclusion list, so no
+    second copy exists to be preferred over the committed one. This function is
+    nonetheless written over the whole tuple rather than over that single path, so that
+    the failure message can report every candidate it tried.
 
     Returns:
-        One entry per legitimate location, packaged copy first and repository sibling
-            second, each absolute and symlink-free. Never empty.
+        One entry per legitimate location, each absolute and symlink-free. Never empty.
     """
-    packaged = _packaged_document_dir()
     out: list[Path] = []
     for directory in DATA_DICTIONARY_SEARCH_PATH:
-        if directory == PACKAGE_DATA_DICTIONARY_DIR:
-            if packaged is None:
-                continue
-            directory = packaged
         candidate = (directory / _DOCUMENT_NAME).resolve()
         if candidate not in out:
             out.append(candidate)
@@ -286,9 +258,9 @@ def _default_document_candidates() -> tuple[Path, ...]:
 def _absolute_document_path(path: Path | None) -> Path:
     """Return the absolute path of the document to read, LINKS LEFT INTACT.
 
-    Two candidates when nothing is asked for, in this order: the packaged copy, which is
-    the only one an installed distribution carries, then the repository copy, which is
-    the only one a source checkout carries.
+    One candidate when nothing is asked for: the committed repository sibling, which is
+    the only location this migration publishes - `pyproject.toml` excludes
+    `data_dictionary*` from packaging, so there is no second copy anywhere.
 
     ⭐ AN EXPLICIT PATH IS **NOT** RESOLVED, and that is the whole point of this
     function (finding F-08). It used to return `Path(path).resolve()`, which follows
@@ -302,12 +274,11 @@ def _absolute_document_path(path: Path | None) -> Path:
     directory and touches nothing else, leaving every `..` and every link in place for
     `_open_without_following_links` to walk and refuse component by component.
 
-    The two DEFAULT candidates are resolved, and the difference is deliberate: they are
-    derived from this distribution's own installed location and from
-    `DATA_DICTIONARY_SEARCH_PATH`, not from a caller, and an installed tree legitimately
-    reaches its package data through a linked directory - a virtual environment's
-    `site-packages`, a linked build tree. Resolving them is what keeps the ordinary
-    default working; refusing to resolve a caller's path is what keeps the guarantee.
+    The DEFAULT candidate IS resolved, and the difference is deliberate: it is derived
+    from `DATA_DICTIONARY_SEARCH_PATH` rather than from a caller, and a checkout
+    legitimately sits behind a linked directory - a linked build tree, a working copy
+    reached through a symlinked parent. Resolving it is what keeps the ordinary default
+    working; refusing to resolve a caller's path is what keeps the guarantee.
 
     Args:
         path: An explicit artifact path, or None for this distribution's own default.
@@ -747,18 +718,16 @@ def _absence_message(path: Path) -> str:
     if path in candidates:
         looked_in = "\n".join(f"    {candidate}" for candidate in candidates)
         preamble = (
-            "Two locations are legitimate and both were looked at, in this "
-            "order:\n"
+            "The legitimate location was looked at and the artifact is not "
+            "there:\n"
             f"{looked_in}\n"
             "\n"
-            "The first is the copy carried inside an installed distribution, "
-            "put there by the package-dir mapping in pyproject.toml that "
-            "makes the repository's data_dictionary/ tree the acas_posting "
-            "package's data directory. The second is the repository artifact "
-            "itself, where Agent Action Plan sections 0.3.1 and 0.4.1.6 place "
-            "it. A source checkout normally has only the second, an installed "
-            "wheel only the first, so one of them being absent is ordinary; "
-            "BOTH being absent is what produced this error.\n"
+            "There is exactly one such location - the committed repository "
+            "sibling, where Agent Action Plan sections 0.3.1 and 0.4.1.6 "
+            "place it. It is deliberately NOT relocated into this package and "
+            "NOT shipped as package data: pyproject.toml names "
+            "data_dictionary* in its packaging exclusion list, so no second "
+            "copy exists that could be read instead of the committed one.\n"
         )
     else:
         # An explicit path= was given. It is honoured exactly as passed and no search
@@ -782,7 +751,7 @@ def _absence_message(path: Path) -> str:
         "checkout the generator has never been run in, or a path= override "
         "naming somewhere wrong.\n"
         "\n"
-        "Four remedies, and no fifth:\n"
+        "Three remedies, and no fourth:\n"
         "  1. run from a source checkout of the repository, where "
         "data_dictionary/acas_posting_dictionary.json sits beside the "
         "acas_posting package; or\n"
@@ -790,9 +759,7 @@ def _absence_message(path: Path) -> str:
         "acas_posting.dictionary.generate - which rebuilds it from the frozen "
         "bridge, the copybooks and the schema, and writes the repository "
         "location; or\n"
-        "  3. reinstall a distribution built from that checkout, so the "
-        "packaged copy is carried into acas_posting/data_dictionary/; or\n"
-        "  4. pass an explicit path - load_dictionary(Path(...)), or the "
+        "  3. pass an explicit path - load_dictionary(Path(...)), or the "
         "path= keyword of any accessor in this module - naming an intact "
         "copy of the artifact.\n"
         "\n"

@@ -102,11 +102,23 @@ repository is one a reader cannot check.
 """
 
 ENTRY_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*(#[0-9]+)?$"
+    r"^[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*"
+    r"(@[A-Za-z0-9][A-Za-z0-9-]*)?(#[0-9]+)?$"
 )
-"""Shape of `DictionaryEntry.key`. The optional `#<n>` tail disambiguates a field name that
-repeats inside one record - `filler` occurs four times in copybooks/wsledger.cob - by
-appending its declaration line.
+"""Shape of `DictionaryEntry.key`: `<record>.<field>`, with two optional tails that
+disambiguate rather than describe.
+
+`@<file stem>` names the DECLARING FILE, and appears only on the second and later
+physical declarations of one signature. Two copybooks in the closure are variants of one
+layout - copybooks/plwsoi5B.cob and copybooks/plwsoi5C.cob differ only in whether a single
+COPY is commented out - so they declare the same items at the same lines. Rule R-5 binds
+every field to an entry, and each of those declarations is a field a reader can point at,
+so each gets its own entry; the first in closure order keeps the unqualified key and the
+rest carry this tail (finding M-18).
+
+`#<n>` disambiguates a field name that repeats inside one record - `filler` occurs four
+times in copybooks/wsledger.cob - by appending its declaration line. Both tails may occur
+together, file stem first, in the order the generator appends them.
 """
 
 TABLE_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9-]*$")
@@ -1776,7 +1788,17 @@ class Coverage(_JsonRecord):
             when coverage is complete, and stated separately so the claim is a
             comparison rather than an assertion.
         host_variables_covered: How many bridge host variables have an entry.
-        copybook_fields_covered: How many copybook fields have an entry.
+        copybook_fields_covered: How many ENTRIES carry a copybook view. Larger than
+            `copybook_declarations_covered` whenever a column binds one OCCURS
+            declaration several times over, because each occurrence is its own entry and
+            each entry cites the one declaration behind it.
+        copybook_declarations_covered: How many DISTINCT PHYSICAL DECLARATIONS in the
+            frozen copybooks have at least one entry citing them - counted by
+            `(source locator, name)` pair, so an OCCURS declaration bound by six columns
+            counts once. This is the number rule R-5's field-level closure is about: the
+            entry tally above can be made to look complete by two entries citing one
+            declaration while another declaration has none, which is exactly the defect
+            this member exists to expose.
         program_source_fields_covered: How many fields declared inline in a program's
             FILE SECTION have an entry - the General Ledger work-file records.
         one_sided_entry_keys: The key of every entry whose one-sided flag is true,
@@ -1794,6 +1816,7 @@ class Coverage(_JsonRecord):
     columns_covered: int
     host_variables_covered: int
     copybook_fields_covered: int
+    copybook_declarations_covered: int
     program_source_fields_covered: int
     one_sided_entry_keys: tuple[EntryKey, ...]
 
@@ -1811,6 +1834,7 @@ class Coverage(_JsonRecord):
             columns_covered=obj["columns_covered"],
             host_variables_covered=obj["host_variables_covered"],
             copybook_fields_covered=obj["copybook_fields_covered"],
+            copybook_declarations_covered=obj["copybook_declarations_covered"],
             program_source_fields_covered=obj["program_source_fields_covered"],
             one_sided_entry_keys=tuple(obj["one_sided_entry_keys"]),
         )
@@ -2206,6 +2230,9 @@ def _check_internal_agreement(obj: JsonObject, problems: list[str]) -> None:
     with_column = 0
     with_host_variable = 0
     with_copybook = 0
+    #: One member per DISTINCT physical copybook declaration cited by some entry,
+    #: identified by `(source locator, name)`.
+    cited_declarations: set[tuple[str, str]] = set()
     flagged_one_sided: set[str] = set()
     columns_per_table: dict[str, int] = {}
 
@@ -2239,6 +2266,16 @@ def _check_internal_agreement(obj: JsonObject, problems: list[str]) -> None:
             with_host_variable += 1
         if entry["copybook"] is not None:
             with_copybook += 1
+            #  ⭐ THE DECLARATION MULTISET, not the entry tally (finding M-18). A
+            #  physical declaration is identified by its source locator and its name, so
+            #  an OCCURS item bound by six columns contributes SIX entries and ONE
+            #  declaration. Counting both is what makes the two figures able to disagree,
+            #  and their disagreement is the only thing that can reveal one declaration
+            #  cited twice while another is cited not at all.
+            copybook_view = cast(JsonObject, entry["copybook"])
+            cited_declarations.add(
+                (cast(str, copybook_view["source"]), cast(str, copybook_view["name"]))
+            )
         if bool(entry["one_sided"]):
             flagged_one_sided.add(key)
 
@@ -2249,6 +2286,8 @@ def _check_internal_agreement(obj: JsonObject, problems: list[str]) -> None:
          "entries carrying a host-variable view"),
         ("copybook_fields_covered", with_copybook,
          "entries carrying a copybook view"),
+        ("copybook_declarations_covered", len(cited_declarations),
+         "distinct physical copybook declarations cited"),
         ("in_scope_tables", len(tables), "table records"),
         ("in_scope_bridges", len(cast(Sequence[object], sources["bridges"])),
          "bridge records"),

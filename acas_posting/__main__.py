@@ -406,9 +406,10 @@ _SUBSYSTEMS: Final[tuple[_Subsystem, ...]] = (
 
 #  THE SEVEN OPERATIONS, one per subsystem-menu dispatch paragraph. Plan
 #  sections 0.3.1 and 0.4.1.1 name the seven modules; these are the only routes
-#  that exist, and there is no eighth. `acas_posting.cli.args` and
-#  `acas_posting.cli.rdbms_params` are the ninth and tenth modules of that
-#  package and are deliberately NOT routes: they are libraries the routes use.
+#  that exist, and there is no eighth. `acas_posting.cli.args` is the ninth
+#  module of that package and is deliberately NOT a route: it is the library the
+#  routes use, and its SECTION 0 carries the connection-parameter reader that
+#  used to be a tenth module (finding M-01).
 _ROUTES: Final[tuple[_Route, ...]] = (
     _Route(
         subsystem="general",
@@ -1049,7 +1050,7 @@ def _failure_status(error: BaseException) -> int:
     The `return_code` attribute is read reflectively rather than by importing the
     exception class, for the same reason `cli/gl_post_cycle.py` reads it that
     way: the per-directory import table of plan section 0.4.3 does not grant this
-    module a path to `cli.rdbms_params`, which is reached only through
+    module a path to `cli.args`, which is reached only through
     `cli.args`.
 
     Args:
@@ -1058,7 +1059,7 @@ def _failure_status(error: BaseException) -> int:
 
     Returns:
         The error's own frozen return code when it carries one - which
-        `cli.rdbms_params.RdbmsParamError` does, holding the parameter loader's 8
+        `cli.args.RdbmsParamError` does, holding the parameter loader's 8
         for "contract absent" and 1 for "contract unusable"
         [common/acas-get-params.cbl:L37-L42] - otherwise the smallest status the
         frozen menu treats as a serious error, `ws-term-code > 7`

@@ -33,8 +33,8 @@ representational rather than behavioural:
 * date text is rendered in one form, because the schema stores two-digit and
   four-digit year spellings side by side.
 
-The ten stages are defined in [harness/parity_stages.sh] and published by
-[harness/run_parity.sh] through `--print-stages`; the Compose recipe restates
+The ten stages are defined in [harness/normalize.py PARITY_STAGES] and published by
+this module itself through `--print-stages`; the Compose recipe restates
 them at [harness/docker-compose.yml "STAGES."]. This module owns two of them:
 stage 4 normalises the COBOL dump and stage 8 the Python dump. The AAP's eight
 logical stages (section 0.3.2) map onto those ten by making both normalisations
@@ -3302,6 +3302,47 @@ def build_parser() -> argparse.ArgumentParser:
         help="suppress the per-table progress notes on stderr.",
     )
 
+    #  THE THREE MODES THAT DO NOT NORMALISE ANYTHING. Each answers a question about a
+    #  scenario definition or about the protocol itself and exits; none reads a dump, so
+    #  none needs --src or --dst. They are here rather than in three files of their own
+    #  because the definitions they publish are shared by every consumer and must have
+    #  exactly one home (findings M-07 and M-08).
+    modes = parser.add_argument_group(
+        "modes that publish a definition instead of normalising a dump"
+    )
+    modes.add_argument(
+        "--scenario-stream",
+        metavar="FILE",
+        help=(
+            "read one scenario definition and write it to stdout as a flat "
+            "TAB-delimited record stream, the form BOTH runners parse. Exits 0, or 3 "
+            "when PyYAML is not importable, 4 when the file cannot be read, 5 when the "
+            "document is not a mapping of scalars, flat lists and blocks - the three "
+            "codes both runners already map onto their own bands, so they are a "
+            "contract and deliberately not this tool's own 8x band."
+        ),
+    )
+    modes.add_argument(
+        "--print-stages",
+        action="store_true",
+        help=(
+            "print the canonical parity-stage registry as `<number><TAB><label>' rows "
+            "and exit. THE ONE DEFINITION of the protocol's shape; the composed recipe "
+            "and tests/conftest.py read it here so their prose cannot drift from the "
+            "sequence actually driven."
+        ),
+    )
+    modes.add_argument(
+        "--print-stage-shell",
+        action="store_true",
+        help=(
+            "print the same registry as a sourceable bash fragment - "
+            "ACAS_PARITY_STAGE_COUNT, ACAS_PARITY_STAGES and the three "
+            "`acas_parity_stage_*' helpers - and exit. This is how the shell scripts "
+            "consume the rows without a shell file of their own to drift from."
+        ),
+    )
+
     return parser
 
 
@@ -3600,6 +3641,683 @@ def _parse_table_selection(
     return tuple(sorted(set(named)))
 
 
+
+# ======================================================================================
+#  SECTION S  -  THE SHARED SCENARIO READER AND THE PARITY-STAGE REGISTRY
+#
+#  Three things live here that used to live in three separate files of their own, and
+#  they are here because this module is the harness's canonicalisation module: reading a
+#  scenario definition ONE way, and naming the protocol's stages ONE way, are the same
+#  kind of job as rendering a dumped row one way (findings M-05, M-07, M-08).
+#
+#    * `load_scenario_yaml` - the DUPLICATE-REJECTING parser every consumer reads a
+#      definition through. `yaml.safe_load` applies last-one-wins to a repeated key,
+#      silently; a scenario definition carries the destructive answers, the fan-out
+#      switch that decides which tables a run touches, the comparison bound and the
+#      expected statuses, so a shadowed key means two consumers read two different
+#      files and an empty diff drawn across that pair is meaningless (finding MJ-17).
+#    * `emit_scenario_stream` - the flat TAB-delimited record stream BOTH runners read a
+#      definition through, so one document cannot mean two things (finding F-32).
+#    * `PARITY_STAGES` - the ten-stage registry, defined ONCE, published to shell
+#      through `--print-stage-shell` and to everything else through `--print-stages`
+#      (finding F-16).
+# ======================================================================================
+
+#: Largest document accepted, in bytes of UTF-8. Measured maximum 101,222 (~99 KiB);
+#: this is ~40x that, so it bounds the cost without constraining the scenario set.
+MAX_DOCUMENT_BYTES = 4 * 1024 * 1024
+
+#: Deepest nesting accepted. Measured maximum 7.
+MAX_DEPTH = 32
+
+#: Most nodes accepted in one document. Measured maximum 1,500.
+MAX_NODES = 100_000
+
+
+#: The three loader types, built once on first use. See `_scenario_loader_types`.
+_SCENARIO_LOADER_TYPES: dict[str, type] | None = None
+
+#: The names `__getattr__` resolves through the factory. A consumer writes
+#: `normalize.ScenarioBudgetError` exactly as it did when these were plain
+#: module-level classes; nothing about the published surface changed.
+_SCENARIO_LOADER_TYPE_NAMES: Final[tuple[str, ...]] = (
+    "ScenarioBudgetError",
+    "DuplicateScenarioKeyError",
+    "ScenarioYamlLoader",
+)
+
+
+def _scenario_loader_types() -> dict[str, type]:
+    """Build the three PyYAML-derived scenario-loader types, once, on first use.
+
+    ⭐ WHY THESE THREE CLASSES ARE BUILT IN A FUNCTION RATHER THAN AT MODULE SCOPE.
+    All three name a PyYAML class as their BASE - `yaml.YAMLError`,
+    `yaml.constructor.ConstructorError` and `yaml.SafeLoader` - and a `class` statement
+    evaluates its bases when it executes. Written at module scope they would force
+    `import yaml` at module scope, and that would cost two things this module is not
+    entitled to spend:
+
+      1. `emit_scenario_stream` DOCUMENTS status 3, "PyYAML is not importable", and
+         both runners already map that code onto their own bands. With the import at
+         module scope the interpreter fails before `main` is ever entered, so the
+         runner would receive a traceback and status 1 instead of the precise status
+         its own error band was written for. A fold that converts a diagnostic into a
+         traceback has changed behaviour, and this fold is a relocation.
+      2. Stage 4 of the parity protocol - canonicalising a dump - has nothing to do
+         with YAML. Coupling `normalize.py --src ... --dst ...` to a YAML parser it
+         does not use on that path would be a new dependency, not a moved one.
+
+    PyYAML remains a pinned, hash-verified dependency (`requirements.txt`) that the
+    harness image installs; this is about WHEN it is required, not whether.
+
+    Returns:
+        The three types, keyed by name: `ScenarioBudgetError`,
+            `DuplicateScenarioKeyError` and `ScenarioYamlLoader`.
+
+    Raises:
+        ModuleNotFoundError: PyYAML is not importable. Raised rather than masked -
+            `emit_scenario_stream` converts it into status 3 for a runner, and a
+            direct caller of `load_scenario_yaml` has no scenario to read either way.
+    """
+    global _SCENARIO_LOADER_TYPES
+    if _SCENARIO_LOADER_TYPES is not None:
+        return _SCENARIO_LOADER_TYPES
+
+    import yaml  # noqa: PLC0415 - deliberately deferred; see above
+
+    class ScenarioBudgetError(yaml.YAMLError):
+        """A scenario definition exceeds a parse budget, or uses an alias.
+
+        Subclasses `yaml.YAMLError`, so every existing consumer - all of which already
+        handle that - reports a budget rejection with no change.
+        """
+
+
+    class DuplicateScenarioKeyError(yaml.constructor.ConstructorError):
+        """A scenario definition declares the same mapping key twice."""
+
+
+    class ScenarioYamlLoader(yaml.SafeLoader):
+        """`yaml.SafeLoader` that refuses a repeated key, an alias, or an over-budget document.
+
+        Safe in the same sense `SafeLoader` is - no arbitrary object construction, no
+        `!!python/` tags - and strictly stricter.
+        """
+
+        def __init__(self, stream: Any) -> None:
+            """Initialise the loader and its budget counters.
+
+            Args:
+                stream: Whatever `yaml.load` was given; passed straight through.
+            """
+            super().__init__(stream)
+            self._acas_depth = 0
+            self._acas_nodes = 0
+
+        def compose_node(self, parent: Any, index: Any) -> Any:
+            """Compose one node, refusing an alias and enforcing the depth and node budgets.
+
+            This is the single hook every node passes through, and it is where an alias is
+            still visible as an alias - by the time a document is constructed, an expanded
+            alias is indistinguishable from a subtree that was written out in full.
+
+            Args:
+                parent: The node being composed into, as PyYAML passes it.
+                index: The position within `parent`, as PyYAML passes it.
+
+            Returns:
+                The composed node.
+
+            Raises:
+                ScenarioBudgetError: The document uses an alias, nests deeper than
+                    `MAX_DEPTH`, or holds more than `MAX_NODES` nodes.
+            """
+            if self.check_event(yaml.events.AliasEvent):
+                event = self.peek_event()
+                raise ScenarioBudgetError(
+                    f"this scenario definition uses a YAML ALIAS (*{event.anchor}) at "
+                    f"{event.start_mark}. Aliases are refused rather than bounded: an "
+                    f"anchor referenced repeatedly expands multiplicatively while the "
+                    f"document is composed, so a few lines can cost unbounded memory. No "
+                    f"definition in this repository uses one - a scenario is a flat record "
+                    f"of seed rows, inputs and expected statuses - so write the value out "
+                    f"in full instead."
+                )
+
+            self._acas_nodes += 1
+            if self._acas_nodes > MAX_NODES:
+                raise ScenarioBudgetError(
+                    f"this scenario definition holds more than {MAX_NODES} nodes, which is "
+                    f"the parse budget. The largest definition in this repository holds "
+                    f"1,500, so a document this size is not a scenario that grew - check "
+                    f"the file is the one you meant to pass."
+                )
+
+            self._acas_depth += 1
+            try:
+                if self._acas_depth > MAX_DEPTH:
+                    raise ScenarioBudgetError(
+                        f"this scenario definition nests deeper than {MAX_DEPTH} levels, "
+                        f"which is the parse budget. The deepest definition in this "
+                        f"repository nests 7 levels, so this is not a scenario that grew - "
+                        f"deep nesting is how a small document forces unbounded recursion."
+                    )
+                return super().compose_node(parent, index)
+            finally:
+                self._acas_depth -= 1
+
+        def construct_mapping(self, node: Any, deep: bool = False) -> dict[Any, Any]:
+            """Construct one mapping, refusing a key that has already been seen.
+
+            Args:
+                node: The mapping node being constructed.
+                deep: Passed through to the base implementation.
+
+            Returns:
+                The mapping.
+
+            Raises:
+                DuplicateScenarioKeyError: A key appears more than once in this mapping.
+            """
+            seen: set[Any] = set()
+            for key_node, _ in node.value:
+                key = self.construct_object(key_node, deep=deep)
+                try:
+                    already = key in seen
+                except TypeError:
+                    # An unhashable key cannot be tracked, and cannot be a scenario key
+                    # either - every key in every definition is a plain string. Left to
+                    # the base implementation rather than guessed at.
+                    continue
+                if already:
+                    raise DuplicateScenarioKeyError(
+                        "while constructing a scenario definition",
+                        node.start_mark,
+                        f"found a DUPLICATE KEY {key!r}. PyYAML's default is "
+                        f"last-one-wins, which would let one consumer read the value "
+                        f"the file appears to state and another read a different one - "
+                        f"and a scenario definition carries the destructive answers, "
+                        f"the fan-out switch that decides which tables a run touches, "
+                        f"the comparison bound and the expected statuses. Remove one of "
+                        f"the two occurrences.",
+                        key_node.start_mark,
+                    )
+                seen.add(key)
+            return super().construct_mapping(node, deep=deep)
+
+    _SCENARIO_LOADER_TYPES = {
+        "ScenarioBudgetError": ScenarioBudgetError,
+        "DuplicateScenarioKeyError": DuplicateScenarioKeyError,
+        "ScenarioYamlLoader": ScenarioYamlLoader,
+    }
+    return _SCENARIO_LOADER_TYPES
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve the three deferred loader types as though they were module attributes.
+
+    PEP 562 module-level attribute access. `module.ScenarioBudgetError` therefore
+    still works for every consumer and for `pytest.raises`, and
+    `issubclass(module.ScenarioBudgetError, yaml.YAMLError)` still holds, without the
+    class statements running at import time.
+
+    Args:
+        name: The attribute being looked up, which by definition is not a global here.
+
+    Returns:
+        The requested loader type.
+
+    Raises:
+        AttributeError: `name` is not one of the three deferred types. The message
+            names them, because a typo here would otherwise surface as PyYAML being
+            imported for no reason.
+    """
+    if name in _SCENARIO_LOADER_TYPE_NAMES:
+        return _scenario_loader_types()[name]
+    raise AttributeError(
+        f"module {__name__!r} has no attribute {name!r}. The only attributes this "
+        f"module resolves lazily are the three PyYAML-derived scenario-loader types "
+        f"({', '.join(_SCENARIO_LOADER_TYPE_NAMES)}); everything else is a plain "
+        f"module global."
+    )
+
+
+def load_scenario_yaml(text: str) -> Any:
+    """Parse one scenario definition's text, refusing a duplicate key or an over-budget document.
+
+    The size budget is checked BEFORE the parser is handed the text, because the point
+    of a size budget is not to parse the document first.
+
+    Args:
+        text: The definition's contents.
+
+    Returns:
+        Whatever the document holds - normally a mapping. The shape is the caller's
+        to check, because each consumer already reports it in its own vocabulary.
+
+    Raises:
+        yaml.YAMLError: The text is not valid YAML, a mapping repeats a key, or the
+            document exceeds a parse budget. `DuplicateScenarioKeyError` and
+            `ScenarioBudgetError` are both subclasses, so a caller already handling
+            `yaml.YAMLError` reports either without any change.
+    """
+    import yaml  # noqa: PLC0415 - deferred with the loader types; see above
+
+    types = _scenario_loader_types()
+    budget_error = types["ScenarioBudgetError"]
+    loader = types["ScenarioYamlLoader"]
+
+    size = len(text.encode("utf-8", errors="surrogatepass"))
+    if size > MAX_DOCUMENT_BYTES:
+        raise budget_error(
+            f"this scenario definition is {size} bytes, over the "
+            f"{MAX_DOCUMENT_BYTES}-byte parse budget. The largest definition in this "
+            f"repository is 101,222 bytes, so nothing legitimate is near this limit - "
+            f"check the file is the one you meant to pass. Nothing was parsed: the "
+            f"size is checked before the text reaches the parser."
+        )
+    return yaml.load(text, Loader=loader)
+
+
+class _ScenarioStreamRefusal(Exception):
+    """A scalar in a scenario definition cannot travel in the flat record stream.
+
+    Carries the exit status the caller must report, so the refusal that used to be a
+    bare `SystemExit(5)` inside a script stays a status rather than becoming an
+    exception a caller has to translate.
+    """
+
+    def __init__(self, status: int) -> None:
+        """Record the status this refusal must produce.
+
+        Args:
+            status: The exit status, always 5 - the "not a mapping of scalars and flat
+                lists" band both runners already map.
+        """
+        super().__init__(status)
+        self.status = status
+
+
+def _render_scenario_scalar(key, value):
+    """Render one scalar as text, refusing anything that cannot travel."""
+    if value is None:
+        text = ""
+    elif isinstance(value, bool):
+        text = "true" if value else "false"
+    elif isinstance(value, int):
+        text = str(value)
+    elif isinstance(value, str):
+        text = value
+    elif isinstance(value, float):
+        sys.stderr.write(
+            "key %r carries a real number, which is refused: no scenario value "
+            "is a real number, and rule R-2 forbids binary floating point from "
+            "entering the comparison by accident. Quote it if it is text.\n"
+            % key
+        )
+        raise _ScenarioStreamRefusal(5)
+    else:
+        sys.stderr.write(
+            "key %r carries an unsupported %s value; this stage reads scalars "
+            "and flat lists of scalars, and records a nested block without "
+            "reading it. A date written unquoted becomes a date object here, so "
+            "quote it to keep it text.\n" % (key, type(value).__name__)
+        )
+        raise _ScenarioStreamRefusal(5)
+    if any(ord(character) < 32 or ord(character) == 127 for character in text):
+        #  A CONTROL CHARACTER IS FOLDED, NOT REFUSED - and the distinction is the
+        #  reader's own protocol rather than a relaxation of it. The stream this
+        #  reader emits is TAB-delimited and newline-terminated, so a value
+        #  carrying either would forge a record boundary; replacing each control
+        #  character with ONE SPACE keeps that property absolutely, because no
+        #  emitted byte is a control character afterwards.
+        #
+        #  It is folded rather than refused because a scenario legitimately
+        #  carries a multi-line documentation block: `description: |` in
+        #  harness/scenarios/clean_batch_gl.yaml is a YAML literal scalar of
+        #  several hundred lines, and no key this runner consumes is documentation.
+        #  Refusing it would have made a documented scenario unreadable.
+        #
+        #  ONLY a value that actually holds a control character is touched, so
+        #  every value that travels arrives byte for byte - `irs_instead: ' '`, the
+        #  single SPACE that selects General-Ledger-only posting
+        #  [copybooks/wssystem.cob:L179-L181], included. Folding whitespace
+        #  generally would have emptied it and silently changed the fan-out.
+        text = "".join(
+            " " if (ord(character) < 32 or ord(character) == 127) else character
+            for character in text
+        )
+    return text
+
+
+def _is_scenario_block(value):
+    """True for a nested structure: a mapping, a sequence or a set."""
+    return isinstance(value, (dict, list, tuple, set, frozenset))
+
+
+def emit_scenario_stream(path: Path) -> int:
+    """Emit one scenario definition as the flat TAB-delimited record stream.
+
+    ⭐ THE ONE SCENARIO READER BOTH RUNNERS USE (finding F-32), folded in from
+    what used to be a separate `harness/scenario_stream.py` (finding M-07). The
+    oracle side once used a bespoke `awk` subset that recognised only unindented
+    `key:` lines while the Python side used PyYAML, so one valid document could
+    mean two different things to the two sides of a comparison whose entire
+    purpose is that both sides receive identical inputs.
+
+    THE STREAM, one record per line, in DOCUMENT ORDER:
+
+        K<TAB><key>                 the key is present at top level
+        S<TAB><key><TAB><value>     a scalar value
+        L<TAB><key><TAB><value>     one item of a flat list, repeated in order
+        G<TAB><key>                 the key carries a nested block, recorded NOT read
+
+    Keys are normalised by replacing `-` with `_`, so `run-date` and `run_date`
+    are one key and two spellings of one key are a hard error rather than a
+    silent last-one-wins.
+
+    Args:
+        path: The scenario definition to read.
+
+    Returns:
+        0 when the stream was emitted, 3 when PyYAML is not importable, 4 when
+            the file could not be read, 5 when the document is not a mapping of
+            scalars, flat lists and blocks. THE THREE FAILURE CODES ARE THE ONES
+            BOTH RUNNERS ALREADY MAP onto their own bands, so they are part of
+            this function's contract and are not normalise.py's own EX_* band.
+    """
+    try:
+        import yaml  # noqa: PLC0415 - lazy, so this module imports without it
+    except ModuleNotFoundError as exc:
+        sys.stderr.write(
+            "PyYAML is not importable by this interpreter (%s). It is the one "
+            "third-party import the harness tree permits itself besides the "
+            "database driver, and the scenario definitions are YAML.\n" % exc
+        )
+        return 3
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        sys.stderr.write("the scenario file could not be read: %s\n" % exc)
+        return 4
+    try:
+        document = load_scenario_yaml(text)
+    except yaml.YAMLError as exc:
+        sys.stderr.write("the scenario file is not valid YAML: %s\n" % exc)
+        return 5
+    if document is None:
+        document = {}
+    if not isinstance(document, dict):
+        sys.stderr.write(
+            "the scenario file must be a mapping at top level; got %s\n"
+            % type(document).__name__
+        )
+        return 5
+
+    try:
+        return _emit_scenario_records(document)
+    except _ScenarioStreamRefusal as refusal:
+        return refusal.status
+
+
+def _emit_scenario_records(document: dict) -> int:
+    """Emit the records for one already-parsed document. See `emit_scenario_stream`."""
+    emitted = {}
+    out = []
+    blocks = []
+    for key in document:
+        if not isinstance(key, str):
+            sys.stderr.write(
+                "every top-level key must be text; got a %s\n" % type(key).__name__
+            )
+            return 5
+        normalised = key.replace("-", "_")
+        if normalised in emitted:
+            sys.stderr.write(
+                "keys %r and %r are the same key: '-' and '_' are "
+                "interchangeable, so one of them must go.\n"
+                % (emitted[normalised], key)
+            )
+            return 5
+        emitted[normalised] = key
+        out.append("K\t%s" % normalised)
+        value = document[key]
+        if isinstance(value, (list, tuple)):
+            #  A LIST IS EMITTED ONLY WHEN EVERY ITEM IS A SCALAR. A part-read list is
+            #  worse than an unread one: the affected-table list BOUNDS the comparison
+            #  and the operation list ORDERS the run, so half of either would look like
+            #  a complete answer. So a list holding a nested item is recorded whole and
+            #  read not at all.
+            if any(_is_scenario_block(item) for item in value):
+                out.append("G\t%s" % normalised)
+                blocks.append((key, "list whose items are themselves blocks"))
+                continue
+            for item in value:
+                out.append("L\t%s\t%s" % (normalised, _render_scenario_scalar(key, item)))
+        elif _is_scenario_block(value):
+            #  A NESTED BLOCK IS RECORDED, NOT READ. A scenario file documents the
+            #  state it seeds in `clock:', `system:' and `seed:' blocks, and states the
+            #  values this runner reads as top-level scalars beside them; the
+            #  oracle-side reader passes over a nested block in exactly the same way,
+            #  which is what lets ONE scenario file drive both runners. The caller
+            #  refuses a block that appears under a key this runner does read, so this
+            #  tolerance cannot turn into a silent mis-read.
+            out.append("G\t%s" % normalised)
+            blocks.append((key, "%s block" % type(value).__name__))
+        else:
+            out.append("S\t%s\t%s" % (normalised, _render_scenario_scalar(key, value)))
+
+    sys.stdout.write("".join(line + "\n" for line in out))
+    for key, shape in blocks:
+        sys.stderr.write(
+            "note: key %r is a %s. It is recorded as present and its members are "
+            "not read: this stage reads scalars and flat lists of scalars, and no "
+            "key this runner reads is declared as a block.\n" % (key, shape)
+        )
+    return 0
+
+
+# --------------------------------------------------------------------------------------
+#  THE PARITY-STAGE REGISTRY (finding F-16, and finding M-08 for its move here)
+#
+#  The oracle-comparison protocol has TEN stages, in ONE order, and that order is what
+#  makes an empty diff mean anything at all (Agent Action Plan section 0.8.5). Before the
+#  registry existed the count and the names were restated independently in six places -
+#  the driver's stage table, both runners' banners, the reset script's banner, the
+#  composed recipe's comments, the scenario definitions' prose and the test docstrings -
+#  and they had drifted: several said EIGHT stages and one said NINE, describing a
+#  protocol that was not the one being executed. A reader reconciling a transcript
+#  against the documentation would have concluded the driver skipped work it had done.
+#
+#  Stage numbering is not cosmetic. It is how a range is named, how a resumed run
+#  identifies which artifacts it may trust, and how the diff evidence cites the step that
+#  produced a capture. So it is DEFINED ONCE - here - and published in two forms:
+#
+#    `--print-stages`       `<number><TAB><label>' rows, for the composed recipe,
+#                           tests/conftest.py and anything else that reads text
+#    `--print-stage-shell`  a sourceable bash fragment defining ACAS_PARITY_STAGE_COUNT,
+#                           ACAS_PARITY_STAGES and the three `acas_parity_stage_*'
+#                           helpers, so the shell scripts consume the SAME rows without
+#                           a shell file of their own to drift from
+#
+#  \u2b50 WHY A PYTHON MODULE OWNS A BASH FRAGMENT. The registry has consumers in both
+#  languages, so one of them has to cross the boundary. It is written here because the
+#  Agent Action Plan section 0.3.1 file inventory has no entry for a registry script,
+#  and every shell consumer already requires python3 for a stage of its own - the reset
+#  script, both runners and the driver each invoke it - so emitting the fragment adds no
+#  dependency any of them did not already have. The alternative, a shell file, is what
+#  was there before and is the extra path finding M-08 names.
+# --------------------------------------------------------------------------------------
+
+#: The number of stages. Anything printing "stage N of M" reads M from here.
+PARITY_STAGE_COUNT: Final[int] = 10
+
+#: One row per stage, `(number, label)', in protocol order. The number is the stage's
+#: identity in every banner and in every artifact that cites a stage.
+#:
+#:   1  reset + seed        the COBOL cycle must start from a known state
+#:   2  run COBOL           the oracle; the behavioural specification (rule R-6)
+#:   3  dump COBOL          raw state capture, ordered by primary key
+#:   4  normalise COBOL     removes representation artefacts - character padding above
+#:                          all, because the bridge widens and trims names (0.6.2)
+#:   5  reset + RE-SEED     the SAME fixture bytes, so the Python cycle starts from the
+#:                          state the COBOL cycle STARTED from, not the state it LEFT
+#:   6  run Python          the migrated cycle
+#:   7  dump Python         raw state capture
+#:   8  normalise Python    the same normalisation, so the comparison is like-for-like
+#:   9  verify published    both trees declare themselves complete BEFORE a single row
+#:                          is compared; two partial captures can produce an EMPTY diff
+#:  10  diff                the verdict. An empty diff is the pass condition
+PARITY_STAGES: Final[tuple[tuple[int, str], ...]] = (
+    (1, "reset the schema and seed the scenario"),
+    (2, "run the compiled COBOL cycle"),
+    (3, "dump the COBOL state"),
+    (4, "normalise the COBOL dump"),
+    (5, "reset the schema and re-seed the SAME scenario"),
+    (6, "run the migrated Python cycle"),
+    (7, "dump the Python state"),
+    (8, "normalise the Python dump"),
+    (9, "verify both captures are published"),
+    (10, "diff the two normalised trees -- an EMPTY diff is the pass"),
+)
+
+
+def parity_stage_label(number: int) -> str:
+    """Return the label for one stage number.
+
+    Args:
+        number: The stage number, 1..`PARITY_STAGE_COUNT`.
+
+    Returns:
+        The stage's label.
+
+    Raises:
+        ValueError: `number` names no stage. Raised rather than answered with an empty
+            label, because a banner reading "stage 11/10: " would state that a protocol
+            ran which does not exist.
+    """
+    for stage, label in PARITY_STAGES:
+        if stage == number:
+            return label
+    raise ValueError(
+        f"{number} names no parity stage; the protocol has {PARITY_STAGE_COUNT}."
+    )
+
+
+def parity_stage_headline(number: int, suffix: str | None = None) -> str:
+    """Return `stage <n>/<count>: <label>` for one stage.
+
+    The exact phrasing every banner in the protocol uses, so a reader grepping a
+    transcript finds them all with one pattern.
+
+    Args:
+        number: The stage number.
+        suffix: An OPTIONAL sub-label, appended in parentheses, for a script that
+            performs one stage in several parts - the COBOL runner drives one operation
+            at a time.
+
+    Returns:
+        The headline.
+
+    Raises:
+        ValueError: `number` names no stage.
+    """
+    label = parity_stage_label(number)
+    if suffix:
+        return f"stage {number}/{PARITY_STAGE_COUNT}: {label} ({suffix})"
+    return f"stage {number}/{PARITY_STAGE_COUNT}: {label}"
+
+
+def parity_stage_registry() -> str:
+    """Return the whole registry as `<number><TAB><label>` rows, newline-terminated.
+
+    The machine-readable form the composed recipe and `tests/conftest.py` consume. Tab
+    separated because a label contains spaces and may contain a colon.
+
+    Returns:
+        The rows, in protocol order, each ending in a newline.
+    """
+    return "".join(f"{number}\t{label}\n" for number, label in PARITY_STAGES)
+
+
+def parity_stage_shell() -> str:
+    """Return a sourceable bash fragment that publishes the registry to shell.
+
+    \u2b50 THE FRAGMENT IS BEHAVIOURALLY WHAT THE FOUR SHELL CONSUMERS ALREADY SOURCED:
+    the same variable names, the same `readonly` protection, the same re-source guard and
+    the same three functions with the same output. A consumer therefore keeps
+    `acas_parity_stage_headline 6` and gets the same string; only where the rows come
+    from changed.
+
+    The guard matters for a reason peculiar to this protocol: the driver sources the
+    registry and then invokes scripts that source it again in the same process, so a
+    second definition must be a no-op rather than a `readonly` reassignment failure.
+    `readonly` is what stops a consumer redefining a row locally and quietly driving a
+    different protocol.
+
+    Returns:
+        The fragment, ready for `eval`.
+
+    Raises:
+        ValueError: A label contains a single quote, which the single-quoted array rows
+            below could not carry safely. Refused rather than escaped, because a label
+            is prose this repository writes and no label needs one.
+    """
+    rows: list[str] = []
+    for number, label in PARITY_STAGES:
+        if "'" in label:
+            raise ValueError(
+                f"the label for stage {number} contains a single quote, which cannot "
+                f"travel in the single-quoted shell rows this emitter writes: {label!r}"
+            )
+        rows.append(f"      '{number}:{label}'")
+    joined = "\n".join(rows)
+    return f"""\
+# Generated by harness/normalize.py --print-stage-shell. Do not edit a copy of this:
+# the rows are defined in PARITY_STAGES in that file and nowhere else (finding M-08).
+if [[ -z "${{ACAS_PARITY_STAGES_DEFINED:-}}" ]]; then
+  ACAS_PARITY_STAGE_COUNT={PARITY_STAGE_COUNT}
+  readonly ACAS_PARITY_STAGE_COUNT
+  readonly -a ACAS_PARITY_STAGES=(
+{joined}
+  )
+  ACAS_PARITY_STAGES_DEFINED=1
+  readonly ACAS_PARITY_STAGES_DEFINED
+fi
+
+acas_parity_stage_label() {{
+  local wanted="$1" entry
+  for entry in "${{ACAS_PARITY_STAGES[@]}}"; do
+    if [[ "${{entry%%:*}}" == "$wanted" ]]; then
+      printf '%s' "${{entry#*:}}"
+      return 0
+    fi
+  done
+  printf 'harness/normalize.py: %s names no stage; the protocol has %s.\\n' \\
+    "$wanted" "$ACAS_PARITY_STAGE_COUNT" >&2
+  return 1
+}}
+
+acas_parity_stage_headline() {{
+  local number="$1" suffix="${{2:-}}" label
+  label="$(acas_parity_stage_label "$number")" || return 1
+  if [[ -n "$suffix" ]]; then
+    printf 'stage %s/%s: %s (%s)' \\
+      "$number" "$ACAS_PARITY_STAGE_COUNT" "$label" "$suffix"
+  else
+    printf 'stage %s/%s: %s' "$number" "$ACAS_PARITY_STAGE_COUNT" "$label"
+  fi
+}}
+
+acas_parity_stage_registry() {{
+  local entry
+  for entry in "${{ACAS_PARITY_STAGES[@]}}"; do
+    printf '%s\\t%s\\n' "${{entry%%:*}}" "${{entry#*:}}"
+  done
+}}
+"""
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command line and return an exit code.
 
@@ -3626,6 +4344,39 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     _QUIET = bool(arguments.quiet)
     env: Mapping[str, str] = os.environ
+
+    #  THE PUBLISHING MODES ARE ANSWERED FIRST, before a single path is resolved. They
+    #  read no dump and write no tree, so requiring --src of them would make the
+    #  registry unreadable without naming a directory that has nothing to do with it.
+    #  At most one may be given: two answers on one stdout is not an answer.
+    selected = [
+        name
+        for name, given in (
+            ("--scenario-stream", arguments.scenario_stream is not None),
+            ("--print-stages", bool(arguments.print_stages)),
+            ("--print-stage-shell", bool(arguments.print_stage_shell)),
+        )
+        if given
+    ]
+    if len(selected) > 1:
+        print(
+            f"harness/normalize.py: {' and '.join(selected)} were both given, and "
+            f"each writes a different document to stdout. Give one.",
+            file=sys.stderr,
+        )
+        return EX_USAGE
+    if arguments.print_stages:
+        sys.stdout.write(parity_stage_registry())
+        return EX_OK
+    if arguments.print_stage_shell:
+        try:
+            sys.stdout.write(parity_stage_shell())
+        except ValueError as exc:
+            print(f"harness/normalize.py: {exc}", file=sys.stderr)
+            return EX_USAGE
+        return EX_OK
+    if arguments.scenario_stream is not None:
+        return emit_scenario_stream(Path(arguments.scenario_stream))
 
     # Tightened HERE and not at import time.
     os.umask(_OUTPUT_UMASK)

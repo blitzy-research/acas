@@ -2732,25 +2732,57 @@ def _build_entries(root: Path, schema: _SchemaFacts,
             draft.derivation = _derivation_of(root, table, draft.copybook, draft.item,
                                               draft.host, draft.column, sibling_columns)
 
-    # Pass 2: one entry per copybook field the columns did not consume.
+    # Pass 2: ONE ENTRY PER PHYSICAL DECLARATION the columns did not consume.
+    #
+    # ⭐ EVERY physical declaration, not one per signature (finding M-18). `_signature`
+    # deliberately omits the file, so two variant copybooks that declare the same item at
+    # the same line share one signature - copybooks/plwsoi5B.cob and
+    # copybooks/plwsoi5C.cob are byte-identical apart from 5C's active
+    # `copy "plwsoi.cob"', so all seven of their declarations collide. Electing one item
+    # per signature therefore left SIX physical declarations of plwsoi5C.cob - its L10,
+    # L12 and L14 through L17 - with no entry of their own, while the aggregate
+    # `copybook_fields_covered' still read 1001 because six OCCURS-expanded IRS-nominal
+    # views were counted twice over. Rule R-5 binds every FIELD to an entry, and a
+    # declaration a reader can point at in a frozen file is a field; so each one now gets
+    # an entry and the count below is over DISTINCT DECLARATIONS rather than over entries.
+    #
+    # KEYS STAY STABLE. Within one signature the CANONICAL copy - the first emitted in
+    # closure order - keeps the plain `<record>.<name>' key and takes part in the existing
+    # `#<line>' collision rule unchanged; every further copy is qualified with `@<file
+    # stem>', which cannot collide with any plain key because no record or field name
+    # contains `@'. So the 1061 keys that existed before this change are byte-identical
+    # after it, the record modules' citations keep resolving, and exactly the six missing
+    # declarations are added.
     groups: dict[tuple[object, ...], list[_CopybookItem]] = {}
     for rel in order:
         for item in fields[rel]:
             groups.setdefault(_signature(item), []).append(item)
-    elected: dict[tuple[object, ...], int | None] = {}
-    for key, items in groups.items():
-        free = [item for item in items if id(item) not in consumed]
-        elected[key] = id(free[0]) if free else None
+
+    #: Which file owns the UNQUALIFIED key for each signature: the first file, in closure
+    #: order, that actually emits a leftover entry for it. It is the first EMITTED copy
+    #: rather than simply the first declaring file, because the column pass may have
+    #: consumed the earlier file's item - `oi5-key' is bound by PUITM5-REC.OI5-KEY from
+    #: plwsoi5B.cob, which is why plwsoi5C.cob is the canonical holder of
+    #: `Open-Item-Record-5.oi5-key' and why that key must not move.
+    canonical_file: dict[tuple[object, ...], str] = {}
+    for rel in order:
+        for item in fields[rel]:
+            if id(item) in consumed:
+                continue
+            canonical_file.setdefault(_signature(item), rel)
 
     leftovers: dict[str, list[_EntryDraft]] = {}
     for rel in order:
         rows = []
         for item in fields[rel]:
-            if id(item) in consumed or elected[_signature(item)] != id(item):
+            if id(item) in consumed:
                 continue
             copybook = item.view()
+            key = "%s.%s" % (item.record, item.name)
+            if canonical_file[_signature(item)] != rel:
+                key = "%s@%s" % (key, Path(rel).stem)
             rows.append(_EntryDraft(
-                key="%s.%s" % (item.record, item.name), presence=model.Presence(
+                key=key, presence=model.Presence(
                     in_copybook=True, in_bridge=False, in_column=False,
                     in_program_source=False),
                 one_sided=True, copybook=copybook, host=None, column=None,
@@ -2805,7 +2837,52 @@ def _build_entries(root: Path, schema: _SchemaFacts,
     for draft in drafts:
         if counts[draft.key] > 1:
             draft.key = "%s#%d" % (draft.key, draft.item.line)
+
+    _assert_declaration_closure(order, fields, drafts)
     return drafts
+
+
+def _assert_declaration_closure(
+    order: list[str],
+    fields: dict[str, list["_CopybookItem"]],
+    drafts: list[_EntryDraft],
+) -> None:
+    """Refuse to emit a dictionary that omits any physical copybook declaration (R-5).
+
+    ⭐ THE POPULATION IS THE MULTISET OF DECLARATIONS IN THE FROZEN FILES, not a total.
+    Finding M-18 was invisible to a total: 1001 declarations existed and 1001 entries
+    carried a copybook view, yet `copybooks/plwsoi5C.cob` had ONE entry for its seven
+    declarations while `copybooks/irswsnl.cob` had twenty entries for its fourteen -
+    six OCCURS-expanded views making up the exact shortfall. So this compares the two
+    SETS, file by file and line by line, and names what is missing.
+
+    Args:
+        order: The copybook closure, in the order it was parsed.
+        fields: Every parsed declaration, by file.
+        drafts: The assembled entry drafts, keys already final.
+
+    Raises:
+        ValueError: Some declaration in a parsed copybook has no entry citing it. The
+            message names the file, the line and the field, because the fix is always to
+            emit the entry and never to lower the expectation.
+    """
+    declared = {
+        (rel, item.line, item.name.lower())
+        for rel in order for item in fields[rel]
+    }
+    cited = {
+        (draft.item.file, draft.item.line, draft.item.name.lower())
+        for draft in drafts
+        if draft.copybook is not None and draft.item is not None
+    }
+    missing = sorted(declared - cited)
+    if missing:
+        raise ValueError(
+            "%d physical copybook declaration(s) have no dictionary entry, which "
+            "rule R-5 does not permit: %s"
+            % (len(missing),
+               ", ".join("%s:L%d %s" % (rel, line, name) for rel, line, name in missing))
+        )
 
 
 _VARCHAR_PREFIX: Final[str] = "varchar"
@@ -3029,6 +3106,13 @@ def _coverage(entries: tuple[model.DictionaryEntry, ...]) -> model.Coverage:
         host_variables_covered=sum(1 for entry in entries
                                    if entry.bridge_host_variable is not None),
         copybook_fields_covered=sum(1 for entry in entries if entry.copybook is not None),
+        #  DISTINCT PHYSICAL DECLARATIONS, keyed by locator and name, so an OCCURS item
+        #  bound by several columns counts ONCE however many entries cite it. Rule R-5's
+        #  closure is about this number; the tally above is about entries (finding M-18).
+        copybook_declarations_covered=len({
+            (str(entry.copybook.source), str(entry.copybook.name))
+            for entry in entries if entry.copybook is not None
+        }),
         program_source_fields_covered=sum(1 for entry in entries
                                           if entry.program_source is not None),
         one_sided_entry_keys=tuple(entry.key for entry in entries if entry.one_sided),

@@ -126,14 +126,14 @@ if _missing_landmarks:
 del _missing_landmarks
 
 # The oracle harness. A SIBLING of acas_posting/, never a sub-package: that is
-# where R-1 stops being a promise and becomes a fact, and pyproject.toml's
-# [tool.setuptools] `packages` allow-list names only the seven acas_posting
-# packages plus the generated data directory, so harness/ and tests/ cannot reach a
-# distribution at all.
+# where R-1 stops being a promise and becomes a fact, and pyproject.toml constrains
+# discovery to `include = ["acas_posting*"]` against an explicit
+# `exclude = ["harness*", "tests*", "docs*", "data_dictionary*"]`, so harness/ and
+# tests/ cannot reach a distribution at all.
 HARNESS_DIR: Final[Path] = REPO_ROOT / "harness"
 
-# The scenario definitions (Agent Action Plan section 0.4.1.7 mandates eight; a
-# ninth, end_of_cycle_gl, covers gl080 - see SCENARIOS). Created by
+# The scenario definitions - the eight Agent Action Plan section 0.4.1.7 mandates, and
+# exactly those (see SCENARIOS). Created by
 # another agent; absence is reported, never worked around.
 SCENARIO_DIR: Final[Path] = HARNESS_DIR / "scenarios"
 
@@ -175,15 +175,24 @@ RESET_SCRIPT: Final[Path] = HARNESS_DIR / "reset_db.sh"
 RUN_COBOL_SCRIPT: Final[Path] = HARNESS_DIR / "run_cobol_scenario.sh"
 RUN_PYTHON_SCRIPT: Final[Path] = HARNESS_DIR / "run_python_scenario.sh"
 
-#: The protocol driver. Read here only for `--print-stages`, which publishes the
-#: canonical stage registry (finding F-16); the tests compose the stages themselves
-#: rather than driving this script, so that a stage's status is available individually.
-PARITY_SCRIPT: Final[Path] = HARNESS_DIR / "run_parity.sh"
+#: THERE IS NO SEPARATE PROTOCOL DRIVER (finding M-06). A `harness/run_parity.sh` used to
+#: run the ten stages from one invocation, and this module never drove it: the tests
+#: COMPOSE the ten stages themselves - see `_run_scenario_parity_stages` - so that each
+#: stage's status is available individually. The three gates that script alone owned now
+#: live in the stages whose state they protect: the oracle-provenance gate and the
+#: seed-file pre-flight in `harness/reset_db.sh` (which is where a refusal happens before
+#: a table is dropped), and the cross-side operations check in
+#: `harness/run_cobol_scenario.sh` (before the first operation produces state). A
+#: hand-driven operator therefore runs the four scripts above and the three Python tools
+#: directly, in the order `README-python-migration.md` section 8 sets out, and is guarded
+#: at each stage by that stage itself rather than by a wrapper.
 
-#: The canonical stage registry, sourced by the driver and both runners. Read through
-#: `PARITY_SCRIPT --print-stages` rather than parsed directly, so this module depends
-#: on the published interface and not on the file's shell syntax.
-STAGE_REGISTRY_SCRIPT: Final[Path] = HARNESS_DIR / "parity_stages.sh"
+#: The module that OWNS the canonical stage registry (findings F-16 and M-08). The rows
+#: were a shell file of its own; they are now `PARITY_STAGES` in `harness/normalize.py`,
+#: published to shell through `--print-stage-shell` and to everything else through
+#: `--print-stages`. Read through that published interface rather than parsed, so this
+#: module depends on the interface and not on the owner's syntax.
+STAGE_REGISTRY_SCRIPT: Final[Path] = HARNESS_DIR / "normalize.py"
 
 # ---------------------------------------------------------------------------
 #  SECTION 2  -  THE ENVIRONMENT CONTRACT
@@ -253,8 +262,9 @@ ENV_SEED_STRICT: Final[str] = "ACAS_SEED_STRICT"
 
 # ⭐ THE ONE RUN ID EVERY STAGE OF ONE PROTOCOL RUN CARRIES (finding F-37).
 #
-# `harness/run_parity.sh` mints one of these and exports it before stage 1, which is
-# how all ten of its stages come to agree; both runners read it, and
+# ONE id is minted and exported before stage 1, which is how all ten stages come to
+# agree - by this module for the composed protocol and by the operator for a
+# hand-driven one; both runners read it, and
 # `harness/dump_tables.py` records it into each capture's provenance. When it is
 # ABSENT each runner derives its own `local-<hex>` id instead - so a protocol composed
 # stage by stage, as `run_scenario_parity` composes it, gave the two sides two
@@ -264,11 +274,12 @@ ENV_SEED_STRICT: Final[str] = "ACAS_SEED_STRICT"
 # same id and `acas_read_seed_identity` DISCARDS a record staged by another attempt,
 # so an unbound protocol also lost the seed marker that F-22 requires to be equal.
 # Binding it here is therefore not a convenience: it is what makes the composed
-# protocol and the driven one the same protocol.
+# protocol and a hand-driven one the same protocol.
 ENV_PARITY_RUN_ID: Final[str] = "ACAS_PARITY_RUN_ID"
 
-# The prefix this module mints under. `harness/run_parity.sh` uses `parity-` and a
-# hand-invoked runner uses `local-`, so a third prefix keeps the composed protocol
+# The prefix this module mints under. A hand-driven run exports its own id - `parity-`
+# is the documented convention, README section 8 - and a runner invoked with none
+# derives `local-`, so a third prefix keeps the composed protocol
 # distinguishable in a retained artifact without any tool having to special-case it:
 # nothing validates the prefix, only the shape `^[A-Za-z0-9._-]{1,64}$`.
 RUN_ID_PREFIX: Final[str] = "pytest-"
@@ -434,10 +445,10 @@ def assert_exact_numeric(value: object, *, where: str) -> None:
 #
 #  THE SINGLE MOST IMPORTANT MECHANICAL FACT IN THIS FILE: nothing the SHIPPED
 #  package imports can reach harness/. That is enforced by pyproject.toml's
-#  [tool.setuptools] `packages` allow-list, which names only the seven
-#  acas_posting packages plus the generated data directory, with
-#  include-package-data = false; harness is absent by construction rather than
-#  filtered out. There is therefore DELIBERATELY no import path from the shipped
+#  [tool.setuptools.packages.find] configuration, which admits only
+#  `acas_posting*` and NAMES `harness*`, `tests*`, `docs*` and `data_dictionary*`
+#  in its exclusion list, with include-package-data = false; harness is absent by
+#  construction rather than filtered out. There is therefore DELIBERATELY no import path from the shipped
 #  package to the compiled oracle (R-1).
 #
 #  ONE ARGUMENT IS DELIBERATELY NOT MADE HERE, BECAUSE IT IS FALSE. An earlier
@@ -469,18 +480,18 @@ def assert_exact_numeric(value: object, *, where: str) -> None:
 #  resolve and no risk of shadowing a stdlib name.
 # ---------------------------------------------------------------------------
 
-# The harness Python modules this suite loads, by file name without the extension.
-# The first three are the tools a test drives; the fourth is the shared
-# scenario parser every consumer reads a definition through.
+# The harness Python modules this suite loads, by file name without the extension:
+# the three state tools a test drives.
+#
+# THERE IS NO FOURTH ENTRY ANY MORE (finding M-05). The one duplicate-rejecting scenario
+# parser was `harness/normalize.py`, a path the Agent Action Plan section 0.3.1
+# harness inventory does not name. It now lives in `harness/normalize.py` beside the
+# other definitions every consumer must agree on, so loading `normalize` loads the
+# parser too and there is no separate module left to keep in step.
 HARNESS_MODULE_NAMES: Final[tuple[str, ...]] = (
     "dump_tables",
     "normalize",
     "diff_states",
-    #  The one duplicate-rejecting scenario parser (finding MJ-17). Loaded the same
-    #  way and for the same reason as the three above, and deliberately NOT exposed
-    #  through the `harness` fixture: it is infrastructure every consumer uses, not a
-    #  tool a test drives.
-    "scenario_yaml",
 )
 
 # Loaded modules, memoised so repeated fixture use does not re-execute a
@@ -900,7 +911,7 @@ RUN_LOG_SUBDIR: Final[str] = "run-logs"
 # count alone cannot tell two different seeds apart: swap one balance, alter one
 # status, load a different fixture with the same shape, and the counts agree while the
 # starting states do not - and then every downstream difference, or its absence, is
-# unattributable. The digest is taken by `harness/table_digest.py` over the canonical
+# unattributable. The digest is taken by `harness/dump_tables.py --table-digest` over the canonical
 # text `harness/dump_tables.py` itself writes, so it covers EVERY BOUNDED TABLE AND
 # EVERY ROW at the declared scale, and BOTH SIDES COMPUTE IT WITH THE SAME PROGRAM -
 # which is the only way two independently produced digests can be compared byte for
@@ -1167,18 +1178,22 @@ ORACLE_HANDLER_MODULES: Final[tuple[str, ...]] = (
     "acasirsub1",
 )
 
-#: The shim supplying the copybook the frozen archive does not carry. Without it the
-#: bridge programs do not compile at all, so its absence explains an otherwise
-#: mystifying build failure and is worth naming separately.
-SQLSTATE_SHIM: Final[Path] = (
-    HARNESS_DIR / "copybook-shims" / "ACAS-SQLstate-error-list.cob"
-)
+#: The compatibility include supplying the copybook the frozen archive does not carry,
+#: as it is named INSIDE THE BUILD COPY. It is not a repository file: finding M-03 made
+#: `harness/build_oracle.sh` GENERATE it at build time into `$ACAS_BUILD/copybooks`,
+#: because a committed copy is a file a reader can mistake for archive material and
+#: writing the member into `copybooks/` would be a fabricated frozen source (R-3, R-4,
+#: AAP section 0.8.1). Its absence therefore no longer has a repository path to probe -
+#: what the tier checks instead is the build's own provenance attestation, which records
+#: this include as a registered source transformation, so a build carrying it reports
+#: `oracle-source-is-frozen no` and the tier declines to call any result parity.
+SQLSTATE_SHIM_BUILD_PATH: Final[str] = "copybooks/ACAS-SQLstate-error-list.cob"
 
 #: `harness/build_oracle.sh`'s completion marker. Its presence says the build tree is
 #: the one that script produced rather than a directory that happens to exist.
 ORACLE_BUILD_MARKER: Final[str] = ".acas-build-oracle-tree"
 
-#: `harness/build_fixtures.sh`'s publish-last manifest. It is written LAST, so its
+#: `harness/seed.sh --build-fixtures`'s publish-last manifest. It is written LAST, so its
 #: presence is what distinguishes a complete fixture from a partial one - which is
 #: exactly why `harness/seed.sh` requires it too.
 FIXTURE_MANIFEST: Final[str] = ".acas-fixture-manifest"
@@ -1271,15 +1286,13 @@ def _probe_compiled_oracle(
             f"starts and then fails at its first table read"
         )
 
-    # The copybook shim. Named separately because its absence produces a compile
-    # error in the bridges that looks nothing like "a copybook is missing".
-    if not SQLSTATE_SHIM.is_file():
-        missing.append("oracle:sqlstate-shim")
-        detail.append(
-            f"  {SQLSTATE_SHIM} is absent. The frozen archive does not carry that "
-            f"copybook, and every common/*MT bridge COPYs it, so no bridge can be "
-            f"compiled without the shim"
-        )
+    # ⭐ THERE IS NO SHIM FILE TO PROBE, AND THAT IS THE POINT (finding M-03).
+    # `harness/build_oracle.sh` generates the comment-only compatibility include into
+    # $ACAS_BUILD/copybooks/ACAS-SQLstate-error-list.cob at build time, so it cannot be
+    # missing from a build that ran, and it is not a repository file that could be
+    # deleted from the checkout. The condition that actually matters is the one the
+    # provenance probe below reports: a build that generated it is a TRANSFORMED build,
+    # `oracle-source-is-frozen no`, and therefore not the specification R-6 names.
 
     # THE ORACLE MUST BE THE FROZEN SPECIFICATION, NOT A REPAIRED ONE.
     #
@@ -1292,9 +1305,9 @@ def _probe_compiled_oracle(
     # nobody had measured, which is worse than a skip because a skip is visible.
     #
     # So the tier reports itself UNAVAILABLE, with the reason, and the reason names
-    # the measured cause rather than a hypothesis. `harness/run_parity.sh` refuses
-    # the same condition with exit 77; this is the same judgement at the tier
-    # boundary, so the two cannot disagree.
+    # the measured cause rather than a hypothesis. `harness/reset_db.sh` refuses
+    # the same condition with exit 77 - before it drops a table - and this is the same
+    # judgement at the tier boundary, so the two cannot disagree.
     _probe_oracle_is_frozen(build_root, missing, detail)
 
 
@@ -1309,7 +1322,7 @@ def _probe_oracle_is_frozen(
     specification.
 
     Set `ACAS_ACCEPT_TRANSFORMED_ORACLE=1` to run the tiers against a transformed
-    build for diagnosis. That mirrors `harness/run_parity.sh
+    build for diagnosis. That mirrors `harness/reset_db.sh
     --accept-transformed-oracle`, and like it, results obtained that way are not
     parity claims.
 
@@ -1447,8 +1460,8 @@ def _probe_built_fixtures(
         detail.append(
             f"  {len(unbuilt)} of {len(SCENARIOS)} scenario fixture(s) have not "
             f"been built: {', '.join(unbuilt)}. Build them with "
-            f"`harness/build_fixtures.sh` (all scenarios) or "
-            f"`harness/build_fixtures.sh <scenario>`"
+            f"`harness/seed.sh --build-fixtures` (all scenarios) or "
+            f"`harness/seed.sh --build-fixtures <scenario>`"
         )
     if incomplete:
         missing.append("fixtures:incomplete")
@@ -1727,9 +1740,9 @@ def reset_consent_token(settings: Any) -> str:
 #  SECTION 7  -  SCENARIO DEFINITIONS AND THE OPERATION VOCABULARY
 # ---------------------------------------------------------------------------
 
-# THE NINE SCENARIOS, one per tests/scenarios/test_*.py, each at
-# harness/scenarios/<name>.yaml. Agent Action Plan section 0.8.5 mandates eight of
-# them, expanding "clean batch post per ledger" into four cases because the four
+# THE EIGHT SCENARIOS, one per tests/scenarios/test_*.py, each at
+# harness/scenarios/<name>.yaml. Agent Action Plan section 0.8.5 mandates exactly
+# these eight, expanding "clean batch post per ledger" into four cases because the four
 # ledgers exercise materially different code paths.
 #
 # `control_total_mismatch` IS GENERAL-LEDGER-SPECIFIC. Agent Action Plan section
@@ -1737,16 +1750,24 @@ def reset_consent_token(settings: Any) -> str:
 # meaningful way to construct an unbalanced sales batch". There is deliberately no
 # SL or PL variant, and no helper here implies one is possible.
 #
-# `end_of_cycle_gl` IS THE NINTH, AND IT IS ADDITIVE RATHER THAN A SUBSTITUTION. The
-# mandated eight drive the posting cycle, the two trading ledgers and the IRS
-# fan-out, and not one of them runs `gl080` - so posting deletion, batch stamping,
-# the nominal-ledger quarter rollover and the cycle advance had no state comparison
-# behind them at all, even though `gl080` is one of the twelve in-scope programs and
-# owns the only one of the five `ROUNDED` stores a scenario can reach
-# [general/gl080.cbl:L328]. It drives the real `gl_end_of_cycle` route, which both
-# runners already supported. Adding a scenario is permitted: section 0.8.5 states
-# the set that MUST be covered, not a ceiling, and section 0.2.1.2 scopes
-# `harness/scenarios/*.yaml` and `tests/scenarios/test_*.py` by trailing wildcard.
+# ⭐ THERE WAS A NINTH, `end_of_cycle_gl`, AND IT HAS BEEN REMOVED (findings M-09 and
+# M-17). It drove `gl080` through the real `gl_end_of_cycle` route and was measured end
+# to end, but the Agent Action Plan's inventory names eight scenario definitions and
+# eight scenario tests, and this project's tree is held to that inventory. What the
+# removal costs is stated rather than glossed: `gl080` no longer has a TABLE-STATE
+# comparison behind it, so posting deletion, batch stamping, the nominal-ledger quarter
+# rollover and the cycle advance are covered at unit level only. What it does not cost:
+# anomaly A-2 (the unbounded quarter subscript) and anomaly A-3 (the second, independent
+# rotating quarter counter) stay locked in the arithmetic tier - `test_a2_...` and
+# `test_a3_current_quarter_rotates_independently_of_a` in
+# tests/arithmetic/test_gl080_cycle_divide_rounded.py - and the three questions that
+# once waited on this scenario were each resolved by STANDALONE compiled probes rather
+# than by it (`Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, and `Q-2`'s fifth
+# `ROUNDED` site at [general/gl080.cbl:L328]). The retained measurement is kept as
+# history in docs/migration/scenario-diff-evidence.md rather than deleted.
+#
+# The `gl_end_of_cycle` OPERATION below is unaffected: it is one of the seven planned
+# CLI routes, and both runners still drive it. No committed scenario selects it.
 SCENARIOS: Final[tuple[str, ...]] = (
     "clean_batch_gl",
     "clean_batch_sl",
@@ -1756,7 +1777,6 @@ SCENARIOS: Final[tuple[str, ...]] = (
     "period_end_totals",
     "control_total_mismatch",
     "empty_batch",
-    "end_of_cycle_gl",
 )
 
 # THE SEVEN OPERATIONS, identical in both runners, mapped to the Python module and
@@ -2049,7 +2069,7 @@ def scenario_file(scenario: str) -> Path:
 def scenario_fixture_dir(scenario: str) -> Path:
     """Return the builder's canonical fixture directory for one scenario.
 
-    `harness/build_fixtures.sh` writes one directory per scenario under
+    `harness/seed.sh --build-fixtures` writes one directory per scenario under
     `$ACAS_FIXTURES`, falling back to `$ACAS_DATA/fixtures`. The scenario YAML is
     mounted read-only inside the harness container, so its relative `seed_dir`
     cannot be the runtime location. Stages 1 and 5 therefore pass this directory
@@ -2057,10 +2077,10 @@ def scenario_fixture_dir(scenario: str) -> Path:
     authority for *which* files are accepted.
 
     THE RULE IS STATED ONCE, BY THE PRODUCER, and derived identically in three
-    places: `harness/build_fixtures.sh`'s `ACAS_BF_OUT` default owns it,
-    `harness/run_parity.sh`'s `acas_parity_resolve_fixture_root` derives it for the
-    standalone driver, and this function derives it for the pytest protocol.
-    `test_shared_storage_and_dispatch_boundaries.py` measures all three against one
+    places: `harness/seed.sh --build-fixtures`'s `ACAS_BF_OUT` default owns it,
+    `harness/reset_db.sh` derives it for a hand-driven stage 1 or 5, and this function
+    derives it for the pytest protocol.
+    `test_comp_binary.py` measures all three against one
     environment and fails if any pair disagrees, because a comment would not keep
     them in step. The one deliberate difference: the builder falls back to `/data`
     as a last resort because it can be run outside Compose, while both readers
@@ -2089,7 +2109,7 @@ def scenario_fixture_dir(scenario: str) -> Path:
     raise HarnessFaultError(
         f"cannot locate the built fixture for {scenario!r}: neither "
         f"${ENV_FIXTURES} nor ${ENV_DATA} is set. Build the fixtures with "
-        f"`harness/build_fixtures.sh {scenario}` and expose its output through "
+        f"`harness/seed.sh --build-fixtures {scenario}` and expose its output through "
         f"{ENV_FIXTURES}, or set {ENV_DATA} so the canonical "
         f"`$ACAS_DATA/fixtures/{scenario}` location is available."
     )
@@ -2166,8 +2186,8 @@ def mint_run_id() -> str:
     """Mint one run id for one protocol run.
 
     Shaped to satisfy the runners' own validation, `^[A-Za-z0-9._-]{1,64}$`, so an
-    artifact published under it is indistinguishable in form from one published by
-    `harness/run_parity.sh`.
+    artifact published under it is indistinguishable in form from one published by a
+    hand-driven stage.
 
     Returns:
         A fresh id, for example `pytest-3f9c1a04b7e24d61`.
@@ -2182,8 +2202,9 @@ def bound_run_id(run_id: str | None = None) -> Iterator[str]:
     THE STAGES ARE SEPARATE PROCESSES, and each of them derives its own identity when
     none is supplied. That is correct for a hand invocation and wrong for a protocol:
     the two sides must be provably two halves of ONE attempt before a verdict may be
-    rendered on them (findings F-22, F-37, F-45). `harness/run_parity.sh` achieves this
-    by exporting the id before its first stage; this does the same for the protocol
+    rendered on them (findings F-22, F-37, F-45). A hand-driven run achieves this by
+    exporting `ACAS_PARITY_RUN_ID` once before stage 1 (README section 8); this does the
+    same for the protocol
     composed in this module, and every stage helper inherits `os.environ`, so no helper
     signature changes and a test that drives a single stage is unaffected.
 
@@ -2221,7 +2242,7 @@ def bound_run_id(run_id: str | None = None) -> Iterator[str]:
 def scenario_definition(scenario: str) -> Mapping[str, Any]:
     """Load one scenario definition (Agent Action Plan section 0.4.1.7).
 
-    Read through `harness/scenario_yaml.py`'s duplicate-rejecting loader, which is a
+    Read through `harness/normalize.py`'s duplicate-rejecting loader, which is a
     `yaml.SafeLoader` subclass - so the loader still cannot construct arbitrary Python
     objects from a data file, AND a repeated mapping key is a hard parse failure rather
     than PyYAML's silent last-one-wins (finding MJ-17). Every consumer of a scenario
@@ -2245,12 +2266,12 @@ def scenario_definition(scenario: str) -> Mapping[str, Any]:
             the affected-table key or both.
     """
     #  Both lazy, so the arithmetic tier imports this module without PyYAML present.
-    #  `scenario_yaml` is loaded by explicit file path for the same reason the three
-    #  larger harness modules are: harness/ is deliberately not a Python package
-    #  (rule R-1), and adding an __init__.py is not the fix.
+    #  `normalize` is loaded by explicit file path for the same reason the other two
+    #  harness modules are: harness/ is deliberately not a Python package (rule R-1),
+    #  and adding an __init__.py is not the fix. It OWNS the parser (finding M-05).
     import yaml  # noqa: PLC0415, F401 - re-exported exception type
 
-    scenario_yaml = _load_harness_module("scenario_yaml")
+    parser_module = _load_harness_module("normalize")
 
     path = scenario_file(scenario)
     if not path.is_file():
@@ -2263,7 +2284,7 @@ def scenario_definition(scenario: str) -> Mapping[str, Any]:
             f"defaulted."
         )
 
-    parsed = scenario_yaml.load_scenario_yaml(path.read_text(encoding="utf-8"))
+    parsed = parser_module.load_scenario_yaml(path.read_text(encoding="utf-8"))
     if not isinstance(parsed, Mapping):
         raise ValueError(
             f"{path}: a scenario definition must be a YAML mapping; parsed as "
@@ -2402,9 +2423,9 @@ STAGE_TIMEOUT_RUN: Final[int] = 3600
 # The protocol stage names, used in every `StageResult` and every failure message so
 # a reader can place a finding in the sequence at a glance.
 #
-# THE NUMBERING IS THE CANONICAL ONE (finding F-16). The protocol has TEN stages,
-# defined once in harness/parity_stages.sh and published by
-# `harness/run_parity.sh --print-stages`. These names previously numbered the second
+# THE NUMBERING IS THE CANONICAL ONE (findings F-16 and M-08). The protocol has TEN
+# stages, defined once in `PARITY_STAGES` in harness/normalize.py and published by
+# `harness/normalize.py --print-stages`. These names previously numbered the second
 # normalisation `7b` and the comparison `8`, which described an EIGHT-stage protocol
 # that had not been the one driven for some time - so a stage number in a test failure
 # named a different stage from the same number in a driver transcript. They now agree,
@@ -2442,16 +2463,16 @@ _STAGE_REGISTRY: list[tuple[int, str]] | None = None
 def parity_stage_registry() -> tuple[tuple[int, str], ...]:
     """Return the canonical stage registry, `(number, label)` in protocol order.
 
-    THE ONE PLACE THE PROTOCOL'S SHAPE IS DEFINED (finding F-16) is
-    harness/parity_stages.sh, and `harness/run_parity.sh --print-stages` is how it is
-    published. Reading it here rather than restating it is what stops this module's
-    prose drifting from the protocol it composes - which is exactly what had happened:
-    this file described EIGHT stages while the driver drove ten.
+    THE ONE PLACE THE PROTOCOL'S SHAPE IS DEFINED (findings F-16 and M-08) is
+    `PARITY_STAGES` in harness/normalize.py, and `harness/normalize.py --print-stages`
+    is how it is published. Reading it here rather than restating it is what stops this
+    module's prose drifting from the protocol it composes - which is exactly what had
+    happened: this file described EIGHT stages while the driver drove ten.
 
     Memoised per session: it is a subprocess, and the answer cannot change mid-run.
 
     Returns:
-        The registry rows. Empty when the driver could not be run, which a caller
+        The registry rows. Empty when the registry could not be read, which a caller
         treats as "cannot check" rather than as a failure - `pytest -m arithmetic`
         must succeed on a host with no harness at all.
     """
@@ -2460,10 +2481,10 @@ def parity_stage_registry() -> tuple[tuple[int, str], ...]:
         return tuple(_STAGE_REGISTRY)
 
     rows: list[tuple[int, str]] = []
-    if PARITY_SCRIPT.is_file() and os.access(PARITY_SCRIPT, os.X_OK):
+    if STAGE_REGISTRY_SCRIPT.is_file() and os.access(STAGE_REGISTRY_SCRIPT, os.X_OK):
         try:
             completed = subprocess.run(  # noqa: S603 - a fixed, repo-local path
-                [str(PARITY_SCRIPT), "--print-stages"],
+                [str(STAGE_REGISTRY_SCRIPT), "--print-stages"],
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -2746,8 +2767,8 @@ def _requested_operations(
     """Resolve the operations one run-stage invocation drives.
 
     BOTH runners drive the whole ordered `operations` list in ONE invocation, and both
-    take a REPEATABLE `--operation` (finding MJ-04). `harness/run_parity.sh` builds each
-    run stage as a single argv carrying one `--operation` per declared operation, in the
+    take a REPEATABLE `--operation` (finding MJ-04). Each run stage is therefore a single
+    argv carrying one `--operation` per declared operation, in the
     declared order, and each runner publishes one disposition record per operation. An
     earlier revision of this docstring said the oracle runner drove "one menu operation
     per invocation, using the scalar `operation` key", which described the runner before
@@ -3150,12 +3171,41 @@ def reset(
         argv += ["--seed-dir", str(scenario_fixture_dir(scenario))]
     if dry_run:
         argv.append("--dry-run")
+    argv += _transformed_oracle_waiver()
     argv.append(str(scenario_file(scenario)))
     # administrative: this drops and re-applies the frozen schema.
     return _run_script(
         RESET_SCRIPT, argv, stage=STAGE_RESET, timeout=STAGE_TIMEOUT_RESET,
         administrative=True,
     )
+
+
+def _transformed_oracle_waiver() -> list[str]:
+    """`--accept-transformed-oracle` when, and only when, the operator asked for it.
+
+    ⭐ THE TWO ACKNOWLEDGEMENTS ARE ONE DECISION AND MUST BE PASSED TOGETHER. Finding
+    M-06 folded the ten-stage driver away and moved its oracle-provenance gate into
+    `harness/reset_db.sh`, where it fires before the first `DROP` - which is a
+    strictly better place for it, because it now guards a hand-driven stage 1 as well
+    as a protocol-bound one. The consequence, MEASURED rather than reasoned, is that
+    this module's own diagnostic switch stopped being sufficient on its own: setting
+    `ACAS_ACCEPT_TRANSFORMED_ORACLE=1` un-skipped the stack-bound tiers and every one
+    of them then ERRORED at stage 1 with `reset_db.sh` exit 77, because the script's
+    gate wants its own flag. Two acknowledgements for one decision, and only one of
+    them given, is a broken diagnostic route rather than a stricter one.
+
+    So the env var - which is the operator saying "run these tiers against a
+    transformed build, for diagnosis, with no parity claim" - is translated into the
+    script flag that says exactly the same thing. Neither is inferred from the other's
+    absence: with the variable unset the tiers SKIP and the flag is never passed, so a
+    hand-driven or an unacknowledged run still meets exit 77.
+
+    Returns:
+        `["--accept-transformed-oracle"]` when the variable is set to `1`, else `[]`.
+    """
+    if os.environ.get("ACAS_ACCEPT_TRANSFORMED_ORACLE", "").strip() == "1":
+        return ["--accept-transformed-oracle"]
+    return []
 
 
 def prepare_scenario(scenario: str) -> StageResult:
@@ -3170,6 +3220,7 @@ def prepare_scenario(scenario: str) -> StageResult:
     argv = [
         "--seed-dir",
         str(scenario_fixture_dir(scenario)),
+        *_transformed_oracle_waiver(),
         str(scenario_file(scenario)),
     ]
     # administrative: this drops and re-applies the frozen schema, then seeds.
@@ -3635,8 +3686,8 @@ def dump(
     #  requires to be present and EQUAL on both sides before it compares a row.
     #  Omitting it left the field empty on both sides, and stage 9 refused the pair -
     #  which is exactly right, since the definition carries the fan-out switch that
-    #  decides which tables the run touches. The driver passes it at the same three
-    #  stages for the same reason.
+    #  decides which tables the run touches. A hand-driven run passes it at the same
+    #  three stages for the same reason - README section 8 spells each one out.
     argv += ["--scenario-file", str(scenario_file(scenario))]
 
     stage = STAGE_DUMP_COBOL if side == SIDE_COBOL else STAGE_DUMP_PYTHON
@@ -3660,8 +3711,10 @@ def verify_published(
 
     Performed here as its own recorded stage rather than left implicit inside the
     comparison, so a test can see that it ran and a failure names stage 9 rather than
-    arriving as a comparison error (finding F-16). `harness/run_parity.sh` does the
-    same thing at the same point.
+    arriving as a comparison error (finding F-16). A hand-driven run gets the same
+    guarantee from stage 10 itself: `harness/diff_states.py` calls this same
+    `verify_trees` before it compares a single row and exits 2 rather than 0, so the
+    check is never skipped - only reported differently.
 
     Args:
         scenario: The scenario name.
@@ -4690,8 +4743,8 @@ def assert_autogen_tables_empty(connection: Any) -> None:
 #  SECTION 10  -  THE COMPOSED PROTOCOL
 #
 #  THE TEN STAGES, IN THE EXACT ORDER. The order and the numbering are NOT restated
-#  here as fact - they are DEFINED in harness/parity_stages.sh and published by
-#  `harness/run_parity.sh --print-stages`, which `parity_stage_registry` reads and a
+#  here as fact - they are DEFINED in `PARITY_STAGES` in harness/normalize.py and published
+#  by `harness/normalize.py --print-stages`, which `parity_stage_registry` reads and a
 #  test asserts these constants against (finding F-16). Each side is normalised as its
 #  own stage; the second normalisation used to be numbered `7b` so that the protocol
 #  could be called eight-stage, which made a stage number in a test message name a
@@ -5259,7 +5312,7 @@ class TableFingerprint:
         row_count: The row count, or None when the table could not be read.
         digest: The lower-case hex SHA-256 of the canonical dump
             `harness/dump_tables.py` writes for that table, or None when the table
-            could not be read. `harness/table_digest.py` is the sole producer, and
+            could not be read. `harness/dump_tables.py --table-digest` is the sole producer, and
             both sides invoke it, so two digests are comparable by construction.
     """
 
@@ -5334,7 +5387,7 @@ def read_fingerprint(path: Path | str) -> tuple[TableFingerprint, ...]:
         ), (
             f"{target}:{number} records {digest_field!r} as {table!r}'s digest; a "
             f"digest is {DIGEST_LENGTH} lower-case hexadecimal characters - the "
-            f"SHA-256 harness/table_digest.py takes over the canonical dump - or "
+            f"SHA-256 harness/dump_tables.py --table-digest takes over the canonical dump - or "
             f"`{FINGERPRINT_UNREADABLE}`."
         )
         records.append(
@@ -5421,7 +5474,7 @@ def assert_seed_fingerprints_agree(
         claim a row count cannot make. Two seeds that differ in one balance, one
         status byte or one date have identical counts, and the diff that follows -
         or the empty diff that follows - belongs to the seed rather than to either
-        cycle. The digest is taken by `harness/table_digest.py` over the canonical
+        cycle. The digest is taken by `harness/dump_tables.py --table-digest` over the canonical
         text `harness/dump_tables.py` writes, by the same program on both sides.
       * the two files are BYTE-IDENTICAL.
 
@@ -5511,7 +5564,7 @@ def assert_seed_fingerprints_agree(
         f"it immediately before it drives the compiled menu, in the same format and "
         f"the same declared order as the Python side's - "
         f"`<TABLE>\\t<count>\\t<digest>` per table - and both digests come from "
-        f"harness/table_digest.py. An absent or empty file means the oracle run did "
+        f"harness/dump_tables.py --table-digest. An absent or empty file means the oracle run did "
         f"not reach the stage that records it, which is a HARNESS FAULT and never a "
         f"behavioural difference.\n{run.describe()}"
     )
@@ -6804,7 +6857,7 @@ def scenario_loader() -> Callable[[str], Mapping[str, Any]]:
     """A loader for one scenario definition, duplicate-rejecting (finding MJ-17).
 
     Needs no stack: a scenario definition is a file on disk. Parsing goes through
-    `harness/scenario_yaml.py`, so a repeated mapping key is a hard parse failure
+    `harness/normalize.py`, so a repeated mapping key is a hard parse failure
     rather than a silent last-one-wins. ONLY THE KEYS THE HELPERS CONSUME ARE
     CHECKED FOR PRESENCE and nothing is interpreted, because judging a scenario's
     declared contents would be the added validation rule R-3 forbids.

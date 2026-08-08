@@ -708,8 +708,8 @@ description: |
 
   THE ACCEPTANCE PROTOCOL
   TEN stages, in this order, one scenario at a time and nothing
-  alongside it. harness/parity_stages.sh is the single registry and
-  `harness/run_parity.sh --print-stages' prints it, so this list is a restatement
+  alongside it. harness/normalize.py is the single registry and
+  `harness/normalize.py --print-stages' prints it, so this list is a restatement
   and never the authority:
     1 reset the schema and seed the scenario
     2 run the compiled COBOL cycle
@@ -725,7 +725,7 @@ description: |
       because two PARTIAL captures can produce an empty diff and so pass a
       comparison that compared nothing
     10 diff the two normalised trees
-  harness/build_oracle.sh and harness/build_fixtures.sh come before stage 1 and are
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures come before stage 1 and are
   not stages: the first runs once per image, the second once per change to a
   scenario's seed records.
   AN EMPTY DIFF IS THE PASS CONDITION AND THE ONLY ONE.
@@ -883,7 +883,7 @@ expected_status:
 # It is NOT the bound of the comparison. The capture and the diff are bounded by
 # ALL 22 IN-SCOPE TABLES -- `harness/dump_tables.py --all-in-scope` at stages 3
 # and 7 and `harness/diff_states.py --all-in-scope` at stage 10, which
-# `harness/run_parity.sh` and `tests/conftest.py` both pass. A bound drawn from
+# both a hand-driven run and `tests/conftest.py` pass. A bound drawn from
 # what a scenario EXPECTS to move cannot show a difference in anything it did not
 # expect to move, and an empty diff is the single pass condition (AAP section
 # 0.8.5). In particular both cycles perform the menu's own `overrewrite.'
@@ -907,7 +907,7 @@ affected_tables:
 # =============================================================================
 # THE SEED RECORDS
 # =============================================================================
-# Built into the declared flat files by harness/make_fixtures.py, which generates a
+# Built into the declared flat files by harness/dump_tables.py --make-fixtures, which generates a
 # COBOL writer per file, compiles it against the FROZEN copybooks and calls the
 # FROZEN handler to write. Field names are spelled exactly as the frozen copybook
 # spells them, and the builder reads them from the frozen definitions itself, so a
@@ -936,7 +936,7 @@ affected_tables:
 #     rather than harmonised (rule R-4).
 #   * The layout the builder uses for pinvoice.dat is [copybooks/plwspinv2.cob],
 #     the view pl055 itself copies, and not the handler's own linkage copybook --
-#     see the SEED_FILES note in harness/make_fixtures.py for why the two differ
+#     see the SEED_FILES note in harness/dump_tables.py --make-fixtures for why the two differ
 #     and how the substitution is proved storage-compatible.
 #
 # WHAT THIS SEED HAS TO ACHIEVE: analysis and value records covering every code the

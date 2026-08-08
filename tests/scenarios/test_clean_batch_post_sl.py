@@ -4,7 +4,7 @@
 matters (finding MJ-07). `GL-Posting-Close` writes nothing, so adding the missing period
 at [sales/sl060.cbl:L1176] leaves an IDENTICAL `GLPOSTING-REC` and every assertion here
 still passes. The LOCK is
-`tests/arithmetic/test_shipped_close_and_rejection_paths.py`, which drives the shipped
+`tests/arithmetic/test_double_entry_explosion.py`, which drives the shipped
 `ca000-BL-Close` over the whole `IRS-Instead` × `Level-1` truth table with a recording
 facade stand-in and fails on exactly the row the two readings disagree about. What THIS
 file establishes is different and still worth having: that two independent
@@ -343,8 +343,8 @@ THE TEN-STAGE PROTOCOL, AND THE THREE-WAY EXIT CONTRACT
 
 EIGHT LOGICAL STAGES, TEN NUMBERED ONES. Agent Action Plan section 0.3.2 fixes the
 order as "seed, run, dump, normalize, reset, run, dump, diff" - eight. The driver
-`harness/run_parity.sh` numbers ten, reading the list from
-`harness/parity_stages.sh`, because it makes BOTH normalisations and the publication
+The PROTOCOL numbers ten, reading the list from
+`harness/normalize.py`, because it makes BOTH normalisations and the publication
 check explicit rather than implied. Nothing was added to the protocol; where older
 prose says "stage 8" it means today's stage 10, the diff. The runners' own
 `Check n/8' headings are their internal preflight checks and are not protocol
@@ -2186,7 +2186,7 @@ def test_a1_missing_period_gl_posting_close_not_executed(
     [sales/sl060.cbl:L1176], or a translation of `ca000-BL-Close` that "obviously"
     closes the posting file, changes which VERBS are performed and changes NO ROW,
     because a close writes nothing. This test would stay green. The lock is
-    `tests/arithmetic/test_shipped_close_and_rejection_paths.py::test_a1_the_posting_close_follows_the_nested_predicate`,
+    `tests/arithmetic/test_double_entry_explosion.py::test_a1_the_posting_close_follows_the_nested_predicate`,
     which drives the shipped paragraph and asserts the verb sequence over the full
     two-field truth table; it was verified to fail on exactly the pure-GL row when the
     period was added. Recorded as A-1 in `docs/migration/anomaly-log.md`, where its
@@ -2994,9 +2994,11 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight scenarios that existed when the measurement was taken, which is all
-    four `unchanged` ones; the ninth, `end_of_cycle_gl`, declares `changed` and moves the
-    row by construction, Phase 5 advancing the cycle and rotating the quarter counter.
+    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
+    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
+    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
+    counter -- that scenario has since been removed (findings M-09 and M-17), and the
+    observation is recorded because it is what established that half.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 

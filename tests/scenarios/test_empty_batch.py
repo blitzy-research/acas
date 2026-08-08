@@ -168,7 +168,9 @@ pre-processed."
 touches nothing at all - which in THIS scenario is nearly indistinguishable from
 the intended outcome, making it a peculiarly silent trap. The pin is asserted;
 `system.period: 1` is inert here, because only `gl_end_of_cycle` reads it and
-this route never reaches gl080. The `end_of_cycle_gl` scenario is where it acts.
+this route never reaches gl080. No committed scenario drives that operation: a
+dedicated `end_of_cycle_gl` definition did, and was removed by findings M-09 and
+M-17, so gl080's own effects are covered in the arithmetic tier.
 
 -------------------------------------------------------------------------------
 THE CENTRAL OPEN QUESTION - RESOLVED BY THE ORACLE, NEVER BY READING
@@ -365,8 +367,8 @@ THE TEN-STAGE PROTOCOL, DRIVEN THROUGH THE ONE HELPER
 
 EIGHT LOGICAL STAGES, TEN NUMBERED ONES. Agent Action Plan section 0.3.2 fixes the
 order as "seed, run, dump, normalize, reset, run, dump, diff" - eight. The driver
-`harness/run_parity.sh` numbers ten, reading the list from
-`harness/parity_stages.sh`, because it makes BOTH normalisations and the publication
+The PROTOCOL numbers ten, reading the list from
+`harness/normalize.py`, because it makes BOTH normalisations and the publication
 check explicit rather than implied. Nothing was added to the protocol; where older
 prose says "stage 8" it means today's stage 10, the diff. The runners' own
 `Check n/8' headings are their internal preflight checks and are not protocol
@@ -1558,8 +1560,9 @@ def test_no_empty_batch_special_case_was_added(
     was tried, and this file stayed green while the call-sequence lock failed.
 
     SO THIS TEST IS A WITNESS, and the LOCK lives in
-    `tests/arithmetic/test_gl072_shipped_silent_skips.py` §4, which drives the
-    shipped `gl072` over an empty work file with a recording facade double and
+    `tests/arithmetic/test_ledger_balance_accumulation.py`'s
+    `test_the_empty_work_file_still_performs_end_account_then_end_batch`, which drives
+    the shipped `gl072` over an empty work file with a recording facade double and
     asserts that `end-account` then `end-batch` both run, on zero keys, in that
     order. What THIS test contributes is different and still worth having: that the
     two independent implementations agree across all bounded tables on a run that
@@ -1589,7 +1592,9 @@ def test_no_empty_batch_special_case_was_added(
             f"NOWHERE in this comparison. Q-EMPTY-BATCH-AT-END is `RESOLVED BY "
             f"ORACLE` (2026-08-07) with exactly that answer, and the guard is "
             f"caught instead by "
-            f"tests/arithmetic/test_gl072_shipped_silent_skips.py section 4. R-3 "
+            f"tests/arithmetic/test_ledger_balance_accumulation.py's "
+                        f"test_the_empty_work_file_still_performs_end_account_then_end_batch. "
+                        f"R-3 "
             f"forbids adding one regardless of table state, because a guard that "
             f"agrees with a measured no-op is still added behaviour and would "
             f"diverge the moment the frozen path changed. A difference HERE is "
@@ -2191,9 +2196,11 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(empty_batch_parity: o
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight scenarios that existed when the measurement was taken, which is all
-    four `unchanged` ones; the ninth, `end_of_cycle_gl`, declares `changed` and moves the
-    row by construction, Phase 5 advancing the cycle and rotating the quarter counter.
+    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
+    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
+    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
+    counter -- that scenario has since been removed (findings M-09 and M-17), and the
+    observation is recorded because it is what established that half.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 

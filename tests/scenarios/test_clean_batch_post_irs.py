@@ -456,8 +456,8 @@ THE TEN-STAGE PROTOCOL, AND WHY STAGE 5 MATTERS MORE HERE THAN ANYWHERE
 
 EIGHT LOGICAL STAGES, TEN NUMBERED ONES. Agent Action Plan section 0.3.2 fixes the
 order as "seed, run, dump, normalize, reset, run, dump, diff" - eight. The driver
-`harness/run_parity.sh` numbers ten, reading the list from
-`harness/parity_stages.sh`, because it makes BOTH normalisations and the publication
+The PROTOCOL numbers ten, reading the list from
+`harness/normalize.py`, because it makes BOTH normalisations and the publication
 check explicit rather than implied. Nothing was added to the protocol; where older
 prose says "stage 8" it means today's stage 10, the diff. The runners' own
 `Check n/8' headings are their internal preflight checks and are not protocol
@@ -1927,10 +1927,10 @@ def test_a4_half_posted_double_entry_reproduced(
     clean no-op's whole signature is an ABSENCE, and an implementation that ABORTED the
     run on a missing debit, or that committed the debit anyway, can leave the same rows.
     Class 1 is therefore locked directly, by call sequence, in
-    `tests/arithmetic/test_shipped_close_and_rejection_paths.py` section 2 - which
-    drives the shipped `Input-Loop` over two transfer records, the first with a missing
-    debit, and requires the second to be posted in full so that the rejection is proved
-    to be a loop-back rather than a terminator. What THIS test owns is class 3.
+    `tests/arithmetic/test_double_entry_explosion.py`'s IR032 group - which drives the
+    shipped `Input-Loop` over two transfer records, the first with a missing debit, and
+    requires the second to be posted in full so that the rejection is proved to be a
+    loop-back rather than a terminator. What THIS test owns is class 3.
 
     THE VAT ASYMMETRY IS PART OF THE SPECIFICATION: the debit side adds VAT when the
     side is "CR" [irs/irs030.cbl:L1636-L1637] and the credit side when it is "DR"
@@ -2283,7 +2283,7 @@ def test_a6_rewrite_verb_can_never_succeed(
     a table state, so it cannot be seen from here.
 
     THE PAIR IS THEREFORE LOCKED WHERE IT LIVES, by
-    `tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` section 20, which
+    `tests/arithmetic/test_comp_binary.py` section 20, which
     calls `acas_posting/dal/acas008_spl_posting.py`'s `aa010_main` once per refused verb
     and requires `WE-Error 988` with `FS-Reply 99`, drives the published verbs through
     BOTH vocabularies, and proves by sabotage that no connection is attempted.
@@ -2301,7 +2301,7 @@ def test_a6_rewrite_verb_can_never_succeed(
     WHERE THE VERB ITSELF IS LOCKED, so that the pair of claims is complete. The status
     pair is a value returned to a caller rather than a table state, so it belongs to the
     data-access layer's tests, and it IS locked there:
-    `tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` INVOKES all four
+    `tests/arithmetic/test_comp_binary.py` INVOKES all four
     refused functions - read-indexed (4), re-write (7), start (9) and delete (8) -
     through BOTH published alias sets, asserts `WE-Error 988` with `FS-Reply 99` on each,
     asserts the record is unchanged, and sabotages the handler's connection opener to
@@ -2852,9 +2852,11 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight scenarios that existed when the measurement was taken, which is all
-    four `unchanged` ones; the ninth, `end_of_cycle_gl`, declares `changed` and moves the
-    row by construction, Phase 5 advancing the cycle and rotating the quarter counter.
+    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
+    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
+    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
+    counter -- that scenario has since been removed (findings M-09 and M-17), and the
+    observation is recorded because it is what established that half.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 

@@ -13,9 +13,10 @@ Present in this package
                 `aa010-Get-System-Recs.` and `overrewrite.` paragraphs plus the
                 IRS `zz090`/`zz095` remap pair - the boundary at which the stored
                 system records are read before a dispatch and written back after
-                it. The seven entry points reach the store only through it.
-    rdbms_params
-                reproduces the frozen connection-parameter loader.
+                it, AND - in its SECTION 0 - reproduces the frozen
+                connection-parameter loader `common/acas-get-params.cbl`, whose
+                six values reach the handlers only through `SYSTEM-REC`. The
+                seven entry points reach the store only through it.
 
 The seven entry points, named in `__all__`
     gl_post_cycle, gl_end_of_cycle, sl_invoice_post, sl_cash_post,
@@ -80,22 +81,21 @@ from __future__ import annotations
 
 from typing import Final
 
-# The ten modules of this package, in AAP 0.3.1 target-tree order - not
+# The nine modules of this package, in AAP 0.3.1 target-tree order - not
 # alphabetical and not execution order. These are MODULE NAMES, recorded for
 # documentation and traceability only: listing a name here does NOT import it,
 # and this marker never imports one. A caller imports the module explicitly, as
 #     from acas_posting.cli import gl_post_cycle
 # and then calls that module's own entry point.
 #
-# AAP 0.3.1 names eight; `rdbms_params` is the ninth and is covered by the
-# section's own `acas_posting/cli/*.py` wildcard (AAP 0.2.1.2, 0.4.4).
+# AAP 0.3.1 names exactly these nine and the tree holds exactly these nine.
 #
-# `rdbms_params` exists because SYSTEM-REC is the only carrier by which a
-# connection parameter reaches the data-access layer
-# [common/acas008.cbl:L558-L563], and the frozen tree solves that with a named
-# program of its own - common/acas-get-params.cbl, called by every
-# common/*LD.cbl loader - which this module reproduces. `args` re-exports its one
-# adapter, so no entry point imports it directly.
+# THE CONNECTION-PARAMETER LOADER IS SECTION 0 OF `args`, not a module of its own
+# (finding M-01). SYSTEM-REC is the only carrier by which a connection parameter
+# reaches the data-access layer [common/acas008.cbl:L558-L563], and the frozen
+# tree solves that with a named program - common/acas-get-params.cbl, called by
+# every common/*LD.cbl loader - whose reader belongs beside the binder that fills
+# the same record rather than in a tenth module.
 #
 # THE MENU PARAGRAPHS LIVE IN `args` because the paragraphs the seven dispatch
 # paragraphs `perform` are part of what AAP 0.4.1.1 defines those routes AS, and
@@ -112,7 +112,6 @@ from typing import Final
 # edge AAP 0.4.3 forbids.
 __all__: Final[tuple[str, ...]] = (
     "args",
-    "rdbms_params",
     "gl_post_cycle",
     "gl_end_of_cycle",
     "sl_invoice_post",

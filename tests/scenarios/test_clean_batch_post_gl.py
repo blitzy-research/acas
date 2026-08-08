@@ -967,8 +967,8 @@ def test_clean_batch_post_gl_state_parity(parity, harness) -> None:
 
     EIGHT LOGICAL STAGES, TEN NUMBERED ONES. Agent Action Plan section 0.3.2 fixes the
     order as "seed, run, dump, normalize, reset, run, dump, diff" - eight. The driver
-    `harness/run_parity.sh` numbers ten, reading the list from
-    `harness/parity_stages.sh`, because it makes BOTH normalisations and the publication
+    The PROTOCOL numbers ten, reading the list from
+    `harness/normalize.py`, because it makes BOTH normalisations and the publication
     check explicit rather than implied. Nothing was added to the protocol; where older
     prose says "stage 8" it means today's stage 10, the diff. The runners' own
     `Check n/8' headings are their internal preflight checks and are not protocol
@@ -1576,9 +1576,11 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight scenarios that existed when the measurement was taken, which is all
-    four `unchanged` ones; the ninth, `end_of_cycle_gl`, declares `changed` and moves the
-    row by construction, Phase 5 advancing the cycle and rotating the quarter counter.
+    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
+    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
+    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
+    counter -- that scenario has since been removed (findings M-09 and M-17), and the
+    observation is recorded because it is what established that half.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 
@@ -1720,8 +1722,9 @@ def test_the_gl_route_leaves_the_measured_no_op_on_both_sides(
         )
 
         #  2. THE BATCH IS UNSTAMPED. `end-batch` ran - that is locked by
-        #  tests/arithmetic/test_gl072_shipped_silent_skips.py section 4 - and its
-        #  rewrite addressed key zero, so the seeded row is untouched.
+        #  tests/arithmetic/test_ledger_balance_accumulation.py's
+        #  test_the_empty_work_file_still_performs_end_account_then_end_batch - and
+        #  its rewrite addressed key zero, so the seeded row is untouched.
         cleared = column_values(tree, BATCH_TABLE, "CLEARED-STATUS")
         posted = column_values(tree, BATCH_TABLE, "POSTED")
         assert cleared and posted

@@ -89,10 +89,11 @@ oracle is mentioned it is located in `harness/` and characterised as **out of pr
 Two structural proofs, each verified in this checkout rather than assumed, and one argument that is
 explicitly withdrawn:
 
-- `pyproject.toml` publishes an explicit **allow-list** of shipped packages — `[tool.setuptools]`
-  `packages` names only the seven `acas_posting*` packages plus the `acas_posting.data_dictionary`
-  data directory — together with `include-package-data = false`. `harness` is on neither list, so
-  it is excluded by construction rather than by an exclusion pattern that could be widened. Belt
+- `pyproject.toml` constrains discovery to the shipped tree — `[tool.setuptools.packages.find]`
+  admits `include = ["acas_posting*"]`, which resolves to exactly the seven code packages, and
+  NAMES `exclude = ["harness*", "tests*", "docs*", "data_dictionary*"]` — together with
+  `include-package-data = false`. `harness` is excluded by name rather than by setuptools' automatic
+  behaviour, and the generated dictionary remains a top-level sibling rather than package data. Belt
   and braces: `harness` also appears in pytest's `norecursedirs` and `harness/*` in the coverage
   `omit` list.
 - A search of `harness/*.py` for `import acas_posting` or `from acas_posting` returns **zero** hits, so
@@ -194,7 +195,10 @@ that was not performed.** AAP §0.6.9 records the limitations of the original
 authoring host. QA remediation later supplied the writable Compose harness,
 completed the strict build, and observed the **eight** mandated parity journeys
 on 2026-08-04. A ninth scenario, `end_of_cycle_gl`, was added afterwards to reach
-`gl080`, and on **2026-08-07 all nine** journeys were observed with empty diffs.
+`gl080`, and on **2026-08-07 all nine** journeys were observed with empty diffs. ⚠️ That
+ninth definition and its test have since been **removed** (findings M-09 and M-17),
+which holds the tree to the Agent Action Plan's eight; the measurement stands as
+measured, and eight of those nine journeys are re-runnable from the committed set.
 
 ⚠️ **AND EVERY ONE OF THOSE DIFFS IS AGAINST THE DISCLOSED-TRANSFORMED DIAGNOSTIC
 ORACLE, NOT THE FROZEN ONE.** It has to be said here rather than only in the evidence
@@ -401,7 +405,7 @@ conditional is written as a **nested** conditional and is deliberately **not** n
 its three siblings.
 
 **Test-locked.** Yes. **Primary lock:**
-`tests/arithmetic/test_shipped_close_and_rejection_paths.py::test_a1_the_posting_close_follows_the_nested_predicate`,
+`tests/arithmetic/test_double_entry_explosion.py::test_a1_the_posting_close_follows_the_nested_predicate`,
 which drives the SHIPPED `ca000-BL-Close` with a recording stand-in in the module's `facade` slot and
 asserts the whole two-field truth table of `IRS-Instead` × `Level-1`. Its companion
 `test_a1_the_nested_and_sibling_readings_differ_on_exactly_one_row` establishes that the table
@@ -596,7 +600,7 @@ half of that is true and the conclusion did not follow: a status pair is not obs
 dump, but it *is* observable from a call.
 
 The **behaviour lock** is at the arithmetic tier, which calls the handler directly: seven tests in
-`tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` drive the refused verbs and assert
+`tests/arithmetic/test_comp_binary.py` drive the refused verbs and assert
 the measured pair — `WE-Error 988` with `FS-Reply 99` — per verb, per published facade alias, for the
 whole refused set, before any connection is attempted, and against the supported functions as a
 control. The **state-level lock** is at the scenario tier, where the pair is invisible:
@@ -607,7 +611,7 @@ guarantee than the behaviour lock rather than a substitute for it, and §11 clas
 relationships separately for exactly that reason. The reproducing module carries the two numbers at
 the guard site.
 
-*The mechanism half* — `tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` §20. It
+*The mechanism half* — `tests/arithmetic/test_comp_binary.py` §20. It
 INVOKES each of the four refused functions through **both** published alias sets, asserts
 `WE-Error 988` with `FS-Reply 99` on every one, asserts the record is unchanged by the call, asserts
 the `File-Function` the facade set before dispatching, and sabotages the handler's connection opener
@@ -1395,24 +1399,25 @@ it distinguishes four relationships that an earlier revision of this table blurr
 
 This is the ownership map. The "primary lock" column is the test that owns the assertion; the "also
 cites" column was recovered by reading every test file in this checkout, so that a reader chasing an
-identifier finds every file that mentions it rather than only the owner. All TWENTY files under
+identifier finds every file that mentions it rather than only the owner. All FOURTEEN files under
 `tests/arithmetic/` are present in the repository and pass on a bare host, with no Docker, no MariaDB
-and no GnuCOBOL: the fourteen AAP §0.4.1.7 names, plus the shared-storage and dispatch-boundary file,
-the deployment-contract file, and the four that drive the shipped modules directly — the gl080
-end-of-cycle file, the gl072 silent-skip file, the CLI-seam file and the shipped-close/rejection file
-that holds A-1's and the IR032 path's call sequences. (Fifteen is the number of
+and no GnuCOBOL, and fourteen is exactly the set AAP §0.4.1.7 names. (Fifteen is the number of
 ANOMALIES carrying a behaviour lock, not the number of files: several files lock more than one, and
-several of the nineteen lock none because they are structural rather than arithmetic.)
+several of the fourteen lock none because they are structural rather than arithmetic.)
 
-⚠️ **This table listed fourteen rows for fifteen files at one revision, and stated fifteen and then
-sixteen and then eighteen as the directory grew.** `test_shared_storage_and_dispatch_boundaries.py`
-was named in the prose below the table, as **A-6**'s lock, but had no row of its own — so a reader
-scanning the table for the file would not have found it, and the stated count of files agreed with
-the number of rows rather than with the tree. Every file now has a row in the second table of this
-section, and the count is **twenty** because the directory holds twenty — nineteen until
-`test_shipped_close_and_rejection_paths.py` was added for findings MJ-07 and MJ-11.
-`test_documented_inventory_counts_match_the_tree` reads the tree, and it is what caught this revision
-rather than a reader noticing.
+⚠️ **The directory once held twenty files, and this table's count chased it upward — fourteen rows for
+fifteen files at one revision, then fifteen, sixteen, eighteen and twenty.** Six of those files were
+groups that had been added during QA remediation without a home in the planned inventory: the
+shared-storage and dispatch-boundary group, the deployment-contract group, the gl080 end-of-cycle
+group, the gl072 silent-skip group, the CLI-seam group and the close-and-rejection group. Each has
+since been **merged, verbatim, into the planned file that owns its subject** — respectively
+`test_comp_binary.py`, `test_pic_field_descriptors.py`, `test_gl080_cycle_divide_rounded.py`,
+`test_ledger_balance_accumulation.py`, `test_control_total_comparison.py` and
+`test_double_entry_explosion.py` — so the directory is the fourteen AAP names again and **no
+assertion was lost**: the collected test-name multiset was compared before and after every merge and
+was identical each time. Every file has a row in the second table of this section.
+`test_documented_inventory_counts_match_the_tree` reads the tree, and it is what caught each stale
+count rather than a reader noticing.
 
 - **PRIMARY LOCK** — the test that owns the assertion of *this defect*. Break the defect and this test
   goes red. There is exactly one per entry, except where an entry has two independent dispositions, in
@@ -1426,18 +1431,17 @@ rather than a reader noticing.
   a lock at all**, and previously the most misleading kind of entry in this table: a reader who followed
   a mention to an arithmetic test and found no assertion had been sent to the wrong file.
 
-**The arithmetic tier — twenty files**, all present, all passing on a bare host with no Docker, no
-MariaDB and no GnuCOBOL. The table immediately below carries a row for the fifteen that own an anomaly
-relationship; the second table in this section carries a row for **every** file, which is the one to
-read for completeness. (Twenty, not the fourteen AAP §0.4.1.7 names: the shared-storage,
-deployment-contract, two shipped-module, CLI-seam and shipped-close/rejection files were added during
-QA remediation.)
+**The arithmetic tier — fourteen files**, all present, all passing on a bare host with no Docker, no
+MariaDB and no GnuCOBOL, and fourteen is exactly the AAP §0.4.1.7 set: the six groups added during QA
+remediation were merged into the planned files that own their subjects, as recorded above. The table
+immediately below carries a row for the fourteen that own an anomaly relationship; the second table in
+this section carries a row for **every** file, which is the one to read for completeness.
 
 | Test file | Primary lock | Supporting lock | Contextual citation |
 | --- | --- | --- | --- |
 | `tests/arithmetic/test_pic_field_descriptors.py` | A-11 | **record locks** for A-12, A-15, A-20 — `assert "A-12" in descriptor.anomaly_refs()` and its two equivalents | A-7 |
 | `tests/arithmetic/test_comp3_packed_decimal.py` | A-8, first truncation | — | A-11, A-15, A-20 |
-| `tests/arithmetic/test_comp_binary.py` | A-8, second truncation, and A-11 | — | — |
+| `tests/arithmetic/test_comp_binary.py` | A-8, second truncation, and A-11; and, in the merged shared-storage group, the shared storage and dispatch boundaries | — | — |
 | `tests/arithmetic/test_sign_leading_display.py` | the two `sign leading` spellings; the primary R-6 site | — | — |
 | `tests/arithmetic/test_move_truncation.py` | — | A-13, via `is_numeric_class` never raising | A-4 |
 | `tests/arithmetic/test_compute_truncate_unrounded.py` | **A-8, A-9, A-10** — the primary R-4 site | — | A-11 |
@@ -1449,7 +1453,6 @@ QA remediation.)
 | `tests/arithmetic/test_control_total_comparison.py` | the three batch dispositions | A-15, as context | A-11 |
 | `tests/arithmetic/test_ledger_balance_accumulation.py` | **A-14**, the sequential read | — | A-12, A-13 |
 | `tests/arithmetic/test_irs_date_component_derivation.py` | **A-7**, the guarded derivation | — | A-13 |
-| `tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` | the shared storage and dispatch boundaries | — | — |
 
 **The scenario tier — eight files, all present in this checkout and read to build the rows below.**
 Four entries have their primary lock here rather than in the arithmetic tier, because their only
@@ -1457,26 +1460,20 @@ observable is end state, and A-6 has its state-level lock here for the same reas
 
 | Entry | Primary lock | Why it cannot be an arithmetic assertion |
 | --- | --- | --- |
-| `tests/arithmetic/test_pic_field_descriptors.py` | A-11, A-12, A-15, A-20 | A-7 |
+| `tests/arithmetic/test_pic_field_descriptors.py` | A-11, A-12, A-15, A-20; and, in the merged deployment-contract group, the deployment, manifest and register-consistency contracts, which carry no anomaly of their own | A-7 |
 | `tests/arithmetic/test_comp3_packed_decimal.py` | A-8, first truncation | A-11, A-15, A-20 |
-| `tests/arithmetic/test_comp_binary.py` | A-8, second truncation, and A-11 | — |
+| `tests/arithmetic/test_comp_binary.py` | A-8, second truncation, and A-11; and, in the merged shared-storage group, **A-6** at §20 — the mechanism half: all four refused functions invoked through both alias sets — and **N-KEY** at §19 | A-2, A-3, A-11, A-13 |
 | `tests/arithmetic/test_sign_leading_display.py` | the two `sign leading` spellings; the primary R-6 site | — |
 | `tests/arithmetic/test_move_truncation.py` | A-13 | A-4 |
 | `tests/arithmetic/test_compute_truncate_unrounded.py` | **A-8, A-9, A-10** — the primary R-4 site | A-11 |
 | `tests/arithmetic/test_compute_rounded_half_up.py` | the five `ROUNDED` sites, the three adjacency pairs, and A-19 | — |
 | `tests/arithmetic/test_irs_vat_from_net.py` | the post-amount-unchanged post-condition, and A-19 | A-1, A-22 |
 | `tests/arithmetic/test_irs_vat_from_gross.py` | the destructive `[irs/irs030.cbl:L1564]` | A-19 |
-| `tests/arithmetic/test_gl080_cycle_divide_rounded.py` | **A-2, A-3** | A-11 |
-| `tests/arithmetic/test_double_entry_explosion.py` | A-21 | — |
-| `tests/arithmetic/test_control_total_comparison.py` | the three batch dispositions, and A-15 as context | A-11 |
-| `tests/arithmetic/test_ledger_balance_accumulation.py` | **A-14** | A-12, A-13 |
+| `tests/arithmetic/test_gl080_cycle_divide_rounded.py` | **A-2, A-3**, and — in the merged end-of-cycle group — **A-2, A-3** again in the SHIPPED module rather than a transcription | A-11 |
+| `tests/arithmetic/test_double_entry_explosion.py` | A-21; and, in the merged close-and-rejection group, **A-1** — the nested posting close, over the full `IRS-Instead` × `Level-1` truth table in the SHIPPED paragraph — and the **IR032 clean rejection**, the sibling path of A-4 | A-4 |
+| `tests/arithmetic/test_control_total_comparison.py` | the three batch dispositions, and A-15 as context; and, in the merged CLI-seams group, the entry-point seams the scenario tier cannot reach without the stack | A-11 |
+| `tests/arithmetic/test_ledger_balance_accumulation.py` | **A-14**; and, in the merged silent-skip group, **A-13** reachability: both silent skips driven, each with a positive witness | A-12, A-13 |
 | `tests/arithmetic/test_irs_date_component_derivation.py` | **A-7** | A-13 |
-| `tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` | **A-6** at §20 — the mechanism half: all four refused functions invoked through both alias sets — and **N-KEY** at §19 | A-2, A-3, A-11, A-13 |
-| `tests/arithmetic/test_gl080_shipped_end_of_cycle.py` | **A-2, A-3** in the SHIPPED module rather than a transcription | A-11 |
-| `tests/arithmetic/test_gl072_shipped_silent_skips.py` | **A-13** reachability: both silent skips driven, each with a positive witness | A-14 |
-| `tests/arithmetic/test_cli_seams_and_failure_paths.py` | the entry-point seams the scenario tier cannot reach without the stack | — |
-| `tests/arithmetic/test_shipped_close_and_rejection_paths.py` | **A-1** — the nested posting close, over the full `IRS-Instead` × `Level-1` truth table in the SHIPPED paragraph — and the **IR032 clean rejection**, the sibling path of A-4 | A-4 |
-| `tests/arithmetic/test_deployment_contract_boundaries.py` | the deployment, manifest and register-consistency contracts; no anomaly of its own | — |
 
 Three entries in the dagger set are locked outside the arithmetic tier as well, because their
 observable is end state rather than a computed value:
@@ -1488,7 +1485,7 @@ observable is end state rather than a computed value:
   a half-posted double entry shows up as table state: the debit is written and nothing balances it.
 - **A-1** is **not**, and the distinction matters (finding MJ-07). A file left unclosed shows up in **no**
   table — `GL-Posting-Close` writes nothing — so the scenario tier is A-1's **state witness** and its
-  **primary lock** is `tests/arithmetic/test_shipped_close_and_rejection_paths.py`, which drives the
+  **primary lock** is `tests/arithmetic/test_double_entry_explosion.py`, which drives the
   shipped paragraph and asserts the verb sequence. An earlier revision of this bullet paired A-1 with
   A-4 as though both were observable in state; they are not, and A-1's own entry records the correction.
 - **A-6**'s state half lives in the IRS scenario file, which compares the transfer table's pre-run
@@ -1496,7 +1493,7 @@ observable is end state rather than a computed value:
   where the handler can be called directly; neither half claims the other's ground.
 
 **A-6** was in this list and no longer is. It is locked in BOTH tiers now — at the handler by
-`tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` §20, which calls the migrated
+`tests/arithmetic/test_comp_binary.py` §20, which calls the migrated
 `acas008` once per refused verb and requires the measured `WE-Error 988` / `FS-Reply 99` pair, and at
 the state level by `tests/scenarios/test_clean_batch_post_irs.py`'s
 `test_a6_rewrite_verb_can_never_succeed`. The ground it was listed on — that its observable is "a
@@ -1544,7 +1541,7 @@ per-entry `Test-locked` fields.** Four relationships exist and they are not inte
 
 ⚠️ **This census read `14 + 1 + 3 + 4` at one revision, with A-6 in a `state-level lock only` row of its
 own.** That was true of a tree in which the only A-6 assertion was the scenario tier's no-change claim.
-It is not true of this one: `tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` now calls
+It is not true of this one: `tests/arithmetic/test_comp_binary.py` now calls
 the migrated `acas008` directly and asserts the measured `WE-Error 988` / `FS-Reply 99` pair seven ways,
 which is a behaviour lock by this section's own definition — so A-6 carries the dagger and sits in the
 first row. Its scenario-tier no-change assertion is a SECOND lock on an already-locked entry, listed
@@ -2035,12 +2032,14 @@ edit anything under frozen `copybooks/`. A strict rebuild completed with zero
 fatal diagnostics and produced all 29 expected `*MT` bridge artifacts and all
 28 loader programs.
 
-**Durable evidence, in the repository rather than in a session log.** The shim itself is committed at
-`harness/copybook-shims/ACAS-SQLstate-error-list.cob` and is comments only, so a reader can confirm by
-inspection that no data item or statement was supplied;
-`[harness/build_oracle.sh acas_install_sqlstate_comment_shim]` is the copy that places it in the
-disposable build tree, and `[harness/build_oracle.sh acas_explain_missing_sqlstate_copybook]` is where
-the script detects the absence and explains it. The build result — 29/29 bridges, 28/28 loaders, all
+**Durable evidence, in the repository rather than in a session log.**
+`[harness/build_oracle.sh acas_install_sqlstate_comment_shim]` is the generator: it emits the
+comment-only text into the disposable build tree, re-reads the file it wrote and fails the build if any
+line is neither blank nor a `*>` comment — so a reader can confirm from the script that no data item or
+statement is supplied. `[harness/build_oracle.sh acas_explain_missing_sqlstate_copybook]` is where the
+script detects the absence and explains it. ⚠️ **An earlier revision cited a committed shim at
+`harness/copybook-shims/ACAS-SQLstate-error-list.cob`; it is gone** (finding M-03) — the include is
+generated, never tracked, and the frozen `copybooks/` tree is still never written to. The build result — 29/29 bridges, 28/28 loaders, all
 twelve in-scope programs and all seventeen handlers — is recorded in
 [`scenario-diff-evidence.md`](scenario-diff-evidence.md) §3, alongside the manifest digests of the runs
 that build produced.
@@ -2114,7 +2113,8 @@ closes could kill the transfer delete-all.
 The Python DAL now scopes process-owned connections explicitly, and the oracle
 build copy suppresses only the destructive local closes. The `irs030`
 reproduction, including the preceding `acasirsub3` read, is runtime verified by driving the IRS
-scenario end to end — `harness/run_parity.sh harness/scenarios/clean_batch_irs.yaml`, whose retained
+scenario end to end — the ten protocol stages over `harness/scenarios/clean_batch_irs.yaml`
+(README §11.1a), whose retained
 `verdict.json` records `identical` over the four IRS tables and whose
 `<ACAS_OUT>/run-logs/clean_batch_irs/cobol.log` carries the facade call sequence — and by
 `tests/scenarios/test_clean_batch_post_irs.py`, which asserts the reproduction against the compared
@@ -2159,8 +2159,8 @@ recorded here because it is a defect of the frozen system, it governs what four
 scenarios can observe, and a defect that is only derived in passing is a defect
 nobody can cite. **The alias `N-KEY` is retained** because
 `harness/scenarios/mixed_accepted_rejected.yaml`,
-`harness/scenarios/end_of_cycle_gl.yaml`,
-`tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py`,
+the since-removed `harness/scenarios/end_of_cycle_gl.yaml`,
+`tests/arithmetic/test_comp_binary.py`,
 `tests/scenarios/test_mixed_accepted_rejected_batch.py` and
 `acas_posting/dal/acas006_gl_posting.py` already cite that name, and §5's rule is
 that identifiers are never renumbered.
@@ -2197,7 +2197,8 @@ that identifiers are never renumbered.
 **One frozen defect with three faces, which is why it is one entry and not three.**
 First, it starves `gl070` → `gl071` → `gl072`: the cycle runs to completion, exits
 zero, and posts nothing. Second, it is why **`gl080`'s deletion phase deletes
-nothing**, measured independently by the `end_of_cycle_gl` scenario. Third, it makes
+nothing**, measured independently by the `end_of_cycle_gl` scenario — since removed
+(findings M-09, M-17), so that measurement is history rather than a re-runnable check. Third, it makes
 **A-13's two silent skips unreachable by any seed** — the non-numeric value genuinely
 exists, but `gl070` discards the row one layer above, before `gl072` can ever see it.
 That third face corrected an earlier claim in this project's own records which named
@@ -2207,7 +2208,7 @@ the right corruption and the wrong program.
 reproduces the round trip, including `_split_post_key`, which was added after
 measurement established that the compiled unload is a **raw byte copy** rather than
 the arithmetic `int(hv_post_key) % 10**10` the module first used. **Locked** by
-`tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` §19, which derives
+`tests/arithmetic/test_comp_binary.py` §19, which derives
 why no seed reaches either skip, and §22, which pins the byte-level round trip.
 The consequence — that no batch is stamped — is asserted against the declared seed
 by `tests/scenarios/test_mixed_accepted_rejected_batch.py`.
@@ -2294,7 +2295,9 @@ protocol with observed empty diffs, and the scenario tier passed 93 tests in bot
 reverse file order. On **2026-08-07**, after `end_of_cycle_gl` was added, **all nine** journeys
 completed the same ten stages with observed empty diffs, and the scenario tier — **107** tests as
 selected by `pytest -m scenario`, the growth being the ninth file's eleven plus the seed-relative
-tests added to the eight — passed in the containerised run. The measurements added to A-13 and
+tests added to the eight — passed in the containerised run. ⚠️ The ninth definition and its eleven
+tests were **removed** afterwards by findings M-09 and M-17, so a `pytest -m scenario` run today
+selects fewer; the figure is left as it was measured rather than adjusted by arithmetic. The measurements added to A-13 and
 A-NEW-13 through A-NEW-17 are therefore runtime findings, not source-reading predictions.
 **[`scenario-diff-evidence.md`](scenario-diff-evidence.md) is the authority for which run produced
 which verdict**, and it carries the manifest digests; this document deliberately does not restate
@@ -2343,7 +2346,7 @@ locked by two separate scenario tests. §11 additionally separates a **record lo
 lock, because conflating them was what let the false attributions stand. ⚠️ This count read "Fourteen"
 and omitted **A-6** until this revision, while A-6's own summary row already carried the dagger and §11
 already counted fifteen: the register disagreed with itself in three places at once. A-6 became locked
-when `tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` §20 began driving the migrated
+when `tests/arithmetic/test_comp_binary.py` §20 began driving the migrated
 `acas008` once per refused verb and requiring the measured `WE-Error 988` / `FS-Reply 99` pair; the
 summary row and §11 were moved then and the heading dagger and this list were not. **Twenty-four
 candidates** live in §15: **eighteen** as `A-NEW-1` through `A-NEW-18`, where `A-NEW-18` carries the

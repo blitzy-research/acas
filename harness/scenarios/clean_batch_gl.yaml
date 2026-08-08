@@ -538,8 +538,8 @@ description: |
 
   THE ACCEPTANCE PROTOCOL
   TEN stages, in this order, one scenario at a time and nothing
-  alongside it. harness/parity_stages.sh is the single registry and
-  `harness/run_parity.sh --print-stages' prints it, so this list is a restatement
+  alongside it. harness/normalize.py is the single registry and
+  `harness/normalize.py --print-stages' prints it, so this list is a restatement
   and never the authority:
     1 reset the schema and seed the scenario
     2 run the compiled COBOL cycle
@@ -555,7 +555,7 @@ description: |
       because two PARTIAL captures can produce an empty diff and so pass a
       comparison that compared nothing
     10 diff the two normalised trees
-  harness/build_oracle.sh and harness/build_fixtures.sh come before stage 1 and are
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures come before stage 1 and are
   not stages: the first runs once per image, the second once per change to a
   scenario's seed records.
   The canonical command sequence is spelled out at
@@ -571,7 +571,7 @@ description: |
   tests/scenarios/ (one per scenario), and harness/run_python_scenario.sh.
   The seed FLAT FILES are deliberately not in the
   checkout: the records are declared above under seed_records and
-  harness/build_fixtures.sh builds the files from them inside the image, because
+  harness/seed.sh --build-fixtures builds the files from them inside the image, because
   fifteen of the seventeen frozen loaders read ORGANIZATION INDEXED or RELATIVE
   files whose on-disk form belongs to the Berkeley DB version that image carries.
 
@@ -743,7 +743,7 @@ expected_status:
 # It is NOT the bound of the comparison. The capture and the diff are bounded by
 # ALL 22 IN-SCOPE TABLES -- `harness/dump_tables.py --all-in-scope` at stages 3
 # and 7 and `harness/diff_states.py --all-in-scope` at stage 10, which
-# `harness/run_parity.sh` and `tests/conftest.py` both pass. A bound drawn from
+# both a hand-driven run and `tests/conftest.py` pass. A bound drawn from
 # what a scenario EXPECTS to move cannot show a difference in anything it did not
 # expect to move, and an empty diff is the single pass condition (AAP section
 # 0.8.5). In particular both cycles perform the menu's own `overrewrite.'
@@ -766,7 +766,7 @@ affected_tables:
 # indexed one is a Berkeley DB database whose on-disk form depends on the library
 # version the image was built with. Committing that would commit an opaque,
 # version-specific binary. So the RECORDS are declared here, as text, and
-# [harness/make_fixtures.py] materialises the files by generating a writer that
+# [harness/dump_tables.py --make-fixtures] materialises the files by generating a writer that
 # CALLS THE FROZEN HANDLER for each file -- so every picture clause, every
 # packed-decimal layout and every key is the frozen one, and none of it is
 # reimplemented anywhere.

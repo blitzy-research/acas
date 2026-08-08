@@ -732,11 +732,13 @@ description: |
       R-6). The system record IS persisted on both sides: the menu exit does it
       at [general/general.cbl:L656-L692] and the headless route reproduces that
       same paragraph as args.overrewrite in
-      acas_posting/cli/gl_end_of_cycle.py. The end_of_cycle_gl scenario
-      compares SYSTEM-REC and finds the cycle advance and the quarter wrap
-      byte-identical on the two sides. The ground is corrected rather than
+      acas_posting/cli/gl_end_of_cycle.py. A dedicated end_of_cycle_gl scenario
+      compared SYSTEM-REC and found the cycle advance and the quarter wrap
+      byte-identical on the two sides -- measured, and then removed with that
+      scenario by findings M-09 and M-17, which hold the tree to the Agent
+      Action Plan's eight definitions. The ground is corrected rather than
       deleted because a reader who acted on the old claim would have concluded
-      the comparison was impossible.
+      the comparison was impossible; it is not, and the measurement showed so.
     FIVE. ITS ARCHIVE PATH WOULD PUT A HOST FILESYSTEM PATH INTO A SCENARIO
     FILE. The archiving walk enters disk-change [general/gl080.cbl:L519],
     reaches accept-option [general/gl080.cbl:L542], accepts a single digit
@@ -754,19 +756,28 @@ description: |
     because driving an out-of-range subscript through the COMPILED oracle would
     be a write into adjacent storage whose effect is undefined. A-3, the second
     and independent rotating quarter counter at [general/gl080.cbl:L355-L357],
-    is now pinned in TABLE STATE by end_of_cycle_gl, which seeds the counter and
-    the subscript to disagree and observes that the subscript writes Q1 while
-    the counter writes Ledger-Last and leaves Q4 alone.
-  CONSEQUENCE, STATED HONESTLY AND CORRECTED: gl_end_of_cycle is NOT appended to
-  THIS file, and the six grounds above are why. It is not absent from the
-  directory: harness/scenarios/end_of_cycle_gl.yaml drives it, with its own
-  affected-table list and its own tests, which is the resolution these six
-  grounds pointed towards rather than an argument against covering gl080 at all.
+    is pinned in the SAME suite --
+    tests/arithmetic/test_gl080_cycle_divide_rounded.py's
+    test_a3_current_quarter_rotates_independently_of_a and its siblings, which
+    make the counter and the subscript disagree and require that the subscript
+    write Q1 while the counter writes Ledger-Last and leaves Q4 alone. It was
+    ALSO pinned in table state, by a dedicated end_of_cycle_gl scenario that has
+    since been removed (findings M-09, M-17); the unit-level pin is what
+    survives, and it is stated here rather than left to be discovered.
+  CONSEQUENCE, STATED HONESTLY AND TWICE CORRECTED: gl_end_of_cycle is NOT
+  appended to THIS file, and the six grounds above are why. A dedicated ninth
+  definition drove it for a time, which is the resolution these six grounds
+  pointed towards; that definition has been removed by findings M-09 and M-17,
+  because the Agent Action Plan's inventory names EIGHT scenario definitions and
+  this tree is held to it. So gl080 has no table-state comparison behind it
+  today -- said plainly rather than implied -- and its coverage is the arithmetic
+  tier's, per ground SIX. Appending the operation here would still be wrong for
+  grounds ONE through FIVE, none of which the removal touches.
   `period` remains an INERT value HERE -- carried because it is part of the
   seeded system record and because the key set is uniform, not because any
-  operation listed in THIS file divides by it -- and it is emphatically not
-  inert in end_of_cycle_gl, where `divide scycle by period giving a rounded` is
-  what selects the quarter.
+  operation listed in THIS file divides by it. It is emphatically not inert in
+  gl080 itself, where `divide scycle by period giving a rounded`
+  [general/gl080.cbl:L328] is what selects the quarter.
 
   THE SEED CONTRACT -- WHAT EACH OF THE NINE FLAT FILES MUST CARRY
   The seeder reproduces the frozen loader contract of
@@ -887,8 +898,8 @@ description: |
 
   THE ACCEPTANCE PROTOCOL
   TEN stages, in this order, one scenario at a time and nothing
-  alongside it. harness/parity_stages.sh is the single registry and
-  `harness/run_parity.sh --print-stages' prints it, so this list is a restatement
+  alongside it. harness/normalize.py is the single registry and
+  `harness/normalize.py --print-stages' prints it, so this list is a restatement
   and never the authority:
     1 reset the schema and seed the scenario
     2 run the compiled COBOL cycle
@@ -904,7 +915,7 @@ description: |
       because two PARTIAL captures can produce an empty diff and so pass a
       comparison that compared nothing
     10 diff the two normalised trees
-  harness/build_oracle.sh and harness/build_fixtures.sh come before stage 1 and are
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures come before stage 1 and are
   not stages: the first runs once per image, the second once per change to a
   scenario's seed records.
   FOR THIS SCENARIO, stages 2 and 6 each drive FOUR OPERATIONS IN THE DECLARED
@@ -936,7 +947,7 @@ description: |
   tests/scenarios/ (one per scenario), and harness/run_python_scenario.sh.
   The seed FLAT FILES are deliberately not in the
   checkout: the records are declared above under seed_records and
-  harness/build_fixtures.sh builds the files from them inside the image, because
+  harness/seed.sh --build-fixtures builds the files from them inside the image, because
   fifteen of the seventeen frozen loaders read ORGANIZATION INDEXED or RELATIVE
   files whose on-disk form belongs to the Berkeley DB version that image carries.
 
@@ -1171,7 +1182,7 @@ payment_post_confirm: "YES"
 # It is NOT the bound of the comparison. The capture and the diff are bounded by
 # ALL 22 IN-SCOPE TABLES -- `harness/dump_tables.py --all-in-scope` at stages 3
 # and 7 and `harness/diff_states.py --all-in-scope` at stage 10, which
-# `harness/run_parity.sh` and `tests/conftest.py` both pass. A bound drawn from
+# both a hand-driven run and `tests/conftest.py` pass. A bound drawn from
 # what a scenario EXPECTS to move cannot show a difference in anything it did not
 # expect to move, and an empty diff is the single pass condition (AAP section
 # 0.8.5). In particular both cycles perform the menu's own `overrewrite.'
@@ -1199,7 +1210,7 @@ affected_tables:
 # =============================================================================
 # THE SEED RECORDS
 # =============================================================================
-# Built into the declared flat files by harness/make_fixtures.py, which generates a
+# Built into the declared flat files by harness/dump_tables.py --make-fixtures, which generates a
 # COBOL writer per file, compiles it against the FROZEN copybooks and calls the
 # FROZEN handler to write. Field names are spelled exactly as the frozen copybook
 # spells them, read from those definitions by the builder itself.

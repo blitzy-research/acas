@@ -172,7 +172,8 @@ ACAS_RUN_PREFLIGHT_LINK=1           # reproduce the vendored worked example
 #
 #  0 = FROZEN. Not one byte of the build copy differs from the checkout, and the
 #      attestation records `oracle-source-is-frozen yes`. This is the ONLY mode whose
-#      output `harness/run_parity.sh` will accept as evidence.
+#      output `harness/reset_db.sh` will accept as evidence -- it reads this attestation
+#      before stage 1 drops a table (finding M-06 moved that gate there).
 #  1 = TRANSFORMED. The catalogued transforms are applied. Must be asked for
 #      explicitly, by `--transformed-oracle` or ACAS_ORACLE_ALLOW_TRANSFORMS=1, and the
 #      resulting oracle is a diagnostic tool rather than a specification.
@@ -1181,7 +1182,7 @@ Options:
                       lifetime and stale reply status in the frozen programs, which
                       rule R-4 requires be reproduced rather than repaired. The
                       attestation then records `oracle-source-is-frozen no' and
-                      harness/run_parity.sh REFUSES the resulting oracle. Use it to
+                      harness/reset_db.sh REFUSES the resulting oracle, exit 77. Use it to
                       diagnose the cycle, never to make a claim about it.
                       ACAS_ORACLE_ALLOW_TRANSFORMS=1 has the same effect.
   --frozen-oracle     State the default explicitly: transform nothing.
@@ -2075,7 +2076,7 @@ acas_target_is_local() {
 # ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED.
 # `1|true|yes|on' is affirmative and `|0|false|no|off' is negative, matched
 # case-insensitively; the identical set lives in
-# acas_posting/cli/rdbms_params.py as AFFIRMATIVE_SPELLINGS / NEGATIVE_SPELLINGS
+# acas_posting/cli/args.py as AFFIRMATIVE_SPELLINGS / NEGATIVE_SPELLINGS
 # and is read there by read_declared_flag, so one exported value cannot mean two
 # different things to the two halves of the harness. Anything else STOPS the run
 # rather than resolving to either answer: the value governs whether a credential
@@ -2092,7 +2093,7 @@ acas_plaintext_declared() {
     'Use 1, true, yes or on for yes; 0, false, no or off for no; or leave it' \
     'unset. The same closed set is read by harness/build_oracle.sh,' \
     'harness/seed.sh, harness/reset_db.sh, harness/run_cobol_scenario.sh,' \
-    'harness/run_python_scenario.sh and acas_posting/cli/rdbms_params.py.'
+    'harness/run_python_scenario.sh and acas_posting/cli/args.py.'
 }
 
 # Decide, ONCE and BEFORE ANYTHING CONNECTS, which client transports this
@@ -2546,36 +2547,94 @@ acas_assert_transform_register_complete() {
   fi
 }
 
+# =============================================================================
+# THE SQLSTATE COMPATIBILITY INCLUDE IS GENERATED HERE, INTO THE BUILD COPY ONLY
+#
+# 22 frozen `common/*MT.cbl` bridges and their 22 `.scb` sources
+# `copy "ACAS-SQLstate-error-list.cob"' from inside their Identification Division
+# REMARKS paragraph -- for example [common/glpostingMT.cbl:L160], which sits between
+# `identification division.' at L9 and `environment division.' at L201, a region in
+# which only comments are legal. The member is absent from the checkout and from
+# presql2-latest.zip alike, so no bridge compiles without something at that name and
+# the default frozen build fails with exit 74 (README section 8.7).
+#
+# ⭐ IT IS NOT A REPOSITORY FILE, AND MUST NOT BECOME ONE (finding M-03; rules R-3,
+# R-4 and AAP section 0.8.1). It used to be committed as
+# `harness/copybook-shims/ACAS-SQLstate-error-list.cob', which the Agent Action Plan's
+# harness inventory does not name; the text is now EMITTED here, at build time,
+# straight into the writable build copy under $ACAS_BUILD. Two properties follow, and
+# both are the point rather than a side effect:
+#
+#   * The frozen tree is untouched. Writing the member into `copybooks/' would be a
+#     fabricated frozen source -- forbidden even if an authentic copy were obtained,
+#     because AAP section 0.8.1 makes any diff touching `copybooks/*.cob' a defect.
+#   * There is no second place for the text to drift to. A committed shim is a file a
+#     reader can mistake for archive material; a generated one carries its own
+#     disclosure into the build log every time it is produced.
+#
+# WHAT IT MAY CONTAIN: blank lines and `*>' comments, and nothing else. That is what
+# makes it behaviour-neutral -- measured, not assumed: the generated C is
+# byte-identical with this include, with a zero-byte member, and with different
+# comment text. The emitted file is re-read and CHECKED against that grammar below,
+# so a future edit to the heredoc that introduced executable text fails the build
+# rather than silently patching the specification.
+# =============================================================================
 acas_install_sqlstate_comment_shim() {
-  local source="$ACAS_REPO/harness/copybook-shims/ACAS-SQLstate-error-list.cob"
   local target="$ACAS_BUILD/copybooks/ACAS-SQLstate-error-list.cob"
 
-  [[ -f "$source" ]] || acas_die "$EX_BUILDTREE" \
-    "the SQLSTATE remarks shim is missing: $source" \
-    'The 22 frozen *MT bridges COPY this absent archive member from their' \
-    'Identification Division Remarks paragraphs. The harness supplies a' \
-    'comment-only compatibility include in the writable build tree.'
-
-  # Fail closed if the shim ever acquires executable text. Its safety rests on
-  # being semantically inert: blank lines and *> comments are the entire allowed
-  # grammar, and the frozen checkout itself is never modified.
-  if grep -Ev '^[[:space:]]*(\*>.*)?$' "$source" | grep -q .; then
+  #  GENERATED, not copied. Every line is a comment or blank, and the terminating
+  #  newline matters: GnuCOBOL otherwise emits a missing-newline warning once per
+  #  bridge that includes it.
+  if ! cat > "$target" <<'SQLSTATE_SHIM_EOF'
+      *> Compatibility include for the missing ACAS SQLSTATE remarks list.
+      *>
+      *> GENERATED by harness/build_oracle.sh into the writable build copy only.
+      *> It is NOT part of the frozen checkout and is not a repository file: the
+      *> archive member this name refers to is absent from the checkout and from
+      *> presql2-latest.zip alike, and writing it into copybooks/ would be a
+      *> fabricated frozen source (rules R-3 and R-4, Agent Action Plan 0.8.1).
+      *>
+      *> Every frozen COPY site expands this file inside the Identification
+      *> Division's Remarks paragraph, before any Data Division begins.  The
+      *> executable SQLSTATE handling remains in mysql-procedures.cpy; this
+      *> include therefore contains comments only and changes no COBOL behavior.
+      *>
+SQLSTATE_SHIM_EOF
+  then
     acas_die "$EX_BUILDTREE" \
-      "$source contains text other than blank lines and COBOL comments." \
+      "could not write the SQLSTATE remarks shim into $target." \
+      'The 22 frozen *MT bridges COPY this absent archive member from their' \
+      'Identification Division Remarks paragraphs, so no bridge compiles without it.'
+  fi
+
+  # Fail closed if the generated include ever acquires executable text. Its safety
+  # rests on being semantically inert: blank lines and *> comments are the entire
+  # allowed grammar. Checked on the MATERIALISED file, so the guarantee covers what
+  # the compiler will actually read.
+  if grep -Ev '^[[:space:]]*(\*>.*)?$' "$target" | grep -q .; then
+    acas_die "$EX_BUILDTREE" \
+      "$target contains text other than blank lines and COBOL comments." \
       'The compatibility include must remain comment-only because its COPY sites' \
-      'are documentation gaps, not missing executable SQLSTATE logic.'
+      'are documentation gaps, not missing executable SQLSTATE logic. Correct the' \
+      'heredoc in acas_install_sqlstate_comment_shim.'
   fi
 
-  # `awk`'s print appends the POSIX text-file newline even when the repository
-  # artifact was materialised without one; GnuCOBOL otherwise emits the same
-  # missing-newline warning once for every bridge that includes the shim.
-  if ! awk '1' "$source" > "$target"; then
-    acas_die "$EX_BUILDTREE" \
-      "could not write the SQLSTATE remarks shim into $target."
-  fi
   chmod 0644 -- "$target" || acas_die "$EX_BUILDTREE" \
     "could not set the SQLSTATE remarks shim mode on $target."
-  acas_log "installed comment-only SQLSTATE remarks shim in the writable build tree"
+
+  #  DISCLOSED EVERY TIME IT IS PRODUCED, because this is the transformation that
+  #  makes an otherwise unbuildable specification compile, and a reader of the build
+  #  log must be able to see that it happened without going looking for it.
+  acas_log 'GENERATED the comment-only SQLSTATE remarks include into the build copy:'
+  acas_log "  $target"
+  acas_log '  The archive member of that name is ABSENT from the frozen checkout and from'
+  acas_log '  presql2-latest.zip; 22 frozen common/*MT bridges COPY it from their REMARKS'
+  acas_log '  paragraph, so without it no bridge compiles (exit 74). It is comments only,'
+  acas_log '  verified by re-reading it, and it is written ONLY under $ACAS_BUILD -- the'
+  acas_log '  frozen copybooks/ tree is never written to, because a fabricated frozen'
+  acas_log '  source would breach rules R-3 and R-4 whatever it contained.'
+  acas_log '  It is REGISTERED as a source transformation, so the provenance attestation'
+  acas_log '  records this build as TRANSFORMED and no verdict from it is a parity claim.'
 }
 
 acas_install_loader_open_scope_shims() {
@@ -3254,7 +3313,7 @@ acas_prepare_build_tree() {
   #  `oracle-source-is-frozen yes` because nothing was changed - not because the check
   #  was skipped. Both facts are then measured on either side of this block.
   if (( ACAS_ALLOW_SOURCE_TRANSFORMS )); then
-    acas_warn "BUILDING A TRANSFORMED ORACLE BECAUSE IT WAS EXPLICITLY REQUESTED. ${#ACAS_SOURCE_TRANSFORMS[@]} catalogued source transformation(s) will be applied to the build copy. The result is a DIAGNOSTIC oracle: harness/run_parity.sh refuses it as evidence, because rule R-4 requires the frozen defects be reproduced rather than repaired and these repairs change the specification the migration is measured against."
+    acas_warn "BUILDING A TRANSFORMED ORACLE BECAUSE IT WAS EXPLICITLY REQUESTED. ${#ACAS_SOURCE_TRANSFORMS[@]} catalogued source transformation(s) will be applied to the build copy. The result is a DIAGNOSTIC oracle: harness/reset_db.sh refuses it as evidence, because rule R-4 requires the frozen defects be reproduced rather than repaired and these repairs change the specification the migration is measured against."
     acas_install_sqlstate_comment_shim
     acas_install_loader_open_scope_shims
     acas_install_system_secondary_loader_credential_shims
@@ -3380,13 +3439,15 @@ acas_explain_missing_sqlstate_copybook() {
          THEREFORE, ON THIS CHECKOUT, THE FROZEN ORACLE IS UNAVAILABLE. That is
          a measurement, not a prediction: a default (frozen, zero-transformation)
          build of this repository fails with exit 74 and 22 compile errors, one
-         per affected bridge. No attestation is written, and run_parity.sh
-         reports exit 77 EVIDENCE UNAVAILABLE rather than any verdict.
+         per affected bridge. No attestation is written, and reset_db.sh
+         reports exit 77 EVIDENCE UNAVAILABLE -- before it drops a single
+         table -- rather than any verdict.
 
          WHAT THE SHIM DOES, MEASURED RATHER THAN ASSUMED. Only an explicitly
-         requested --transformed-oracle build installs
-         harness/copybook-shims/ACAS-SQLstate-error-list.cob, which is
-         comment-only. Its CONTENT provably does not matter: compiling
+         requested --transformed-oracle build GENERATES the comment-only
+         compatibility include, and only into the writable build copy at
+         $ACAS_BUILD/copybooks -- it is not a repository file and the frozen
+         copybooks/ tree is never written to (finding M-03). Its CONTENT provably does not matter: compiling
          glpostingMT.cbl to C (cobc -C) with the comment-only shim, with a
          zero-byte member, and with arbitrary different comment text yields a
          BYTE-IDENTICAL translation in all three cases. Only the COPY resolving
@@ -3403,8 +3464,9 @@ acas_explain_missing_sqlstate_copybook() {
          open-error branches, propagate RDBMS credentials, retain connections
          across calls, and reset stale reply pairs -- all of them changes to
          EXECUTABLE logic in the handlers. A build carrying those has repaired
-         the specification, which is why run_parity.sh refuses to call any
-         verdict from it a parity claim.
+         the specification, which is why reset_db.sh refuses to set up a
+         comparison against it, and why no verdict drawn from one is a parity
+         claim.
          --------------------------------------------------------------------
 EXPLAIN
 }
@@ -4243,8 +4305,8 @@ acas_finalise() {
 #
 # Both remain available, because a build is a thing one debugs. What they must not
 # do is silently produce EVIDENCE. So every full build publishes what it was
-# actually built from, and `harness/run_parity.sh` reads that file and refuses to
-# run the compiled cycle when an override was used or when the compiled modules no
+# actually built from, and `harness/reset_db.sh` reads that file and refuses to set up
+# the comparison when an override was used or when the compiled modules no
 # longer match the ones the attestation covers.
 #
 # WRITTEN ONLY AFTER A FULL FIVE-STEP SEQUENCE, from acas_main -- a partial or
@@ -4261,7 +4323,7 @@ acas_finalise() {
 # "this is the unmodified oracle" for a build that was not. Version 2 publishes the
 # register: a count, a set digest, one record per transformed path carrying its FROZEN
 # and BUILD digests, and `oracle-source-is-frozen' stating the conclusion outright.
-# harness/run_parity.sh understands version 2 and refuses version 1, deliberately: an
+# harness/reset_db.sh understands version 2 and refuses version 1, deliberately: an
 # attestation that cannot state whether the sources were transformed is not evidence
 # about the frozen specification.
 readonly ACAS_ATTESTATION_VERSION='2'
@@ -4287,7 +4349,7 @@ readonly ACAS_ATTESTATION_BASENAME='oracle-attestation.txt'
 readonly ACAS_CANONICAL_COBMYSQLAPI_OBJ='/usr/local/lib/acas/cobmysqlapi.o'
 
 # The digest of the compiled module set, computed the same way here and in
-# run_parity.sh: every *.so under the six build directories, sorted by path, each
+# reset_db.sh: every *.so under the six build directories, sorted by path, each
 # hashed, and the whole listing hashed again. This is what BINDS the attestation to
 # the artifacts -- replacing a single .so after the build invalidates it.
 #
@@ -4483,7 +4545,7 @@ acas_publish_attestation() {
     acas_source_transform_records
   } > "$target" || acas_die "$EX_FINALISE" \
     "the provenance attestation could not be written to $target." \
-    'Without it harness/run_parity.sh will refuse to run the compiled cycle,' \
+    'Without it harness/reset_db.sh will refuse to set up the comparison,' \
     'because an oracle that cannot say what it was built from cannot arbitrate.'
 
   chmod 0444 "$target" 2>/dev/null || true
@@ -4500,7 +4562,7 @@ acas_publish_attestation() {
     acas_warn "THIS ORACLE WAS COMPILED FROM TRANSFORMED SOURCES, and the attestation now says so. ${#ACAS_SOURCE_TRANSFORMS_APPLIED[@]} build-copy file(s) differ from the frozen checkout; every one is listed in $target as a source-transform record carrying its frozen and build digests and the reason for it. They are connectivity and IF-scope repairs without which the compiled cycle cannot reach MySQL, and none alters an accounting computation, a posting order, a control total or a rejection path -- but a parity verdict produced against this build is a verdict against a DISCLOSED-TRANSFORMED oracle and must never be described as one against the unmodified frozen specification. The frozen checkout itself is untouched: diff $ACAS_REPO against $ACAS_BUILD to see every difference."
   fi
   if [[ "$overrides" == 'yes' ]]; then
-    acas_warn "THIS ORACLE CANNOT PRODUCE EVIDENCE: its identity was not established from the reviewed sources alone (presql2-digest-override=$digest_override, presql2-matches-pin=$archive_matches_pin, cobmysqlapi-redirected=$object_redirected, cobmysqlapi-provenance=$object_provenance). The attestation records that and harness/run_parity.sh will refuse to run the compiled cycle against this build. Rebuild without ACAS_PRESQL2_SHA256, and without pointing ACAS_COBMYSQLAPI_OBJ anywhere other than $ACAS_CANONICAL_COBMYSQLAPI_OBJ. To replace either legitimately, make it a REVIEWED SOURCE CHANGE -- update the vendored archive and ACAS_PRESQL2_SHA256_EXPECTED together in the same commit."
+    acas_warn "THIS ORACLE CANNOT PRODUCE EVIDENCE: its identity was not established from the reviewed sources alone (presql2-digest-override=$digest_override, presql2-matches-pin=$archive_matches_pin, cobmysqlapi-redirected=$object_redirected, cobmysqlapi-provenance=$object_provenance). The attestation records that and harness/reset_db.sh will refuse to set up a comparison against this build. Rebuild without ACAS_PRESQL2_SHA256, and without pointing ACAS_COBMYSQLAPI_OBJ anywhere other than $ACAS_CANONICAL_COBMYSQLAPI_OBJ. To replace either legitimately, make it a REVIEWED SOURCE CHANGE -- update the vendored archive and ACAS_PRESQL2_SHA256_EXPECTED together in the same commit."
   else
     acas_log "  provenance          $object_provenance"
     acas_log '  overrides           none -- this oracle may produce evidence'

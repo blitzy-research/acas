@@ -11,11 +11,12 @@
 # key and in the same order, because two runners read these files with two
 # different strategies and only the shared shape satisfies both.
 #
-# TWO THINGS MAKE THIS SCENARIO DIFFERENT FROM ITS EIGHT SIBLINGS. (The
-# enumeration above is the EIGHT the Agent Action Plan mandates; the directory
-# holds NINE, because end_of_cycle_gl was added beyond the mandated set. This
-# sentence previously said "SEVEN SIBLINGS", counting the directory as it stood
-# before that file existed.)
+# TWO THINGS MAKE THIS SCENARIO DIFFERENT FROM ITS SEVEN SIBLINGS. (The
+# enumeration above is the EIGHT the Agent Action Plan mandates, and the directory
+# holds exactly those eight. It briefly held a NINTH, end_of_cycle_gl, added beyond
+# the mandate and removed again by findings M-09 and M-17; this sentence has read
+# "SEVEN", then "EIGHT", and is back to seven for the same reason each time -- it
+# counts the directory, not the mandate.)
 #   1. Its run EMPTIES A TABLE ON THIS SEED -- and the distinction matters,
 #      because the clear is BOUNDED, not unconditional. The pinned end-of-job
 #      answer below performs an open-output on the IRS transfer file, which the
@@ -652,7 +653,7 @@ description: |
                          the run instead of looping leaves the same rows and no
                          diff distinguishes them. Class 1 is locked by call
                          sequence in
-                         tests/arithmetic/test_shipped_close_and_rejection_paths.py
+                         tests/arithmetic/test_double_entry_explosion.py
                          section 2, which serves a rejected record followed by a
                          sound one and requires the sound one to post in full.
     irsdflt.dat       -- [common/masterLD.sh:L100], loaded into IRSDFLT-REC as
@@ -745,8 +746,8 @@ description: |
 
   THE ACCEPTANCE PROTOCOL
   TEN stages, in this order, one scenario at a time and nothing
-  alongside it. harness/parity_stages.sh is the single registry and
-  `harness/run_parity.sh --print-stages' prints it, so this list is a restatement
+  alongside it. harness/normalize.py is the single registry and
+  `harness/normalize.py --print-stages' prints it, so this list is a restatement
   and never the authority:
     1 reset the schema and seed the scenario
     2 run the compiled COBOL cycle
@@ -762,7 +763,7 @@ description: |
       because two PARTIAL captures can produce an empty diff and so pass a
       comparison that compared nothing
     10 diff the two normalised trees
-  harness/build_oracle.sh and harness/build_fixtures.sh come before stage 1 and are
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures come before stage 1 and are
   not stages: the first runs once per image, the second once per change to a
   scenario's seed records.
   AN EMPTY NORMALISED DIFF IS THE ONLY PASS CONDITION. The comparison is bounded by
@@ -785,7 +786,7 @@ description: |
   tests/scenarios/ (one per scenario), and harness/run_python_scenario.sh.
   The seed FLAT FILES are deliberately not in the
   checkout: the records are declared above under seed_records and
-  harness/build_fixtures.sh builds the files from them inside the image, because
+  harness/seed.sh --build-fixtures builds the files from them inside the image, because
   fifteen of the seventeen frozen loaders read ORGANIZATION INDEXED or RELATIVE
   files whose on-disk form belongs to the Berkeley DB version that image carries.
 
@@ -1001,7 +1002,7 @@ irs_clear_postings: "Y"
 # It is NOT the bound of the comparison. The capture and the diff are bounded by
 # ALL 22 IN-SCOPE TABLES -- `harness/dump_tables.py --all-in-scope` at stages 3
 # and 7 and `harness/diff_states.py --all-in-scope` at stage 10, which
-# `harness/run_parity.sh` and `tests/conftest.py` both pass. A bound drawn from
+# both a hand-driven run and `tests/conftest.py` pass. A bound drawn from
 # what a scenario EXPECTS to move cannot show a difference in anything it did not
 # expect to move, and an empty diff is the single pass condition (AAP section
 # 0.8.5). In particular both cycles perform the menu's own `overrewrite.'
@@ -1019,7 +1020,7 @@ affected_tables:
 # =============================================================================
 # THE SEED RECORDS
 # =============================================================================
-# Built into the declared flat files by harness/make_fixtures.py, which generates a
+# Built into the declared flat files by harness/dump_tables.py --make-fixtures, which generates a
 # COBOL writer per file, compiles it against the FROZEN copybooks and calls the
 # FROZEN handler to write. Field names are spelled exactly as the frozen copybook
 # spells them, with the handler's own REPLACING clauses applied, and the builder

@@ -615,7 +615,11 @@ POST_FINGERPRINT_NAME: Final[str] = "python.post-fingerprint"
 # grew a second, inline definition of "the digest": two definitions is how a pre-run and
 # a post-run record - or an oracle-side and a Python-side record - silently stop being
 # comparable while every individual assertion still passes.
-TABLE_DIGEST_PRODUCER: Final[str] = "table_digest.py"
+#
+# It is the `--table-digest` MODE of the dump tool rather than a program of its own
+# (finding M-10): the digest is taken over that module's `serialise_dump` output, so the
+# separate file existed only to load this one by path and digest what it produced.
+TABLE_DIGEST_PRODUCER: Final[str] = "dump_tables.py --table-digest"
 
 # LAYER 3 - DATABASE-BACKED WITNESS MARKERS emitted by
 # `harness/run_python_scenario.sh`.
@@ -859,7 +863,7 @@ def _snapshot_fingerprint(source: Path, destination: Path) -> Path:
     about run B.
 
     Each record is one line per bounded table plus the parameter row, three
-    TAB-separated fields written by the single producer `harness/table_digest.py`. Layer
+    TAB-separated fields written by the single producer `harness/dump_tables.py --table-digest`. Layer
     4 compares run A's PRE-run record with run B's PRE-run record as bytes, proving the
     two runs started alike. Layer 2b compares ONE run's PRE-run record with its OWN
     post-run record, proving what that run did.
@@ -1006,7 +1010,7 @@ def _row_counts(
 def _parse_state_record(path: Path, *, where: str) -> dict[str, tuple[int, str]]:
     """Parse one state record into `{table: (row_count, digest)}`.
 
-    THE FORMAT IS A CONTRACT AND IT HAS ONE PRODUCER. `harness/table_digest.py` writes
+    THE FORMAT IS A CONTRACT AND IT HAS ONE PRODUCER. `harness/dump_tables.py --table-digest` writes
     every state record on both sides, one line per table, three TAB-separated fields:
     the table name, its row count, and the lower-case hex SHA-256 of the canonical
     primary-key-ordered dump. Layer 4 compares two such files as BYTES and never parses
@@ -1036,7 +1040,7 @@ def _parse_state_record(path: Path, *, where: str) -> dict[str, tuple[int, str]]
         fields = line.split("\t")
         assert len(fields) == 3, (
             f"HARNESS FAULT: {where} line {number} of {path} is not the three fields "
-            f"harness/table_digest.py writes - table, row count, sha256. It reads "
+            f"harness/dump_tables.py --table-digest writes - table, row count, sha256. It reads "
             f"{line!r}. A record whose shape is not the contract cannot be read at "
             f"all, and guessing at it would be the added validation R-3 forbids."
         )
@@ -1402,8 +1406,9 @@ def determinism_pair(
             guard itself, so a bare host SKIPS with a precise reason and never errors.
         harness: The three harness modules, loaded by explicit file path - never
             `import harness`. The structural enforcement of R-1 is `pyproject.toml`'s
-            `[tool.setuptools] packages` ALLOW-LIST, which names only the seven
-            `acas_posting` packages plus the generated data directory and sets
+            `[tool.setuptools.packages.find]` configuration, which admits only
+            `acas_posting*`, NAMES `harness*`, `tests*`, `docs*` and
+            `data_dictionary*` in its exclusion list and sets
             `include-package-data = false`, so `harness` is absent by construction.
             The absence of `harness/__init__.py` is NOT the enforcement: PEP 420 would
             make a namespace import resolve anyway. Explicit-path loading is used

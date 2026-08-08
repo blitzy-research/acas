@@ -34,15 +34,16 @@
 #      C="docker compose -f harness/docker-compose.yml run --rm -T gnucobol"
 #      S=<scenario file>   N=<its basename without the extension>
 #      $C /repo/harness/build_oracle.sh                 once per image
-#      $C /repo/harness/build_fixtures.sh                once per scenario change
-#      $C /repo/harness/run_parity.sh "$S"
+#      $C /repo/harness/seed.sh --build-fixtures                once per scenario change
+#      then the TEN PROTOCOL STAGES, listed in full below and in
+#      README-python-migration.md section 8
 #
 #  THE FIXTURE STAGE IS NOT OPTIONAL, and it is second for a reason. The frozen
 #  loaders read Cobol flat files, and fifteen of the seventeen are ORGANIZATION
 #  INDEXED or RELATIVE -- an INDEXED file on this toolchain is a Berkeley DB Btree
 #  whose on-disk form belongs to the library version this image carries, which is
 #  measurable rather than assumable. So the RECORDS are declared as text in each
-#  scenario file under `seed_records', and `build_fixtures.sh' builds the FILES
+#  scenario file under `seed_records', and `harness/seed.sh --build-fixtures' builds the FILES
 #  from them, by generating a Cobol writer per file, compiling it against the
 #  FROZEN copybooks, and calling the FROZEN handler to write -- then reading every
 #  file back through the same definitions and refusing the build unless the counts
@@ -51,20 +52,35 @@
 #  `seed_dir' resolves relative to the scenario file, which is inside the READ-ONLY
 #  checkout (R-3), so a built fixture can never live there -- the runtime location
 #  is `$ACAS_FIXTURES', or `$ACAS_DATA/fixtures' when that is unset, plus the
-#  scenario name, which is exactly where `build_fixtures.sh' writes. `run_parity.sh'
-#  and `reset_db.sh --seed-dir' resolve it themselves; the explicit `--seed-dir'
+#  scenario name, which is exactly where `harness/seed.sh --build-fixtures' writes.
+#  `seed.sh' and `reset_db.sh' resolve it themselves; the explicit `--seed-dir'
 #  option remains for a fixture built somewhere else. It says WHERE, never WHICH:
 #  the scenario's `seed_files' list stays the sole authority on what must be
 #  present, and every declared name is verified BEFORE stage 1 drops the schema.
 #  It is forwarded to BOTH reset stages from one place, so stages 1 and 5 cannot
 #  diverge.
 #
-#  run_parity.sh IS THE RECOMMENDED FORM, because the ordering is the evidence:
-#  it runs the ten stages in sequence and ABORTS ON THE FIRST NON-ZERO, so a
-#  later stage cannot render a verdict on a capture an earlier stage never
-#  produced. Driving them by hand is still supported, and is exactly what the
-#  driver does:
-#      $C /repo/harness/seed.sh --seed-dir /data/fixtures/"$N"  "$S"
+#  THE ORDER IS THE EVIDENCE, so the ten stages are run in sequence and STOPPED AT
+#  THE FIRST NON-ZERO EXIT: a later stage cannot render a verdict on a capture an
+#  earlier stage never produced, and re-seeding costs less than a wrong verdict.
+#  Each stage is one invocation, each gate lives in the stage it protects -- the
+#  oracle-provenance gate and the seed pre-flight in `reset_db.sh', the cross-side
+#  operations check in `run_cobol_scenario.sh' -- so a hand-driven stage is guarded
+#  exactly as a driven one is. `tests/conftest.py' drives this same sequence
+#  programmatically for the scenario tier, and `harness/normalize.py --print-stages'
+#  prints the canonical list. TWO variables bind the ten together, and both are the
+#  operator's to supply by hand -- `tests/conftest.py' supplies them for the composed
+#  protocol:
+#      R="parity-$(date +%Y%m%dT%H%M%S)"   one run id for all ten stages; without it
+#                                          each stage derives its own and stage 10
+#                                          refuses the pair as two different runs
+#      D=/data/"$N"                        the per-scenario staged data, which stage 1
+#                                          writes and stages 2 and 6 must be pointed
+#                                          at -- system.dat is there, not in /data
+#  so each stage below is prefixed `-e ACAS_PARITY_RUN_ID="$R"', and the two RUN
+#  stages additionally with `-e ACAS_DATA="$D" -e ACAS_LEDGERS="$D"'. The ten, in
+#  order:
+#      $C /repo/harness/reset_db.sh --seed-dir /data/fixtures/"$N"  "$S"
 #      $C /repo/harness/run_cobol_scenario.sh          "$S"
 #      $C python3 /repo/harness/dump_tables.py --scenario "$N" --side cobol \
 #                                              --scenario-file "$S"
@@ -448,7 +464,7 @@ services:
     #
     #        ONE KEY, ONE CLOSED SET. This is the ONLY name for this decision in
     #        the whole tree: the five harness scripts read it, and so does
-    #        `acas_posting/cli/rdbms_params.py` through `read_declared_flag`,
+    #        `acas_posting/cli/args.py` through `read_declared_flag`,
     #        which `acas_posting/cli/args.py` also uses. The accepted spellings
     #        are `1`, `true`, `yes`, `on` for yes and `0`, `false`, `no`, `off`
     #        or unset for no, compared case-insensitively; ANY OTHER TEXT STOPS
@@ -458,13 +474,13 @@ services:
     #        half read any non-empty value other than `0` as yes, and read a
     #        different variable name entirely, so a declaration made here did not
     #        arrive.    #        IT IS ALSO THE PYTHON SIDE'S CANONICAL SPELLING, AND THERE IS NOW ONE
-    #        CONTRACT RATHER THAN TWO. `acas_posting/cli/rdbms_params.py` publishes
+    #        CONTRACT RATHER THAN TWO. `acas_posting/cli/args.py` publishes
     #        the whole transport contract in `TRANSPORT_CONTRACT`, reads THIS
     #        variable as the isolated-oracle declaration -- and no other name -- and
     #        uses the same closed set of affirmative spellings these scripts use. It used to declare four flag variables of its own that nothing
     #        here set, while `cli/args.py` read this one with a looser rule, so
     #        `false` meant yes on one side of the harness and no on the other.
-    #        `tests/arithmetic/test_deployment_contract_boundaries.py` now asserts
+    #        `tests/arithmetic/test_pic_field_descriptors.py` now asserts
     #        that every declared knob has a provider and a consumer, and that this
     #        block sets the one row marked as provided here.
     #
@@ -530,8 +546,8 @@ services:
     #        `reset_db.sh` GATE 2 requires a target-scoped consent token equal to
     #        exactly `DESTROY <schema>@<host>:<port>`. It is set here because
     #        destroying and rebuilding this throwaway schema IS the documented
-    #        stages 1 and 5 of the TEN-stage protocol (harness/parity_stages.sh is
-    #        the canonical list; `run_parity.sh --print-stages' prints it). Because
+    #        stages 1 and 5 of the TEN-stage protocol (harness/normalize.py is
+    #        the canonical list; `normalize.py --print-stages' prints it). Because
     #        the token embeds the
     #        target, it cannot be copied to another host or schema and still
     #        match -- which is what makes granting it here safe.
@@ -568,10 +584,10 @@ services:
       #  THE ADMINISTRATIVE PAIR IS DECLARED HERE AND REACHES TWO STAGES OF TEN
       #  (finding SEC-04).
       #
-      #  It has to be declared at service level, because `harness/run_parity.sh` drives
-      #  all ten stages from ONE invocation and stages 1 and 5 - both
-      #  `harness/reset_db.sh` - drop and re-apply the frozen schema, which needs DDL
-      #  rights the application account does not have.
+      #  It has to be declared at service level, because all ten stages run inside this
+      #  one service - composed by `tests/conftest.py`, or driven by hand - and stages 1
+      #  and 5, both `harness/reset_db.sh`, drop and re-apply the frozen schema, which
+      #  needs DDL rights the application account does not have.
       #
       #  A service-level variable is otherwise inherited by EVERY descendant, which put
       #  the database superuser password into the environment of the GnuCOBOL compiler,
@@ -579,16 +595,19 @@ services:
       #  and pytest itself. Three mechanisms now remove it everywhere it is not needed,
       #  and each is independent of the others:
       #
-      #    1. `run_parity.sh` runs stages 2, 3, 4, 6, 7, 8, 9 and 10 through
-      #       `env -u ACAS_DB_ADMIN_USER -u ACAS_DB_ADMIN_PASSWORD`, keeping the pair
-      #       only for the two reset stages.
-      #    2. `build_oracle.sh`, `build_fixtures.sh`, `run_cobol_scenario.sh` and
+      #    1. EVERY harness script is CLASSIFIED, and only the two that administer the
+      #       schema - `reset_db.sh` and the `seed.sh` it delegates to - may hold the
+      #       pair. There is no wrapper deciding this per stage any more (finding M-06
+      #       folded the ten-stage driver away), so the classification IS the mechanism
+      #       and `tests/arithmetic/test_pic_field_descriptors.py` refuses an
+      #       unclassified `harness/*.sh`.
+      #    2. `build_oracle.sh`, `harness/seed.sh --build-fixtures`, `run_cobol_scenario.sh` and
       #       `run_python_scenario.sh` each `unset` the pair at entry, before their
-      #       first child exists - so a DIRECT invocation of any of them is scoped too,
-      #       not only one routed through the driver. None of the four holds a single
+      #       first child exists - so a DIRECT invocation of any of them is scoped, which
+      #       is the only form a hand-driven stage takes. None of the four holds a single
       #       reference to either name.
       #    3. `tests/conftest.py` scrubs it in `_run_script` unless the caller asks for
-      #       `administrative=True`, which exactly three of its five call sites do - the
+      #       `administrative=True`, which exactly three of its call sites do - the
       #       seed and the two resets.
       #
       #  So the credential is scoped by CONSTRUCTION rather than by convention: a

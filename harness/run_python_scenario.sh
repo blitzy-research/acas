@@ -3,7 +3,8 @@
 # Drive the MIGRATED PYTHON posting cycle for one scenario, with inputs
 # identical to the ones the compiled oracle was given.
 #
-# This is stage 6 of the TEN-stage parity protocol harness/run_parity.sh drives.
+# This is stage 6 of the TEN-stage parity protocol (README section 8 drives it by
+# hand, tests/conftest.py composes it).
 # The ten stages, named by the JOB each performs rather than by the script that
 # performs it:
 #
@@ -11,7 +12,7 @@
 #     5 reset+reseed 6 run(PYTHON)  7 dump(python)   8 normalise(python)   <-- 6 is here
 #     9 verify both captures published                10 diff
 #
-# That list is a CITATION, not the definition. The definition is harness/parity_stages.sh
+# That list is a CITATION, not the definition. The definition is harness/normalize.py
 # and this script sources it, because this comment previously said EIGHT stages -- a
 # protocol that had not been the one driven for some time (finding F-16). The Agent
 # Action Plan's eight logical stages (section 0.3.2) become these ten by making BOTH
@@ -632,7 +633,7 @@ readonly -a ACAS_PY_SUBSYSTEMS=(general sales purchase irs)
 # ⭐ THE CLOSED SET OF SEMANTIC STATUSES, PER OPERATION (finding MJ-01)
 #
 # A status this script records as BEHAVIOURAL becomes evidence: the wrapper exits
-# EX_BEHAVIOUR=69, harness/run_parity.sh lets the protocol CONTINUE past stage 6 so
+# EX_BEHAVIOUR=69, the protocol CONTINUES past stage 6 so
 # the capture can corroborate it, and tests/conftest.py classifies it as
 # `behavioural-difference' rather than as a broken rig. That is the right treatment
 # for a term code and the wrong treatment for everything else, and this table is what
@@ -758,22 +759,41 @@ case "${BASH_SOURCE[0]}" in
   *)   ACAS_PY_SELF_DIR='.' ;;
 esac
 readonly ACAS_PY_SELF_DIR
-readonly ACAS_PY_SCENARIO_READER="$ACAS_PY_SELF_DIR/scenario_stream.py"
+# The shared scenario reader and the shared stage registry are BOTH modes of
+# harness/normalize.py (findings M-05, M-07 and M-08): they were files of their own,
+# which the Agent Action Plan section 0.3.1 harness inventory does not name.
+readonly ACAS_PY_SCENARIO_READER="$ACAS_PY_SELF_DIR/normalize.py"
 
-# THE CANONICAL STAGE REGISTRY (finding F-16). The parity protocol's ten stages are
-# defined in harness/parity_stages.sh and nowhere else, so this script's statement of
-# where it sits in that protocol cannot drift from the protocol actually driven. It was
-# duplicated here as prose, and the prose had gone stale claiming EIGHT stages.
-readonly ACAS_PY_STAGE_REGISTRY="$ACAS_PY_SELF_DIR/parity_stages.sh"
-if [[ -r "$ACAS_PY_STAGE_REGISTRY" ]]; then
-  # shellcheck source=harness/parity_stages.sh
-  . "$ACAS_PY_STAGE_REGISTRY"
-else
+# THE CANONICAL STAGE REGISTRY (findings F-16 and M-08). The parity protocol's ten
+# stages are defined in `PARITY_STAGES' in harness/normalize.py and nowhere else, and
+# `--print-stage-shell' publishes them as the sourceable fragment eval'd below -- the same
+# variable names, the same readonly protection, the same re-source guard and the same
+# three `acas_parity_stage_*' helpers this script has always called. So this script's
+# statement of where it sits in the protocol cannot drift from the protocol actually
+# driven. It was duplicated here as prose, and the prose had gone stale claiming EIGHT
+# stages; it was then a shell file of its own, which is not one of the harness paths the
+# Agent Action Plan section 0.3.1 inventory names.
+readonly ACAS_PY_STAGE_REGISTRY="$ACAS_PY_SELF_DIR/normalize.py"
+if [[ ! -r "$ACAS_PY_STAGE_REGISTRY" ]]; then
   printf '%s: the canonical stage registry is missing: %s\n' \
     "$0" "$ACAS_PY_STAGE_REGISTRY" >&2
   printf '  The parity protocol'"'"'s stages are defined there and nowhere else.\n' >&2
   exit 71
 fi
+if ! command -v python3 >/dev/null 2>&1; then
+  printf '%s: python3 is not on PATH, so the canonical stage registry cannot be\n' \
+    "$0" >&2
+  printf '  read. This runner drives the migrated Python cycle, so it needs it.\n' >&2
+  exit 71
+fi
+if ! ACAS_PY_STAGE_SHELL="$(python3 "$ACAS_PY_STAGE_REGISTRY" --print-stage-shell)"
+then
+  printf '%s: the canonical stage registry could not be read from %s\n' \
+    "$0" "$ACAS_PY_STAGE_REGISTRY" >&2
+  exit 71
+fi
+eval "$ACAS_PY_STAGE_SHELL"
+unset ACAS_PY_STAGE_SHELL
 ACAS_PY_BEHAVIOURAL=0           # count of contradicted dispositions
 ACAS_PY_ASSERT_FAILURES=0       # count of failed post-run assertions
 
@@ -809,7 +829,7 @@ declare -A ACAS_PY_BEFORE_DIGESTS=()  # canonical affected-table digests before 
 ACAS_PY_CAPTURE_DIR=''                # <out-dir>/<scenario>/python
 ACAS_PY_FINGERPRINT=''                # this side's pre-run state fingerprint file
 ACAS_PY_POST_FINGERPRINT=''           # and the same record taken after the run
-# This script's own directory, so its sibling harness/table_digest.py -- the single
+# This script's own directory, so its sibling harness/dump_tables.py --table-digest -- the single
 # canonical state-digest producer BOTH sides invoke -- is found relative to this file
 # rather than through $PATH or a guessed checkout layout. Resolved once, here,
 # because $0 is not reliable after a `cd'.
@@ -823,9 +843,10 @@ ACAS_PY_OP_STATUS_FILE=''
 # a real process status -- it IS WS-Term-Code [copybooks/wscall.cob:L10] -- so a slot
 # left at zero would attest a clean disposition for an operation that never ran.
 readonly ACAS_PY_OP_NOT_RUN='not-run'
-# One identity for one attempt, bound through every stage (F-37). Supplied by
-# harness/run_parity.sh via --run-id or ACAS_PARITY_RUN_ID; derived locally when a
-# hand invocation supplies neither.
+# One identity for one attempt, bound through every stage (F-37). Supplied by the
+# protocol via --run-id or ACAS_PARITY_RUN_ID; derived locally when a
+# hand invocation supplies neither -- and its presence is what marks this run as a
+# protocol stage rather than a hand invocation (acas_py_assert_no_evidence_bypass).
 ACAS_PY_RUN_ID="${ACAS_PARITY_RUN_ID:-}"
 # The staged fixture marker digest this run was seeded from, read from the record
 # harness/reset_db.sh publishes. The EXACT seed identity (F-22).
@@ -1304,10 +1325,11 @@ acas_py_release_lock() {
 #  Every artifact of the parity protocol used to be written to a CANONICAL path and
 #  nothing else: run-logs/<scenario>/<side>.log, <side>.run-status,
 #  <side>.seed-fingerprint. Two attempts at one scenario therefore wrote to the same
-#  names, and harness/run_parity.sh's --from/--to made that reachable on purpose:
+#  names, and the deleted driver's --from/--to made that reachable on purpose:
 #  stages 1..5 of one attempt and stages 6..10 of another produce a verdict over
 #  artifacts that were never part of the same run, and nothing in the evidence says
-#  so.
+#  so. Resuming a protocol part-way is no longer offered at all (finding M-06), and
+#  the run-scoped paths below are why doing it by hand cannot go unnoticed either.
 #
 #  So one identity is bound through every stage. It arrives from the driver
 #  (--run-id, or ACAS_PARITY_RUN_ID), which is how all ten stages come to agree; when
@@ -1664,11 +1686,12 @@ acas_py_usage() {
   cat <<'USAGE_EOF'
 harness/run_python_scenario.sh -- drive the MIGRATED PYTHON posting cycle.
 
-Stage 6 of the TEN-stage parity protocol harness/run_parity.sh drives:
+Stage 6 of the TEN-stage parity protocol (README section 8 drives it by hand,
+tests/conftest.py composes it):
     reset+seed -> run(COBOL) -> dump -> normalise -> reset+re-seed ->
     run(PYTHON) -> dump -> normalise -> verify published -> diff
-The canonical stage list is harness/parity_stages.sh; print it with
-`harness/run_parity.sh --print-stages'. The `Check n/8' headings printed below
+The canonical stage list is harness/normalize.py; print it with
+`harness/normalize.py --print-stages'. The `Check n/8' headings printed below
 are this script's own preflight checks and are NOT protocol stages.
 
 This is the MIGRATED side. It runs the headless command-line entry points of the
@@ -1907,7 +1930,7 @@ them inside any tree the diff stage compares:
                              effect would retire the empty-batch no-op claim.
                              Recorded before the first operation runs. The
                              digest is taken over the canonical dump by
-                             [harness/table_digest.py], the SAME producer the
+                             [harness/dump_tables.py --table-digest], the SAME producer the
                              oracle side invokes, and it is what makes the record
                              mean anything: two seeds differing in one balance
                              have identical row counts. It is compared with the
@@ -2157,21 +2180,22 @@ acas_py_yaml_stream() {
   # or a duplicated key is read one way by a parser and another way (or not at all)
   # by a line matcher, and the comparison would still have produced a verdict.
   #
-  # So the parser now lives in harness/scenario_stream.py and BOTH runners invoke
+  # So the parser now lives in harness/normalize.py --scenario-stream and BOTH runners invoke
   # it. There is no second implementation left to drift. Its exit codes are 3 no
   # PyYAML, 4 unreadable, 5 not a mapping of scalars and flat lists -- the same
   # three this function already reported -- and the caller maps them onto this
   # script's own band.
   [[ -f "$reader" ]] || {
     printf 'the shared scenario reader is missing: %s\n' "$reader" >&2
-    printf 'It is harness/scenario_stream.py and it ships beside this script; both\n' >&2
-    printf 'runners read every scenario through it so that one document cannot mean\n' >&2
-    printf 'two things (F-32).\n' >&2
+    printf 'It is harness/normalize.py --scenario-stream and it ships beside this\n' >&2
+    printf 'script; both runners read every scenario through it so that one document\n' >&2
+    printf 'cannot mean two things (F-32).\n' >&2
     return 4
   }
 
   acas_py_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
-  "${ACAS_DEADLINE_ARGV[@]}" "$ACAS_PY_PYTHON" "$reader" "$1" < /dev/null
+  "${ACAS_DEADLINE_ARGV[@]}" "$ACAS_PY_PYTHON" "$reader" \
+    --scenario-stream "$1" < /dev/null
 }
 
 # Read the document into the three associative arrays.
@@ -2480,6 +2504,10 @@ acas_py_resolve_scenario() {
   ACAS_PY_CURRENT_STAGE='resolving the scenario'
   acas_py_stage 'Check 2/8: scenario, definition and operations'
 
+  #  Before the id is DERIVED, because a derived id means a hand invocation and a
+  #  supplied one means a protocol stage, and the two are permitted different options.
+  acas_py_assert_no_evidence_bypass
+
   [[ -n "$ACAS_PY_RUN_ID" ]] || ACAS_PY_RUN_ID="$(acas_py_derive_run_id)"
   acas_py_assert_run_id
   acas_py_log "run id = $ACAS_PY_RUN_ID"
@@ -2496,10 +2524,10 @@ acas_py_resolve_scenario() {
     'derived from it.'
   [[ -f "$ACAS_PY_SCENARIO_FILE" ]] || acas_py_die "$EX_SCENARIO" \
     "scenario file not found: $(acas_py_sanitise_field "$ACAS_PY_SCENARIO_FILE")" \
-    'The nine scenario definitions live under harness/scenarios/ and are named' \
+    'The eight scenario definitions live under harness/scenarios/ and are named' \
     'clean_batch_gl, clean_batch_sl, clean_batch_pl, clean_batch_irs,' \
-    'mixed_accepted_rejected, period_end_totals, control_total_mismatch,' \
-    'empty_batch and end_of_cycle_gl.'
+    'mixed_accepted_rejected, period_end_totals, control_total_mismatch and' \
+    'empty_batch.'
   [[ -r "$ACAS_PY_SCENARIO_FILE" ]] || acas_py_die "$EX_SCENARIO" \
     "scenario file is not readable: $(acas_py_sanitise_field "$ACAS_PY_SCENARIO_FILE")"
 
@@ -3147,10 +3175,12 @@ acas_py_resolve_gating_answers() {
   #  scenario selects the end-of-cycle operation it must say what the answers are,
   #  and if it does not, the run is refused before anything connects.
   #
-  #  MEASURED: `end_of_cycle_gl.yaml' is the ONLY scenario that selects this
-  #  operation and it already declares both keys, so requiring them refuses no
-  #  scenario that exists. (`period_end_totals.yaml' names the operation only in a
-  #  comment explaining why it is deliberately not appended.)
+  #  MEASURED: NO committed scenario selects this operation. `end_of_cycle_gl.yaml' was
+  #  the only one that did and it declared both keys; it was removed by findings M-09
+  #  and M-17, which hold the tree to the Agent Action Plan's eight. The requirement
+  #  therefore refuses no scenario that exists and stands so that one added later must
+  #  declare both keys rather than have them guessed. (`period_end_totals.yaml' names
+  #  the operation only in a comment explaining why it is deliberately not appended.)
   #
   #  Rule R-3 is not engaged: this adds no validation of the ANSWER. Both answers
   #  remain equally acceptable and neither is rejected. What is refused is SILENCE.
@@ -3194,25 +3224,30 @@ acas_py_resolve_gating_answers() {
       9)
         # ⭐ MJ-10: REFUSED HERE TOO, so that the two legs agree on what is
         # drivable. This side implements 9 perfectly well -- the entry point
-        # publishes --disk-change-option and the program module honours it. What it
-        # cannot do is produce COMPARABLE evidence, because
-        # [harness/run_cobol_scenario.sh] refuses 9: `a` is `pic 99`
-        # [general/gl080.cbl:L183] so a single keystroke's landing position is
-        # unmeasured, and on 9 the section exits [general/gl080.cbl:L547] before the
-        # accept that would consume the Return.
+        # publishes --disk-change-option and the program module honours it, and a
+        # 2026-08-08 measurement CONFIRMED that reading: a single keystroke 9 into
+        # `77 a pic 99' [general/gl080.cbl:L183] stores 09 rather than 90, so
+        # `if a = 9' [general/gl080.cbl:L546] fires, and the Return is consumed
+        # rather than left buffered for the next prompt.
+        #
+        # What this side still cannot do is produce COMPARABLE evidence, because
+        # [harness/run_cobol_scenario.sh] refuses 9 -- not for want of the semantics
+        # any more, but because `disk-change' is unreachable in every fixture
+        # (SYSTEM-REC.Arch = "Y" [general/gl080.cbl:L315]) so there is no compiled
+        # journey to match.
         #
         # A capture with no possible counterpart is not evidence, and this runner
         # exists to produce evidence. Refused rather than warned, so a scenario
         # cannot be written that only one leg can run. No scenario declares 9.
         acas_py_die "$EX_SCENARIO" \
           'disk_change_option: "9" has no oracle counterpart, so it is refused rather than run.' \
-          'This side implements 9. The compiled leg cannot be driven to it provably' \
-          '-- `a` is `pic 99` [general/gl080.cbl:L183], so whether one keystroke' \
-          'lands as 09 or 90 is unmeasured, and on 9 the section exits at' \
-          '[general/gl080.cbl:L547] before the accept that would consume the' \
-          'Return -- and the prompt is unreachable in every fixture because it' \
-          'needs SYSTEM-REC.Arch = "Y" [general/gl080.cbl:L315], so it cannot be' \
-          'measured now either.' \
+          'This side implements 9, and a 2026-08-08 probe confirmed the reading: one' \
+          'keystroke into `a` (`pic 99`, [general/gl080.cbl:L183]) stores 09 rather' \
+          'than 90, so `if a = 9` [general/gl080.cbl:L546] fires, and the Return is' \
+          'consumed rather than left buffered.' \
+          'The compiled leg still cannot be driven to it provably: the prompt is' \
+          'unreachable in every fixture because it needs SYSTEM-REC.Arch = "Y"' \
+          '[general/gl080.cbl:L315], and seeding that would be inventing state (R-3).' \
           'A capture this protocol can never compare is not evidence, so the run is' \
           'refused here as well and the two legs agree on what is drivable.' \
           'Use disk_change_option: "0". Recorded as Q-GL084-ACCEPT-SEMANTICS in' \
@@ -3233,20 +3268,22 @@ acas_py_resolve_gating_answers() {
     ACAS_PY_ARCHIVE_PATH="$(acas_py_scenario_scalar archive_path_override)"
     # ⭐ MJ-10: and PRESENT is refused, symmetrically with the compiled leg. That
     # accept is an UPDATE field pre-loaded with the path built at
-    # [general/gl080.cbl:L530-L537]; whether typed text replaces or inserts into
-    # that content is unmeasured, and unmeasurable while the prompt is unreachable.
-    # This side would take the override as a plain string, so an insert rather than a
-    # replace on the other side would give the two legs different paths -- and a diff
-    # between them would measure the accept's edit semantics, not the accounting.
+    # [general/gl080.cbl:L530-L537]. Whether typed text replaces or inserts into
+    # that content was measured on 2026-08-08 and is NEITHER: it overwrites in place
+    # from position 1 and leaves the tail, which is what this side now reproduces
+    # (`_disk_change_accept_option` composes the candidate with `ref_mod_into`).
+    # The refusal stands on the remaining gap: the section is unreachable in every
+    # fixture, so a capture here would have no compiled journey to be compared with.
     [[ -z "$ACAS_PY_ARCHIVE_PATH" ]] || acas_py_die "$EX_SCENARIO" \
       'archive_path_override has no oracle counterpart, so it is refused rather than run.' \
       'The compiled prompt is `accept file-2 ... with update`' \
       '[general/gl080.cbl:L555], an update field already holding the path built at' \
-      '[general/gl080.cbl:L530-L537]. Whether typed text replaces or inserts into' \
-      'it is unmeasured, and the prompt is unreachable in every fixture (it needs' \
-      'SYSTEM-REC.Arch = "Y" [general/gl080.cbl:L315]) so it cannot be measured' \
-      'now. This side would pass the override as a plain string, so the two legs' \
-      'could receive different paths.' \
+      '[general/gl080.cbl:L530-L537]. Its edit semantics are MEASURED (2026-08-08):' \
+      'typed text overwrites in place from position 1 and leaves the tail, and this' \
+      'side reproduces that.' \
+      'The prompt is nonetheless unreachable in every fixture (it needs' \
+      'SYSTEM-REC.Arch = "Y" [general/gl080.cbl:L315]), so the compiled leg has no' \
+      'journey to capture and a run here would have nothing to be compared with.' \
       'Remove the key to take the frozen default, which is no override. Recorded as' \
       'Q-GL084-ACCEPT-SEMANTICS in docs/migration/ambiguity-resolutions.md.'
   fi
@@ -3687,7 +3724,7 @@ acas_py_db() {
   # acas_py_db <mode> [table...]     mode is `probe', `system' or `counts'
   #
   # ⭐ THERE IS NO `digests' MODE HERE, AND THAT IS DELIBERATE. The canonical
-  # per-table digest has exactly ONE producer, [harness/table_digest.py], which both
+  # per-table digest has exactly ONE producer, [harness/dump_tables.py --table-digest], which both
   # this runner and the oracle-side runner invoke through `acas_py_table_digests'.
   # A second implementation living here would be a second definition of "the state",
   # and the two records are compared BYTE FOR BYTE across the two sides -- so a
@@ -3702,7 +3739,7 @@ import sys
 
 # NO hashlib, NO json and NO decimal: this helper probes, reads named SYSTEM-REC
 # columns and counts rows, and it computes no state digest. That belongs to
-# [harness/table_digest.py] alone -- see the note above the heredoc.
+# [harness/dump_tables.py --table-digest] alone -- see the note above the heredoc.
 try:
     import mysql.connector as driver
 except ModuleNotFoundError as exc:
@@ -3746,7 +3783,7 @@ tls_ca = (os.environ.get("ACAS_DB_TLS_CA") or "").strip()
 tls_cert = (os.environ.get("ACAS_DB_TLS_CERT") or "").strip()
 tls_key = (os.environ.get("ACAS_DB_TLS_KEY") or "").strip()
 # ONE KEY, ONE CLOSED SET, AND UNRECOGNISED TEXT IS REFUSED - the same contract
-# acas_posting/cli/rdbms_params.read_declared_flag enforces and the same one the
+# acas_posting/cli/args.read_declared_flag enforces and the same one the
 # four sibling shell scripts match on. `false' must not read as a declaration and
 # neither must `maybe'; the value governs whether a credential crosses a network
 # in the clear, so anything unrecognised stops the run instead of resolving to
@@ -3759,7 +3796,7 @@ if _plaintext not in AFFIRMATIVE and _plaintext not in NEGATIVE:
         "or leave it unset. The same closed set is read by "
         "harness/build_oracle.sh, harness/seed.sh, harness/reset_db.sh, "
         "harness/run_cobol_scenario.sh and "
-        "acas_posting/cli/rdbms_params.py.\n"
+        "acas_posting/cli/args.py.\n"
     )
     raise SystemExit(2)
 declared = _plaintext in AFFIRMATIVE
@@ -3936,6 +3973,36 @@ acas_py_target_acknowledged() {
   [[ "$supplied" == "$(acas_py_target_label)" ]]
 }
 
+# ⭐ A PROTOCOL-BOUND RUN REFUSES THE ACKNOWLEDGEMENT (findings MJ-18, M-06)
+#
+# The mirror of harness/run_cobol_scenario.sh's gate, for the same reason and with the
+# same test. The acknowledgement above lets this runner post into a server that does not
+# declare itself a harness-owned disposable target, which is fine for a hand-driven
+# diagnosis and wrong for stage 6: the state this stage produces is the other half of a
+# verdict, and a database that cannot prove it is throwaway makes that verdict a
+# statement about an unknown state.
+#
+# ACAS_PARITY_RUN_ID (or --run-id) is what binds ten invocations into one protocol run,
+# so its presence IS the evidence path. The refusal used to live in the deleted
+# harness/run_parity.sh and therefore did not reach a hand-driven stage; checked here it
+# travels with the stage, before the run id is derived and before the cycle is driven.
+acas_py_assert_no_evidence_bypass() {
+  #  Unbound means the hand-drivable tool, so nothing is refused.
+  [[ -n "$ACAS_PY_RUN_ID" ]] || return 0
+  [[ -n "${ACAS_PY_ACKNOWLEDGE_DESTRUCTIVE-}" ]] || return 0
+
+  acas_py_die "$EX_PRECONDITION" \
+    'ACAS_PY_ACKNOWLEDGE_DESTRUCTIVE is set on a protocol-bound run.' \
+    "This run carries ACAS_PARITY_RUN_ID='$ACAS_PY_RUN_ID', so it is stage 6 of the" \
+    'parity protocol and the state it produces will be compared against the compiled' \
+    'oracle. The acknowledgement waives the requirement that the target declare itself' \
+    'a harness-owned disposable server, and a verdict drawn from a database that' \
+    'cannot prove that is a statement about an unknown state.' \
+    'Unset it and re-run against the harness target. To drive the Python cycle at' \
+    'another server deliberately, invoke this script WITHOUT a bound run id: the' \
+    'acknowledgement is honoured then, and no protocol artifact claims the result.'
+}
+
 acas_py_assert_disposable_target() {
   local marker="$1" acknowledged=0
   if acas_py_target_acknowledged; then
@@ -3979,7 +4046,7 @@ acas_py_assert_disposable_target() {
         '' \
         'If the target really is disposable, say so explicitly and name it exactly:' \
         "    ACAS_PY_ACKNOWLEDGE_DESTRUCTIVE='$(acas_py_target_label)'" \
-        'harness/run_parity.sh refuses that variable: evidence production may not' \
+        'A protocol-bound run refuses that variable: evidence production may not' \
         'be aimed by hand.'
     fi
     acas_py_warn 'acknowledged: this server does not declare itself a harness-owned disposable target.'
@@ -4189,11 +4256,12 @@ acas_py_table_counts() {
 #      SYSTEM-REC column [copybooks/wssystem.cob:L127] that the frozen date sections
 #      write back. So the objection was MEASURED rather than argued: the digest HOLDS on
 #      all four scenarios declaring `unchanged' and MOVES on every one declaring
-#      `changed'. That was measured over the eight scenarios that existed when the
-#      measurement was taken, which is all four `unchanged' ones; the ninth,
-#      end_of_cycle_gl, declares `changed' and moves the row by construction, Phase 5
-#      advancing the cycle and rotating the quarter counter. Declaring the row falsifies
-#      no effect claim.
+#      `changed'. That was measured over the eight committed scenarios, which is all
+#      four `unchanged' ones; it was also measured on a ninth, end_of_cycle_gl, which
+#      declared `changed' and moved the row by construction, its Phase 5 advancing the
+#      cycle and rotating the quarter counter -- that scenario has since been removed
+#      (findings M-09, M-17) and the observation is recorded because it established the
+#      `changed' half of the claim. Declaring the row falsifies no effect claim.
 #
 # The fingerprint is kept ANYWAY, because it gives what a dump cannot: the cross-check
 # proves both sides STARTED from the same 169-column row, the pre/post pair proves whether
@@ -4220,7 +4288,7 @@ acas_py_resolve_fingerprint_tables() {
 # Publishes "<table><TAB><count><TAB><sha256>" lines, in the order asked, in
 # ACAS_PY_SQL_OUT.
 #
-# ⭐ THE DIGEST COMES FROM harness/table_digest.py AND FROM NOWHERE ELSE. That
+# ⭐ THE DIGEST COMES FROM harness/dump_tables.py --table-digest AND FROM NOWHERE ELSE. That
 # program is the single canonical producer, and the OTHER side of the comparison
 # invokes exactly the same one: the two records are compared byte for byte, so two
 # implementations - however carefully written - would differ on formatting alone and
@@ -4234,7 +4302,7 @@ acas_py_resolve_fingerprint_tables() {
 acas_py_table_digests() {
   local rc=0 started elapsed producer
   ACAS_PY_SQL_OUT=''
-  producer="$ACAS_PY_HARNESS_DIR/table_digest.py"
+  producer="$ACAS_PY_HARNESS_DIR/dump_tables.py"
   if [[ ! -f "$producer" ]]; then
     acas_py_die "$EX_PRECONDITION" \
       "the canonical state-digest producer is missing: $(acas_py_sanitise_field "$producer")" \
@@ -4243,7 +4311,8 @@ acas_py_table_digests() {
   fi
   started="$SECONDS"
   acas_py_deadline_prefix "$ACAS_TIMEOUT_CLIENT"
-  ACAS_PY_SQL_OUT="$("${ACAS_DEADLINE_ARGV[@]}" "$ACAS_PY_PYTHON" "$producer" -- "$@" 2>&1)" || rc=$?
+  ACAS_PY_SQL_OUT="$("${ACAS_DEADLINE_ARGV[@]}" "$ACAS_PY_PYTHON" "$producer" \
+    --table-digest -- "$@" 2>&1)" || rc=$?
   elapsed=$(( SECONDS - started ))
   acas_py_assert_not_timed_out "$rc" "$elapsed" "$ACAS_TIMEOUT_CLIENT" \
     'ACAS_TIMEOUT_CLIENT' 'digesting the affected tables'
@@ -4336,7 +4405,7 @@ acas_py_record_before_state() {
 # Two seeds that differ in one balance, one status byte or one date have IDENTICAL
 # row counts, so the counts-only form certified a starting state it had not
 # established -- and an empty diff taken after it meant nothing. The digest comes
-# from [harness/table_digest.py], which BOTH SIDES INVOKE: the two records are
+# from [harness/dump_tables.py --table-digest], which BOTH SIDES INVOKE: the two records are
 # compared byte for byte with `cmp -s', so one producer is the only design under
 # which two independently taken records can agree.
 #
@@ -4810,7 +4879,7 @@ acas_py_run_operations() {
     # cycle that ran, and admitting it as a behavioural difference would let it
     # continue past stage 6 into a dump, a normalisation and a diff, and be attested
     # as a measured semantic difference. Exit EX_ASSERT rather than EX_BEHAVIOUR so
-    # harness/run_parity.sh STOPS the protocol -- 69 is the one status it continues
+    # the protocol STOPS -- 69 is the one status it continues
     # through -- and so tests/conftest.py bands it as `harness-fault'.
     if ! acas_py_status_is_semantic "$operation" "$rc"; then
       local admitted
@@ -5179,12 +5248,12 @@ acas_py_assert_repo_untouched() {
 # this stage PRINTS passes `--all-in-scope' explicitly rather than pointing the
 # tool at the scenario file, so the bound a hand-driven capture will use is in the
 # line an operator copies and in the run log this stage writes. It is the same
-# bound stages 3 and 7 of [harness/run_parity.sh] use, so the attested capture the
+# bound stages 3 and 7 use, so the attested capture the
 # protocol takes compares the same 22 tables on both sides.
 #
 # An artifact that is written to be overwritten is not a convenience, it is a
-# second owner of the evidence. So it is gone. Stage 3 and stage 7 of
-# [harness/run_parity.sh] -- and `dump()` in [tests/conftest.py] -- invoke
+# second owner of the evidence. So it is gone. Stage 3 and stage 7 -- driven by hand
+# or by `dump()` in [tests/conftest.py] -- invoke
 # dump_tables.py AFTER the runner has exited, which is the only moment at which the
 # status is final and the attestation can be true. That capture is the only one.
 #
@@ -5212,7 +5281,7 @@ acas_py_capture_command() {
 acas_py_capture() {
   ACAS_PY_CURRENT_STAGE='naming the capture the protocol will take'
   #  "Check", not "Stage": the protocol's stage numbering is owned by
-  #  harness/parity_stages.sh, and this runner's own checks are local to it.
+  #  harness/normalize.py, and this runner's own checks are local to it.
   acas_py_stage 'Check 7/8: the state capture -- owned by the protocol, not by this stage'
 
   ACAS_PY_CAPTURE_DIR="$ACAS_PY_OUT_DIR/$ACAS_PY_SCENARIO/$ACAS_PY_SIDE"

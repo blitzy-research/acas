@@ -5,11 +5,11 @@
 """Compare two normalised dumps. AN EMPTY DIFF IS THE PASS CONDITION.
 
 Stage 10 of the parity protocol, and the only arbiter in it. The stage list itself
-lives in [harness/parity_stages.sh ACAS_PARITY_STAGES], which
-[harness/run_parity.sh ACAS_PARITY_STAGE_REGISTRY] reads and
-`run_parity.sh --print-stages' prints. It is the stage older prose in this
+lives in [harness/normalize.py PARITY_STAGES], which
+[harness/normalize.py parity_stage_shell] reads and
+`harness/normalize.py --print-stages' prints. It is the stage older prose in this
 repository calls "stage 8", from the Agent Action Plan's eight logical stages
-(section 0.3.2); the driver makes both normalisations and the publication check
+(section 0.3.2); the protocol makes both normalisations and the publication check
 explicit, which is what turns eight into ten. Exit 0 with empty
 output means the Python cycle reproduced the compiled COBOL exactly; exit 1 means
 a real behavioural difference; exit 2 means the comparison could not be performed
@@ -1740,8 +1740,9 @@ def assert_same_provenance(
                 f"(recorded run status {recorded!r}). Two captures taken after runs "
                 f"that never happened are trivially equal, and equality is the pass "
                 f"condition -- which is why this is refused here rather than compared. "
-                f"Run the ten stages in order; harness/run_parity.sh does it and binds "
-                f"one run id through every one of them."
+                f"Run the ten stages in order with one run id bound through all of "
+                f"them: export ACAS_PARITY_RUN_ID before stage 1 (README section 8), "
+                f"or let tests/conftest.py bind it for the composed protocol."
             )
 
     for key in must_match:
@@ -1756,8 +1757,8 @@ def assert_same_provenance(
             raise ManifestError(
                 f"the provenance field {key!r} is empty on {whose}. It is required: a "
                 f"verdict that cannot state it is a verdict about an unidentified pair "
-                f"of captures. Re-run the protocol from stage 1 so that "
-                f"harness/run_parity.sh binds one run id through every stage."
+                f"of captures. Re-run the protocol from stage 1 with ACAS_PARITY_RUN_ID "
+                f"bound through every stage (README section 8)."
             )
         if not left_value or not right_value:
             # The identity requirement was waived, so an empty field is accepted and
@@ -1917,8 +1918,8 @@ def assert_attested(
             f"This is refused rather than reported as a pass because an empty "
             f"diff is the only pass condition the protocol has (Agent Action "
             f"Plan section 0.8.5), and two captures taken after failed runs "
-            f"produce exactly that. Run the ten stages in order -- "
-            f"harness/run_parity.sh does it and stops at the first failure. "
+            f"produce exactly that. Run the ten stages in order and stop at the "
+            f"first failure. "
             f"--allow-unattested waives this and forfeits the claim that the "
             f"verdict is evidence (rule R-6)."
         )
@@ -2218,8 +2219,8 @@ def _validate_table_selection(tables: Sequence[str]) -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 #  ⭐ THE SHARED SCENARIO PARSER IS RESOLVED BY PATH, NOT BY NAME (finding MJ-17).
 #
-#  `harness/scenario_yaml.py` is a SIBLING FILE, not an installed package, so a bare
-#  `import scenario_yaml` resolves only when this directory already sits on `sys.path`.
+#  `harness/normalize.py` is a SIBLING FILE, not an installed package, so a bare
+#  `import normalize` resolves only when this directory already sits on `sys.path`.
 #  That holds when this module is run as a script from `harness/` and does NOT hold
 #  when a test loads it by path, which made the import ORDER-DEPENDENT: it resolved if
 #  some other harness module had inserted the directory first and failed otherwise.
@@ -2235,32 +2236,50 @@ def _validate_table_selection(tables: Sequence[str]) -> tuple[str, ...]:
 #  imported into test processes where a shadowing entry would be a real hazard.
 # ---------------------------------------------------------------------------
 def _load_scenario_yaml_module() -> Any:
-    """Load the sibling `scenario_yaml` module from this file's own directory.
+    """Load the sibling module that owns the shared scenario parser, by path.
+
+    The parser lives in `harness/normalize.py` (finding M-05): it was
+    `harness/scenario_yaml.py`, which is not one of the harness paths the Agent Action
+    Plan section 0.3.1 inventory names, and the canonicalisation module is where the
+    other definitions every consumer must agree on already live.
+
+    ⭐ REGISTERED IN `sys.modules` BEFORE EXECUTION, and removed again if execution
+    fails. Not optional: the module declares `@dataclass` classes with `slots=True`,
+    which rebuilds each class and makes `dataclasses` look the defining module up by
+    name - so an unregistered module fails with an `AttributeError` raised from inside
+    the standard library, naming neither this call nor the real cause.
 
     Returns:
-        The executed `scenario_yaml` module, whose `load_scenario_yaml` rejects a
-            duplicate key instead of applying last-one-wins.
+        The executed module, whose `load_scenario_yaml` rejects a duplicate key instead
+            of applying last-one-wins.
 
     Raises:
         ImportError: The sibling file is absent or cannot be executed - which includes
-            PyYAML being unavailable, since `scenario_yaml` imports it at module
-            scope. The message names which of the two it was, so the caller's refusal
-            can say what is actually missing.
+            PyYAML being unavailable, since the loader types it builds subclass PyYAML's.
+            The message names which of the two it was, so the caller's refusal can say
+            what is actually missing.
     """
     import importlib.util  # noqa: PLC0415 - lazy, alongside the import it performs
 
-    sibling = Path(__file__).resolve().parent / "scenario_yaml.py"
+    sibling = Path(__file__).resolve().parent / "normalize.py"
     if not sibling.is_file():
         raise ImportError(
             f"the shared duplicate-rejecting scenario parser is absent: {sibling}"
         )
-    spec = importlib.util.spec_from_file_location(
-        "acas_harness_scenario_yaml", sibling
-    )
+    module_name = "acas_harness_normalize_scenario_parser"
+    cached = sys.modules.get(module_name)
+    if cached is not None:
+        return cached
+    spec = importlib.util.spec_from_file_location(module_name, sibling)
     if spec is None or spec.loader is None:  # pragma: no cover - defensive
         raise ImportError(f"the shared scenario parser is not loadable: {sibling}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
     return module
 
 
@@ -2296,11 +2315,11 @@ def scenario_expects_empty_state(path: Path | str | None) -> bool:
         #  scenario definition carries the destructive answers, the fan-out switch
         #  that decides which tables a run touches and the comparison bound. Imported
         #  lazily, by sibling name, so this module still imports without PyYAML.
-        scenario_yaml = _load_scenario_yaml_module()
+        parser_module = _load_scenario_yaml_module()
     except ImportError as exc:
         raise ScenarioFileError(
             f"the shared scenario parser could not be loaded, so a scenario "
-            f"definition cannot be read: {exc}. harness/scenario_yaml.py is "
+            f"definition cannot be read: {exc}. harness/normalize.py is "
             f"the shared duplicate-rejecting loader and requirements.txt pins "
             f"PyYAML==6.0.3; the message above names which of the two was "
             f"missing, because they have different remedies."
@@ -2308,7 +2327,7 @@ def scenario_expects_empty_state(path: Path | str | None) -> bool:
 
     source = Path(path)
     try:
-        document = scenario_yaml.load_scenario_yaml(
+        document = parser_module.load_scenario_yaml(
             source.read_text(encoding="utf-8")
         )
     except OSError as exc:
@@ -2368,13 +2387,13 @@ def scenario_tables(path: Path | str) -> tuple[str, ...]:
         #  scenario definition carries the destructive answers, the fan-out switch
         #  that decides which tables a run touches and the comparison bound. Imported
         #  lazily, by sibling name, so this module still imports without PyYAML.
-        scenario_yaml = _load_scenario_yaml_module()
+        parser_module = _load_scenario_yaml_module()
     except ImportError as exc:
         raise ScenarioFileError(
             f"the shared scenario parser could not be loaded, so a scenario "
             f"definition cannot be read: {exc}. The two possible causes have "
             f"different remedies, which is why this message names the one that "
-            f"applied: harness/scenario_yaml.py is the shared "
+            f"applied: harness/normalize.py is the shared "
             f"duplicate-rejecting loader, and requirements.txt pins "
             f"PyYAML==6.0.3. Pass --tables instead to name the tables directly."
         ) from exc
@@ -2390,7 +2409,7 @@ def scenario_tables(path: Path | str) -> tuple[str, ...]:
         ) from exc
 
     try:
-        document = scenario_yaml.load_scenario_yaml(text)
+        document = parser_module.load_scenario_yaml(text)
     except yaml.YAMLError as exc:
         raise ScenarioFileError(
             f"the scenario definition {source} is not valid YAML: {exc}"
@@ -3014,8 +3033,8 @@ def invalidate_verdict(target: Path) -> None:
     """Remove any verdict manifest already at `target`, before comparing anything.
 
     THE REASON THIS EXISTS (finding F-35, rule R-6). The verdict manifest is the
-    machine-readable claim that a scenario reached parity, and `harness/run_parity.sh`
-    refuses to report IDENTICAL without one. A stale manifest surviving an error path
+    machine-readable claim that a scenario reached parity, and
+    `docs/migration/scenario-diff-evidence.md` cites one per scenario. A stale manifest surviving an error path
     would therefore let a run that never reached the comparison inherit the previous
     run's verdict - which is the exact failure the manifest exists to prevent. It goes
     first, before a single dump is read, exactly as the report does.
@@ -3032,10 +3051,7 @@ def invalidate_verdict(target: Path) -> None:
     except OSError as exc:
         raise ReportPathError(
             f"could not remove the previous verdict manifest {target} before "
-            f"comparing: {exc}. It has to go first: harness/run_parity.sh reads "
-            f"this file to decide whether a scenario may be reported IDENTICAL, "
-            f"so a stale one surviving an error path would let this run inherit "
-            f"the previous run's verdict."
+            f"comparing: {exc}. It has to go first: this file IS the published claim that a scenario may be reported IDENTICAL, so a stale one surviving an error path would let this run inherit the previous run's verdict."
         ) from exc
 
 
@@ -3051,7 +3067,7 @@ def _provenance_field(
     Returns:
         The recorded value, or None when there is no manifest or no such key. None
         is meaningful in the published verdict: it says this comparison carried no
-        provenance, which is what stops `harness/run_parity.sh` claiming parity from
+        provenance, which is what stops a reader claiming parity from
         it (finding F-15).
     """
     if manifest is None:
@@ -3103,8 +3119,8 @@ def build_verdict(
     that compared twenty-two tables and found no difference from a run whose
     `diff.txt` happened to be absent or empty for some other reason. The verdict
     manifest states the outcome explicitly, names how much was compared, and carries
-    the provenance the two sides agreed on - so `harness/run_parity.sh`, the scenario
-    tests and the migration's diff evidence all read a claim rather than infer one.
+    the provenance the two sides agreed on - so the scenario
+    tests and the migration's diff evidence read a claim rather than infer one.
 
     It is published on BOTH outcomes. A `different` verdict is evidence too: it is
     what an ambiguity resolution cites when the compiled oracle is interrogated
@@ -3259,7 +3275,7 @@ def publish_verdict(
 
     A comparison that completed has already produced its finding, and the exit
     status carries it. A verdict manifest that cannot be written must therefore be
-    REPORTED loudly - `harness/run_parity.sh` will refuse to claim parity without
+    REPORTED loudly - no parity may be claimed without
     it, which is the intended consequence - but must not turn a completed
     comparison into `EX_ERROR`, because that would lose the finding itself.
 
@@ -3283,7 +3299,7 @@ def publish_verdict(
         _warn(
             f"no verdict manifest was published: no --out was given, so there "
             f"is no output directory to put {VERDICT_FILENAME} in. "
-            f"harness/run_parity.sh will not report parity from this run."
+            f"No parity may be reported from this run."
         )
         return None
     try:
@@ -3477,9 +3493,10 @@ both captures must attest a successful run, and both must not be empty
   a scenario whose expected end state really is all-empty declares
   `expect_empty_state: true' and is compared on that declaration.
   --allow-unattested waives both and forfeits the same claim.
-  The ten stages are driven in order by [harness/run_parity.sh], which
-  stops at the first non-zero -- which is the reason neither refusal
-  should ever fire in a protocol run.
+  The ten stages are driven in order -- by hand as README section 8
+  sets out, or composed by [tests/conftest.py] -- and stopped at the
+  first non-zero, which is the reason neither refusal should ever fire
+  in a protocol run.
 
 exit codes
   0  identical           stdout is EMPTY - that is the pass condition
@@ -3959,7 +3976,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _assert_writable(report_path, env)
             # INVALIDATE THE ACCEPTED OUTPUT NOW, before a dump is read. Both
             # artifacts: a stale verdict manifest is the more dangerous of the two,
-            # because harness/run_parity.sh reads it as this run's parity claim
+            # because it IS this run's published parity claim
             # (findings F-35 and F-15).
             invalidate_report(report_path)
             stale_verdict = verdict_path_for(report_path)

@@ -995,7 +995,7 @@ def _split_post_key(hv_post_key: Decimal) -> tuple[int, int]:
 
     The rule is stated here rather than imported because
     ``acas_posting.cobol`` is outside this module's dependency set (section 0.4.3);
-    ``tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py`` asserts that
+    ``tests/arithmetic/test_comp_binary.py`` asserts that
     this function agrees with ``acas_posting.cobol.usage.decode`` so the two cannot
     drift apart.
 

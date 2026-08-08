@@ -383,7 +383,7 @@ exist made two tests in this file read as anomaly locks when they were end-state
 agreement checks over a run in which neither skip occurred.
 
 BOTH SKIPS ARE DRIVEN AT THE UNIT LEVEL INSTEAD, against the SHIPPED program:
-`tests/arithmetic/test_gl072_shipped_silent_skips.py` drives
+`tests/arithmetic/test_ledger_balance_accumulation.py` drives
 `acas_posting/programs/gl072_transaction_update.py` through each branch with a fake
 facade and asserts a POSITIVE WITNESS for each - no batch lookup at all for skip (a), the
 lookup pair `[7, 7]` with no nominal read for skip (b) - plus the absence of any effect
@@ -647,8 +647,8 @@ def parity(protocol: object, _parity_cache: dict[str, object]) -> object:
 
     EIGHT LOGICAL STAGES, TEN NUMBERED ONES. Agent Action Plan section 0.3.2 fixes the
     order as "seed, run, dump, normalize, reset, run, dump, diff" - eight. The driver
-    `harness/run_parity.sh` numbers ten, reading the list from
-    `harness/parity_stages.sh`, because it makes BOTH normalisations and the publication
+    The PROTOCOL numbers ten, reading the list from
+    `harness/normalize.py`, because it makes BOTH normalisations and the publication
     check explicit rather than implied. Nothing was added to the protocol; where older
     prose says "stage 8" it means today's stage 10, the diff. The runners' own
     `Check n/8' headings are their internal preflight checks and are not protocol
@@ -725,7 +725,7 @@ def parity(protocol: object, _parity_cache: dict[str, object]) -> object:
     # BOTH SIDES STARTED FROM THE SAME RECORDED SEEDED STATE. One line per bounded
     # table in the declared order plus the parameter row, each line carrying the table
     # name, its ROW COUNT and a SHA-256 of its canonical primary-key-ordered dump -
-    # produced for both sides by the one producer, harness/table_digest.py. The digest is
+    # produced for both sides by the one producer, harness/dump_tables.py --table-digest. The digest is
     # what makes the claim mean something: equal counts with different VALUES is exactly
     # the case a count-only record could not see, and it is the case a reset that
     # restored the wrong rows would produce. Stage 5 drops and re-applies all 33 tables
@@ -897,10 +897,12 @@ def test_scenario_definition_preconditions(
     `Bcycle` [copybooks/wsbatch.cob:L34] must equal it, or the cycle filters at
     [general/gl070.cbl:L312-L313] and [general/gl070.cbl:L457-L458] skip the batch and
     the run posts nothing at all. `period` is INERT on this route,
-    because only `gl_end_of_cycle` consumes it. That operation IS driven, by the
-    `end_of_cycle_gl` scenario, which is where the period boundary and the quarter
-    rollover are observed; appending it to THIS scenario was considered and
-    DECLINED on six recorded grounds, and that decision is oracle-reversible in
+    because only `gl_end_of_cycle` consumes it. NO committed scenario drives that
+    operation: a dedicated `end_of_cycle_gl` definition observed the period boundary and
+    the quarter rollover and was removed by findings M-09 and M-17, which hold the tree
+    to the Agent Action Plan's eight. Appending it to THIS scenario was separately
+    considered and DECLINED on six recorded grounds, none of which the removal touches,
+    and that decision is oracle-reversible in
     `docs/migration/ambiguity-resolutions.md` rather than re-litigated.
 
     NO MONETARY OR QUANTITY VALUE IS READ FROM THE YAML AND NONE COULD BE (R-2): YAML
@@ -1048,7 +1050,9 @@ def test_scenario_definition_preconditions(
         f"finding."
     )
     # DECLARED AND INERT: this route never reaches gl080, so nothing reads `period`
-    # here. The scenario that does drive it is `end_of_cycle_gl`. Its presence is asserted; its value is not interpreted, because
+    # here, and no committed scenario drives that operation at all (the `end_of_cycle_gl`
+    # definition that did was removed by findings M-09 and M-17).
+    # Its presence is asserted; its value is not interpreted, because
     # interpreting a declared value and judging it would be the added validation R-3
     # forbids.
     assert type(system["period"]) is int, (
@@ -1446,7 +1450,7 @@ def test_a13_non_numeric_batch_number_skipped_silently(
     while proving nothing about it.
 
     WHERE THE BRANCH IS ACTUALLY DRIVEN, so that the pair of claims is complete.
-    `tests/arithmetic/test_gl072_shipped_silent_skips.py` drives the SHIPPED
+    `tests/arithmetic/test_ledger_balance_accumulation.py` drives the SHIPPED
     `acas_posting/programs/gl072_transaction_update.py` with a work-file record whose
     `post-batch` is `'1234X'` - reachable because the shipped line-sequential work file
     is TEXT and `acas_posting.cobol.move.is_numeric_class` answers False for it - and
@@ -1558,7 +1562,7 @@ def test_a13_we_error_999_record_skipped_silently(
     L306-L307 on this route. An earlier form of this test read as a reproduction of skip
     (b); it was an end-state agreement claim over a run in which the skip never occurred.
 
-    WHERE THE BRANCH IS ACTUALLY DRIVEN. `tests/arithmetic/test_gl072_shipped_silent_skips.py`
+    WHERE THE BRANCH IS ACTUALLY DRIVEN. `tests/arithmetic/test_ledger_balance_accumulation.py`
     drives the SHIPPED `acas_posting/programs/gl072_transaction_update.py` against a
     not-waiting batch and asserts a POSITIVE WITNESS that the sentinel arm ran - the
     facade recorded the two batch lookups `[7, 7]` and NO `gl_nominal_read_next` at all,
@@ -1707,7 +1711,7 @@ def test_the_run_reproduced_the_measured_no_op_rather_than_posting(
 
     WHAT IT STILL DOES NOT PROVE. It does not prove either silent skip executed; this
     fixture cannot reach them, for the reasons the module docstring gives, and
-    `tests/arithmetic/test_gl072_shipped_silent_skips.py` drives both branches against
+    `tests/arithmetic/test_ledger_balance_accumulation.py` drives both branches against
     the shipped program instead.
 
     Args:
@@ -2171,7 +2175,7 @@ def test_unwaiting_batch_is_not_stamped(
 #
 #  WHY THE EXPECTED ANSWER IS "UNCHANGED", AND WHY THAT IS NOT A WEAK CLAIM. Under
 #  ANOMALY N-KEY - derived and measured in the scenario file, and locked against the
-#  migrated code by tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py
+#  migrated code by tests/arithmetic/test_comp_binary.py
 #  section 19 - the POST-KEY a seeded posting row carries cannot be decoded back
 #  into its batch number, so gl070 discards the row at
 #  [general/gl070.cbl:L492-L493] and pretrans.tmp is left ZERO BYTES long. Nothing
@@ -2790,9 +2794,11 @@ def test_system_record_parity_by_digest_as_well_as_by_dump(parity: object, proto
     one-shot latches, and `Date-Form`, which the frozen date sections write back
     [copybooks/wssystem.cob:L127] - and the digest HOLDS on all four scenarios that
     declare `unchanged` and MOVES on every one that declares `changed`. That was measured
-    over the eight scenarios that existed when the measurement was taken, which is all
-    four `unchanged` ones; the ninth, `end_of_cycle_gl`, declares `changed` and moves the
-    row by construction, Phase 5 advancing the cycle and rotating the quarter counter.
+    over the eight committed scenarios, which is all four `unchanged` ones; the `changed`
+    half was established on a ninth, `end_of_cycle_gl`, which declared `changed` and moved
+    the row by construction, its Phase 5 advancing the cycle and rotating the quarter
+    counter -- that scenario has since been removed (findings M-09 and M-17), and the
+    observation is recorded because it is what established that half.
     So declaring the row falsifies no effect claim; the digest is the belt to the dump's
     braces.
 

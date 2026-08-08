@@ -3084,9 +3084,42 @@ def _disk_change_accept_option(st: _Gl080Storage) -> bool:
     # accepts the computed path - which is why NOT supplying an override is
     # ACCEPTED and not UNRESOLVED. `archive_path_override is None` is that
     # operator.
-    if st.archive_path_override is not None:
-        candidate = move.move(
-            st.archive_path_override, _FILE_2, sending_field=_FILE_2
+    #
+    # ⭐ AN OVERRIDE OVERWRITES IN PLACE; IT DOES NOT REPLACE THE FIELD. Question
+    # `Q-GL084-ACCEPT-SEMANTICS` asked whether typed text REPLACES the presented
+    # content or is INSERTED into it, and the compiled answer is NEITHER: it
+    # overwrites from position 1 and leaves everything beyond what was typed
+    # exactly as the field already held it. MEASURED (2026-08-08) on the harness
+    # image's own `cobc (GnuCOBOL) 3.2.0` over a real 24x80 pty, with the frozen
+    # declaration `03 file-2 pic x(532) value "archive.dat"`
+    # [copybooks/file02.cob:L1] and the frozen statement form
+    # [general/gl080.cbl:L555]: a field presented holding `archives/archive.dat`
+    # and given the two keystrokes `XY` followed by Return came back holding
+    # `XYchives/archive.dat`, and the same field given a BARE Return came back
+    # unchanged. So an override shorter than the computed path leaves the
+    # computed path's tail in place, and an EMPTY override is the bare Return.
+    #
+    # This function used to assign the override as a whole-field `MOVE`, which is
+    # a THIRD reading - the operator typing and then clearing the tail - and one
+    # no probe could make the compiled accept produce. Reproducing what was
+    # measured rather than what was assumed is rule R-6; carrying the whole-field
+    # replacement would be added behaviour under rule R-3. The path is a flat
+    # file and not a schema table, so no scenario diff can see the difference,
+    # which is precisely why it had to be measured rather than inferred from a
+    # green run. The register records the reading and its bound.
+    if st.archive_path_override is not None and st.archive_path_override != "":
+        # 555 accept file-2 ... with update. The typed characters overwrite the
+        # leading positions of the field's presented content; the rest stands.
+        typed = move.move(
+            st.archive_path_override,
+            picture.descriptor_for(
+                f"x({len(st.archive_path_override)})",
+                name="file-2-typed",
+                source_locator="general/gl080.cbl:L555",
+            ),
+        )
+        candidate = move.ref_mod_into(
+            st.file_defs.file_defs_a.file_2, 1, len(typed), typed
         )
         # 556 if file-2 (1:1) = space ONE-BASED reference modification, delegated. Never
         # a Python slice.

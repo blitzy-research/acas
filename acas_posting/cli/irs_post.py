@@ -360,7 +360,7 @@ def _build_parser() -> argparse.ArgumentParser:
     #  process-listing leak besides. Deployment security is resolved ONCE, outside
     #  the accounting path, from the same contract the six connection parameters
     #  come from: `args.install_connection_policy` reads it through
-    #  `cli/rdbms_params.resolve_transport_policy` while the linkage is bound, and
+    #  `cli/args.resolve_transport_policy` while the linkage is bound, and
     #  every handler observes the installed policy without being told. It decides
     #  no posted figure, so it cannot make two runs of one scenario differ (R-6).
 
@@ -512,7 +512,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             argument that has no defensible default must fail loudly rather than
             be invented, which is what keeps an ambient run date out of the
             cycle (rule R-6).
-        acas_posting.cli.rdbms_params.RdbmsParamError: the deployment contract
+        acas_posting.cli.args.RdbmsParamError: the deployment contract
             for the database connection is absent or unusable. Propagated
             deliberately, on the binder's own documented terms - a run that
             cannot connect to the provisioned database must stop before it

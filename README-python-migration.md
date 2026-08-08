@@ -29,10 +29,11 @@ before you read anything else about parity, then §9.4 for the second measured
 obstacle (the frozen loaders never reach a `COMMIT`), then
 [`docs/migration/scenario-diff-evidence.md`](docs/migration/scenario-diff-evidence.md)
 §0, which is the evidence register and states, verdict by verdict, what has and
-has not been established. `harness/run_parity.sh` enforces this rather than
-trusting a reader's diligence: with no attested frozen oracle it stops at exit
-**77 — EVIDENCE UNAVAILABLE**, a status deliberately distinct from "the two
-states differ", and against a transformed diagnostic oracle it marks every
+has not been established. **`harness/reset_db.sh` enforces this rather than
+trusting a reader's diligence**: with no attested frozen oracle it stops at exit
+**77 — EVIDENCE UNAVAILABLE** before it drops a table, a status deliberately
+distinct from "the two states differ", and against a transformed diagnostic
+oracle it discloses on every exit path that it marks every
 verdict **NO PARITY CLAIM**.
 
 WARNING: this migration **targets behavioural exactness** — it is not a clean-up
@@ -433,7 +434,7 @@ tests/
 ├── scenarios/                end-to-end state parity. Needs the Compose stack
 └── determinism/              two runs under one pinned clock must be byte-identical
 harness/                      the compiled oracle. NEVER on the package import path
-└── scenarios/                9 YAML definitions: the 8 mandated + end_of_cycle_gl
+└── scenarios/                8 YAML definitions: exactly the 8 AAP §0.8.5 mandates
 pyproject.toml                requires-python "==3.12.*", pinned deps, pytest config
 requirements.txt              ALL THREE dependency sets, hash-pinned, in one file
 README-python-migration.md    this file
@@ -456,21 +457,28 @@ scripts "are listed individually in §0.4.1 rather than folded into a pattern,
 **because each has a distinct source and a distinct set of changes**", which is a
 statement about documentation granularity, not about exclusivity.
 
-Four files sit outside the illustrative tree and inside those patterns:
+**Two MODES of listed files sit outside the illustrative tree and inside those
+patterns.** Neither is a file of its own:
 
-| File | Covered by | Why it exists rather than being folded into a listed file |
+| Mode | Covered by | Why it exists rather than being folded away too |
 | --- | --- | --- |
-| `acas_posting/cli/rdbms_params.py` | `acas_posting/cli/*.py` (§0.2.1.2, §0.4.4) | The single process-boundary resolver for connection parameters and for the deployment's transport declaration — exact-parity by default, hardened only when named (§8.1a). §0.4.1.1 gives `cli/args.py` a different job — binding argv to `WS-Calling-Data` — and putting deployment security policy inside the argument binder would couple two concerns that are separately testable, and separately wrong when coupled |
-| `harness/run_parity.sh` | `harness/*` (§0.2.1.2), `harness/**` (§0.2.1.3) | The ten-stage protocol driver. §0.8.5 defines acceptance as *seed → run compiled → dump → reset → run Python → dump → diff*, and §0.3.2 says explicitly that deterministic staged orchestration "justifies the rigid stage ordering baked into the harness scripts". One driver that cannot be run out of order **is** that design; the alternative is a documented sequence a human retypes, which is the failure mode §0.3.2 warns against |
-| `harness/build_fixtures.sh` | `harness/*`, `harness/**` | Generates the seed flat files each scenario declares. §0.2.1.1 puts `common/masterLD.sh` and the `*LD.cbl` loaders in scope "as the specification for how the harness seeds a scenario", and §0.4.1.7 gives `harness/seed.sh` the job of reproducing that per-file contract — which presupposes the files exist. Something has to produce them |
-| `harness/make_fixtures.py` | `harness/*`, `harness/**` | The generator `build_fixtures.sh` drives. It is separate because it emits COBOL, and emitting COBOL safely requires the literal-encoding guard that a shell script cannot express — see §12's note on generated-source safety |
+| `harness/seed.sh --build-fixtures` | `harness/*`, `harness/**` | Generates the seed flat files each scenario declares. §0.2.1.1 puts `common/masterLD.sh` and the `*LD.cbl` loaders in scope "as the specification for how the harness seeds a scenario", and §0.4.1.7 gives `harness/seed.sh` the job of reproducing that per-file contract — which presupposes the files exist. Something has to produce them |
+| `harness/dump_tables.py --make-fixtures` | `harness/*`, `harness/**` | The generator `harness/seed.sh --build-fixtures` drives. It lives in `dump_tables.py` because that module already owns the record layout and a value's external form; it stays a distinct mode because it emits COBOL, and emitting COBOL safely requires the literal-encoding guard a shell script cannot express — see §12's note on generated-source safety |
+
+**The ten-stage driver is NOT among them any longer.** `harness/run_parity.sh` was
+the last file justified on this reasoning, and it is gone (finding M-06): the
+Agent Action Plan's harness inventory names eleven files plus `scenarios/` and it was
+not among them, and §0.8.5's acceptance sequence is satisfied by the stages themselves. Every gate it
+uniquely owned moved into the stage that owns the state it protects and the
+orchestration was already implemented in `tests/conftest.py` — §11.1 tabulates
+where each went, and §11.1a is the operator's own ten-stage recipe.
 
 **What was NOT retained on this reasoning.** The same review flagged
 `requirements-harness.txt` and `requirements-dev.txt`, and those were **removed**,
 because §0.2.1.2 names the dependency artifacts *without* a wildcard — exactly two
 files, `pyproject.toml` and `requirements.txt` — and §0.5.1 states the inventory as
 one table. A named list and a trailing wildcard are different instruments, and the
-distinction is the whole reason four files were kept and two were not. §7 records
+distinction is the whole reason these were kept and those two were not. §7 records
 the consolidation.
 
 Three structural decisions in that layout are load-bearing rather than
@@ -489,34 +497,55 @@ stylistic:
   `gl071` `[copybooks/wsnames.cob:L15-L16]`, so nothing about them reaches the
   database and nothing about them appears in a table dump.
 
-### 5.1 Four files the plan covers by wildcard rather than by name
+### 5.1 Three files the plan covers by wildcard rather than by name
 
-The Agent Action Plan names most target files individually, but four are reached
+The Agent Action Plan names most target files individually, but three are reached
 only through its **trailing wildcards**. They are listed here explicitly, because
 a reader comparing the tree against the plan's per-file tables will not find them
 there and should not have to guess whether they were smuggled in.
 
+There were more. `acas_posting/cli/rdbms_params.py` is now SECTION 0 of
+`acas_posting/cli/args.py`; `harness/scenario_yaml.py` and
+`harness/scenario_stream.py` are the shared parser and the `--scenario-stream` mode
+of `harness/normalize.py`; `harness/parity_stages.sh` is `PARITY_STAGES` in that
+same file, published through `--print-stages` and `--print-stage-shell`;
+`harness/table_digest.py` is the `--table-digest` mode of
+`harness/dump_tables.py`; `harness/build_fixtures.sh` and `harness/make_fixtures.py`
+are the `--build-fixtures` mode of `harness/seed.sh` and the `--make-fixtures` mode
+of `harness/dump_tables.py`; and `harness/run_parity.sh` is gone entirely, its gates
+moved into `harness/reset_db.sh` and `harness/run_cobol_scenario.sh` and its
+orchestration already present in `tests/conftest.py` (§11.1). Each was folded into
+the listed file whose job it already shared, so the definitions are unchanged and
+there are fewer paths to keep in step.
+
 | File | Covered by | Why it exists |
 |---|---|---|
-| `acas_posting/cli/rdbms_params.py` | §0.2.1.2 "Package and entry points: … `acas_posting/cli/*.py`", repeated in the §0.4.4 pattern table | The connection parameters the frozen COBOL reads from `~/ACAS/acas.param` and the `RDB-Data` block `[copybooks/wsfnctn.cob:L57-L64]`, including the carrier widths — `DB-Port` reaches the bridges through a FOUR-character carrier `[common/acas-get-params.cbl:L158]`, `[copybooks/mysql-variables.cpy:L91]`, while the stored width is five `[copybooks/wssystem.cob:L142]`. Keeping that in one module is what lets every client agree on it. |
-| `harness/build_fixtures.sh` | §0.2.1.2 "Oracle harness: `harness/*`" | The frozen loaders read COBOL flat files, and most are `ORGANIZATION INDEXED` — a Berkeley DB Btree whose on-disk form belongs to the library version the image carries. Fixtures must therefore be **generated by compiled COBOL**, not hand-written. See §8.8. |
-| `harness/make_fixtures.py` | §0.2.1.2 "Oracle harness: `harness/*`" | Generates the per-file COBOL writer that `build_fixtures.sh` compiles, from each scenario's `seed_records`, so no record layout is ever restated by hand. |
-| `harness/run_parity.sh` | §0.2.1.2 "Oracle harness: `harness/*`" | The fail-closed ten-stage driver. The ordering *is* the evidence (§11.1), so a driver that aborts at the first non-zero and passes that status through verbatim is what stops a partial capture being carried forward — with one mandated exception, stage 6 exiting 69, described in §11.1 (finding MJ-05). |
+| `harness/seed.sh --build-fixtures` | §0.2.1.2 "Oracle harness: `harness/*`" | The frozen loaders read COBOL flat files, and most are `ORGANIZATION INDEXED` — a Berkeley DB Btree whose on-disk form belongs to the library version the image carries. Fixtures must therefore be **generated by compiled COBOL**, not hand-written. See §8.8. |
+| `harness/dump_tables.py --make-fixtures` | §0.2.1.2 "Oracle harness: `harness/*`" | Generates the per-file COBOL writer that `harness/seed.sh --build-fixtures` compiles, from each scenario's `seed_records`, so no record layout is ever restated by hand. |
 
 **The artifact boundary, measured rather than asserted.** Building the wheel and
 listing it shows the boundary holds: the distribution contains **only**
 `acas_posting/` and its `dist-info`. No `harness/`, no `tests/`, no `.cbl`,
-`.cob` or `.scb`, and no `.sql`. `pyproject.toml` sets
-`include-package-data = false` and names the two dictionary artifacts file by file
-rather than by glob, so nothing that lands in the checkout can reach the wheel by
-accident. `acas_posting.data_dictionary` is a **data directory, not an importable
-package** — it holds no module and is mapped from the top-level
-`data_dictionary/` through `[tool.setuptools.package-dir]`, reached only through
-`importlib.resources`.
+`.cob` or `.scb`, no `.sql`, and **no JSON** either. `pyproject.toml` constrains
+discovery with `[tool.setuptools.packages.find]` — `include = ["acas_posting*"]`
+against an explicit `exclude = ["harness*", "tests*", "docs*",
+"data_dictionary*"]` — and sets `include-package-data = false`, so what ships is
+the seven code packages and nothing that happens to be lying in the checkout.
+**The generated dictionary is a top-level sibling and stays one:** Agent Action
+Plan §0.3.1 fixes it at `data_dictionary/`, so it is neither relocated into the
+package by a `package-dir` mapping nor carried as `package-data`, and
+`acas_posting/dictionary/loader.py` resolves exactly that committed path. One
+artifact, one location, no possibility of two copies disagreeing.
 
-So of the four, exactly one ships — `rdbms_params.py`, which is a CLI module and
-belongs in the package the plan describes — and the three harness files do not,
-which is what R-1 requires of them.
+So neither mode ships: both belong to harness files, which is what R-1
+requires of them. **The connection-parameter resolver is no longer among them.**
+It used to be `acas_posting/cli/rdbms_params.py`; it is now SECTION 0 of
+`acas_posting/cli/args.py`, because §0.4.1.1 gives that module the job of binding
+the system records and the six `RDBMS-*` fields of `SYSTEM-REC` are part of
+exactly that binding — they are the only carrier by which a connection parameter
+reaches the handlers `[common/acas008.cbl:L558-L563]`. Every name it published is
+published unchanged from `args`, so a caller's import moves and nothing else
+about it does.
 
 ### Import boundaries — the layering contract
 
@@ -533,7 +562,7 @@ path.
 | `acas_posting/cli/*.py` | `programs`, `clock`, `cli.args` | `dal.acas*` directly, `harness` |
 | `tests/arithmetic/*` | `cobol`, `records` | `dal`, any database |
 | `tests/scenarios/*` | `cli`, the shared harness helpers | `dal` internals |
-| `harness/*` | the standard library, `PyYAML`, the driver | `acas_posting` internals other than the CLI |
+| `harness/*` | the standard library, `PyYAML`, the database driver | `acas_posting` internals other than the CLI |
 
 ---
 
@@ -594,7 +623,7 @@ dependency, with its pin:
 | runtime | `SQLAlchemy` | `2.0.51` | Declared because AAP §0.5.1 fixes the runtime closure at this name and this version | **No** — see the note below |
 | runtime | `greenlet` | `3.5.4` | `SQLAlchemy`'s own requirement, named as such by AAP §0.5.1 | **No** |
 | runtime | `typing_extensions` | `4.16.0` | `SQLAlchemy`'s own requirement | **No** |
-| harness | `PyYAML` | `6.0.3` | Parses the nine scenario definitions under `harness/scenarios/` | Yes, by the harness only |
+| harness | `PyYAML` | `6.0.3` | Parses the eight scenario definitions under `harness/scenarios/` | Yes, by the harness only |
 | dev | `pytest` | `9.1.1` | The test runner | Yes, by the tests only |
 | dev | `pytest-cov` | `7.1.0` | Coverage as traceability evidence (R-5), **not** a quality gate | Yes, by the tests only |
 
@@ -657,7 +686,7 @@ constructs an `Engine`, a `MetaData`, a `Table`, a mapped class, a `Session` or 
 async engine, so no schema can be generated and no coroutine scheduled even by
 accident. Two independent checks assert that rather than assuming it:
 
-- `tests/arithmetic/test_deployment_contract_boundaries.py` censuses every import
+- `tests/arithmetic/test_pic_field_descriptors.py` censuses every import
   under `acas_posting/` and requires the imported third-party set to be exactly
   `{mysql}`; requires `pyproject.toml`'s declared runtime set to be exactly the
   plan's closure, no wider and no narrower; requires `requirements.txt` to pin
@@ -858,9 +887,8 @@ spellings for it:
 
 `harness/docker-compose.yml` sets it for the internal network. The five harness
 scripts read it, and so does the shipped package, through one function —
-`acas_posting/cli/rdbms_params.read_declared_flag`, which
-`acas_posting/cli/args.py` also uses — so one exported value means one thing
-everywhere. Writing `false` grants nothing, and unrecognised text stops the run
+`read_declared_flag`, published by `acas_posting/cli/args.py` — so one exported
+value means one thing everywhere. Writing `false` grants nothing, and unrecognised text stops the run
 rather than resolving to either answer: this variable decides whether a
 credential and every posted figure may cross a network in the clear, and only
 the operator who typed it knows what was meant.
@@ -897,7 +925,7 @@ command is backgrounded.
 ⚠️ **`ACAS_SEED_AUTOCOMMIT=on` is REQUIRED to obtain a fixture, and it is a
 declared deviation from the AAP.** The default is the AAP-mandated `off` (§9.4), and
 without this flag every seeding stage — `harness/seed.sh`, `harness/reset_db.sh` and
-therefore stages 1 and 5 of the driver — exits **76**, "the seed reported success
+therefore protocol stages 1 and 5 — exits **76**, "the seed reported success
 and left no rows". That is not a harness bug: it is the reproduced legacy defect. The frozen loaders
 reach **no** `COMMIT` and **no** `ROLLBACK` — across all 28 `common/*LD.cbl`
 every `perform aa020-Rollback` is commented out, 78 sites and none live, and
@@ -1091,8 +1119,9 @@ unaffected.)
 
 **Consequence, stated plainly: on this checkout there is no frozen oracle, so no
 parity evidence can be produced.** No attestation is written, and
-`harness/run_parity.sh` reports exit **77 — EVIDENCE UNAVAILABLE**, a status
-deliberately distinct from "the two states differ". Nothing was compared.
+`harness/reset_db.sh` reports exit **77 — EVIDENCE UNAVAILABLE** before stage 1
+drops a table, a status deliberately distinct from "the two states differ".
+Nothing was compared.
 
 **The member is not fabricated.** It carries the SQLSTATE list the bridges
 document, and inventing a frozen source file would breach both R-3 (no new
@@ -1110,16 +1139,27 @@ a container-local `ACAS_BUILD` so the live build tree and the retained per-scena
 captures were left untouched. Observed: *"frozen oracle: no source transformation
 applied; the build copy is byte-for-byte the checkout"*, then **44** diagnostic lines
 naming **22 distinct** bridges, then *"FATAL: comp-common.sh produced 22 fatal
-diagnostic line(s)"* and **exit 74**. `harness/run_parity.sh` against an unattested
-build then exited **77** with *"Nothing was compared"* — before stage 1, so no
-database was touched. `docs/migration/scenario-diff-evidence.md` §0.1 tabulates both.
+diagnostic line(s)"* and **exit 74**. `harness/reset_db.sh` against an unattested
+build then exited **77** with *"Nothing was compared"* — before it dropped a single
+table, so no database was touched. `docs/migration/scenario-diff-evidence.md` §0.1 tabulates both.
 
 #### 8.7.1 What the shim is, and what it is measured to do
 
-An explicitly requested `--transformed-oracle` build materialises an idempotent,
-comments-only include under the **writable build copy** —
-`harness/copybook-shims/ACAS-SQLstate-error-list.cob`, 8 lines, not one of them a
+An explicitly requested `--transformed-oracle` build **generates** an idempotent,
+comments-only include under the **writable build copy**, at
+`$ACAS_BUILD/copybooks/ACAS-SQLstate-error-list.cob` — 13 lines, not one of them a
 statement. The checkout's own `copybooks/` is never written.
+
+**It is generated, not committed** (finding M-03).
+`[harness/build_oracle.sh acas_install_sqlstate_comment_shim]` emits the text, then
+**re-reads what it wrote** and fails the build if a single line is neither blank nor a
+`*>` comment, and logs a disclosure naming the absent archive member every time it
+runs. There is deliberately no repository copy: the Agent Action Plan's harness
+inventory does not name one, a committed file of that name is one a reader can mistake
+for archive material, and writing the member into `copybooks/` would be a fabricated
+frozen source whatever it contained (R-3, R-4, AAP §0.8.1). The transformation is
+registered in `ACAS_SOURCE_TRANSFORMS`, so any build carrying it attests
+`oracle-source-is-frozen no` and **no verdict from it is a parity claim**.
 
 Its content provably does not matter. Translating `glpostingMT.cbl` to C with
 `cobc -C` under three variants — the comment-only shim, a zero-byte member, and
@@ -1153,8 +1193,8 @@ then reads every file back through the same definitions and refuses the build
 unless the counts agree. No record layout is restated anywhere.
 
 ```bash
-$C /repo/harness/build_fixtures.sh                 # all scenarios
-$C /repo/harness/build_fixtures.sh clean_batch_gl  # one scenario
+$C /repo/harness/seed.sh --build-fixtures                 # all scenarios
+$C /repo/harness/seed.sh --build-fixtures clean_batch_gl  # one scenario
 ```
 
 The fixture stage is **not optional**, and it comes second for that reason.
@@ -1181,8 +1221,8 @@ TAB-separated `key<TAB>value` lines needing no parser:
 | `source-transforms`, `source-transform-set-sha256` | How many build-copy sources differ from the frozen checkout, and one digest over the whole disclosure so a consumer can compare two builds with a single value. |
 | `source-transform` × N | One record per transformed path: `source-transform<TAB>path<TAB>frozen-sha256<TAB>build-sha256<TAB>reason`. Both digests are published so a reader can recompute either side and diff the two trees. |
 
-`harness/run_parity.sh` **requires** the attestation before stage 2 and refuses to
-run the compiled cycle without it. It re-derives rather than trusts: it checks the
+`harness/reset_db.sh` **requires** the attestation at stages 1 and 5 and refuses to
+set up the comparison without it. It re-derives rather than trusts: it checks the
 recorded archive digest equals the recorded pin, requires
 `cobmysqlapi-provenance` to be one of the two legitimate values, re-computes
 the module-set digest from the modules **on disk** so that replacing a single
@@ -1207,8 +1247,8 @@ Two consequences to plan around:
   before producing evidence.
 - **Setting `ACAS_PRESQL2_SHA256`, or pointing `ACAS_COBMYSQLAPI_OBJ` anywhere
   other than `/usr/local/lib/acas/cobmysqlapi.o`, permanently marks that build as
-  unable to produce evidence.** The build still completes and still warns; the
-  parity driver then refuses it. To replace either legitimately, make it a
+  unable to produce evidence.** The build still completes and still warns;
+  `harness/reset_db.sh` then refuses to set up a comparison against it. To replace either legitimately, make it a
   **reviewed source change** — update the vendored archive and
   `ACAS_PRESQL2_SHA256_EXPECTED` together in the same commit — rather than setting
   a variable at run time.
@@ -1255,9 +1295,9 @@ reproduced. Forty of these transforms repair executable logic — `IF` scope,
 connection lifetime, credential propagation, stale reply pairs — so a build
 carrying them has repaired the specification. Comparing the migrated cycle against
 a repaired specification cannot establish that the migration reproduces the frozen
-one, which is why `harness/run_parity.sh` refuses such a build with exit 77 unless
-`--accept-transformed-oracle` is given, and marks every verdict from it **NO PARITY
-CLAIM** when it is.
+one, which is why `harness/reset_db.sh` refuses such a build with exit 77 unless
+`--accept-transformed-oracle` is given, and discloses **NO PARITY CLAIM** on every
+exit path when it is.
 
 **What they do not touch.** No arithmetic statement, no `ROUNDED` site, no sort
 key, no control-total comparison, no rejection path and no posted value. Each one
@@ -1266,9 +1306,12 @@ is a connectivity or `IF`-scope repair, stated per file in the attestation.
 **What that means for a verdict.** An empty diff obtained under
 `--accept-transformed-oracle` is agreement between the migrated cycle and a
 **disclosed-transformed, partly repaired** compiled oracle. It is not, and must not
-be described as, parity with the untouched checkout. Every
-`harness/run_parity.sh` summary prints that distinction beside its verdict, and the
-claim it records is `identical-against-diagnostic-oracle` rather than `identical`.
+be described as, parity with the untouched checkout.
+`harness/reset_db.sh` prints that distinction on every exit path of a waived run —
+*"an empty diff drawn against this oracle would say the migrated cycle matches a
+PATCHED system"* — and `tests/conftest.py` reports the oracle tiers UNAVAILABLE
+rather than passing them, unless `ACAS_ACCEPT_TRANSFORMED_ORACLE=1` asks for the
+same diagnosis. A verdict obtained either way is a diagnosis, not `identical`.
 **No result in this repository currently establishes parity against the frozen
 specification**, because the frozen specification does not presently compile (§8.7).
 `docs/migration/scenario-diff-evidence.md` states that position per scenario.
@@ -1300,9 +1343,9 @@ cannot live there. It says *where*, never *which*: the scenario's `seed_files`
 list stays the sole authority on what must be present, and every declared name is
 verified for presence and readability before a load program runs.
 
-`harness/run_parity.sh` and `harness/reset_db.sh` **default** it to the canonical
+`harness/reset_db.sh` and `harness/seed.sh` **default** it to the canonical
 fixture root — `$ACAS_FIXTURES`, or `$ACAS_DATA/fixtures` when that is unset, plus
-the scenario name, which is exactly where `harness/build_fixtures.sh` writes — so
+the scenario name, which is exactly where `harness/seed.sh --build-fixtures` writes — so
 the option is only needed for a fixture built somewhere else. `harness/seed.sh`
 itself takes no default, because it can be driven against an ambient data
 directory with no scenario at all.
@@ -1445,7 +1488,7 @@ capture reach a comparison whose pass condition is an empty diff.
   modes, so the mode is invisible to the frozen code. That is why the deviation is
   available at all; it is not why it could be silent. A fixture seeded this way is
   usable for development and diagnosis and is **not** AAP-conformant evidence, and
-  `harness/run_parity.sh` warns to that effect rather than describing it as though
+  `harness/seed.sh` warns to that effect rather than describing it as though
   it were. The measurements are written up in full at
   `docs/migration/ambiguity-resolutions.md`.
 
@@ -1576,10 +1619,11 @@ ACAS_PY_ACKNOWLEDGE_DESTRUCTIVE='<user>@<host>:<port>/<schema>'    # Python runn
 ```
 
 Each runner prints the exact string its own target needs, so there is nothing to
-guess at. **`harness/run_parity.sh` refuses both variables** — along with
+guess at. **A protocol-bound run refuses both variables** — along with
 `ACAS_RESET_ACKNOWLEDGE_DESTRUCTIVE`, `ACAS_RESET_ACKNOWLEDGE`,
 `ACAS_DB_ALLOWED_SCHEMAS` and `ACAS_DB_DISPOSABLE_HOSTS` — because evidence
-production may not be aimed by hand. Refused rather than quietly unset: an
+production may not be aimed by hand. Each stage refuses its own while
+`ACAS_PARITY_RUN_ID` is bound (§11.1a). Refused rather than quietly unset: an
 operator who set one deliberately is told the evidence driver will not honour it,
 instead of being left believing it applied.
 
@@ -1591,10 +1635,10 @@ exact capture command instead, so a hand-driven run copies one line.
 
 **`run_cobol_scenario.sh` drives the WHOLE ORDERED OPERATION LIST IN ONE
 INVOCATION**, and `--operation` is **repeatable** — `--operation NAME` may be
-given more than once and the names are driven in the order given. `run_parity.sh`
-builds stage 2 as a single argv with one `--operation` per declared operation, in
+given more than once and the names are driven in the order given. Stage 2 is
+built as a single argv with one `--operation` per declared operation, in
 the declared order, and publishes `cobol.operation-status` with **one record per
-operation**. It also pre-validates before stage 1 that **both** runners can drive
+operation**. It also validates, before it drives the first operation, that **both** runners can drive
 every one of them. A scenario that declares operations without either a repeated
 `--operation` or an `operations:` list is *refused* rather than having its first
 operation silently run.
@@ -1605,8 +1649,8 @@ cosmetic: under the old contract a four-operation scenario was driven by four
 separate invocations, only the last of which published a disposition, so nothing
 downstream could tell a clean run of four operations from a clean run of one
 followed by three that aborted — and the record that *was* published described
-operation one while the database held the effects of all four. `run_parity.sh`
-states the same history in its own comment above stage 2.
+operation one while the database held the effects of all four. The runner states
+the same history in its own comment above its operation loop.
 
 `harness/run_cobol_scenario.sh` drives the **menu executables** rather than the
 posting programs, and that is deliberate. None of the twelve in-scope programs
@@ -1792,22 +1836,22 @@ sales batch.
 
 ### 11.1 The stage order is the evidence
 
-The protocol is a rigid sequence, not an ad-hoc comparison. **`harness/parity_stages.sh`
-is the single definition of the ten stages and their labels**, and the driver
-prints it on demand rather than restating it:
+The protocol is a rigid sequence, not an ad-hoc comparison. **`harness/normalize.py`
+is the single definition of the ten stages and their labels**, and it prints them on
+demand rather than anything restating them:
 
 ```bash
-$C /repo/harness/run_parity.sh --print-stages
+$C /repo/harness/normalize.py --print-stages
 ```
 
 ⚠️ **That is the shape; the count is ten.** The line above names the eight
-*logical* steps and reads as nine because the reset appears once. The driver
+*logical* steps and reads as nine because the reset appears once. The protocol
 numbers **ten**, because it counts the reset on both sides and makes the
 publication check its own gate. Anywhere in this project's older prose that says
 "eight-stage" or "the stage-8 diff", read **today's stage 10** — the diff. The
-authority is `[harness/parity_stages.sh ACAS_PARITY_STAGES]`, which the driver
-reads through `[harness/run_parity.sh ACAS_PARITY_STAGE_REGISTRY]` and prints under
-`--help` in `[harness/run_parity.sh acas_parity_usage]`. And
+authority is `[harness/normalize.py PARITY_STAGES]`, read by shell through
+`[harness/normalize.py parity_stage_shell]` and by everything else through
+`--print-stages`. And
 **runner-local `Check n/8` labels are a different numbering entirely**:
 `run_cobol_scenario.sh` and `run_python_scenario.sh` each print their own
 preflight steps, which count that one script's internal checks. A runner's
@@ -1817,39 +1861,67 @@ preflight steps, which count that one script's internal checks. A runner's
 non-zero has produced no evidence, so re-seed rather than carry a partial
 capture forward.
 
-The recommended form is the fail-closed driver, because the ordering *is* the
-evidence: it runs the stages in sequence and aborts at the first non-zero,
-passing that stage's own exit status through verbatim rather than flattening
-every failure into one code.
+**There is no driver script: the operator runs the ten stages, in order, stopping at
+the first non-zero exit** (finding M-06). A `harness/run_parity.sh` used to run them
+from one invocation and it is gone — the Agent Action Plan's harness inventory
+(§0.3.1) names eleven harness files plus `scenarios/`, and that was not one of them.
+**`harness/` now holds exactly those eleven files and the eight scenario definitions,
+and nothing else.** Nothing it uniquely enforced was dropped. Each gate moved into **the stage that owns the state it
+protects**, which is stronger than a wrapper rather than weaker, because a
+hand-driven stage is now guarded exactly as a composed one is:
 
-⚠️ **There is exactly one exception to "aborts at the first non-zero", and it is
-deliberate** (finding MJ-05). `acas_parity_is_behavioural` is true for **stage 6 and
-exit 69 only** — the Python run stage reporting that an operation's observed
-disposition contradicted the scenario's declared one. In that one case the driver
-records the difference and **continues**, so that the capture, the normalisation and
-the diff still run and can localise the divergence to a table and a column instead of
-leaving only a status code. It is remembered rather than forgiven: **the final result
-can never be `identical` after it, whatever the diff reports.** Separately,
-`--keep-going` is an explicit opt-in for diagnosing a broken harness and is not the
-protocol — a verdict produced that way is not evidence.
+| What the deleted driver enforced | Where it is enforced now |
+| --- | --- |
+| The oracle-provenance attestation — **exit 77 EVIDENCE UNAVAILABLE** | `harness/reset_db.sh`, `acas_assert_oracle_attestation`, run **before the first `DROP`**, so a refusal leaves the database untouched |
+| Every declared seed file exists, checked before the schema is dropped | `harness/reset_db.sh`, `acas_assert_seed_files`, before it takes the sequential lock |
+| Every declared operation is driveable by **both** sides | `harness/run_cobol_scenario.sh`, `acas_assert_operations_supported_by_both_sides`, immediately after the operation list resolves — before the first operation produces state |
+| Destructive-target bypasses refused on the evidence path | Each stage refuses **its own**, on any run carrying `ACAS_PARITY_RUN_ID`: `reset_db.sh::acas_assert_no_evidence_bypass` for the two allow-lists and the two acknowledgements, `run_cobol_scenario.sh::acas_assert_no_evidence_bypass` and `run_python_scenario.sh::acas_py_assert_no_evidence_bypass` for the drive-side pair |
+| The ten stages in order, aborting at the first non-zero | The operator, following the table below. `tests/conftest.py::run_scenario_parity` composes the identical sequence for the scenario tier, stage by stage |
+| The stage registry, printed on demand | `harness/normalize.py --print-stages` |
+| The per-stage administrative-credential scrub | The **file set**: only `reset_db.sh` and the `seed.sh` it delegates to may hold the pair, and every other harness script `unset`s it at entry (§7.1, SEC-04) |
+| The published parity claim | `harness/diff_states.py`'s own `verdict.json` (§11.4) |
 
-```bash
-N=clean_batch_gl
-S="/repo/harness/scenarios/$N.yaml"
-$C /repo/harness/run_parity.sh "$S"                  # the fixture root is defaulted
-$C /repo/harness/run_parity.sh --seed-dir "/data/fixtures/$N" "$S"   # or state it
-$C /repo/harness/run_parity.sh --dry-run "$S"       # print the ten commands, run none
-$C /repo/harness/run_parity.sh --print-stages       # the canonical registry, as TSV
-$C /repo/harness/run_parity.sh --from 2 --to 2 "$S" # re-run one stage after a fix
-$C /repo/harness/run_parity.sh --help
-```
+⚠️ **One consequence of the relocation had to be repaired, and it was found by
+measurement rather than by reading.** The gate now fires for anything that invokes
+`reset_db.sh` — which includes `tests/conftest.py`'s stage 1 and stage 5. Setting
+`ACAS_ACCEPT_TRANSFORMED_ORACLE=1`, the documented way to run the stack-bound tiers
+against a diagnostic build, therefore un-skipped those tiers and then failed all
+**73** of them at stage 1 on exit 77: two acknowledgements for one decision, and only
+one of them given. `tests/conftest.py::_transformed_oracle_waiver` now translates the
+variable into `reset_db.sh --accept-transformed-oracle`, **conditionally** — with the
+variable unset the tiers skip and the flag is never passed, so a hand-driven or
+unacknowledged run still meets exit 77. Both halves are locked by
+`tests/arithmetic/test_pic_field_descriptors.py`'s
+`test_the_reset_refuses_a_transformed_oracle_as_evidence`, including the negative
+direction: a waiver passed unconditionally fails that test.
 
-`--from`/`--to` name a range by stage NUMBER, which is why the numbering is part
-of the contract rather than presentation. A resumed run refuses to mix attempts:
-it rejects artifacts written under a different run id, so a stage cannot render a
-verdict on a capture from an earlier attempt.
+⚠️ **Four options are deliberately not carried forward.** Each is named so that
+nobody hunts for it:
 
-The driver's ten stages, which are the sequence above with the reset counted on
+- **`--from` / `--to`** — resume a range by stage number. This was the sharpest of
+  the four: stages 1–5 of one attempt and 6–10 of another produce a verdict over
+  artifacts that were never one run. What replaces it is *re-run from stage 1*; the
+  run-scoped artifact paths and `diff_states.py`'s run-id equality check mean a mixed
+  pair now **fails closed** rather than being compared.
+- **`--dry-run`** — print the ten commands and run none. The table and the block
+  below **are** that command list.
+- **`--keep-going`** — carry on past a failing stage. No replacement, by design: a
+  verdict produced past a failing stage was never evidence.
+- **the `parity-result` summary file** — replaced by `verdict.json`, which is the
+  machine-readable claim `harness/diff_states.py` publishes on both outcomes.
+
+⚠️ **There is exactly one exception to "stop at the first non-zero", and it is
+deliberate** (finding MJ-05): **stage 6 exiting 69**, the Python run stage reporting
+that an operation's observed disposition contradicted the scenario's declared one. In
+that one case the run **continues**, so that the capture, the normalisation and the
+diff still happen and can localise the divergence to a table and a column instead of
+leaving only a status code. It is remembered rather than forgiven: **the result can
+never be parity after it, whatever the diff reports.** The rule is implemented in
+`[tests/conftest.py RUN_PYTHON_BEHAVIOURAL_EXIT]` and
+`[tests/conftest.py DISPOSITION_BEHAVIOURAL]` for the composed protocol, and stated
+here for a hand-driven one; every other non-zero status stops the run.
+
+The ten stages, which are the logical sequence above with the reset counted on
 both sides and the publication check promoted to a gate of its own:
 
 | Stage | Command | Job |
@@ -1869,40 +1941,83 @@ Stages 1 and 5 are the same command on purpose: the second reset is what makes
 the Python side's *starting* state the COBOL side's starting state rather than
 the COBOL side's *ending* state.
 
-Driving the stages by hand is still supported, and the commands below are the
-driver's own argv rather than a paraphrase of it. ⚠️ **Two differences used to
-make a hand run mean less than the driver's, and both are now spelled out.**
+#### The operator contract — the four things that bind the ten stages
 
-**One — stage 1 is `reset_db.sh`, not `seed.sh`,** exactly as stage 5 is, because
-that is what `run_parity.sh` runs. Substituting `seed.sh` seeds *whatever the
-previous run left in the schema* — which usually still produces an empty diff, and
-is the reason the mistake survives: the two sides agree on a state neither of them
-established.
+⚠️ **Four requirements make a hand-driven run mean what a composed one means. Each
+was implicit in the deleted driver, so each is now stated.**
 
-**Two — `--all-in-scope` is REQUIRED on all three capture and comparison stages,
-and omitting it silently narrows the evidence** (finding MJ-03). `run_parity.sh`
-passes `--all-in-scope` *and* `--scenario-file` at stages 3, 7 and 10, and the two
-flags do different jobs: `--all-in-scope` sets the **comparison bound** to all 22
-in-scope tables, while `--scenario-file` supplies the **provenance digest** that
-`diff_states.py` requires to match on both sides. Without `--all-in-scope` the
-bound falls back to the scenario's own `affected_tables` — five tables for most
-scenarios — so a hand-driven "empty diff" would attest agreement over a quarter of
-the surface the driver compares, and could not show a difference in anything the
-scenario did not expect to move. AAP §0.8.5 makes an empty diff **the** pass
-condition, so the narrower bound would have let a scenario certify parity while a
-system row differed.
+**One — ONE run id across all ten stages.** `ACAS_PARITY_RUN_ID` is what makes ten
+separate invocations one attempt. Export it once, before stage 1, and pass it to every
+stage. Without it each runner derives its own `local-<hex>` id, and stage 10 then
+**refuses the pair** — correctly, because `run_id` is one of the provenance fields
+that must be equal before a single row is compared. It is also what marks the run as
+the **evidence path**, so every destructive-target bypass is refused while it is
+bound (§11.1b).
+
+**Two — stages 2 and 6 must be pointed at the per-scenario staged data.** Stage 1
+copies the declared fixture files into `$ACAS_DATA/<scenario>` and the frozen loaders
+run there, so `system.dat` is in *that* directory and not in `/data`. Both run stages
+therefore need `ACAS_DATA` **and** `ACAS_LEDGERS` set to it; `tests/conftest.py`'s
+`scenario_runtime_environment` does exactly this for the composed protocol.
+
+**Three — stage 1 is `reset_db.sh`, not `seed.sh`,** exactly as stage 5 is.
+Substituting `seed.sh` seeds *whatever the previous run left in the schema* — which
+usually still produces an empty diff, and is the reason the mistake survives: the two
+sides agree on a state neither of them established.
+
+**Four — `--all-in-scope` is REQUIRED on all three capture and comparison stages,
+and omitting it silently narrows the evidence** (finding MJ-03). Pass
+`--all-in-scope` *and* `--scenario-file` at stages 3, 7 and 10; the two flags do
+different jobs. `--all-in-scope` sets the **comparison bound** to all 22 in-scope
+tables, while `--scenario-file` supplies the **provenance digest** that
+`diff_states.py` requires to match on both sides. Without `--all-in-scope` the bound
+falls back to the scenario's own `affected_tables` — five tables for most scenarios —
+so an "empty diff" would attest agreement over a quarter of the surface, and could
+not show a difference in anything the scenario did not expect to move. AAP §0.8.5
+makes an empty diff **the** pass condition, so the narrower bound would let a
+scenario certify parity while a system row differed.
 
 ```bash
-$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
-$C /repo/harness/run_cobol_scenario.sh "$S"
-$C python3 /repo/harness/dump_tables.py --scenario "$N" --side cobol --all-in-scope --scenario-file "$S"
-$C python3 /repo/harness/normalize.py   --scenario "$N" --side cobol
-$C /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
-$C /repo/harness/run_python_scenario.sh "$S"
-$C python3 /repo/harness/dump_tables.py --scenario "$N" --side python --all-in-scope --scenario-file "$S"
-$C python3 /repo/harness/normalize.py   --scenario "$N" --side python
-$C python3 /repo/harness/diff_states.py --scenario "$N" --all-in-scope --scenario-file "$S"
+N=clean_batch_gl
+S="/repo/harness/scenarios/$N.yaml"
+R="parity-$(date -u +%Y%m%dT%H%M%SZ)"     # ONE id for all ten stages
+D="/data/$N"                              # the per-scenario staged data
+P="-e ACAS_PARITY_RUN_ID=$R"              # every stage
+Q="$P -e ACAS_DATA=$D -e ACAS_LEDGERS=$D" # the two RUN stages, additionally
+
+# 1  reset the schema and seed the scenario
+$C $P /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+# 2  run the compiled COBOL cycle
+$C $Q /repo/harness/run_cobol_scenario.sh "$S"
+# 3  capture the COBOL state          4  normalise it
+$C $P python3 /repo/harness/dump_tables.py --scenario "$N" --side cobol --all-in-scope --scenario-file "$S"
+$C $P python3 /repo/harness/normalize.py   --scenario "$N" --side cobol
+# 5  reset and RE-SEED the same scenario
+$C $P /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+# 6  run the migrated Python cycle
+$C $Q /repo/harness/run_python_scenario.sh "$S"
+# 7  capture the Python state         8  normalise it
+$C $P python3 /repo/harness/dump_tables.py --scenario "$N" --side python --all-in-scope --scenario-file "$S"
+$C $P python3 /repo/harness/normalize.py   --scenario "$N" --side python
+# 9  and 10: the comparison verifies both captures are published before it compares
+#     a single row, so stage 9 is enforced by stage 10 rather than skipped
+$C $P python3 /repo/harness/diff_states.py --scenario "$N" --all-in-scope --scenario-file "$S"
 ```
+
+**Stage 9 has no command of its own by design.** `harness/diff_states.py` calls the
+same `verify_trees` check before it compares anything and exits `2` rather than `0`
+when either capture is unpublished or the two disagree on scenario, side, run
+identity or seeded bytes. The composed protocol surfaces it as a numbered stage so a
+failure is reported as *stage 9* instead of arriving as a comparison error; a
+hand-driven run gets the identical guarantee one stage later.
+
+**Every stage's exit status is meaningful and none should be flattened.** The bands
+are per script: `seed.sh` 70–78, `reset_db.sh` 80–91 plus **77 EVIDENCE
+UNAVAILABLE**, the two runners 70–79 plus 90, and the three Python tools 80–87 —
+each documented under its own `--help`. Two statuses matter most while reading
+evidence: **77** from stage 1 means *nothing was compared* (the oracle cannot
+arbitrate), and **76** from a seed means the AAP-mandated autocommit-off window left
+no durable row, which is the reproduced frozen defect and not a harness fault.
 
 `harness/diff_states.py` exits `0` with empty stdout for an empty diff, `1` for
 a real behavioural difference, and `2` when the comparison could not be
@@ -1910,16 +2025,25 @@ performed at all. It also **refuses** a capture whose run stage did not attest
 success, and refuses a pair that is empty on both sides — so a hand-driven run
 fails closed instead of reporting that two empty captures were identical.
 
-### 11.1a What the driver refuses before stage 1
+### 11.1a What a protocol-bound run refuses before it acts
 
-Stages 1 and 5 **drop and re-apply the schema**. The driver is therefore stricter
-about its target than the individual scripts are, and deliberately so: the scripts
-are general administrative tools that document escape hatches for use outside
-evidence production, whereas the driver produces the evidence and must not be
-steerable by ambient configuration.
+Stages 1 and 5 **drop and re-apply the schema**. An evidence run must therefore be
+stricter about its target than an administrative one: the same scripts are general
+tools that document escape hatches for use outside evidence production, and those
+hatches must not be reachable when the run's output will be compared.
 
-Before any stage runs, `harness/run_parity.sh` requires all of the following, and
-each failure is refused up front rather than discovered mid-protocol:
+**The two roles are told apart by the run itself, not by a wrapper.** A protocol run
+binds `ACAS_PARITY_RUN_ID` before stage 1 — `tests/conftest.py`'s `bound_run_id` for
+the composed protocol, the operator's own `export` for a hand-driven one — and while
+it is bound, each stage refuses every bypass it would otherwise honour
+(`reset_db.sh::acas_assert_no_evidence_bypass` and the two runner gates beside it).
+Unbound, the hatches remain, because then the script is the administrative tool and
+not a stage. This is where the deleted driver's entry gate went (finding M-06), and
+it is stronger there: the guard now travels with the stage, so a **hand-driven**
+stage 1 is scoped exactly as a composed one is, which the driver could never do.
+
+Every one of the following is required, and each failure is refused before the stage
+acts rather than discovered part-way through:
 
 | Requirement | Refused otherwise |
 |---|---|
@@ -1928,21 +2052,22 @@ each failure is refused up front rather than discovered mid-protocol:
 | `ACAS_DB_PORT` fits the frozen four-character carrier, `1..9999` | `0`, `99999`, or non-numeric text — the carrier is `pic x(4)` at `[common/acas-get-params.cbl:L158]` and `[copybooks/mysql-variables.cpy:L91]` |
 | `ACAS_RESET_CONSENT`, if set, names *this* target | A token naming another database or host, or one missing the `DESTROY` prefix — so a token left in an environment cannot later authorise a different server |
 | The server-side disposability sentinel is present | Absent — `harness/reset_db.sh` proves disposability against the server, not merely against the host name |
-| **None** of `ACAS_DB_ALLOWED_SCHEMAS`, `ACAS_DB_DISPOSABLE_HOSTS`, `ACAS_RESET_ACKNOWLEDGE_DESTRUCTIVE`, `ACAS_RESET_ACKNOWLEDGE` is set | Any of them set, *even to a harmless value* |
-| A full-build provenance attestation exists and is untainted (§8.9) | Absent, unreadable, override-tainted, or describing modules other than those on disk — checked only when stage 2 is in range |
+| **None** of `ACAS_DB_ALLOWED_SCHEMAS`, `ACAS_DB_DISPOSABLE_HOSTS`, `ACAS_RESET_ACKNOWLEDGE_DESTRUCTIVE`, `ACAS_RESET_ACKNOWLEDGE` is set | Any of them set, *even to a harmless value*, on a run carrying `ACAS_PARITY_RUN_ID` |
+| **Neither** drive-side acknowledgement — `ACAS_RUN_ACKNOWLEDGE_DESTRUCTIVE`, `ACAS_PY_ACKNOWLEDGE_DESTRUCTIVE` — is set | Either set on a bound run: each lets its runner post into a server that never declared itself disposable, so a verdict would describe an unknown database |
+| A full-build provenance attestation exists and is untainted (§8.9) | Absent, unreadable, override-tainted, or describing modules other than those on disk — checked by `reset_db.sh` **before the first `DROP`**, so a refusal leaves the database untouched |
 | **The attestation says the oracle was compiled from the FROZEN checkout** — `oracle-source-is-frozen=yes` (§8.9) | `no`, with exit **77 — EVIDENCE UNAVAILABLE**, distinct from the statuses that mean the two states differ. `--accept-transformed-oracle` proceeds for diagnosis and marks every verdict **NO PARITY CLAIM**. On this checkout the default frozen build fails, so this is the ordinary outcome (§8.7) |
 
-The last bypass row is the sharpest of them, and the reason it is refused rather
-than merely warned about: `ACAS_RESET_ACKNOWLEDGE_DESTRUCTIVE` suppresses **both**
-the static disposable-target check and the server-side sentinel proof, so with it
-set the evidence path would accept any reachable database.
+The reset-side acknowledgement is the sharpest of them, and the reason it is refused
+rather than merely warned about: `ACAS_RESET_ACKNOWLEDGE_DESTRUCTIVE` suppresses
+**both** the static disposable-target check and the server-side sentinel proof, so
+with it set the evidence path would accept any reachable database.
 
 These are refusals, not defaults to be overridden. There is no flag to disable
 them, because a flag to disable them would be the hole they close.
 
 `harness/docker-compose.yml` already supplies exactly the canonical values, so a
-Compose run needs none of this configured by hand — which is the point. If the
-driver refuses, the target is not the canonical one.
+Compose run needs none of this configured by hand — which is the point. If a stage
+refuses, the target is not the canonical one.
 
 ### 11.1b What a run RETAINS, and where
 
@@ -1953,7 +2078,6 @@ sets to `/out`, backed by a named volume, so the artifacts outlive the container
 | Artifact | Carries |
 | --- | --- |
 | `<scenario>/verdict.json` | the machine-readable verdict, written on **both** outcomes: the scenario, the outcome, the exit code, the tables compared and differing, the run id, the seed marker digest, and the digests of the scenario file, the frozen schema, both run manifests and the diff report |
-| `<scenario>/parity-result` | the driver's own claim for the run — the scenario, the run id, the claim, the stage range requested, the first failing stage's status, the behavioural status and the verdict state |
 | `<scenario>/{cobol,python}.norm/_manifest.json` | each capture's provenance: run id, scenario-file digest, frozen-schema digest, the exact command, the producing tool's digest, the prior stage's manifest digest, and the run attestation it was taken under |
 | `run-logs/<scenario>/<side>.run-status` | wrapper health, distinct from disposition, plus a per-operation status row for each declared operation |
 | `run-logs/<scenario>/<side>.operation-status` | each operation's OWN observed disposition, in declared order |
@@ -1977,9 +2101,11 @@ because an evidence directory that accumulates indefinitely with nothing said ab
 its lifetime is a defect in its own right — and the contents are not neutral.
 
 **What is actually in there, measured rather than assumed.** On this clone the
-evidence volume holds **1410 files, 11.5 MB**, across nine scenario trees. Each
+evidence volume holds **1410 files, 11.5 MB**, across nine scenario trees — the eight
+committed scenarios plus the removed `end_of_cycle_gl`, whose retained tree is cited by
+the evidence register and is therefore kept (see the retention rule below). Each
 tree carries `cobol/`, `cobol.normalized/`, `python/`, `python.normalized/`,
-`diff.txt`, `parity-result` and `verdict.json`. The dumps are `SELECT *` over the
+`diff.txt` and `verdict.json`. The dumps are `SELECT *` over the
 in-scope tables, so they contain **monetary amounts** and **the primary keys that
 identify the accounts, customers and suppliers they belong to** — a `GLLEDGER-REC`
 row, for instance, leads with its nominal account number. This is accounting data
@@ -2049,7 +2175,7 @@ No tie-breaking logic, no timestamp masking, no surrogate-key remapping.
 
 THE COMPARISON IS BOUNDED BY ALL 22 IN-SCOPE TABLES. Pass `--all-in-scope` to
 both `dump_tables.py` (stages 3 and 7) and `diff_states.py` (stage 10);
-`harness/run_parity.sh` and `tests/conftest.py` already do. A scenario's
+the recipe in §11.1a and `tests/conftest.py` both do. A scenario's
 `affected_tables` is its **declared effect**, which the runners assert against —
 it is *not* the bound, because a bound drawn from what a scenario expects to move
 cannot show a difference in anything it did not expect to move, and an empty diff
@@ -2125,7 +2251,7 @@ Each is one line per table, three TAB-separated fields:
 <TABLE><TAB><row count><TAB><sha256 of the canonical primary-key-ordered dump>
 ```
 
-**One producer, and only one.** `harness/table_digest.py` computes every digest
+**One producer, and only one.** `harness/dump_tables.py --table-digest` computes every digest
 for both sides and both records. That matters more than it looks: two definitions
 of "the digest" is exactly how a pre-run and a post-run record, or an oracle-side
 and a Python-side record, silently stop being comparable while every individual
@@ -2161,12 +2287,14 @@ scenario's effect claim to fields the scenario does not reason about. It does no
 **the digest holds on all four scenarios that declare `unchanged` and moves on every one
 that declares `changed`.** That was measured over the eight scenarios that existed when
 the measurement was taken — which is all four `unchanged` ones — and the ninth,
-`end_of_cycle_gl`, declares `changed` and moves the row by construction, Phase 5
-advancing the cycle and rotating the quarter counter. The fingerprint is kept
+`end_of_cycle_gl`, declared `changed` and moved the row by construction, its Phase 5
+advancing the cycle and rotating the quarter counter — that scenario has since been
+removed (findings M-09 and M-17), and the observation is recorded because it is what
+established the `changed` half of the claim. The fingerprint is kept
 on top of the dump because it adds what the dump cannot — a SHA-256 over all 169
 columns, the two withheld cells included, and a SHA-256 is not a disclosure.
 `tests/conftest.py`'s `assert_system_record_parity` compares the two sides' post-run
-digests, and each of the nine scenario tests calls it.
+digests, and each of the eight scenario tests calls it.
 
 **What reads the pair.** `tests/conftest.py`'s `assert_seed_fingerprints_agree`
 cross-checks the two sides' pre-run records; its `assert_tables_unchanged_by_run`
@@ -2185,7 +2313,7 @@ no-op.
 
 | Tier | Files | Marker | Needs |
 | --- | --- | --- | --- |
-| `tests/arithmetic/` | 19 | `arithmetic` | nothing — no Docker, no MariaDB, no GnuCOBOL |
+| `tests/arithmetic/` | 14 | `arithmetic` | nothing — no Docker, no MariaDB, no GnuCOBOL |
 | `tests/scenarios/` | 8 | `scenario` | the Compose stack and a seeded database |
 | `tests/determinism/` | 1 | `determinism` | the Compose stack |
 
@@ -2204,25 +2332,28 @@ classes, `COMP-3` packed decimal, `COMP` binary, `SIGN LEADING` display,
 `MOVE` truncation, un-`ROUNDED` truncation, `ROUNDED` half-up, the two VAT
 formulations, the `gl080` cycle divide, the double-entry explosion, the
 control-total comparison, the ledger-balance accumulation, and the derived IRS
-date components — fourteen files. Two more are **structural** rather than
-arithmetic and live in this tier for its defining property, which is not its
-subject but its dependencies: it needs no database, no COBOL and no Docker, so it
-runs anywhere. They are `test_shared_storage_and_dispatch_boundaries.py`, which
-locks the storage and dispatch boundaries between the layers, and
-`test_deployment_contract_boundaries.py`, which locks the transport-environment
-contract, the driver deadlines, the IRS bind boundary and the cross-file reference
-integrity of the documents and scenario definitions.
+date components — **fourteen files, which is exactly the set AAP §0.4.1.7 names**.
 
-Four further files in this tier are not computation patterns but **shipped-module
+The tier once held twenty. Six further groups were written during QA remediation
+and given files of their own, which put the directory outside the planned
+inventory; each has since been **merged verbatim into the planned file that owns
+its subject**, so the fourteen names are also the whole of the tier. No assertion
+moved subject and none was lost — the collected test-name multiset was compared
+before and after every merge and was identical each time. Two of the six are
+**structural** rather than arithmetic and live in this tier for its defining
+property, which is not its subject but its dependencies: it needs no database,
+no COBOL and no Docker, so it runs anywhere. The other four are **shipped-module
 drivers**, and they exist because a pattern test can pass against a correct local
 transcription while the module that ships is wrong:
 
-| File | What it drives, in-process |
-| --- | --- |
-| `test_gl080_shipped_end_of_cycle.py` | `gl080_end_of_cycle.py` — the `ROUNDED` cycle-to-period divide, the unbounded quarter subscript, the second rotating quarter counter, and the archive and deletion phases. **No scenario declares the `gl_end_of_cycle` operation**, so this is the only place the module is executed at all |
-| `test_gl072_shipped_silent_skips.py` | `gl072_transaction_update.py` — both silent skips, each proven *reached* rather than inferred from end state |
-| `test_shared_storage_and_dispatch_boundaries.py` | the shared storage emulation, the dispatch boundaries, and `acas008`'s four unconditionally refused verbs — all four through the entity-named vocabulary, and the rewrite additionally through the handler-named one, which is the only one of the four `Proc-ZZ100-ACAS-IRS-Calls.cob` declares. The other three handler-named aliases are asserted **absent**, since publishing them would make the facade this migration's invention rather than the copybook's |
-| `test_cli_seams_and_failure_paths.py` | the `acas_posting/cli/` seams — the key-1 status-before-close path, the IRS handler-named verb selection and its `FacadeGoback` boundary, the `gl071` serious-error short-circuit, and the RDBMS-parameter absent and unusable statuses |
+| Merged group | Now lives in | What it covers |
+| --- | --- | --- |
+| shared storage and dispatch boundaries (structural) | `test_comp_binary.py` §17–§23 | the shared storage emulation, the dispatch boundaries, and `acas008`'s four unconditionally refused verbs — all four through the entity-named vocabulary, and the rewrite additionally through the handler-named one, which is the only one of the four `Proc-ZZ100-ACAS-IRS-Calls.cob` declares. The other three handler-named aliases are asserted **absent**, since publishing them would make the facade this migration's invention rather than the copybook's |
+| deployment-contract boundaries (structural) | `test_pic_field_descriptors.py` | the transport-environment contract, the driver deadlines, the IRS bind boundary and the cross-file reference integrity of the documents and scenario definitions |
+| `gl080` end-of-cycle driver | `test_gl080_cycle_divide_rounded.py` | `gl080_end_of_cycle.py` — the `ROUNDED` cycle-to-period divide, the unbounded quarter subscript, the second rotating quarter counter, and the archive and deletion phases. **No scenario declares the `gl_end_of_cycle` operation**, so this is the only place the module is executed at all |
+| `gl072` silent-skip driver | `test_ledger_balance_accumulation.py` | `gl072_transaction_update.py` — both silent skips, each proven *reached* rather than inferred from end state, and the empty work file's at-end path |
+| CLI-seam driver | `test_control_total_comparison.py` | the `acas_posting/cli/` seams — the key-1 status-before-close path, the IRS handler-named verb selection and its `FacadeGoback` boundary, the `gl071` serious-error short-circuit, and the RDBMS-parameter absent and unusable statuses |
+| close-and-rejection driver | `test_double_entry_explosion.py` | `sl060`'s nested `GL-Posting-Close` (anomaly A-1) and `irs030`'s IR032 clean rejection — two call sequences no table dump can observe |
 
 The methodological rule that governs the whole tier: **expected values are
 captured from the compiled oracle**, never derived by reading the COBOL and
@@ -2285,10 +2416,9 @@ is out of scope.
 $C sh -lc 'cd /repo && python -m pytest -m scenario'
 ```
 
-Each asserts an empty normalised diff for one scenario. There are **nine**, and
-the ninth is deliberately distinguished from the other eight in the right-hand
-column, because the count of what is committed and the count of what the plan
-mandated are two different numbers and conflating them misrepresents both:
+Each asserts an empty normalised diff for one scenario. There are **eight**, and they
+are exactly the eight AAP §0.8.5 mandates — the committed count and the mandated count
+are the same number:
 
 | Scenario | Test file | Basis |
 | --- | --- | --- |
@@ -2300,24 +2430,37 @@ mandated are two different numbers and conflating them misrepresents both:
 | period-end totals update | `tests/scenarios/test_period_end_totals_update.py` | AAP §0.8.5 mandate |
 | control-total mismatch rejection | `tests/scenarios/test_control_total_mismatch_rejection.py` | AAP §0.8.5 mandate |
 | empty batch | `tests/scenarios/test_empty_batch.py` | AAP §0.8.5 mandate |
-| General Ledger end of cycle | `tests/scenarios/test_end_of_cycle_gl.py` | **beyond the mandate** — see below |
 
 "Clean batch post per ledger" is expanded into four cases because the four
 ledgers exercise materially different code paths. As noted in §10.5, the
 **control-total mismatch case is General-Ledger-specific**, since Sales and
 Purchase batches balance by construction.
 
-**Why there is a ninth.** The eight above discharge the mandate exactly: AAP
-§0.8.5 asks for clean batch per ledger, mixed accepted-and-rejected, period-end
-totals, control-total mismatch and empty batch, and **none of those five is an
-end-of-period run**. The consequence was that `gl080` — one of the twelve
-in-scope programs, and the owner of one of the migration's five `ROUNDED` stores
-at `[general/gl080.cbl:L328]` — was covered by unit tests and by no state
-comparison at all. `harness/scenarios/end_of_cycle_gl.yaml` closes that by
-driving the real `gl_end_of_cycle` route, which is `general/general.cbl`'s
-`load09.` dispatching `gl080`. It is an addition to the evidence, not a
-reinterpretation of the mandate, so anywhere this documentation counts *the
-mandated set* it still says eight.
+⚠️ **There was a ninth, and it has been removed — with a cost worth stating.** The
+eight above discharge the mandate exactly: AAP §0.8.5 asks for clean batch per ledger,
+mixed accepted-and-rejected, period-end totals, control-total mismatch and empty batch,
+and **none of those five is an end-of-period run**. A ninth definition,
+`harness/scenarios/end_of_cycle_gl.yaml`, was therefore added beyond the mandate to
+drive the real `gl_end_of_cycle` route — `general/general.cbl`'s `load09.` dispatching
+`gl080` — with `tests/scenarios/test_end_of_cycle_gl.py` beside it, and it was measured
+end to end.
+
+Both files have been **deleted** (findings M-09 and M-17), because the Agent Action
+Plan's inventory names eight scenario definitions and eight scenario tests and this tree
+is held to that inventory. **The consequence, stated rather than glossed: `gl080` — one
+of the twelve in-scope programs, and the owner of one of the migration's five `ROUNDED`
+stores at `[general/gl080.cbl:L328]` — has no table-state comparison behind it.** What
+remains is not nothing: anomaly **A-2** (the unbounded quarter subscript) and anomaly
+**A-3** (the second, independent rotating quarter counter) are locked in the arithmetic
+tier by `tests/arithmetic/test_gl080_cycle_divide_rounded.py`, and the three ambiguity
+questions that once waited on an end-of-period scenario — `Q-GL080-DIVIDE-BY-ZERO`,
+`Q-QUARTER-SUBSCRIPT` and `Q-2`'s fifth `ROUNDED` site — were each resolved by
+**standalone compiled probes**, not by that scenario, so none of them reverts to open.
+The retained measurement is kept as history in
+[`docs/migration/scenario-diff-evidence.md`](docs/migration/scenario-diff-evidence.md)
+and the removed definition's design is described in
+[`docs/migration/ambiguity-resolutions.md`](docs/migration/ambiguity-resolutions.md)
+§16.1, so whoever needs it next can rebuild it rather than re-derive it.
 
 ### 12.3 The determinism tier
 
@@ -2349,6 +2492,63 @@ actually exercised (R-5). It is **not a quality gate**: there is deliberately
 no `fail_under` and no `--cov` in `addopts`, because a coverage number never
 decides whether this migration is correct. Only an empty scenario diff does.
 
+**The command.** One line, non-gating, runnable on a bare host:
+
+```bash
+python -m pytest -m arithmetic --cov --cov-report=term-missing:skip-covered
+```
+
+Add `--cov-report=html` for a browsable copy in `htmlcov/`, or
+`--cov-report=xml` for `coverage.xml`. `[tool.coverage.run]` fixes the measured
+tree as `source = ["acas_posting"]` with `branch = true` and omits `harness/*`
+and `tests/*` — belt and braces for R-1 — and `[tool.coverage.html]` and
+`[tool.coverage.xml]` fix the two destinations. All three of `.coverage`,
+`coverage.xml` and `htmlcov/` are gitignored, so producing the evidence never
+adds a tracked file.
+
+**The recorded figure.** Measured on this checkout with the command above, on
+CPython 3.12.13:
+
+| | |
+|---|---|
+| Tests run | **1,219 passed**, 114 deselected (the stack-backed tiers) |
+| `acas_posting` modules measured | **89 of 89** |
+| Modules with **zero** coverage | **0** |
+| Modules at 100 % | 18 |
+| Statements | 15,293 of 31,865 |
+| Branches | 1,529 of 6,874 |
+| Overall, branch-inclusive | **43.4 %** |
+
+**What that number is, and is not.** ⚠️ **Two of these figures moved, and the
+movement is recorded rather than overwritten.** The row above read *1,217 passed
+/ 126 deselected / 90 modules / one module at zero / 41.9 %* until the six
+arithmetic groups added during QA remediation were merged into the fourteen
+planned files (findings M-11 to M-16) and `cli/rdbms_params.py` was folded into
+`cli/args.py` (M-01). Merging changed the deselection arithmetic and folding
+removed a module, so the figures are re-measured here rather than carried.
+
+**No module is at zero any more**, and the one that used to be — the dictionary
+**generator** — is now reached at **24 %** by the merged deployment-contract
+group, which reads it to close the traceability census. Its own exercise is
+still the one that matters, because the generator's job is to be *run*:
+
+```bash
+python -m coverage run -m acas_posting.dictionary.generate --check
+python -m coverage report --include='acas_posting/dictionary/generate.py'
+```
+
+Measured: `--check` exits **0** — the committed artifact is byte-reproducible
+from the frozen sources — and the generator itself comes out at **90 %** of
+1,707 statements with branch coverage on.
+
+Every module in the package is now reached by the infrastructure-free tier,
+which is the R-5 claim being evidenced: the traced modules are exercised, not
+merely present. The 43.4 % is a *branch-inclusive* figure over a package whose
+program modules are dominated by paths a state comparison drives rather than a
+unit test — the scenario and determinism tiers, which this host cannot run and
+which are therefore deselected above. Reading it as a quality score would be
+reading it as the gate it is deliberately not.
+
 Execution is never randomised and never parallelised. Posting order is
 load-bearing and the comparison is order-sensitive, so no `xdist`, no
 `pytest-randomly`, and no plugin that reorders collection.
@@ -2364,8 +2564,12 @@ load-bearing and the comparison is order-sensitive, so no `xdist`, no
 
 Generated by `acas_posting/dictionary/generate.py` from the **authoritative
 triple**: the copybook picture clause, the bridge host-variable declaration, and
-the `CREATE TABLE` column definition. It currently carries 1061 entries covering
-513 columns, 513 host variables, 1001 copybook fields and 46 work-file fields
+the `CREATE TABLE` column definition. It currently carries 1067 entries covering
+513 columns, 513 host variables, **1001 distinct physical copybook declarations**
+through 1007 copybook-view entries — the two figures differ because an `OCCURS`
+declaration bound by several columns yields one entry per occurrence, and
+publishing both is what makes a missing declaration visible instead of masked
+(finding M-18) — and 46 work-file fields
 across the 22 in-scope tables and 20 bridges. Regenerate or verify with:
 
 ```bash
@@ -2427,7 +2631,7 @@ register's §11 carries the reconciled one and this copy now matches it, verifie
 extracting the dagger set from the register's twenty-two entry headings mechanically
 rather than by reading: fifteen daggers, and they are exactly the fifteen above.
 `A-6` moved into the behaviour-lock row because
-`tests/arithmetic/test_shared_storage_and_dispatch_boundaries.py` now calls the
+`tests/arithmetic/test_comp_binary.py` now calls the
 migrated `acas008` directly and asserts the measured `WE-Error 988` / `FS-Reply 99`
 pair; its scenario-tier no-change assertion is a *second* lock on an
 already-locked entry, not a category of its own. **The register is the authority for
@@ -2438,14 +2642,19 @@ this census**; a count here that disagrees with §11 is this copy being out of d
 state comparison — and a state comparison cannot see it, because `GL-Posting-Close`
 writes nothing, so adding the missing period left an identical dump and that test
 passed either way. Its lock is now
-`tests/arithmetic/test_shipped_close_and_rejection_paths.py`, which drives the shipped
+`tests/arithmetic/test_double_entry_explosion.py`, which drives the shipped
 paragraph and asserts the verb sequence across the whole `IRS-Instead` × `Level-1`
 truth table; the scenario tests are recorded as **state witnesses**. Only direct
 discriminating tests are credited as locks.
 
 A handful of entries carry a `PENDING` status naming the ambiguity question that
 still governs them. That is honest bookkeeping, not an oversight: the entry
-records what has been measured and what has not.
+records what has been measured and what has not. On the ambiguity side the
+register's §13 now carries **no** `PENDING — AWAITING ORACLE EXECUTION` entry at
+all: the last one, `Q-GL084-ACCEPT-SEMANTICS`, was measured on 2026-08-08 by a
+standalone `cobc 3.2.0` probe over a real 24×80 pty — no fixture edited, no seed
+invented — and its first answer reversed the reading the source suggested while
+its second corrected `programs/gl080_end_of_cycle.py`.
 
 ### 13.4 Ambiguity resolutions and scenario diff evidence
 

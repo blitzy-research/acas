@@ -127,7 +127,7 @@ dependencies = [
 #  edge "SQLAlchemy Core / connector", an alternative rather than a stack. An AST
 #  import census over acas_posting/ yields exactly one third-party top-level module,
 #  `mysql`, which is what the paragraph above this list states and what
-#  `tests/arithmetic/test_deployment_contract_boundaries.py` asserts.
+#  `tests/arithmetic/test_pic_field_descriptors.py` asserts.
 #
 #  WHY THE CONNECTOR IS THE PATH TAKEN -- the frozen semantics decide it, not taste.
 #  `dal/connection.py` does not merely open a connection; it reproduces the frozen
@@ -153,7 +153,7 @@ dependencies = [
 #  sqlalchemy or greenlet, and none constructs an Engine, a MetaData, a Table, a
 #  mapped class, a Session or an async engine, so no schema can be generated and no
 #  coroutine scheduled even by accident. Two independent checks assert that rather than
-#  assuming it. `tests/arithmetic/test_deployment_contract_boundaries.py` censuses
+#  assuming it. `tests/arithmetic/test_pic_field_descriptors.py` censuses
 #  every import in the tree and requires the imported third-party set to be exactly
 #  {mysql}, requires this list to be exactly the plan's closure, and requires no
 #  document to describe the Core boundary as active. `harness/Dockerfile.gnucobol`
@@ -213,50 +213,39 @@ test = ["acas-posting[dev,harness]"]
 #  `python -m acas_posting.cli.<module>`, and the two forms return the same
 #  status because the router passes the route's value through unchanged.
 
-#  PACKAGING -- an explicit ALLOW-LIST, not a pattern search, so anything not
-#  named below is excluded by construction and what ships never depends on what
-#  happens to be lying in the checkout (R-1, R-6).
+#  PACKAGING -- THE STRUCTURAL ENFORCEMENT POINT OF R-1.
 #
-#  The generated data dictionary is the one sibling whose CONTENT is shipped, as
-#  package data: every record module builds its field descriptors from it during
-#  a normal import, so a wheel without it cannot import acas_posting.records at
-#  all. The Agent Action Plan fixes its path at data_dictionary/, so the
-#  `package-dir` mapping below serves both -- the checkout keeps that path while
-#  the wheel carries a copy inside the package, which the loader reaches through
-#  importlib.resources and falls back from to the repository sibling. The schema
-#  travels with it because the artifact's `meta.schema_ref` names it relatively.
+#  What ships is `acas_posting*` and nothing else. Agent Action Plan section
+#  0.7.2 R-1 is prescriptive about the mechanism: "harness/ is a SIBLING of
+#  acas_posting/ rather than a sub-package, and pyproject.toml packages only
+#  acas_posting*. This makes the prohibition structural rather than a matter of
+#  discipline -- there is no import path from the shipped package to the
+#  harness."
+#
+#  The four excluded trees are NAMED rather than left to setuptools' automatic
+#  exclusions, so a reader sees the prohibition instead of inferring it. Two of
+#  them matter for R-1 in particular: `harness*` carries the compiled COBOL
+#  oracle and its cobc toolchain, and `tests*` imports it.
+#
+#  THE GENERATED DATA DICTIONARY IS A TOP-LEVEL SIBLING AND STAYS ONE. Plan
+#  section 0.3.1 fixes its path at data_dictionary/ beside acas_posting/, so it
+#  is neither relocated into the package by a `package-dir` mapping nor shipped
+#  as `package-data`: `data_dictionary*` is named in the exclusion list below for
+#  exactly that reason. The runtime path constant is
+#  `acas_posting/__init__.py`'s job (plan section 0.4.1.1: "Package marker;
+#  exports the version and the dictionary path constant") and the reading is
+#  `acas_posting/dictionary/loader.py`'s, which resolves the committed sibling.
 [tool.setuptools]
-packages = [
-    # The seven code packages; each has an __init__.py and none is a namespace
-    # package.
-    "acas_posting",
-    "acas_posting.cli",
-    "acas_posting.cobol",
-    "acas_posting.dal",
-    "acas_posting.dictionary",
-    "acas_posting.programs",
-    "acas_posting.records",
-    # A DATA DIRECTORY, not an importable package: it holds no Python module and
-    # is reached only through importlib.resources, which needs no __init__.py.
-    "acas_posting.data_dictionary",
-]
-# Automatic inclusion is off, so the only non-Python files in the wheel are the
-# two named by `package-data`; no stray file in the checkout can reach it.
+# Automatic inclusion is off, so no non-Python file reaches the wheel and no
+# stray artifact in the checkout can travel with it.
 include-package-data = false
 
-# The one directory mapped from outside the package tree. Every other package
-# keeps its natural path, which is why there is no "" entry -- adding one would
-# re-root the whole distribution.
-[tool.setuptools.package-dir]
-"acas_posting.data_dictionary" = "data_dictionary"
-
-# Named file by file rather than as a glob: these two artifacts are the entire
-# contents of that directory, and a glob would ship whatever else landed there.
-[tool.setuptools.package-data]
-"acas_posting.data_dictionary" = [
-    "acas_posting_dictionary.json",
-    "acas_posting_dictionary.schema.json",
-]
+# Discovery is constrained rather than automatic: `include` admits the seven code
+# packages (acas_posting and its six sub-packages, each with an __init__.py and
+# none a namespace package) and `exclude` names every sibling tree by hand.
+[tool.setuptools.packages.find]
+include = ["acas_posting*"]
+exclude = ["harness*", "tests*", "docs*", "data_dictionary*"]
 
 #  Test runner. Selection idiom:
 #      pytest -m arithmetic                       infrastructure-free
@@ -330,3 +319,28 @@ omit = [
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
+
+#  THE EVIDENCE PRODUCER, AND WHERE IT LANDS.
+#
+#  Pinning `pytest-cov` without publishing a command leaves the R-5 evidence
+#  claim unbacked, so the command is documented in README-python-migration.md
+#  section 12.4 and is exactly:
+#
+#      python -m pytest -m arithmetic --cov --cov-report=term-missing:skip-covered
+#
+#  optionally adding `--cov-report=html` or `--cov-report=xml` to retain a
+#  browsable or machine-readable copy. It stays OUT of `addopts` on purpose: an
+#  ordinary test run must not require the plugin, and no run is gated on a
+#  number (there is no `fail_under` anywhere in this file, deliberately).
+#
+#  BOTH DESTINATIONS BELOW ARE ALREADY GITIGNORED - `.coverage`, `coverage.xml`
+#  and `htmlcov/` - so producing the evidence never adds a tracked artifact and
+#  never disturbs the file inventory the Agent Action Plan fixes. The measured
+#  figures themselves are recorded in prose, in README section 12.4 and in
+#  docs/migration/traceability.md, because a number a reader can cite is the
+#  evidence R-5 asks for; the report itself is a working artifact.
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"

@@ -19,8 +19,8 @@ Layout
     dictionary/     the data dictionary model, generator and loader
 
 Every layer listed above is complete, and so is everything outside this package
-that the migration owes. Inside: `clock.py`, `dates.py`, `workfiles.py`, the ten
-`cli/` modules (`__init__`, `args`, `rdbms_params` and the seven route entry
+that the migration owes. Inside: `clock.py`, `dates.py`, `workfiles.py`, the nine
+`cli/` modules (`__init__`, `args` and the seven route entry
 points), the thirteen `programs/` modules (`__init__` and the twelve migrated
 programs), the twenty-eight `records/` modules, the eight `cobol/` modules, the
 twenty-two `dal/` modules and the four `dictionary/` modules. Outside: the four
@@ -33,10 +33,12 @@ depends on any of them, which is why this list is a statement of repository
 state and never a precondition of import.
 
 The generated data dictionary is the field-level authority for every record
-module, and it lives in two places: a committed repository sibling and a copy
-packaged inside an installed distribution. Either may legitimately be absent -
-a source checkout has only the first, a wheel only the second - so both are
-named here and choosing between them belongs to
+module, and it lives in exactly ONE place: the committed repository sibling
+`data_dictionary/`, fixed there by Agent Action Plan section 0.3.1. It is
+deliberately NOT relocated into this package and NOT shipped as package data -
+`pyproject.toml` names `data_dictionary*` in its packaging exclusion list - so
+there is one artifact, one path and no possibility of two copies disagreeing.
+Publishing that path is this module's job; reading it belongs to
 `acas_posting.dictionary.loader`. Import is a pure namespace definition: it
 opens no file and validates no path, because a marker that could fail because
 of its surroundings would take the whole package down with it.
@@ -64,8 +66,6 @@ REPOSITORY_ROOT: Final[Path] = PACKAGE_ROOT.parent
 
 DATA_DICTIONARY_DIR: Final[Path] = REPOSITORY_ROOT / _DICTIONARY_DIR_NAME
 
-PACKAGE_DATA_DICTIONARY_DIR: Final[Path] = PACKAGE_ROOT / _DICTIONARY_DIR_NAME
-
 #: The machine-readable data dictionary itself - the field-level authority for this
 #: migration, generated from the authoritative triple of the copybook picture clause,
 #: the bridge host-variable declaration and the CREATE TABLE column definition.
@@ -76,32 +76,18 @@ DATA_DICTIONARY_SCHEMA_PATH: Final[Path] = (
     DATA_DICTIONARY_DIR / "acas_posting_dictionary.schema.json"
 )
 
-#: The two directories a reader may legitimately find the dictionary in, IN THE ORDER TO
-#: TRY THEM: the packaged copy first, the repository sibling second.
-DATA_DICTIONARY_SEARCH_PATH: Final[tuple[Path, ...]] = (
-    PACKAGE_DATA_DICTIONARY_DIR,
-    DATA_DICTIONARY_DIR,
-)
+#: The directories a reader may legitimately find the dictionary in, IN THE ORDER TO TRY
+#: THEM. There is exactly ONE, and that is the whole point: the artifact is a TOP-LEVEL
+#: SIBLING of this package, fixed at data_dictionary/ by Agent Action Plan section
+#: 0.3.1, and `pyproject.toml` names `data_dictionary*` in its packaging exclusion list
+#: so no second copy is ever created inside an installed distribution. Published as a
+#: tuple rather than as the single path because `dictionary/loader.py` iterates it and
+#: reports every candidate it tried when the artifact is absent.
+DATA_DICTIONARY_SEARCH_PATH: Final[tuple[Path, ...]] = (DATA_DICTIONARY_DIR,)
 
-#: The packaged directory under its SECOND PUBLISHED SPELLING, and the two artifacts
-#: inside it.
-PACKAGED_DATA_DICTIONARY_DIR: Final[Path] = PACKAGE_DATA_DICTIONARY_DIR
-
-#: The repository sibling under its SECOND PUBLISHED SPELLING, the mirror of the pair
-#: above.
+#: The repository sibling under its SECOND PUBLISHED SPELLING, for a reader who reaches
+#: for the explicit name.
 REPOSITORY_DATA_DICTIONARY_DIR: Final[Path] = DATA_DICTIONARY_DIR
-
-#: The shipped copy of the machine-readable data dictionary. Same bytes as
-#: DATA_DICTIONARY_PATH by construction.
-PACKAGED_DATA_DICTIONARY_PATH: Final[Path] = (
-    PACKAGED_DATA_DICTIONARY_DIR / "acas_posting_dictionary.json"
-)
-
-#: The shipped copy of the JSON Schema. It travels with the dictionary because
-#: `meta.schema_ref` names it relatively.
-PACKAGED_DATA_DICTIONARY_SCHEMA_PATH: Final[Path] = (
-    PACKAGED_DATA_DICTIONARY_DIR / "acas_posting_dictionary.schema.json"
-)
 
 # The complete public surface of this module: the version and the generated data
 # dictionary's paths.
@@ -110,10 +96,6 @@ __all__: Final[tuple[str, ...]] = (
     "DATA_DICTIONARY_PATH",
     "DATA_DICTIONARY_SCHEMA_PATH",
     "DATA_DICTIONARY_SEARCH_PATH",
-    "PACKAGED_DATA_DICTIONARY_DIR",
-    "PACKAGED_DATA_DICTIONARY_PATH",
-    "PACKAGED_DATA_DICTIONARY_SCHEMA_PATH",
-    "PACKAGE_DATA_DICTIONARY_DIR",
     "PACKAGE_ROOT",
     "REPOSITORY_DATA_DICTIONARY_DIR",
     "REPOSITORY_ROOT",
