@@ -39,9 +39,13 @@ than the rule number alone:
       `DELETE`. No DDL of any kind, and no index however tempting: `gl072`
       locates its nominal account with a sequential read, so the ordering the
       upstream sort produces is what makes the posting correct.
-    * SQLAlchemy at Core level; no ORM entity layer, which would want to own
-      schema definition and would obscure the statement ordering the scenario
-      state diff compares.
+    * `mysql-connector-python` is the only driver this package uses. SQLAlchemy
+      is pinned in the manifests and DECLARED, and it is not imported by any
+      module here. The plan permits Core level and forbids an ORM entity layer;
+      what ships does not take that path at all, so "Core level" records a
+      PERMISSION rather than a boundary this code crosses. The entity layer is
+      refused on its own merits as well - it would want to own schema definition
+      and would obscure the statement ordering the scenario state diff compares.
     * Strictly sequential, matching the single-threaded COBOL.
     * Exact numerics only. Every value arrives as `Decimal`, `int`, `str`,
       `bytes` or `None`; never a binary float.

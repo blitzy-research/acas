@@ -342,9 +342,14 @@ def transport_decimal_context() -> decimal.Context:
     A DELIBERATE context rather than an implicit one, but a narrow one.
 
     Returns:
-        A fresh :class:`decimal.Context`, safe for the caller to mutate. >>> ctx =
-            transport_decimal_context() >>> ctx.prec 28 >>> ctx.create_decimal("1.50") +
-            ctx.create_decimal("0.25") Decimal('1.75').
+        A fresh :class:`decimal.Context`, safe for the caller to mutate.
+
+    Examples:
+        >>> ctx = transport_decimal_context()
+        >>> ctx.prec
+        28
+        >>> ctx.create_decimal("1.50") + ctx.create_decimal("0.25")
+        Decimal('1.75')
     """
     return decimal.Context(
         prec=SCHEMA_MAX_DECIMAL_PRECISION * 2,
@@ -1597,10 +1602,21 @@ def _connect_step_for(errno: int) -> ConnectStep:
             server.
 
     Returns:
-        The :class:`~acas_posting.dal.status.ConnectStep` to report. >>>
-            _connect_step_for(-1) <ConnectStep.INIT: 101> >>> _connect_step_for(2003)
-            <ConnectStep.REAL_CONNECT: 102> >>> _connect_step_for(1049) # measured at
-            102, never 103 <ConnectStep.REAL_CONNECT.
+        The :class:`~acas_posting.dal.status.ConnectStep` to report.
+
+    Examples:
+        A non-positive number means the driver never reached a server:
+
+        >>> _connect_step_for(-1)
+        <ConnectStep.INIT: 101>
+        >>> _connect_step_for(2003)
+        <ConnectStep.REAL_CONNECT: 102>
+
+        1049 - unknown database - is the case that looks like step 103 and is
+        MEASURED at 102, which is the paragraph above in one line:
+
+        >>> _connect_step_for(1049)
+        <ConnectStep.REAL_CONNECT: 102>
     """
     if errno <= 0:
         return ConnectStep.INIT

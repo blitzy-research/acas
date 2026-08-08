@@ -560,9 +560,47 @@ path.
 | `acas_posting/dal/acas*.py` | `dal.connection`, `dal.status`, `dal.cursor_state`, one `records` module | `programs`, `cli`, other `dal.acas*`, `harness` |
 | `acas_posting/programs/*.py` | `records`, `dal.facade`, `cobol.arithmetic`, `cobol.move`, `cobol.condition_names`, `dates`, `workfiles` | `cli`, `dal.acas*` directly, `harness` |
 | `acas_posting/cli/*.py` | `programs`, `clock`, `cli.args` | `dal.acas*` directly, `harness` |
-| `tests/arithmetic/*` | `cobol`, `records` | `dal`, any database |
+| `tests/arithmetic/*` — at MODULE scope; see the note below | `cobol`, `records`, and `dictionary` beneath them | `dal`, `cli`, `programs`, any database |
 | `tests/scenarios/*` | `cli`, the shared harness helpers | `dal` internals |
 | `harness/*` | the standard library, `PyYAML`, the database driver | `acas_posting` internals other than the CLI |
+
+**The `tests/arithmetic/*` row holds at MODULE scope, and that qualification is
+load-bearing rather than a hedge.** Measured across the fourteen files: every
+module-level import in the tier resolves to `acas_posting.cobol`,
+`acas_posting.records` or `acas_posting.dictionary` — the last being the layer
+`cobol` itself sits on, so it is a reach DOWN and not a layering breach — and not
+one of them names `acas_posting.dal`, `acas_posting.cli`,
+`acas_posting.programs`, `mysql`, `sqlalchemy`, `yaml`, `numpy` or `pandas`.
+Inside test bodies the tier deliberately DOES reach `acas_posting.dal`,
+`acas_posting.programs`, `acas_posting.cli`, `acas_posting.dates` and
+`acas_posting.workfiles`: R-4 requires the reproduced anomalies be locked
+against the code that SHIPS rather than against a re-transcription of it, and a
+lock cannot assert against a module it never imports. Section 12.1 describes the
+loader that does it — it evicts every tier-isolated name before importing,
+purges what the import added on the way out, and then asserts that nothing
+survived.
+
+**Both halves of the row are enforced, not trusted.** An `ast` walk in
+`tests/arithmetic/test_comp_binary.py::test_no_arithmetic_module_imports_a_program_or_dal_at_module_level`
+rejects a module-level import of `acas_posting.programs`, `acas_posting.dal` or
+`acas_posting.cli` in **any** file of the tier, with no allow-list;
+`::test_the_set_of_modules_that_defer_import_is_the_declared_one` is the ratchet
+over the function-level ones, so the crossing set stays something that was
+decided rather than something that accumulated. `acas_posting.cli` is in that
+prohibition for a measured reason and not by symmetry: importing
+`acas_posting.cli.args` pulls `acas_posting.dal` and the whole of
+`mysql.connector` in transitively, so a module-level import of it would break the
+property while naming neither of the other two prefixes. The driver, `PyYAML`,
+`harness`, `numpy` and `pandas` half is held by the import-time snapshot two
+files take — `test_comp3_packed_decimal.py` and `test_pic_field_descriptors.py`
+each freeze `sys.modules` as they finish importing and assert none of those names
+is resident.
+
+The scope distinction is what keeps the promise underneath the row intact: a
+module-level `import acas_posting.dal` would make the whole directory
+uncollectable on a host without the pinned driver, whereas a function-level one is
+confined to the single test that needs it, and the tier still requires no
+database, no COBOL and no Docker.
 
 ---
 
@@ -581,9 +619,15 @@ path.
   and the scenario and determinism tiers.
 - **`openssl`** or an equivalent, if harness credentials have to be generated.
 
-`tests/arithmetic/` needs **no Docker, no MariaDB and no GnuCOBOL**. It imports
-only `acas_posting.cobol` and `acas_posting.records`, touches no database, and
-runs anywhere a 3.12 interpreter runs.
+`tests/arithmetic/` needs **no Docker, no MariaDB and no GnuCOBOL**. At module
+scope it imports only `acas_posting.cobol`, `acas_posting.records` and the
+`acas_posting.dictionary` layer beneath them; it touches no database, and it runs
+anywhere a 3.12 interpreter runs. It does reach `acas_posting.dal`,
+`acas_posting.programs` and `acas_posting.cli` from inside test bodies, to lock
+the reproduced anomalies against the modules that ship — section 12.1 sets out
+why and how, and section 5's import-boundary note records the scope distinction.
+Neither reach needs a database: the tier's loader evicts and purges, and the
+`dal` functions it drives are the pure ones.
 
 ---
 
@@ -1748,6 +1792,84 @@ equivalent lines are commented out in the frozen source
 `[purchase/purchase.cbl:L755-L758]`. Each gate belongs to its own route; the
 router imposes none (R-4).
 
+### 10.2a The connection contract every route reads — six parameters, three deadlines
+
+No route takes a database setting on the command line. The frozen counterpart
+reads its settings from outside `argv` too `[common/acas-get-params.cbl:L30]`,
+and a password in a process listing is a leak, so the environment is the only
+source. `acas_posting/cli/args.py` is the one adapter in the shipped package
+that reads it.
+
+**The six-parameter contract**, in the order of the frozen `MOVE` statements at
+`[common/glbatchLD.cbl:L262-L267]`:
+
+| Variable | Frozen keyword | Receiving item | Narrowest carrier | Locator |
+| --- | --- | --- | --- | --- |
+| `ACAS_DB_HOST` | `DBHOST` | `RDBMS-Host` | `x(32)` | `[copybooks/wssystem.cob:L143]` |
+| `ACAS_DB_USER` | `DBUSER` | `RDBMS-User` | `x(12)` | `[copybooks/wssystem.cob:L138]` |
+| `ACAS_DB_PASSWORD` | `DBPASS` | `RDBMS-Passwd` | `x(12)` | `[copybooks/wssystem.cob:L139]` |
+| `ACAS_DB_NAME` | `DBNAME` | `RDBMS-DB-Name` | `x(12)` | `[copybooks/wssystem.cob:L137]` |
+| `ACAS_DB_PORT` | `DBPORT` | `RDBMS-Port` | `x(4)` — the carrier, not the `x(5)` store | `[copybooks/wssystem.cob:L142]`, carried through `[copybooks/mysql-variables.cpy:L91]` |
+| `ACAS_DB_SOCKET` | `DBSOCK` | `RDBMS-Socket` | `x(64)` | `[copybooks/wssystem.cob:L144]` |
+
+`ACAS_DB_SOCKET` is the **one optional** member: empty means connect over TCP,
+and `harness/docker-compose.yml` sets it to `""` explicitly rather than leaving
+it unset, so the choice is visible rather than inferred. §8.1 carries the two
+width warnings that go with this table — twelve characters for the name, user and
+password, and a port of 1 to 9999 — and those warnings are why the carriers are
+stated here at all.
+
+**Absence is reproduced rather than refused, and the distinction is exact.** With
+**not one** of the six set, `resolve_rdbms_params` raises `RdbmsParamError`
+carrying `RDB_RETURN_NO_SOURCE` (8) — the frozen `move 8 to LK-Return / goback`
+`[common/acas-get-params.cbl:L174-L178]`. With *some* set and others missing the
+run **continues**: the missing carrier is left space-filled, exactly as
+`initialise LK-RDB-Vars` over a group declared `value spaces`
+`[common/acas-get-params.cbl:L152]` leaves it. Three conditions are *reported*
+rather than refused — a required value left blank, a value wider than its
+carrier, and a value containing whitespace, which the frozen reader cuts at the
+first space `[common/acas-get-params.cbl:L193-L199]` — because `acas-get-params`
+disposes of all three by TRANSFORMING rather than by objecting, and R-3 forbids
+adding the objection. The reports come from `audit_deployment_contract`, which is
+**off the parity path**: nothing in the migrated cycle calls it, so a run behaves
+identically whether or not you ask for them. No report echoes a value.
+
+**The three driver deadlines**, which are DEPLOYMENT settings and deliberately
+**not** part of the contract above:
+
+| Variable | Default | Accepted range | What it bounds |
+| --- | --- | --- | --- |
+| `ACAS_DB_CONNECT_TIMEOUT` | **10** seconds | 1 to 86400 | reaching the server |
+| `ACAS_DB_READ_TIMEOUT` | **300** seconds | 1 to 86400 | a statement's read |
+| `ACAS_DB_WRITE_TIMEOUT` | **300** seconds | 1 to 86400 | a statement's write |
+
+Whole seconds, written in decimal digits with no sign, unit or separator; leave
+one unset for its default. A malformed value, or one outside the range, raises
+`RdbmsParamError` with `RDB_RETURN_MALFORMED` (1), and the message does **not**
+echo what was supplied — these arrive on the same transport as
+`ACAS_DB_PASSWORD`. The ceiling is one day, the same one
+`harness/run_python_scenario.sh` puts on its own budgets, past which a "bound" is
+indistinguishable from none.
+
+They exist because the frozen C interface sets **none**: `mysql_real_connect` is
+called with a literal zero client-flag word and no option set on the handle
+`[copybooks/mysql-procedures.cpy:L72-L77]`, so an unreachable or wedged server
+blocks the compiled program indefinitely as well. Bounding that produces **no
+different table state** — only a run that reports instead of never ending — which
+is why it does not offend R-3, and why the defaults sit two orders of magnitude
+above the slowest statement the cycle issues, a full sequential walk of one
+seeded table, so that no posting run this migration can produce is cut short by
+one.
+
+The seven remaining variables the shipped package reads are the transport
+declaration and the two hardened-mode switches, and §8.1a is where they are set
+out: `ACAS_DB_ALLOW_PLAINTEXT`, `ACAS_DB_TLS_CA`, `ACAS_DB_TLS_CERT`,
+`ACAS_DB_TLS_KEY`, `ACAS_DB_REQUIRE_TLS`,
+`ACAS_DB_REQUIRE_DECLARED_CREDENTIALS` and
+`ACAS_DB_ALLOW_PLACEHOLDER_CREDENTIALS`. **Sixteen names, and that is the whole
+of what `acas_posting` reads from its surroundings.** The harness scripts read
+more of their own; §11.1a lists the ones a protocol-bound run refuses.
+
 ### 10.3 The abort gate is a hard gate, not a warning
 
 This one changes which tables a run writes, so getting it wrong produces a
@@ -2371,7 +2493,11 @@ against a re-transcription of it. Those imports happen inside the test body,
 through a context manager that imports the module for real and then removes it
 from `sys.modules` again — deliberately **not** behind `pytest.importorskip`,
 because a soft import turns a broken shipped module into a SKIP, and a skipped
-anomaly lock is indistinguishable from an absent one.
+anomaly lock is indistinguishable from an absent one. This is the detail behind
+the MODULE-scope qualification on section 5's `tests/arithmetic/*` import-boundary
+row: the row's prohibitions hold at module level, where they decide whether the
+directory is collectable at all, and the reaches described here are function-level
+and confined to the test that makes them.
 
 The tier still needs no database driver, and that is enforced rather than assumed.
 Each loader **evicts** every tier-isolated name before it imports, purges every

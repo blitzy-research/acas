@@ -886,9 +886,26 @@ def _require_exact_numeric(value: object, what: str) -> None:
         what: The field being stored, for a diagnosis that names the culprit.
 
     Raises:
-        TypeError: If the value is neither ``Decimal`` nor ``int``. >>>
-            _require_exact_numeric(Decimal("1.23"), "VA-V-THIS") >>>
-            _require_exact_numeric(7, "VA-GL").
+        TypeError: If the value is neither ``Decimal`` nor ``int``.
+
+    Examples:
+        Both exact types pass silently - the check is a guard, not a converter:
+
+        >>> _require_exact_numeric(Decimal("1.23"), "VA-V-THIS") is None
+        True
+        >>> _require_exact_numeric(7, "VA-GL") is None
+        True
+
+        A `float` is refused rather than quantized, which would launder the
+        artefact instead of catching it:
+
+        >>> _require_exact_numeric(1.5, "VA-GL")
+        Traceback (most recent call last):
+        ...
+        TypeError: acas013/valueMT: VA-GL must be an exact numeric value (Decimal or \
+int), not float. Rule R-2 forbids an accounting value passing through a binary \
+floating-point type at any point; quantizing one here would launder the artefact \
+instead of catching it.
     """
     if not isinstance(value, (Decimal, int)):
         raise TypeError(

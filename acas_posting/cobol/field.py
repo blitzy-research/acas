@@ -732,8 +732,12 @@ def _memoised_descriptor(key: str, path: Path | None) -> FieldDescriptor:
 
     `functools.cache` is the modern spelling of `functools.lru_cache` with no size
     limit, and it is unbounded here on purpose: the key domain is bounded by the
-    artifact, which holds 1061 entries, so the cache cannot grow beyond the dictionary
-    itself.
+    artifact, which holds 1067 entries under 1067 distinct keys, so the cache cannot
+    grow beyond the dictionary itself. The 1067 is the ENTRY count and is the right
+    bound here; `acas_posting/dictionary/generate.py` states 1061 for a different
+    quantity - the UNQUALIFIED keys - because six declarations whose signature
+    collides with a canonical copy are keyed with an `@<file stem>` suffix, and
+    1061 + 6 is this same 1067.
 
     Args:
         key: The entry key.

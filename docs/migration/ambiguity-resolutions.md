@@ -184,14 +184,31 @@ three and conclude the separation is not real:
   Belt and braces: `harness` sits in pytest's `[tool.pytest.ini_options] norecursedirs` and `harness/*`
   in the `[tool.coverage.run] omit` list, the latter annotated in the file itself as
   "Belt and braces for R-1".
-- **The import direction was measured, and the one place it does run is the legitimate one.** A search
-  of `harness/*.py` for `import acas_posting` or `from acas_posting` returns **zero** hits: the three
-  Python helpers the tests load are pure — they read table state, canonicalise it and diff it, and none
-  of them knows the migrated package exists. The only `import acas_posting` anywhere under `harness/`
-  is inside `harness/run_python_scenario.sh`, in the inline Python it feeds to the interpreter — an
-  import probe and two `SystemDataBlock` reads. That is the harness *driving* the migrated cycle out of
-  process, which is exactly what R-1 licenses; it is not `acas_posting` reaching for COBOL, which is
-  what R-1 forbids. The prohibited direction has zero instances.
+- **The import direction was measured, and the one import that remains is the bare availability
+  probe.** A search of `harness/*.py` for `import acas_posting` or `from acas_posting` returns **zero**
+  hits: the three Python helpers the tests load are pure — they read table state, canonicalise it and
+  diff it, and none of them knows the migrated package exists. The only `import acas_posting` anywhere
+  under `harness/` is inside `harness/run_python_scenario.sh`, in the inline Python it feeds to the
+  interpreter, and it is **one statement importing the package ROOT and nothing else** — a probe that
+  the package is installed and importable. `grep -nE "from acas_posting|import acas_posting\."` over
+  that file returns nothing at all. That is the harness *driving* the migrated cycle out of process,
+  which is exactly what R-1 licenses; it is not `acas_posting` reaching for COBOL, which is what R-1
+  forbids. The prohibited direction has zero instances.
+
+  **This bullet used to read "an import probe and two `SystemDataBlock` reads", and the two reads are
+  gone.** They were the AUDIT-3 pair — inline heredocs importing `acas_posting.records.system_record`
+  to assert that the migrated model preserves `Scycle REDEFINES Cyclea`
+  `[copybooks/wssystem.cob:L62-L63]`. R-1 did license them, since a child interpreter reading a record
+  class is still the harness driving the package from outside; but **AAP §0.4.3's per-directory import
+  table does not**, giving `harness/*` "standard library, `PyYAML`, driver" against a prohibition on
+  "`acas_posting` internals other than the CLI", and the runner's own header claimed the only package
+  import was the root probe. Two rules, one satisfied and one not, and a file asserting the stricter
+  reading of itself. The assertion moved to where §0.4.3 licenses the import —
+  `tests/arithmetic/test_comp_binary.py::test_system_cycle_redefines_is_one_storage_location`, with
+  `::test_binary_char_scycle_redefines_cyclea` pinning the descriptor — and it lost nothing on the way,
+  because the redefinition is a property of the record model rather than of any one run. What the stage
+  still does itself is what only it can see: it reads `CYCLEA` back over SQL and refuses a run whose
+  cycle is unreadable or zero.
 
 ### 2.4 R-2 — Zero binary floating point
 
@@ -803,17 +820,17 @@ did not reach the boundary the question is about. A question answered by reading
 the weaker `RESOLVED BY CONSTRUCTION` instead — `Q-8` is the one entry that does, and it says why in its own
 text.
 
-**§13** carries the deferrals handed up from the tiers that could not answer them: **eight** entries of its
-own, mostly under mnemonic identifiers — six from the arithmetic tier, one from the scenario tier and one from
-the two parity runners — plus a
+**§13** carries the deferrals handed up from the tiers that could not answer them: **nine** entries of its
+own, mostly under mnemonic identifiers — seven from the arithmetic tier, one from the scenario tier and one
+from the two parity runners — plus a
 companion answer key that a run supplies, plus **three** questions cited by scope because the semantics layer
-already owns them. The seventh is [`Q-EMPTY-BATCH-AT-END`](#q-empty-batch-at-end), which
+already owns them. One of the nine is [`Q-EMPTY-BATCH-AT-END`](#q-empty-batch-at-end), which
 `tests/scenarios/test_empty_batch.py` coined and cited before this file carried it; §13's warning records that
 gap rather than closing it silently. **§14** catalogues every remaining `Q-` identifier the repository cites —
-**85** distinct identifiers are cited outside this file across the migration trees, and **every one of them
+**86** distinct identifiers are cited outside this file across the migration trees, and **every one of them
 resolves to an entry or a catalogue row in this file**, so no citation anywhere dangles (§17 states that as a
 counted property, with the counting algorithm given so every figure is reproducible; the register's own total
-is **114**, the difference being the 3 identifiers documented as unassigned and the 26 canonical names §15.1
+is **115**, the difference being the 3 identifiers documented as unassigned and the 26 canonical names §15.1
 mints). **§15** does two things: **§15.1** assigns a globally unique canonical identifier to every reading that
 previously had only a colliding bare number, and **§15.2** tabulates the collisions between the three
 coexisting registers.
@@ -2943,9 +2960,10 @@ difference once the bound covered all 22 tables.
 The parity tiers reached a class of question they cannot answer and would not be honest to guess: **what the
 compiled program produces where the language leaves the result undefined, or where the only observable is
 one the migration does not have.** Each one is recorded here with the same five parts, in a more compact
-form because the experiments share a shape. Six came up from the arithmetic tier; the seventh,
-`Q-EMPTY-BATCH-AT-END`, came up from the scenario tier, and the eighth,
-`Q-GL084-ACCEPT-SEMANTICS`, came up from the two parity runners — each is marked as such at its entry.
+form because the experiments share a shape. **Nine** entries: seven came up from the arithmetic tier —
+including `Q-PACKED-RECEIVER-SENTINEL`, the byte-level reading of a COMP-3 receiver an unchecked subscript
+aliased — while `Q-EMPTY-BATCH-AT-END` came up from the scenario tier and `Q-GL084-ACCEPT-SEMANTICS` from
+the two parity runners; each is marked as such at its entry.
 
 Most carry a **mnemonic** identifier rather than a number. That is deliberate and not a lapse in the
 numbering: they were opened by the modules and tests that hit them, an id that names the question survives
@@ -3886,6 +3904,73 @@ phrase and the terminal, all of which the probe reproduced exactly.
 and is measured; `A-NEW-9` records the maintainer's own `*> this lot looks wrong !!!!!` on that construction.
 This entry owns only what the two **accepts** do with a keystroke, which neither of those touches.
 
+<a id="q-packed-receiver-sentinel"></a>
+
+### `Q-PACKED-RECEIVER-SENTINEL` — how the runtime reads a COMP-3 receiver an unchecked subscript aliased
+
+**Status: `RESOLVED BY ORACLE`, with a bounded non-reproduction stated rather than absorbed.** The reading
+rule was measured and **is** implemented; five of the ninety-five readings taken are deliberately **not**
+encoded, and this entry exists because a measured behaviour that the migration decides not to reproduce has
+to be visible somewhere a reader looks — AAP §0.1.1 requires deliberate non-reproductions be recorded *"so
+the omission is visible rather than accidental"*, and it names three such categories, which made this a
+fourth that appeared in no deliverable at all. Handed up by the semantics layer, whose measurements these
+are.
+
+**(a) The question.** `A-2` and its siblings compute an array subscript with no bounds check
+`[general/gl080.cbl:L328]`, `[general/gl080.cbl:L345]`, so the receiver of an `ADD` can be an arbitrary
+slice of the enclosing group rather than a field anything ever stored. Its bytes can therefore carry a
+nibble no `MOVE` would put there — typically the sign nibble of the neighbouring packed field, landing in a
+DIGIT position. **What does the compiled program read out of such a window?** It is not the digit-by-digit
+reading `acas_posting/cobol/usage.py` performs, and guessing would corrupt every figure the unbounded
+subscript touches.
+
+**(b) The evidence, and what was watched.** `cobc -C` established the code path first: `add <field> to
+<comp-3>` compiles to `cob_add (&receiver, &addend, 0)`, the runtime's generic add, which reads a COMP-3
+receiver **byte by byte in base 100** rather than nibble by nibble in base 10. The two agree for every byte
+pattern a `MOVE` can produce and diverge for the rest. The per-byte contribution was then measured directly
+— 26 byte values in each of three positions of a `pic s9(7)v99 comp-3` field — and comes out as three rules:
+
+```text
+high nibble <= 9 and low nibble <= 9  ->  high * 10 + low   (ordinary BCD)
+high nibble <= 9 and low nibble >= 10 ->  255
+high nibble >= 10                     ->  0
+```
+
+with the field's LAST byte contributing its high nibble as a single digit, **except** when that low nibble
+is zero — not a sign nibble at all — in which case it contributes two digits like any other byte. Readings
+that pin it: `0x4C` → 4, `0x5C` → 5, `0x99` → 9, `0x9A` → 9, `0x9F` → 9, against `0x10` → 10, `0x20` → 20,
+`0x30` → 30. The reading is then truncated to the field's digit count with no diagnostic, which is why a
+window decoding to more digits than the field holds still yields a definite answer. Eleven end-to-end
+readings are RETAINED in the repository rather than reported from a log —
+`PACKED_RECEIVER_READ_ORACLE_EVIDENCE` in `acas_posting/cobol/move.py` — including
+`323032342020 + 77.77 → 030323497 97C`, the real six-byte window `PTurnover-q (6)` addresses over
+`Purch-Stats-Date`.
+
+**(c) The five readings deliberately NOT reproduced, and the sixth that is not a program state.** Where the
+receiver's last byte carries an invalid HIGH nibble **and** a zero low nibble — `0xA0`, `0xC0`, `0xD0`,
+`0xE0`, `0xF0` — the runtime yielded **2550** where every other rule it obeys predicts **0**, and no
+consistent digit rule reproduces that column alongside the `0x20` → 20 readings. **2550 is a sentinel out
+of the runtime's own lookup table, not an accounting property**, so encoding it would assert a property of
+one `libcob` build as though it were the specification — which is the opposite of what R-6 asks for. The
+sixth excluded reading is a probe artefact rather than a program state: the window's trailing filler was
+seeded with `"Z"` (`0x5A`) where the frozen programs hold SPACES.
+
+**(d) The resolution, and why the exclusion changes nothing observable.** `_packed_receiver_value` and
+`_packed_byte_contribution` in `acas_posting/cobol/move.py` implement the three rules and the last-byte
+exception exactly, so **89 of the 95 readings are reproduced**, the excluded five yield `0`, and the
+truncation is silent because `cob_add` was called with `opt = 0` and therefore has no size-error path to
+take (R-3: no validation is added where the frozen call has none). **Neither exclusion is reachable at any
+migrated site**, and that is a case analysis rather than a hope: a receiver window's last byte is always
+one of three things, none of which can carry a high nibble above 9 — a byte of a stored packed value, whose
+high nibble is a decimal digit; a character byte of a `DISPLAY` field or of filler, `0x20`–`0x3F`; or a
+small binary counter. The five patterns require a high nibble of `A` or above in that position, so no
+in-scope record layout can present one.
+
+**(e) Consuming module.** `acas_posting/cobol/move.py`, which carries the rules, the retained evidence table
+and the unreachability argument at the site. Reached from `acas_posting/programs/gl080_end_of_cycle.py`,
+`pl060_order_posting.py` and `pl100_payment_posting.py`, the three unbounded-subscript sites. The anomaly
+register's neighbours are `A-2` (the unbounded quarter subscript), `A-PL060-B` and `A-PL060-C`.
+
 <a id="q-string-pointer-and-refmod"></a>
 
 ### The three that are handed **down**, not up — questions the semantics layer already owns
@@ -4144,7 +4229,7 @@ entry carried one. This table is the single place an unresolved item is declared
 | [`Q-CLI-SYSREC-PINS`](#q-cli-family) | **A** | What the frozen row holds after a menu-driven run. Settled by dumping `SYSTEM-REC` after an oracle journey. | `cli/args.py` (`_bind_system_record`, `overrewrite`) | the CLI's pins win; the six connection fields are forced, and a scenario must seed `Run-Date`, `Date-Form` and `IRS-Instead` to agree — which the runners check |
 | [`Q-CLI-GL080-DEFAULTS`](#q-cli-family) | **A** | The frozen database effect of the three promoted parameters. Narrowed already against the DIAGNOSTIC oracle by the `end_of_cycle_gl` journey; a frozen build turns that into an observation. | `cli/gl_end_of_cycle.py`, `programs/gl080_end_of_cycle.py` | `--disk-change-option 9` reported to leave the three GL tables as seeded; the two unprovable inputs are refused |
 | [`Q-CLI-OVERREWRITE-SECOND-LEG`](#q-cli-family) | **B** for the reproduction, **A** for the observation | Reproduction: AAP §0.3.1/§0.4.1.5 give the migration a single SQL store, so an indexed second leg has nothing to select and the divergence is declared rather than pending. Observation: which leg the oracle's second dispatch takes without the build-copy shim still needs a frozen build. | `cli/args.py` (`overrewrite`) | one store, always persisted; the divergence recorded at the site and in `Q-7` |
-| [`Q-EDITED-BLANK-WHEN-ZERO`](#q-edited-blank-when-zero) | **B** (already `MEASURED — DECLINED ON SCOPE` for its print-only half) | The rendering was measured in full; every picture it governs on `gl072`'s side receives into a print line, and AAP §0.2.2 excludes report formatting beyond database effects. The one case that reaches a column IS measured and reproduced. | `cobol/move.py`, `programs/gl072_transaction_update.py` | the column-reaching case reproduced; the print-only renderings deliberately not implemented, held by twelve permanent `xfail`s |
+| [`Q-EDITED-BLANK-WHEN-ZERO`](#q-edited-blank-when-zero) | **B** (already `MEASURED — DECLINED ON SCOPE` for its print-only half) | The rendering was measured in full; every picture it governs on `gl072`'s side receives into a print line, and AAP §0.2.2 excludes report formatting beyond database effects. The one case that reaches a column IS measured and reproduced. | `cobol/move.py`, `programs/gl072_transaction_update.py` | the column-reaching case reproduced; the print-only renderings deliberately not implemented, and the refusal is what holds that — `cobol/move.py` raises `UnobservableEditedPicture` for all three print receivers, asserted with the measured characters named and refuted by `tests/arithmetic/test_ledger_balance_accumulation.py::test_q_edited_blank_when_zero_is_measured_and_deliberately_not_implemented`, which cites AAP §0.2.2 as the reason. There is no `xfail` marker anywhere in `tests/` |
 | [`Q-20`](#q-numeric-band) | **C** | Settled by reading the frozen handler: `[common/acas006.cbl:L309-L317,L637-L644]` force `fn-Delete-All` after an open-output on the RDB leg and `[common/acas006.cbl:L389]` truncates on the flat leg. Shown in full in its §14.1 row. | `programs/gl080_end_of_cycle.py`, `dal/acas006_gl_posting.py` | already reproduced by `ba015_test_ends`; `Q-23`'s unreachability is unaffected |
 | [`Q-CLI-TERMCODE-1-7`](#q-cli-family) | **C** | Settled by census: only 0, 4, 5, 8 and 9 are ever stored into `WS-Term-Code` in the whole frozen tree; 1, 2, 3, 6 and 7 have no producer. Shown in full in its §14.2 row. | `cli/args.py:is_serious_error`, `cli/gl_post_cycle.py`, `cli/gl_end_of_cycle.py`, `__main__.py` | the `> 7` predicate, total over `pic 99`, plus the `= 5` phase gate |
 | [`Q-CLI-IRS-RUNDATE`](#q-cli-family) | **C** | Settled by construction: inside `Ledger-Postings-Add` the posting date comes from the transfer record `[irs/irs030.cbl:L1662]`; the IRS `run-date` is read only at the out-of-scope `[irs/irs030.cbl:L789]` and at two screen items. Shown in full in its §14.2 row. | `cli/irs_post.py`, `programs/irs030_posting.py` | nothing provisional at the site, which is now the answer rather than a gap |
@@ -4500,22 +4585,22 @@ Q-nn` at the site that raises it"* — and **seven Payroll data-item names**.
 | Property | Value |
 | --- | --- |
 | Primary entries in §12 | **14** — `Q-1` … `Q-5`, `Q-5.1` … `Q-5.3`, `Q-6` … `Q-10`, and `Q-SYS4-SPARE-SENTINEL` |
-| Entries in §13 | **8** of its own — six handed up from the arithmetic tier, `Q-EMPTY-BATCH-AT-END` from the scenario tier and `Q-GL084-ACCEPT-SEMANTICS` from the two parity runners — plus one companion answer key, plus **3** cited by scope |
+| Entries in §13 | **9** of its own — seven handed up from the arithmetic tier (the newest being `Q-PACKED-RECEIVER-SENTINEL`), `Q-EMPTY-BATCH-AT-END` from the scenario tier and `Q-GL084-ACCEPT-SEMANTICS` from the two parity runners — plus one companion answer key, plus **3** cited by scope |
 | Statuses in §12 | **0** × `PENDING — AWAITING ORACLE EXECUTION`; **12** × `RESOLVED BY ORACLE` (`Q-1`, `Q-4`, `Q-5`, `Q-5.1`, `Q-2`, `Q-3`, `Q-5.2`, `Q-5.3` and `Q-SYS4-SPARE-SENTINEL` dated 2026-08-07; `Q-6`, `Q-7`, `Q-10` dated 2026-08-04); **1** × `RESOLVED BY CONSTRUCTION` (`Q-8`); **1** partial (`Q-9`). Sums to the 14 entries |
-| Statuses in §13 | **0** × `PENDING — AWAITING ORACLE EXECUTION`; **7** × `RESOLVED BY ORACLE` — six dated 2026-08-07 (`Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-70f`, `Q-EMPTY-BATCH-AT-END`) and one dated 2026-08-08 (`Q-GL084-ACCEPT-SEMANTICS`, measured by a standalone `cobc 3.2.0` probe over a real pty, which needed no seed); **1** two-part status (`Q-EDITED-BLANK-WHEN-ZERO`, `RESOLVED BY ORACLE` for the case that reaches a column and `MEASURED — DECLINED ON SCOPE` for the print-only pictures). Sums to the 8 entries |
+| Statuses in §13 | **0** × `PENDING — AWAITING ORACLE EXECUTION`; **8** × `RESOLVED BY ORACLE` — six dated 2026-08-07 (`Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-70f`, `Q-EMPTY-BATCH-AT-END`), one dated 2026-08-08 (`Q-GL084-ACCEPT-SEMANTICS`, measured by a standalone `cobc 3.2.0` probe over a real pty, which needed no seed) and `Q-PACKED-RECEIVER-SENTINEL`, whose readings are the semantics layer's own and are RETAINED in `acas_posting/cobol/move.py` rather than reported from a log — this register adopts them and names their owner instead of re-claiming them; **1** two-part status (`Q-EDITED-BLANK-WHEN-ZERO`, `RESOLVED BY ORACLE` for the case that reaches a column and `MEASURED — DECLINED ON SCOPE` for the print-only pictures). Sums to the 9 entries |
 | **Unresolved items project-wide, across §§12–15** | **10 rows in [§14.5](#the-open-item-register)**, and that table is the only place any of them is declared. This row read **11** until `Q-GL084-ACCEPT-SEMANTICS` was measured on 2026-08-08 and its row removed; the count is re-derived from the table rather than carried. By class: **3 × A** (awaiting the frozen executable) — `Q-9`, `Q-CLI-SYSREC-PINS`, `Q-CLI-GL080-DEFAULTS`; **2 × B** (closed on scope) — `Q-EDITED-BLANK-WHEN-ZERO`, and `Q-CLI-OVERREWRITE-SECOND-LEG` for its reproduction half; **5 × C** (settled here without an executable, and therefore no longer open) — `Q-20`, `Q-CLI-TERMCODE-1-7`, `Q-CLI-IRS-RUNDATE`, `Q-CLI-SYSREC-RUNDATE`, `Q-CLI-RUNDATE-VS-ROW`. Two rows carry a class per half and are counted under the half that is still open: `Q-CLI-OVERREWRITE-SECOND-LEG` (B for the reproduction, A for the oracle observation) and `Q-CLI-RUNDATE-VS-ROW` (C for the semantics, A for the oracle row). **So what genuinely awaits an executable is 3 whole items plus 2 halves, what is closed on scope is 2, and what this revision settled by reading the frozen source is 5** |
 | Items moved out of "open" by a reading or census | **5**, each by a reading or a census shown in full in its own row rather than by a status change alone: `Q-20` (the frozen handler forces `fn-Delete-All` after an open-output), `Q-CLI-TERMCODE-1-7` (only 0, 4, 5, 8, 9 are ever stored into `WS-Term-Code`; 1, 2, 3, 6, 7 have no producer anywhere), `Q-CLI-IRS-RUNDATE` (the IRS `run-date` reaches no data inside `Ledger-Postings-Add`), `Q-CLI-SYSREC-RUNDATE` (five creation-path writers, all excluded by AAP §0.2.2, plus one bridge unload), `Q-CLI-RUNDATE-VS-ROW` (the same census plus `overrewrite()`'s key-1 rewrite, with the agreement now CHECKED by both runners). **None of the five required a code change**, and each row says why: the behaviour they describe was already what executes |
-| Consuming code path named per unresolved item | **all 11.** §14.5 carries a "Consuming code path" column, so an answer arriving later has a named place to land, and a reader can tell whether an open question touches the accounting path or the harness |
-| `RESOLVED BY ORACLE` used as a status | **19 entries** — 12 in §12, 6 in §13 and the column-reaching half of §13's two-part entry — and only where a compiled run or a focused compiled probe directly answered the stated question, with the captured observable written into the entry. §4 states the rule; this row is the only tally of it |
+| Consuming code path named per unresolved item | **all 10** — the figure §14.5 yields, and the same one the row above derives; it read **11** until `Q-GL084-ACCEPT-SEMANTICS` was measured and its row removed. §14.5 carries a "Consuming code path" column, so an answer arriving later has a named place to land, and a reader can tell whether an open question touches the accounting path or the harness |
+| `RESOLVED BY ORACLE` used as a status | **20 entries** — 12 in §12, 7 in §13 and the column-reaching half of §13's two-part entry — and only where a compiled run or a focused compiled probe directly answered the stated question, with the captured observable written into the entry. §4 states the rule; this row is the only tally of it |
 | `RESOLVED BY CONSTRUCTION` used as a whole-entry status | **1** — `Q-8`, whose open half was *which statements exist*, answered by a census of the frozen `MOVE` sites shown in full in the entry. It claims the weaker of the two resolved statuses deliberately: no compiled run was needed, so none is claimed. `Q-9` remains partial and carries its settled half inside the entry |
 | Entries carrying all five template parts | **all of them.** Every §12 and §13 entry has (a) question, (b) evidence, (c) oracle experiment, (d) resolution-or-status and (e) consuming module(s) |
-| Explicit anchors | **26** — one for each of the **22** anchored entries (`q-1` … `q-9`, `q-5-1` … `q-5-3`, `q-sys4-spare-sentinel`, and one per §13 entry), plus `q-string-pointer-and-refmod` on §13's closing handed-down table, so a bare `#q-n` citation resolves, plus **three added with §14.5**: `the-open-item-register` on §14.5 itself and `q-numeric-band` / `q-cli-family` on the two §14 catalogue sub-sections, whose rows have no anchors of their own. Those two are EXPLICIT rather than heading-derived deliberately: `### 14.2 The `Q-CLI-*` family — the CLI boundary` slugs to `142-the-q-cli--family--the-cli-boundary`, a double hyphen from the removed `*` that is easy to write wrong and impossible to notice. Every internal fragment reference in this file — **35** of them, to **21** distinct anchors — resolves; **0** dangle. Each id appears exactly ONCE: a duplicate anchor is as bad as a missing one, because a reader cannot tell which of the two a link reached — and a duplicate `q-empty-batch-at-end` has arisen **twice**, each time while two independently drafted versions of that entry coexisted, which is why this row is now checked by matching the anchor tags mechanically rather than by reading |
-| `Q-` identifiers cited by the project | **85** cited somewhere OTHER than this file, and **every one of them appears in this file** — §12, §13, §14 or §15, so **0 dangle**. Census scope, stated so the figure is reproducible: the git-tracked text files of `acas_posting/`, `tests/`, `harness/`, `docs/`, `data_dictionary/` and the two manifests, under the algorithm stated above this table. This row has read **82**, then **81**, then **85**; it is re-derived mechanically under that algorithm on every revision and now comes out at **85** — the newest being `Q-GL084-ACCEPT-SEMANTICS`, which both parity runners name in the diagnostic that refuses the input it governs and whose entry is now `RESOLVED BY ORACLE` — and the earlier figures are corrected rather than defended, since a row whose whole purpose is to be reproducible has to match what reproducing it yields |
-| Identifiers this file uses **as register identifiers** | **114**, and every one of them is entered, catalogued or declared here |
-| … of which cited **outside** this register | **85** — the row above. Each resolves to a §12 or §13 entry or to a §14/§15 catalogue row, so **no citation anywhere in the project dangles** |
+| Explicit anchors | **27** — one for each of the **23** anchored entries (`q-1` … `q-9`, `q-5-1` … `q-5-3`, `q-sys4-spare-sentinel`, and one per §13 entry including `q-packed-receiver-sentinel`), plus `q-string-pointer-and-refmod` on §13's closing handed-down table, so a bare `#q-n` citation resolves, plus **three added with §14.5**: `the-open-item-register` on §14.5 itself and `q-numeric-band` / `q-cli-family` on the two §14 catalogue sub-sections, whose rows have no anchors of their own. Those two are EXPLICIT rather than heading-derived deliberately: `### 14.2 The `Q-CLI-*` family — the CLI boundary` slugs to `142-the-q-cli--family--the-cli-boundary`, a double hyphen from the removed `*` that is easy to write wrong and impossible to notice. Every internal fragment reference in this file — **35** of them, to **20** distinct anchors — resolves; **0** dangle. The 35 is 34 markdown links plus the ONE bare fragment citation, at :372, which names an anchor the links already reach — which is why the distinct figure is 20 and not 21. **One further `#…` token is excluded because it is a shape and not a reference**: the metasyntactic form quoted two sentences above, whose whole purpose is to stand for any number. Counting it is what makes a naive `#([a-z0-9-]+)` census yield 21, and this row read **21** for exactly that reason; the excluded token is now named so the next re-derivation agrees with the figure instead of "correcting" it back. Each id appears exactly ONCE: a duplicate anchor is as bad as a missing one, because a reader cannot tell which of the two a link reached — and a duplicate `q-empty-batch-at-end` has arisen **twice**, each time while two independently drafted versions of that entry coexisted, which is why this row is now checked by matching the anchor tags mechanically rather than by reading |
+| `Q-` identifiers cited by the project | **86** cited somewhere OTHER than this file, and **every one of them appears in this file** — §12, §13, §14 or §15, so **0 dangle**. Census scope, stated so the figure is reproducible: the git-tracked text files of `acas_posting/`, `tests/`, `harness/`, `docs/`, `data_dictionary/` and the two manifests, under the algorithm stated above this table. This row has read **82**, then **81**, then **85**; it is re-derived mechanically under that algorithm on every revision and now comes out at **86** — the newest being `Q-PACKED-RECEIVER-SENTINEL`, which `acas_posting/cobol/move.py` names at the rule it implements — and the earlier figures are corrected rather than defended, since a row whose whole purpose is to be reproducible has to match what reproducing it yields. **One token the re-derivation surfaces is a family label and is excluded as such**: `Q-GL051-<n>`, the metasyntactic form `acas_posting/programs/gl051_batch_control_check.py` writes twice, whose stem `Q-GL051` is not an identifier any more than `Q-PL055-n` is. It is now enumerated with the other labels below, because an exclusion applied but not listed is the one way a reproducible figure stops being reproducible |
+| Identifiers this file uses **as register identifiers** | **115**, and every one of them is entered, catalogued or declared here |
+| … of which cited **outside** this register | **86** — the row above. Each resolves to a §12 or §13 entry or to a §14/§15 catalogue row, so **no citation anywhere in the project dangles** |
 | … of which **register-only** | **29**, each declared as such rather than left to look like an omission: **3** documented as **unassigned** — `Q-12`, `Q-13`, `Q-70c` — and **26** newly minted in §15.1 as the canonical names for readings that previously had only a colliding bare number: seven in the GL051 series, nine in SL060, five in PL100, four in MOVE, and the single `Q-VATNET-1` (the series are named without their `Q-` prefix here on purpose: a self-audit row that spells a family stem mints a token its own census then has to exclude). Readings of **86** and **88** for this row count `Q-GL080-DIVIDE-BY-ZERO` and `Q-SYS4-SPARE-SENTINEL` among the register-only identifiers. Neither is one: [`scenario-diff-evidence.md`](scenario-diff-evidence.md) cites the first and the six corrected fixtures cite the second, so both fall inside the 84. `Q-GL080-DIVIDE-BY-ZERO` remains the one **coined name** for an existing question (§13, §15) — coined and cited being different properties that the old row conflated |
-| Tokens outside the census, and why | Two closed sets, both named in full so the exclusion is checkable rather than asserted. **Payroll data-item names — `Q-TAX`, `Q-TAXES`, `Q-FICA-TAX`, `Q-CO-FUTA-LIAB`, `Q-ENDED`, `Q-Year`, `Q-mmdd`** — are COBOL fields in a sub system AAP §0.2.2 excludes in its entirety; they are not register identifiers and are deliberately not catalogued. **Family labels and placeholders — `Q-5.x`, `Q-70`, `Q-CLI`, `Q-PL055-n`, `Q-n`, `Q-nn`** — name groups and metasyntactic slots rather than questions; the last is what `acas_posting/programs/gl080_end_of_cycle.py` writes in *"`AMBIGUITY Q-nn` at the site that raises it"*. A naive `Q-` pattern over this file therefore returns more tokens than the rows above count, by these two sets plus case and trailing-punctuation variants of them. This row used to assert a specific naive-token total. That number decayed on every edit to the file and is replaced by the rule, for the same reason §4's status tallies were moved into this section: a count written where nothing recomputes it is a claim with a shelf life |
-| Experiments described as having been run | The strict build, all nine parity journeys committed at the time (eight of them in the committed set; the ninth's definition is not committed), both scenario orders, the two-run determinism tier, the focused boundary probes cited by `Q-7`, `Q-9` and `Q-10`, and the 2026-08-07 focused probes cited by `Q-1`, `Q-2`, `Q-3`, `Q-4`, `Q-5`, `Q-5.1`, `Q-5.2`, `Q-5.3`, `Q-SYS4-SPARE-SENTINEL`, `Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-EDITED-BLANK-WHEN-ZERO`, `Q-70f` and `Q-EMPTY-BATCH-AT-END`. Every one of the latter reports its captured observable in its own entry. Two of them called a COMPILED MODULE rather than only compiling a probe — `Q-1` invoked `maps04.so` and `Q-3` went through the compiled handler, bridge and `cobmysqlapi` to real SQL |
+| Tokens outside the census, and why | Two closed sets, both named in full so the exclusion is checkable rather than asserted. **Payroll data-item names — `Q-TAX`, `Q-TAXES`, `Q-FICA-TAX`, `Q-CO-FUTA-LIAB`, `Q-ENDED`, `Q-Year`, `Q-mmdd`** — are COBOL fields in a sub system AAP §0.2.2 excludes in its entirety; they are not register identifiers and are deliberately not catalogued. **Family labels and placeholders — `Q-5.x`, `Q-70`, `Q-CLI`, `Q-PL055-n`, `Q-GL051-<n>`, `Q-n`, `Q-nn`** — name groups and metasyntactic slots rather than questions; the last is what `acas_posting/programs/gl080_end_of_cycle.py` writes in *"`AMBIGUITY Q-nn` at the site that raises it"*. A naive `Q-` pattern over this file therefore returns more tokens than the rows above count, by these two sets plus case and trailing-punctuation variants of them. This row used to assert a specific naive-token total. That number decayed on every edit to the file and is replaced by the rule, for the same reason §4's status tallies were moved into this section: a count written where nothing recomputes it is a claim with a shelf life |
+| Experiments described as having been run | The strict build, all nine parity journeys committed at the time (eight of them in the committed set; the ninth's definition is not committed), both scenario orders, the two-run determinism tier, the focused boundary probes cited by `Q-7`, `Q-9` and `Q-10`, and the 2026-08-07 focused probes cited by `Q-1`, `Q-2`, `Q-3`, `Q-4`, `Q-5`, `Q-5.1`, `Q-5.2`, `Q-5.3`, `Q-SYS4-SPARE-SENTINEL`, `Q-SORT-TIE-ORDER`, `Q-GL080-DIVIDE-BY-ZERO`, `Q-QUARTER-SUBSCRIPT`, `Q-ROUNDED-OVERFLOW-ORDER`, `Q-EDITED-BLANK-WHEN-ZERO`, `Q-70f` and `Q-EMPTY-BATCH-AT-END`. Every one of the latter reports its captured observable in its own entry. Two of them called a COMPILED MODULE rather than only compiling a probe — `Q-1` invoked `maps04.so` and `Q-3` went through the compiled handler, bridge and `cobmysqlapi` to real SQL. `Q-PACKED-RECEIVER-SENTINEL` is the one entry whose experiment this register did **not** commission: the `cobc -C` inspection and the 95 byte-position readings are the semantics layer's, taken while `acas_posting/cobol/move.py` was written and retained there in `PACKED_RECEIVER_READ_ORACLE_EVIDENCE`. The entry adopts them and names their owner, which is why its status rests on a retained artifact rather than on a run this file reports |
 | Measured values claimed as this register's own observations | Only values linked to the 2026-08-04 evidence files and to the compiled probes named in their entries, which now include the 2026-08-07 set. The 2026-08-07 figures were captured by probes compiled with the frozen build scripts' own flags — no `-std=`, no `>>SET ARITHMETIC`, no `binary-truncate` — so each records the compiler's default behaviour and not a configured one |
 | Provenance of every measured claim | Durable repository state, or an explicit label. **0** citations of a host temporary path: the four claims that would naturally cite a `/tmp/…` log each cite instead a committed script, a frozen locator or a section of [`scenario-diff-evidence.md`](scenario-diff-evidence.md) — or is labelled a **report of an observed run rather than a retained artefact** |
 | Runtime versions the observations are attributed to | Stated once, in §10's "The provenance a reported observation carries with it": GnuCOBOL 3.2 final and MariaDB 10.11.7 on the compiled side, a C-backed CPython 3.12 on the Python side. **No claim of parity across every 3.12 patch release** is made anywhere |
@@ -4526,7 +4611,7 @@ Q-nn` at the site that raises it"* — and **seven Payroll data-item names**.
 | Experiments that report a value through a binary float | **0** (R-2) |
 | Experiments that build inside the mounted checkout | **0.** §3's hazard note and §10's protocol both forbid it |
 | Locators verified by direct reading of the frozen source | **all of them.** §8 lists the thirteen corrections that verification produced |
-| Identifiers renumbered **in code** | **0.** §15.1 adds a canonical name beside each colliding bare number and keeps the bare number as a declared alias, so no existing citation was rewritten and none dangles |
+| `Q-` identifiers renumbered **in code** | **0.** §15.1 adds a canonical name beside each colliding bare number and keeps the bare number as a declared alias, so no existing citation was rewritten and none dangles. Scoped to `Q-` deliberately: the ANOMALY identifiers were renamed in code, by `anomaly-log.md` §15.2, which scoped seven module-local families that had been using a bare form. Those two registers made opposite calls on the same problem and both are defensible — an alias costs nothing where every citation is external and load-bearing, while a rename is the only fix where the bare form is what made the citation ambiguous in the first place |
 | Identifiers newly opened here | **0 questions.** `Q-EMPTY-BATCH-AT-END` was **cited before it was entered** — by `tests/scenarios/test_empty_batch.py`, which coined it — so its §13 entry adopts an existing identifier and closes a dangling citation rather than opening a question. Two others were drafted under new mnemonics and both were then traced to identifiers the project already had: one became `Q-70f` when `gl070`'s own question family was found (§14.1a), and one — the zero divisor — is the arithmetic tier's `Q-7`, which §12's mandated `Q-7` prevents this register from using, so it keeps the mnemonic `Q-GL080-DIVIDE-BY-ZERO` as a declared **alias** (§15.2). The **26** canonical identifiers §15.1 mints are the same case at scale: each is paired one-to-one with a reading its owning file already published. **Names are coined; questions are not.** |
 | Third-party measurements recorded but **not** promoted to a resolution | **1** — `Q-OTM5-NARROW`'s magnitude finding (§14.4), attributed to the tier that took it and changing no status here. Two entries have left this row rather than being removed from it, and the distinction matters: the provisional constants of `Q-2`, `Q-3`, `Q-5.2`, `Q-5.3` and `Q-ROUNDED-OVERFLOW-ORDER` were measured by this register's own probes and promoted; and the arithmetic tier's zero-divisor measurement was **independently re-measured** here, so `Q-GL080-DIVIDE-BY-ZERO` now rests on this register's own observation and merely agrees with the tier's. `Q-5.1`'s constants, listed here as provisional until 2026-08-07, are measured and no longer are |
 
@@ -4558,8 +4643,14 @@ exists to prevent:
   - **An answer can be that the behaviour is unobservable, which is itself a finding** rather than a deferral.
     `Q-EDITED-BLANK-WHEN-ZERO` retains exactly that shape for `gl072`'s three print items — every edited
     receiver there is a print line and AAP §0.2.2 puts report formatting beyond database effects out of
-    scope — while the one case that *does* reach a column is measured. §4 draws that line, and the twelve
-    permanent `xfail`s in the arithmetic tier hold it.
+    scope — while the one case that *does* reach a column is measured. §4 draws that line, and what holds it
+    is an assertion rather than a marker: `test_q_edited_blank_when_zero_is_measured_and_deliberately_not_implemented`
+    requires `cobol/move.py` to REFUSE each of the three receivers with `UnobservableEditedPicture`, and
+    separately requires that the plausible rendering the probe measured is not produced. **This bullet
+    read "the twelve permanent `xfail`s in the arithmetic tier hold it", and no such marker exists** —
+    the tier contains no `xfail` of any form, as :1359, :2503 and :3112 each record for their own
+    question. A marker that does not exist cannot hold a decision, and citing one hid the fact that a
+    positive assertion already did.
   - **Measuring a defect does not repair it and must not be read as repairing it.** `A-11`, `A-15` and `A-17`
     in [`anomaly-log.md`](anomaly-log.md) all moved from `PENDING` to `REPRODUCED` on these measurements and
     all three remain live defects under R-4. `Q-5` is the sharpest case: knowing that

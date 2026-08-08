@@ -1329,6 +1329,16 @@ UNCHECKED_SUBSCRIPT_ORACLE_EVIDENCE: Final[tuple[tuple[str, int, str], ...]] = (
 #: counter. Every other reading - 89 of the 95 taken - is reproduced exactly,
 #: including `0x32 0x30 0x32 0x34 0x20 0x20`, the real six-byte window that
 #: `PTurnover-q (6)` addresses over `Purch-Stats-Date`.
+#:
+#: AND IT IS RECORDED IN A DELIVERABLE, NOT ONLY HERE. Agent Action Plan section
+#: 0.1.1 requires a deliberate non-reproduction be recorded "so the omission is
+#: visible rather than accidental", and rule R-6 makes
+#: [docs/migration/ambiguity-resolutions.md] the register of measured arbitrations.
+#: This one is `Q-PACKED-RECEIVER-SENTINEL` there: the five byte patterns, the 2550
+#: reading, the rule implemented instead, the case analysis above and the
+#: probe-artefact sixth. For a period it appeared in no deliverable at all, which
+#: made an exemplary in-code disclosure invisible to every reader who starts from
+#: the documents - the failure mode that requirement exists to prevent.
 PACKED_RECEIVER_READ_ORACLE_EVIDENCE: Final[tuple[tuple[str, str], ...]] = (
     ("444C000005 + 22.22", "465502222C"),
     ("444C00000C + 22.22", "465502222C"),

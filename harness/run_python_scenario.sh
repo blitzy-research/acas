@@ -61,6 +61,16 @@
 #        internals, so the only Python import of the package below is the bare
 #        availability probe of the package ROOT. The mechanised proof is that this
 #        script completes on a host with no COBOL compiler and no COBOL runtime.
+#        The claim is checkable in one command and is meant to be checked: grep this
+#        file for a submodule import of the package -- the `from' form, or the `import'
+#        form with a dot after the package name -- and every hit is a COMMENT saying
+#        there are none, this one included. The only executable mention is the single
+#        probe statement in `acas_py_probe_import''s caller. The claim held FALSE for
+#        one revision, in which two inline heredocs pulled in the record module
+#        `acas_posting.records.system_record' to assert the Scycle/Cyclea
+#        redefinition; that assertion now lives in the arithmetic tier, where the same
+#        section licenses the import -- see AUDIT-3 in
+#        `acas_py_assert_file_system_used' for what moved and why.
 #
 #        ON THE FROZEN-SOURCE CITATIONS BELOW. Every [<path>:<locator>] naming a
 #        COBOL file is a CITATION and never an operand: it appears in a comment, in
@@ -3321,12 +3331,23 @@ acas_py_resolve_tables() {
 # =============================================================================
 # THE PACKAGE AND THE DRIVER
 #
-# The package import below is the BARE ROOT ONLY. That is a legitimate
-# availability probe and not a breach of the layering rule: the package root is
-# deliberately not a convenience-import hub, so importing it reaches no internal
-# module of the migrated cycle. Everything else this script needs from the
-# migrated side it reaches as a SUBPROCESS, which is what Agent Action Plan
-# section 0.4.3 requires of this tree.
+# The package import below is the BARE ROOT ONLY, and it is the ONLY `acas_posting'
+# import anywhere in this file. That is a legitimate availability probe and not a
+# breach of the layering rule: the package root is deliberately not a
+# convenience-import hub, so importing it reaches no internal module of the migrated
+# cycle. Everything else this script needs from the migrated side it reaches as a
+# SUBPROCESS, which is what Agent Action Plan section 0.4.3 requires of this tree --
+# "standard library, PyYAML, driver", and not "acas_posting internals other than the
+# CLI".
+#
+# NO SUBMODULE IMPORT, INCLUDING FOR AN ASSERTION THAT WOULD BE CHEAP TO MAKE HERE.
+# The temptation is real: a two-line heredoc over `acas_posting.records' can check a
+# record model against a value this stage has just read from the database, and one
+# revision of AUDIT-3 did exactly that. It is still a breach, and the reason is not
+# pedantry -- this boundary is what keeps the shipped package free of the harness and
+# the harness free of the package's internals, so an exception taken for a cheap
+# assertion is an exception taken for all of them. Such an assertion belongs to the
+# test tier, which section 0.4.3 licenses to import `records'.
 #
 # This script imports no data-frame library and no array library, and computes
 # with nothing but integers (R-2).
@@ -4149,25 +4170,30 @@ acas_py_assert_file_system_used() {
       'drive a headless posting journey.'
   fi
 
-  # AUDIT-3: assert the migrated REDEFINES model against the value just read.
-  # SCYCLE has no database column because it is the same byte as CYCLEA.
-  if ! "$ACAS_PY_PYTHON" - "$cyclea" <<'PY'
-import sys
-from acas_posting.records.system_record import SystemDataBlock
-
-block = SystemDataBlock()
-block.cyclea = int(sys.argv[1])
-raise SystemExit(0 if block.scycle == block.cyclea else 1)
-PY
-  then
-    acas_py_die "$EX_ASSERT" \
-      'the migrated SYSTEM-REC model does not preserve Scycle REDEFINES Cyclea.' \
-      'Every posting route compares batch cycle to the Scycle view, so a mismatch' \
-      'would turn the run into a silent no-op.'
-  fi
-  acas_py_log "PASS  SYSTEM-REC Cyclea/Scycle share the loaded value $cyclea"
+  # AUDIT-3, AND WHERE IT LIVES. `Scycle REDEFINES Cyclea`
+  # [copybooks/wssystem.cob:L62-L63] is ONE storage location with two names, so
+  # `SCYCLE` has no database column and every posting route compares the batch cycle
+  # to the Scycle view of the byte read back here. That the migrated record model
+  # preserves the redefinition therefore matters, and it is asserted -- but NOT from
+  # this file. Agent Action Plan section 0.4.3 gives this tree "standard library,
+  # PyYAML, driver" and forbids the package's internals, so an assertion needing
+  # `acas_posting.records` cannot be made here without breaching the layering the
+  # same section defines. It is held instead where that import is licensed, in the
+  # arithmetic tier that runs on a bare host:
+  #     tests/arithmetic/test_comp_binary.py
+  #       ::test_system_cycle_redefines_is_one_storage_location   both directions
+  #       ::test_binary_char_scycle_redefines_cyclea              the descriptor
+  # RECORDED AS A DELIBERATE OMISSION (R-5) rather than dropped silently: an earlier
+  # revision of this stage ran the assertion inline through a heredoc that pulled in
+  # the record module `acas_posting.records.system_record`, which made the layering
+  # claim in this file's own header false. The claim is worth keeping, because the
+  # boundary it describes is what keeps the oracle out of the shipped package; the
+  # assertion loses nothing by moving, since the property is of the model and not of
+  # this run. What stays here is what only this stage can see: the value the seed
+  # actually loaded.
+  acas_py_log "PASS  SYSTEM-REC CYCLEA reads back the loaded value $cyclea"
   acas_py_summary_row 'FILE-SYSTEM-USED' "$(acas_py_render_char "$value")"
-  acas_py_summary_row 'Cyclea/Scycle' "$cyclea"
+  acas_py_summary_row 'Cyclea' "$cyclea"
 }
 
 # acas_py_table_counts <table>...
@@ -5029,22 +5055,24 @@ acas_py_assert_after_run() {
       acas_py_warn "FAIL  the fan-out switch changed from $ACAS_PY_IRS_INSTEAD_SHOWN to $(acas_py_render_char "$irs_after") during the run"
     fi
 
+    #  THE POST-RUN CYCLE, JUDGED ONLY ON WHAT SQL CAN SEE, AND NOT PINNED. A run
+    #  that left `Cyclea' [copybooks/wssystem.cob:L62] unreadable or zero has moved
+    #  the byte every posting route's cycle filter compares against -- `if bcycle not
+    #  = scycle' [general/gl070.cbl:L312] and [general/gl070.cbl:L457] -- so that IS
+    #  asserted. Its VALUE is deliberately not asserted to be unchanged: end-of-period
+    #  processing advances the same byte, `add 1 to scycle.'
+    #  [general/gl080.cbl:L334], so an equality check here would report a correctly
+    #  advanced cycle as a failure. The value is therefore emitted as an OBSERVATION.
+    #
+    #  The `Scycle' VIEW of that byte is a property of the migrated record model
+    #  rather than of this run, and it is asserted in the arithmetic tier for the
+    #  layering reason given at `acas_py_assert_file_system_used' (Agent Action Plan
+    #  section 0.4.3).
     if [[ ! "$cyclea_after" =~ ^[0-9]+$ ]] || (( 10#$cyclea_after == 0 )); then
       ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
       acas_py_warn "FAIL  SYSTEM-REC.CYCLEA is not readable and non-zero after the run: $(acas_py_render_char "$cyclea_after")"
-    elif "$ACAS_PY_PYTHON" - "$cyclea_after" <<'PY'
-import sys
-from acas_posting.records.system_record import SystemDataBlock
-
-block = SystemDataBlock()
-block.cyclea = int(sys.argv[1])
-raise SystemExit(0 if block.scycle == block.cyclea else 1)
-PY
-    then
-      acas_py_log "PASS  the post-run Cyclea/Scycle views share $cyclea_after"
     else
-      ACAS_PY_ASSERT_FAILURES=$(( ACAS_PY_ASSERT_FAILURES + 1 ))
-      acas_py_warn 'FAIL  the post-run SystemDataBlock does not preserve Scycle REDEFINES Cyclea'
+      acas_py_log "PASS  SYSTEM-REC.CYCLEA is readable and non-zero after the run: $cyclea_after"
     fi
   fi
 

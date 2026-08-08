@@ -1901,7 +1901,8 @@ def aa010_main(
         fs_reply, we_error, locator = rejected
         file_access.we_error = int(we_error)
         file_access.fs_reply = int(fs_reply)
-        #  ONE ERROR. This is anomaly A6's own guard - the handler refuses
+        #  ONE ERROR. This is the guard behind anomaly ``A-6`` of
+        #  [docs/migration/anomaly-log.md] - the handler refuses
         #  read-indexed, rewrite, start and delete unconditionally because its store
         #  is sequential - and `FS-Reply` 99 goes back to the caller, so it is a
         #  failure. Reporting it at DEBUG made a published facade verb that can NEVER
@@ -1913,7 +1914,7 @@ def aa010_main(
             locator=locator,
             fs_reply=int(fs_reply),
             we_error=int(we_error),
-            detail="File-Function %d refused: the store is sequential (anomaly A6)"
+            detail="File-Function %d refused: the store is sequential (anomaly A-6)"
             % int(file_access.file_function),
         )
         aa999_main_exit(file_access, dal_common)

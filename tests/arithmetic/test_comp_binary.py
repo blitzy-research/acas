@@ -5061,8 +5061,11 @@ def test_a6_the_supported_functions_are_not_refused() -> None:
 # is better than implying a completeness the walk does not have.
 # ---------------------------------------------------------------------------
 
-#: Every `tests/arithmetic/*.py` permitted to import `acas_posting.programs` or
-#: `acas_posting.dal` INSIDE A FUNCTION BODY, with the reason each one needs to.
+#: Every `tests/arithmetic/*.py` permitted to import `acas_posting.programs`,
+#: `acas_posting.dal` or `acas_posting.cli` INSIDE A FUNCTION BODY, with the reason
+#: each one needs to. The name keeps its original two-prefix spelling - it is quoted
+#: verbatim in the ratchet's own failure message below, which is what a reader acts
+#: on; the set it governs is whatever `_tier_crossing_imports` matches.
 #:
 #: Every entry earns its place by driving shipped code instead of re-deriving it. That
 #: is the trade this allow-list records: a slightly wider import set in exchange for
@@ -5146,7 +5149,7 @@ def _arithmetic_tier_files() -> tuple[Path, ...]:
 
 
 def _tier_crossing_imports(tree: ast.Module) -> tuple[tuple[int, str, bool], ...]:
-    """Every import of `acas_posting.programs` or `acas_posting.dal` in one module.
+    """Every import of `programs`, `dal` or `cli` from `acas_posting` in one module.
 
     Args:
         tree: The parsed module.
@@ -5168,7 +5171,21 @@ def _tier_crossing_imports(tree: ast.Module) -> tuple[tuple[int, str, bool], ...
             named.append(node.module)
         named.extend(alias.name for alias in node.names)
         for name in named:
-            if name.startswith(("acas_posting.programs", "acas_posting.dal")):
+            if name.startswith(
+                (
+                    "acas_posting.programs",
+                    "acas_posting.dal",
+                    #  `acas_posting.cli` belongs here for the SAME REASON, and it
+                    #  was measured rather than assumed: importing
+                    #  `acas_posting.cli.args` loads `acas_posting.dal` and the whole
+                    #  of `mysql.connector` transitively, so a module-level import of
+                    #  it breaks this tier's runs-anywhere property exactly as a
+                    #  direct `dal` import would - while naming neither of the two
+                    #  prefixes above. The README's import-boundary note names all
+                    #  three, so the enforced set is the documented set.
+                    "acas_posting.cli",
+                )
+            ):
                 found.append((node.lineno, name, id(node) in top_level))
     return tuple(found)
 
@@ -5196,8 +5213,8 @@ def test_no_arithmetic_module_imports_a_program_or_dal_at_module_level() -> None
         )
 
     assert offenders == [], (
-        "the arithmetic tier must not import acas_posting.programs or "
-        "acas_posting.dal at module level - Agent Action Plan section 0.4.3 keeps "
+        "the arithmetic tier must not import acas_posting.programs, acas_posting.dal "
+        "or acas_posting.cli at module level - Agent Action Plan section 0.4.3 keeps "
         "this tier runnable with no database, and a module-level import crosses the "
         "boundary at collection time. Move the import into the function that needs "
         "it. Offenders: " + "; ".join(offenders)
@@ -5247,7 +5264,8 @@ def test_the_set_of_modules_that_defer_import_is_the_declared_one() -> None:
 
     undeclared = sorted(deferring - declared)
     assert undeclared == [], (
-        f"these modules defer-import acas_posting.programs or acas_posting.dal but "
+        f"these modules defer-import acas_posting.programs, acas_posting.dal or "
+        f"acas_posting.cli but "
         f"are not on the allow-list: {undeclared}. Driving shipped code instead of "
         f"re-deriving a formula is the right reason to cross this boundary - add the "
         f"file to _MAY_DEFER_IMPORT_PROGRAM_OR_DAL with that reason stated, so the "

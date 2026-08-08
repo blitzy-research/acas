@@ -314,7 +314,7 @@ is listed here rather than applied silently.
 | --- | --- | --- | --- |
 | A-1 missing period | `sales/sl060.cbl:L1172-L1178` (span only) | **`sales/sl060.cbl:L1176`** | the span is right; the defect line was never named |
 | A-13 non-numeric skip | `general/gl072.cbl:L289-L290` | **`general/gl072.cbl:L291-L292`** | L289 is `go to end-run.`, part of the at-end phrase |
-| A-13 `we-error` skip | `general/gl072.cbl:L303-L304` | **`general/gl072.cbl:L306-L307`**, plus a second site at **L348-L349** | L303-L304 are blank-comment and `if post-ledger` lines |
+| A-13 `we-error` skip | `general/gl072.cbl:L303-L304` | **`general/gl072.cbl:L306-L307`**, plus a second site at **L348-L349** | L303 is `move post-batch to save-batch` and L304 is `perform headings through headings-end.` — the tail of the `if save-batch equal zero` block that begins at L302. The blank-comment line is L305 and `if post-ledger not = save-ledger` is L309 |
 | A-14 sequential read | `general/gl072.cbl:L410-L412` | **`general/gl072.cbl:L408`**, guard L407, key move L405 | L410-L411 is the *post-read* `if read-ledger not = "R"` guard |
 | A-21 qualified reference | `general/gl070.cbl:L510` | **`general/gl070.cbl:L497`, `L521`, `L525`** | L510 is an ordinary unqualified `move post-cr to pre-ac.` |
 | A-11 signed source block | `copybooks/wssl.cob:L46-L52` | **`copybooks/wssl.cob:L45-L53`** for the nine `binary-long`, plus **L43-L44** for two `binary-short` | L46-L52 is seven of the nine, omitting `Sales-Limit` and `Sales-Create-Date` |
@@ -2306,10 +2306,82 @@ one place they can be kept correct. What this section owns is the namespace: the
 size is fixed, its twelve owning modules are named, and its module-local scoping is stated, so a reader
 meeting `N-deadbranches` knows what kind of thing it is and where the one authoritative copy sits.
 
+### 15.2 The seven module-local families that were using a BARE form, now scoped and declared
+
+**Seven module-local families existed that this section had not declared, and six of them were using the
+worst possible spelling: a bare `A<n>` with no owning program in it.** Because the spelling carries no
+scope, those six were not six namespaces at all — they were one namespace that six modules were
+allocating from independently, which is why the collision below is with each other as much as with this
+register. It is also the exact form the rule at the end of this section forbids, and the harm was not
+hypothetical. `A14` in `acas_posting/dal/cursor_state.py` was the fetched-then-discarded row of a
+`READ NEXT`; `A14` in `acas_posting/dal/acas029_otm5.py` was `fn-extend`'s
+commented-out `open extend`; and **A-14** in this register is `gl072`'s sequential nominal read. Three
+defects, one spelling, and nothing in the text to say which register a reader was in. Worse, three
+modules were using a bare `A6` to mean **this register's A-6**, so the same shape was carrying both
+scopes at once, and two comments in `cursor_state.py` asserted that a module-local tag was "recorded in
+`docs/migration/anomaly-log.md`" when the entry at those digits was a different defect entirely.
+
+**All seven are now program-scoped, and all seven are declared here.** The renaming follows §15.1's own
+precedent exactly — the identifier gains the program that owns it, the reading is unchanged, and the
+owning module declares the family in its own docstring:
+
+| Family | Entries | Occurrences | Owning module |
+| --- | ---: | ---: | --- |
+| **`A-IRSUB1-1` … `A-IRSUB1-49`** | 49 | 105 | `acas_posting/dal/acasirsub1_irs_nominal.py` |
+| **`A-IRSUB5-1` … `A-IRSUB5-47`** | 47 | 139 | `acas_posting/dal/acasirsub5_irs_final.py` |
+| **`A-IRSUB3-1` … `A-IRSUB3-34`** | 34 | 138 | `acas_posting/dal/acasirsub3_irs_dflt.py` |
+| **`A-ACAS029-<n>`**, highest 49, sparse | 31 | 74 | `acas_posting/dal/acas029_otm5.py` |
+| **`A-IRSUB4-<n>`**, highest 32, sparse | 27 | 46 | `acas_posting/dal/acasirsub4_irs_posting.py` |
+| **`A-CURSOR-<n>`**, highest 14, sparse | 12 | 45 | `acas_posting/dal/cursor_state.py` |
+| **`F-ARGS-1` … `F-ARGS-7`** | 7 | 8 | `acas_posting/cli/args.py` (was `F-A<n>`, a bare `F-` form) |
+
+**Three of the six number ranges are sparse, and that is stated rather than tidied**, for §5's reason: a
+module's numbering is fixed by the citations already inside it, so a gap stays a gap. `A-CURSOR-` skips 5
+and **6** — 6 precisely because that module cites this register's `A-6` and the two must not be
+confusable.
+
+Four further modules **cite** one of those families without owning one, and each now cites it by its
+prefixed name so the scope is on the page: `acas000_system.py` (six references into `A-CURSOR-`),
+`acas007_gl_batch.py` (one), and `acas008_spl_posting.py` plus `acas019_otm3.py`, whose references were
+to **this register's `A-6`** and now spell it that way. Occurrence counts above are of the identifier as
+written, the owning module's own family declaration included.
+
+**The old-to-new map, one rule rather than 207 rows.** Every rename is the same transformation — the
+number is unchanged and the owning program is prepended — so the map is a rule and cannot fall out of
+step with the code:
+
+```text
+acasirsub1_irs_nominal.py    A<n>  ->  A-IRSUB1-<n>      (49 entries, numbers unchanged)
+acasirsub3_irs_dflt.py       A<n>  ->  A-IRSUB3-<n>      (34 entries, numbers unchanged)
+acasirsub4_irs_posting.py    A<n>  ->  A-IRSUB4-<n>      (27 entries, numbers unchanged)
+acasirsub5_irs_final.py      A<n>  ->  A-IRSUB5-<n>      (47 entries, numbers unchanged)
+acas029_otm5.py              A<n>  ->  A-ACAS029-<n>     (31 entries, numbers unchanged)
+cursor_state.py              A<n>  ->  A-CURSOR-<n>      (13 entries, numbers unchanged)
+cli/args.py                  F-A<n> -> F-ARGS-<n>        (7 entries, numbers unchanged)
+                             a bare A6 that meant THIS register  ->  A-6
+```
+
+`A-IRSUB<n>` rather than `A-ACASIRSUB<n>` because `irsub1`, `irsub3` and `irsub5` are the frozen
+source's own short spelling for those handlers — `[common/acasirsub4.cbl:L129-L131]`'s sibling list uses
+it — and because the shorter form keeps a comment line inside its width.
+
+**Nothing outside the owning modules cited a bare form, so nothing dangles.** Verified one identifier at
+a time across `tests/`, `harness/`, `harness/scenarios/`, `data_dictionary/` and the four documents:
+zero citations of a bare `A<n>` or `F-A<n>` existed outside the module that allocated it, which is
+precisely why the collision had gone unnoticed — the tags were readable only from inside, and from
+inside the digits looked unambiguous.
+
+**The rule is now mechanised rather than only written.**
+`tests/arithmetic/test_pic_field_descriptors.py::test_no_module_allocates_a_bare_anomaly_identifier`
+scans every `acas_posting/**/*.py` for a bare `A<n>`, `A-NEW-<n>` or `F-<n>` tag and fails on any hit,
+so a future module cannot open a seventh undeclared family the way these two were opened. A rule that
+only a reviewer enforces is a rule that returns; this one now fails the suite.
+
 **The rule from here.** Any candidate opened from now on either takes the next free number **in this
 register** or uses a name that cannot collide — a program-scoped letter or a program-scoped
-`F-<PROGRAM>-<n>`, as above, or a mnemonic. A bare `A-NEW-<n>` or bare `F-<n>` allocated inside a single
-module is not an acceptable identifier.
+`F-<PROGRAM>-<n>`, as above, or a mnemonic. **A bare `A<n>`, a bare `A-NEW-<n>` and a bare `F-<n>`
+allocated inside a single module are each not an acceptable identifier**, and the test named above is
+what holds that.
 
 ---
 
@@ -2392,6 +2464,11 @@ summary row and §11 were moved then and the heading dagger and this list were n
 candidates** live in §15: **eighteen** as `A-NEW-1` through `A-NEW-18`, where `A-NEW-18` carries the
 working alias `N-KEY` under which the scenario files, the arithmetic tier and the data-access module
 already cite it, plus the **six** program-scoped ones registered in §15.1 with their old-to-new map.
+**Eleven module-local FAMILIES** are declared there as namespaces rather than transcribed row by row:
+the three `F-<PROGRAM>-<n>` families of §15.1, the 251-tag `N-<mnemonic>` family, and the **seven** of
+§15.2 — six `A-<PROGRAM>-<n>` families and `F-ARGS-<n>` — every one of which was using a bare form until
+that sub-section scoped it, and none of which can now collide with `A-1` … `A-22`, with `A-NEW-<n>` or
+with each other.
 Thirteen frozen-script and frozen-file defects in §13 are recorded; executable compatibility changes
 live only in the writable build tree or in the migration harness.
 

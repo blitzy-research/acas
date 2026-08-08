@@ -1829,7 +1829,7 @@ def mt_ba040_process_read_next(
     """``ba040-Process-Read-Next.`` [common/glbatchMT.cbl:L456-L529].
 
     The maintainer's own inline ``*> nom uses > ??`` at [:L472] is the record of anomaly
-    A9 in :mod:`acas_posting.dal.cursor_state`.
+    ``A-CURSOR-9`` in :mod:`acas_posting.dal.cursor_state`.
 
     Args:
         file_access: ``File-Access``; receives the status pair and log fields.

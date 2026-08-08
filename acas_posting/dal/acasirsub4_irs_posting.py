@@ -40,7 +40,7 @@ Linkage view               FD view                    Bridge host variable
 ``Vat-Amount``   signed    ``Vat-Amount4``      L112  ``9(07)V9(02)``       L186
 =========================  =========================  =========================
 
-THE COLUMN NAMES COME FROM THE FD VIEW, NOT THE LINKAGE VIEW (anomaly A27). The
+THE COLUMN NAMES COME FROM THE FD VIEW, NOT THE LINKAGE VIEW (anomaly A-IRSUB4-27). The
 inline ``01 Record-4`` at [common/acasirsub4.cbl:L101-L112] supplies ``KEY-4``,
 ``POST4-CODE``, ``POST4-DR``, ``VAT-AC-DEF4`` and ``VAT-AMOUNT4`` verbatim; the
 linkage names (``Post-Key``, ``Post-Code``, ``Post-DR``, ``Vat-AC-Def``,
@@ -55,7 +55,7 @@ not a preference").
 
 ``Key-Number`` [common/acasirsub4.cbl:L103], the elementary item inside the
 ``Key-4`` group, has NO column and NO host variable - the column is named after
-its parent group. Recorded as a deliberate omission (anomaly A28).
+its parent group. Recorded as a deliberate omission (anomaly A-IRSUB4-28).
 
 THE THREE DERIVED COLUMNS
 =========================
@@ -70,7 +70,7 @@ guarded moves [common/irspostingMT.cbl:L982-L987]::
     if       Post-Date (7:2) numeric
              move     Post-Date (7:2) to HV-POST4-YEAR.
 
-THREE GUARDS, NOT ONE (anomaly A2). The plan's register describes a single rule,
+THREE GUARDS, NOT ONE (anomaly A-IRSUB4-2). The plan's register describes a single rule,
 but the source tests each component separately, so derivation is PARTIAL: a date
 of ``"01/AB/23"`` yields day 1, month 0, year 23 while ``POST4-DAT`` still holds
 the raw text. Eight outcomes are reachable, not two. Verified against the
@@ -90,19 +90,19 @@ state its author did not anticipate: internally inconsistent, and reproduced as
 such rather than repaired (rule R-4, "A defect reproduced is correct; a defect
 fixed is a failure").
 
-Separator positions 3 and 6 are NEVER examined (anomaly A4), so ``"01X02X23"``
+Separator positions 3 and 6 are NEVER examined (anomaly A-IRSUB4-4), so ``"01X02X23"``
 derives cleanly, and only a two-digit year is ever stored. The components are
 sliced, never parsed - a general-purpose date routine "would be more correct than
 the specification, which is the one outcome to avoid" (plan section 0.8.6).
 
-LOAD ORDER IS NOT COLUMN ORDER (anomaly A5). The three derived columns sit at
+LOAD ORDER IS NOT COLUMN ORDER (anomaly A-IRSUB4-5). The three derived columns sit at
 ordinals 4, 5 and 6 [mysql/ACASDB.sql:L278-L280] but are loaded LAST, after all
 ten copybook fields, because they were bolted on - "These added after new columns
 created 31/12/16" [common/irspostingMT.cbl:L978]. Both orders are reproduced
 where each belongs: load order in :func:`_load_host_variables`, column order in
 every statement.
 
-THEY ARE WRITE-ONLY (anomaly A3). ``bb100-UnloadHVs``
+THEY ARE WRITE-ONLY (anomaly A-IRSUB4-3). ``bb100-UnloadHVs``
 [common/irspostingMT.cbl:L995] performs TEN moves for THIRTEEN columns
 [common/irspostingMT.cbl:L1006-L1015] - it cannot do otherwise, since no
 copybook field exists to receive them. The maintainer states the purpose
@@ -121,24 +121,24 @@ wins and the corrections are recorded here rather than propagated:
 * The flat-file write DOES load its FD record - [common/acasirsub4.cbl:L405] is
   ``move Posting-Record to Record-4.``, identical to the rewrite at
   [common/acasirsub4.cbl:L430]. There is no write/rewrite asymmetry and no stale
-  record. (Corrects the claimed anomaly A7, which is withdrawn.)
+  record. (Corrects the claimed anomaly A-IRSUB4-7, which is withdrawn.)
 * The duplicate-key retry [common/acasirsub4.cbl:L409-L411] is therefore NOT a
   guaranteed non-terminating loop: because ``Record-4`` is reloaded at the top of
   the paragraph on every pass and ``add 1 to Post-Key`` mutates the CALLER's
   linkage record, the retry advances and stops at the first free key. The real
   defect is the silent unbounded mutation of the caller's key, which wraps at
-  99999. (Refines anomaly A6.)
+  99999. (Refines anomaly A-IRSUB4-6.)
 * ``Post-Key`` IS moved into ``Key-Number`` before the flat start -
   [common/acasirsub4.cbl:L358-L359] is one ``move`` with two targets.
-  (Corrects the claimed anomaly A22, which is withdrawn.)
+  (Corrects the claimed anomaly A-IRSUB4-22, which is withdrawn.)
 * The access-type guard IS LIVE on this path. The bridge repeats it at
   [common/irspostingMT.cbl:L599-L601] with a different status pair, so it is
-  implemented here - see :data:`BRIDGE_START_PARAM_ERROR`. (Corrects anomaly A21,
+  implemented here - see :data:`BRIDGE_START_PARAM_ERROR`. (Corrects anomaly A-IRSUB4-21,
   which claimed the guard was reachable only from the flat path.)
 * Delete-all is BOUNDED, not a whole-table wipe. ``ba085-Process-Delete-ALL``
   increments the key [common/irspostingMT.cbl:L812] and builds a ``WHERE``
   predicate [common/irspostingMT.cbl:L818-L828] before issuing its statement
-  [common/irspostingMT.cbl:L845-L848]. (Corrects anomaly A18.)
+  [common/irspostingMT.cbl:L845-L848]. (Corrects anomaly A-IRSUB4-18.)
 
 The guard line numbers are ``L982-L987``, matching both the plan's own citation
 and the generated dictionary; the working notes were consistently one line high.
@@ -178,15 +178,15 @@ as omissions":
 
 * THE WHOLE FLAT-FILE PATH. Dispatch reaches the database branch at
   [common/acasirsub4.cbl:L196-L200] and never returns, so ``aa020`` through
-  ``aa100`` are specification only. With it go: the duplicate-key retry (A6), the
-  flat start's reliance on ``Key-Number`` (A22), and the live ``stop "Cobol File
+  ``aa100`` are specification only. With it go: the duplicate-key retry (A-IRSUB4-6), the
+  flat start's reliance on ``Key-Number`` (A-IRSUB4-22), and the live ``stop "Cobol File
   EOF"`` in a block whose own comment says it "should NOT occur"
-  [common/acasirsub4.cbl:L301-L308] (A23) - never translated to a
+  [common/acasirsub4.cbl:L301-L308] (A-IRSUB4-23) - never translated to a
   process-terminating call.
-* DUAL-WRITE SEMANTICS (A32). The banner at [common/acasirsub4.cbl:L208-L212]
+* DUAL-WRITE SEMANTICS (A-IRSUB4-32). The banner at [common/acasirsub4.cbl:L208-L212]
   documents writing to both stores when both are configured, a flat read being
   "overwritten by rdb processing if set". Only the database path is in scope.
-* ``Key-Number`` (A28), which has neither column nor host variable.
+* ``Key-Number`` (A-IRSUB4-28), which has neither column nor host variable.
 * ALL PRESENTATION. The record-size failure's ``display``/``accept`` dialogue
   [common/acasirsub4.cbl:L484-L499] keeps its control transfer and loses its
   screen I/O; the bridge's terminal-height probe
@@ -202,14 +202,14 @@ These change no behaviour, so there is nothing to reproduce - but each is a fact
 about the frozen source that a later reader would otherwise have to rediscover,
 and rule R-4 wants them recorded rather than silently dropped.
 
-* A25 - A REREAD PARAGRAPH INSIDE A BRIDGE. ``ba041-Reread``
+* A-IRSUB4-25 - A REREAD PARAGRAPH INSIDE A BRIDGE. ``ba041-Reread``
   [common/irspostingMT.cbl:L420] is the only such paragraph in any of the twenty
   in-scope bridges; the others fetch inline. It exists because this bridge's START
   ends by jumping to it [common/irspostingMT.cbl:L702], which is the same
   start-then-read shape the handler has, pushed down a layer. It is why
   :func:`start` ends with a call to :func:`read_next` rather than returning a
   position.
-* A29 - TWO SPELLINGS OF ``initialize`` FOR THE SAME RECORD, in one bridge. The
+* A-IRSUB4-29 - TWO SPELLINGS OF ``initialize`` FOR THE SAME RECORD, in one bridge. The
   read path uses ``initialize Posting-Record with filler``
   [common/irspostingMT.cbl:L472] while the unload uses the plain form
   [common/irspostingMT.cbl:L1004]. Only the plain form is on the path this module
@@ -218,7 +218,7 @@ and rule R-4 wants them recorded rather than silently dropped.
   preceded by a stale ``*> (init moved lower)``
   [common/irspostingMT.cbl:L999] whose ``initialize`` is in fact five lines BELOW
   it, not lower still - the same stale note ``irsnominalMT`` carries.
-* A30 - A REPEATING-GROUP NOTE IN A BRIDGE WITH NO REPEATING GROUP. "RGs are
+* A-IRSUB4-30 - A REPEATING-GROUP NOTE IN A BRIDGE WITH NO REPEATING GROUP. "RGs are
   handled separately for all such actions so they must not be loaded here"
   [common/irspostingMT.cbl:L989-L990] follows the load paragraph, but
   ``IRSPOSTING-REC`` has no repeating group and no ``occurs`` anywhere - the same
@@ -235,7 +235,7 @@ That convention wraps most handlers in a per-handler error check - but there is
 NONE for ``acasirsub4``; checks exist only for ``acas000``, ``acas008``,
 ``irsub1``, ``irsub3`` and ``irsub5`` at [:L320], [:L327], [:L334], [:L341] and
 [:L348]. Consistently, the handler declares a ``*> Module Specific`` heading and
-then no module-specific message at all [common/acasirsub4.cbl:L129-L131] (A26).
+then no module-specific message at all [common/acasirsub4.cbl:L129-L131] (A-IRSUB4-26).
 SO :func:`dispatch` PERFORMS NO RECOVERY: it returns the status pair and leaves
 recovery to the caller, exactly as [common/acasirsub4.cbl:L538] directs - "Any
 errors leave it to caller to recover from". This matters because ``irs030``
@@ -292,7 +292,7 @@ line of code, and that is what measuring rather than guessing was for.
          ``1.004`` stores ``1.00``. Precision and scale have different
          dispositions, and only precision can abort a statement.
 
-    Q-C  THE KEY PREDICATE, ANOMALY A15. The key metadata declares ``"STR"``
+    Q-C  THE KEY PREDICATE, ANOMALY A-IRSUB4-15. The key metadata declares ``"STR"``
          [common/irspostingMT.scb:L126] for a ``mediumint(5) unsigned`` key
          [mysql/ACASDB.sql:L275], so the bridge quotes the value and the
          comparison works only by server coercion. IT COERCES TO A NUMBER, proved
@@ -306,6 +306,18 @@ line of code, and that is what measuring rather than guessing was for.
          So the quoted literal is reproduced exactly as the bridge emits it, and
          binding an integer "because the column is numeric" would be a different
          statement for no gain.
+
+    THIS MODULE'S ANOMALY FAMILY IS ``A-IRSUB4-<n>``, PREFIX INCLUDED.
+    The readings reproduced here - `A-IRSUB4-1` to `A-IRSUB4-32`, the ones this module
+    reaches - are numbered inside this module and nowhere else, so the tag carries the
+    handler that owns it. ``A-IRSUB4-7`` is this module's own reading, while the
+    canonical register's ``A-7`` is the guarded date-component derivation that this
+    module happens also to reproduce; the two are cited separately and the prefix is
+    what keeps them apart, as `_load_host_variables` does in as many words. Each entry
+    is stated in full at the site that reproduces it, and the family is registered by
+    name, size and owning module in section 15 of [docs/migration/anomaly-log.md],
+    which states the rule this spelling obeys: a bare ``A7`` is not an identifier this
+    project allocates in either direction.
 """
 
 from __future__ import annotations
@@ -391,7 +403,7 @@ KEY_LENGTH: Final[int] = 5
 KEY_METADATA_TYPE: Final[str] = "STR"
 """``*> key is string`` [common/irspostingMT.scb:L126].
 
-ANOMALY A15: the key metadata declares a string type for ``KEY-4``, which is
+ANOMALY A-IRSUB4-15: the key metadata declares a string type for ``KEY-4``, which is
 ``mediumint(5) unsigned`` [mysql/ACASDB.sql:L275] - a number. The predicate the
 bridge builds wraps the value in double quotes regardless, so it compares a
 quoted string to a numeric column and works only because the server coerces.
@@ -471,7 +483,7 @@ DERIVED_COLUMNS: Final[tuple[str, ...]] = (
 )
 """The columns with no copybook counterpart [common/irspostingMT.cbl:L177-L179].
 
-ANOMALY A1, the plan's register entry ``A-7``, and the reason this module is the plan's
+ANOMALY A-IRSUB4-1, the plan's register entry ``A-7``, and the reason this module is the plan's
 proof that the bridge is authoritative.
 """
 
@@ -485,7 +497,7 @@ DERIVED_COLUMN_SLICES: Final[Mapping[str, tuple[int, int]]] = MappingProxyType(
 """The reference-modification offsets, one-based, exactly as the source writes.
 
 The implied layout is ``DD/MM/YY`` with separators at positions 3 and 6, and THOSE TWO
-POSITIONS ARE NEVER EXAMINED (anomaly A4) - so ``"01X02X23"`` derives day 1, month 2,
+POSITIONS ARE NEVER EXAMINED (anomaly A-IRSUB4-4) - so ``"01X02X23"`` derives day 1, month 2,
 year 23 without complaint.
 """
 
@@ -560,7 +572,7 @@ bridge writes 2 - a second reason the remap is needed.
 """
 
 WE_ERROR_EOF_ONLY_IN_COMMENT: Final[int] = 989
-"""ANOMALY A13: a code that exists only as a commented-out line.
+"""ANOMALY A-IRSUB4-13: a code that exists only as a commented-out line.
 
 [common/irspostingMT.cbl:L577] carries ``*> move 989 to WE-Error`` and 989 appears
 nowhere else in the whole handler-and-bridge folder. Named here so the register entry
@@ -573,7 +585,7 @@ HANDLER_BAD_FUNCTION: Final[int] = int(WeError.NOT_USED)
 BRIDGE_BAD_FUNCTION: Final[int] = int(WeError.UNKNOWN_UNEXPECTED)
 """``990`` - the bridge's bad-function code [common/irspostingMT.cbl:L924].
 
-ANOMALY A17, first half: the two layers disagree on the SAME condition. Both set ``FS-
+ANOMALY A-IRSUB4-17, first half: the two layers disagree on the SAME condition. Both set ``FS-
 Reply`` to 99 and both carry the comment ``*> Houston; We have a problem``, but the
 handler reports 999 and the bridge 990.
 """
@@ -581,7 +593,7 @@ handler reports 999 and the bridge 990.
 HANDLER_START_PARAM_ERROR: Final[int] = int(WeError.FILE_KEY_NO_OUT_OF_RANGE)
 """``998`` - the handler's access-type rejection [common/acasirsub4.cbl:L362].
 
-ANOMALY A17, second half. The handler sets 998 and, unlike every other error path,
+ANOMALY A-IRSUB4-17, second half. The handler sets 998 and, unlike every other error path,
 LEAVES ``FS-Reply`` AT ZERO - there is no ``move 99 to fs-reply`` in that block
 [common/acasirsub4.cbl:L361-L364].
 """
@@ -661,7 +673,7 @@ _WIDE_INTEGER_WINDOW: Final[tuple[int, int]] = (13, 8)
 """``WS-MYSQL-EDIT(13:08)`` [common/irspostingMT.cbl:L1041].
 
 Eight positions for the ``9(08) COMP`` host variables - ``HV-KEY-4``, ``HV-POST4-DR``
-and ``HV-POST4-CR``. ANOMALY A16: their copybook sources are ``pic 9(5)`` and their
+and ``HV-POST4-CR``. ANOMALY A-IRSUB4-16: their copybook sources are ``pic 9(5)`` and their
 columns ``mediumint(5)``, so the width inflates 5 -> 8 -> 5. No clamping is applied.
 """
 
@@ -669,7 +681,7 @@ _NARROW_INTEGER_WINDOW: Final[tuple[int, int]] = (18, 3)
 """``WS-MYSQL-EDIT(18:03)`` [common/irspostingMT.cbl:L1071].
 
 Three positions for the ``9(03) COMP`` host variables - the three derived components and
-``HV-VAT-AC-DEF4``. ANOMALY A16 again: fed from two-character substrings, or from ``pic
+``HV-VAT-AC-DEF4``. ANOMALY A-IRSUB4-16 again: fed from two-character substrings, or from ``pic
 99``, into ``tinyint(2)`` columns, so 2 -> 3 -> 2.
 """
 
@@ -819,7 +831,7 @@ def _is_cobol_numeric(text: str) -> bool:
 def _derive_date_components(post_date: str) -> tuple[int, int, int]:
     """Derive ``POST4-DAY``, ``POST4-MONTH`` and ``POST4-YEAR`` from the date text.
 
-    THREE INDEPENDENT GUARDS, NOT ONE (anomaly A2). Each component stands or falls on
+    THREE INDEPENDENT GUARDS, NOT ONE (anomaly A-IRSUB4-2). Each component stands or falls on
     its own two characters, so derivation is partial.
 
     Args:
@@ -873,7 +885,7 @@ _COPYBOOK_LOAD_ORDER: Final[tuple[tuple[str, str], ...]] = (
 )
 """The ten copybook moves, IN COPYBOOK ORDER, not column order.
 
-ANOMALY A5. These run first, in exactly this sequence
+ANOMALY A-IRSUB4-5. These run first, in exactly this sequence
 [common/irspostingMT.cbl:L967-L976], and the three derived columns follow AFTER them
 [common/irspostingMT.cbl:L982-L987] even though they occupy ordinals 4, 5 and 6 of the
 row [mysql/ACASDB.sql:L278-L280].
@@ -914,7 +926,7 @@ def _load_host_variables(posting: PostingRecord) -> Mapping[str, str]:
 
     THE ORDER IS THE SOURCE'S ORDER: the group is initialised, then the ten copybook
     fields are moved in copybook order, then the three derived components are moved last
-    (anomaly A5).
+    (anomaly A-IRSUB4-5).
 
     Args:
         posting: The caller's ``Posting-Record``. Read only; the database path never
@@ -950,7 +962,7 @@ def _load_host_variables(posting: PostingRecord) -> Mapping[str, str]:
 def _unload_host_variables(row: Mapping[str, Any]) -> PostingRecord:
     """``bb100-UnloadHVs`` [common/irspostingMT.cbl:L995-L1015].
 
-    TEN MOVES FOR THIRTEEN COLUMNS - the asymmetry is anomaly A3 and it is deliberate.
+    TEN MOVES FOR THIRTEEN COLUMNS - the asymmetry is anomaly A-IRSUB4-3 and it is deliberate.
     ``POST4-DAY``, ``POST4-MONTH`` and ``POST4-YEAR`` are read from the row and
     DISCARDED, because ``Posting-Record`` has no field able to receive them.
 
@@ -1367,7 +1379,7 @@ def _positioning_cursor(connection: Any) -> Iterator[Any]:
 def read_next(file_access: FileAccess) -> tuple[int, PostingRecord | None]:
     """``fn-read-next`` - ``ba040`` falling into ``ba041-Reread``.
 
-    THE READ IS UNFILTERED (anomaly A24). ``aa041-Reread``
+    THE READ IS UNFILTERED (anomaly A-IRSUB4-24). ``aa041-Reread``
     [common/acasirsub4.cbl:L312-L321] has no loop-back and no predicate, so every row is
     delivered.
 
@@ -1466,7 +1478,7 @@ def start(
 ) -> tuple[int, PostingRecord | None]:
     """``fn-start`` - ``ba060-Process-Start`` [common/irspostingMT.cbl:L592-L703].
 
-    START DOES NOT MERELY POSITION - IT RETURNS A RECORD (anomaly A11). The paragraph
+    START DOES NOT MERELY POSITION - IT RETURNS A RECORD (anomaly A-IRSUB4-11). The paragraph
     ends ``perform ba999-end`` and then ``go to ba041-Reread``
     [common/irspostingMT.cbl:L698-L702], and the handler does the same with ``perform
     aa999-main-exit.`` followed by ``go to aa041-Reread.``
@@ -1558,7 +1570,7 @@ def write(posting: PostingRecord, file_access: FileAccess) -> tuple[int, int]:
 
     THIS IS WHERE THE THREE BRIDGE-ONLY COLUMNS ARE POPULATED, and the only place they
     are ever written - see :func:`_derive_date_components` and
-    :func:`_load_host_variables`. Anomaly A1, register entry ``A-7``.
+    :func:`_load_host_variables`. Anomaly A-IRSUB4-1, register entry ``A-7``.
 
     Returns:
         The ``(FS-Reply, We-Error)`` pair.
@@ -1630,7 +1642,7 @@ def rewrite(posting: PostingRecord, file_access: FileAccess) -> tuple[int, int]:
         )
 
     if affected != 1:
-        # ANOMALY A10: no status is written. The caller's pair stands.
+        # ANOMALY A-IRSUB4-10: no status is written. The caller's pair stands.
         #  NO RECORD HERE. The frozen update has no invalid-key path and writes
         #  NEITHER status field [common/irspostingMT.cbl:L898-L919], nor does it
         #  display anything, so a record was invented (R-4) - and the SILENCE is the
@@ -1681,7 +1693,7 @@ def delete(posting: PostingRecord, file_access: FileAccess) -> tuple[int, int]:
         )
 
     if affected != 1:
-        # ANOMALY A10 again - no status for a row that was not there.
+        # ANOMALY A-IRSUB4-10 again - no status for a row that was not there.
         #  NO RECORD HERE, for the reason the rewrite arm gives: the frozen
         #  delete writes neither status field [common/irspostingMT.cbl:L771-L788] and
         #  displays nothing, and the silence is the anomaly.
@@ -1749,7 +1761,7 @@ def open_output(
     and then FALLS THROUGH into ``ba020-Process-DAL`` [common/acasirsub4.cbl:L531]. So
     the bridge is called TWICE: once with the function still open/output, which
     connects, and once more with the function now 6, which clears the data down. Anomaly
-    A19.
+    A-IRSUB4-19.
 
     Args:
         system: For the connect.
@@ -1765,7 +1777,7 @@ def open_output(
     if fs_reply != FsReply.SUCCESS:
         return fs_reply, we_error
 
-    # ANOMALY A20: `move RDBMS-Flat-Statuses to FA-RDBMS-Flat-Statuses`
+    # ANOMALY A-IRSUB4-20: `move RDBMS-Flat-Statuses to FA-RDBMS-Flat-Statuses`
     # [common/acasirsub4.cbl:L197] is NOT performed on this path. Left undone
     # deliberately - see the docstring.
 
@@ -1902,10 +1914,10 @@ def dispatch(
     # `when other  *> 6 is unused  go to aa100-Bad-Function`
     # [common/acasirsub4.cbl:L234-L235]. Code 6 lands here even though the BRIDGE
     # dispatches it [common/irspostingMT.cbl:L271-L272] - delete-all is reachable
-    # only through the open/output coercion in step 3. Anomaly A18.
+    # only through the open/output coercion in step 3. Anomaly A-IRSUB4-18.
     #  NO SEPARATE RECORD FOR CODE 6. The frozen `when other` treats it exactly
     #  as it treats any other unhandled code - one arm, one outcome - so a record
-    #  distinguishing it announced an anomaly rather than an event (R-4). Anomaly A18
+    #  distinguishing it announced an anomaly rather than an event (R-4). Anomaly A-IRSUB4-18
     #  is recorded in this function's docstring and in
     #  `docs/migration/anomaly-log.md`, and the ONE bad-function record below names
     #  the code, so an operator still sees which function was refused.
@@ -1921,7 +1933,7 @@ def dispatch(
         we_error=HANDLER_BAD_FUNCTION,
         detail="File-Function %s is not dispatched by this handler; code 6 lands "
         "here even though the bridge implements it "
-        "[common/irspostingMT.cbl:L271-L272] - anomaly A18" % function,
+        "[common/irspostingMT.cbl:L271-L272] - anomaly A-IRSUB4-18" % function,
     )
     return _store(file_access, int(FsReply.ERROR), HANDLER_BAD_FUNCTION)
 

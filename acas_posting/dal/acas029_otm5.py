@@ -11,6 +11,18 @@ payment-days figures reproducible
 A verb that arrives with a key number this table does not declare is refused
 rather than guessed at, because guessing would silently read a different index
 than the frozen program read.
+
+THIS MODULE'S ANOMALY FAMILY IS ``A-ACAS029-<n>``, PREFIX INCLUDED.
+The thirty-one handler- and bridge-level readings reproduced here are numbered inside
+this module and nowhere else, so the tag carries the program that owns it.
+``A-ACAS029-12`` is the handler-versus-bridge bad-function disagreement recorded
+below; the canonical register's ``A-12`` in [docs/migration/anomaly-log.md] is the
+ledger-name width drift, a different defect. Each entry is stated in full at the site
+that reproduces it, and the family is registered by name, size and owning module in
+section 15 of that register - which also states the rule this spelling obeys:
+a bare ``A12`` is not an identifier this project allocates in either direction. Where
+module cites the canonical register instead - ``A-6``, the published facade verb that
+can never succeed - it says so and spells it the register's way.
 """
 
 from __future__ import annotations
@@ -138,7 +150,7 @@ DICTIONARY_KEYS: Final[Mapping[str, str]] = {
     loader.column_for(entry.key).name: entry.key for entry in _ENTRIES
 }
 
-# ANOMALY A1 - the headline defect, derived rather than asserted.
+# ANOMALY A-ACAS029-1 - the headline defect, derived rather than asserted.
 WRITE_ONLY_COLUMNS: Final[tuple[str, ...]] = tuple(
     loader.column_for(entry.key).name
     for entry in _ENTRIES
@@ -146,13 +158,13 @@ WRITE_ONLY_COLUMNS: Final[tuple[str, ...]] = tuple(
 )
 
 #: The 27 columns ``bb100-UnloadHVs`` does move back [common/otm5MT.cbl:L1394-L1422], in
-#: COLUMN order. Its length is the arithmetic statement of anomaly A1: 29 loaded, 27
+#: COLUMN order. Its length is the arithmetic statement of anomaly A-ACAS029-1: 29 loaded, 27
 #: unloaded.
 UNLOADED_COLUMNS: Final[tuple[str, ...]] = tuple(
     name for name in COLUMNS if name not in WRITE_ONLY_COLUMNS
 )
 
-# ANOMALY A4 - four fields signed in the copybook, unsigned at the host variable and
+# ANOMALY A-ACAS029-4 - four fields signed in the copybook, unsigned at the host variable and
 # unsigned in the column, so the sign is lost AT THE BRIDGE, before any SQL executes.
 SIGN_LOSS_COLUMNS: Final[tuple[str, ...]] = tuple(
     loader.column_for(entry.key).name
@@ -234,25 +246,25 @@ BRIDGE_TRACE_NUMBERS: Final[Mapping[str, tuple[int, ...]]] = {
 }
 
 
-# ANOMALY A13 - ``move 35 to fs-Reply`` [common/acas029.cbl:L307] is a status value
+# ANOMALY A-ACAS029-13 - ``move 35 to fs-Reply`` [common/acas029.cbl:L307] is a status value
 # OUTSIDE the set ``dal/status.py`` declares from the frozen documentation, ``{0, 10,
 # 21, 22, 23, 99}``.
 FS_REPLY_OPEN_INPUT_FAILED: Final[int] = 35
 
-# ANOMALY A12 - the handler and the bridge DISAGREE on the bad-function code.
+# ANOMALY A-ACAS029-12 - the handler and the bridge DISAGREE on the bad-function code.
 # ``aa100-Bad-Function`` sets ``999`` [common/acas029.cbl:L522] while ``ba100-Bad-
 # Function`` sets ``990`` [common/otm5MT.cbl:L1308].
 HANDLER_BAD_FUNCTION_WE_ERROR: Final[int] = int(WeError.NOT_USED)
 
 BRIDGE_BAD_FUNCTION_WE_ERROR: Final[int] = int(WeError.UNKNOWN_UNEXPECTED)
 
-# ANOMALY A18 - the key-number guard splits 996 from 998 under the SAME copy-pasted
+# ANOMALY A-ACAS029-18 - the key-number guard splits 996 from 998 under the SAME copy-pasted
 # comment text, "file seeks key type out of range".
 KEY_GUARD_WE_ERROR_READ_START: Final[int] = int(WeError.FILE_KEY_NO_OUT_OF_RANGE)
 
 KEY_GUARD_WE_ERROR_DELETE: Final[int] = int(WeError.DELETE_KEY_OUT_OF_RANGE)
 
-# ANOMALY A19 - ``fn-read-next`` is NOT key-guarded, even though a read-next after a
+# ANOMALY A-ACAS029-19 - ``fn-read-next`` is NOT key-guarded, even though a read-next after a
 # ``START`` uses the key.
 KEY_GUARDED_FUNCTIONS: Final[tuple[FileFunction, ...]] = (
     FileFunction.READ_INDEXED,
@@ -260,12 +272,12 @@ KEY_GUARDED_FUNCTIONS: Final[tuple[FileFunction, ...]] = (
     FileFunction.DELETE,
 )
 
-# ANOMALY A14 - ``fn-extend`` has its ``open extend`` COMMENTED OUT, annotated "Must not
+# ANOMALY A-ACAS029-14 - ``fn-extend`` has its ``open extend`` COMMENTED OUT, annotated "Must not
 # be used for ISAM files" [common/acas029.cbl:L325], and returns ``997``/``99`` instead
 # [common/acas029.cbl:L326-L327].
 OPEN_EXTEND_WE_ERROR: Final[int] = int(WeError.ACCESS_TYPE_WRONG)
 
-# ANOMALY A33 - the record-size FATAL. ``if A < B`` sets ``901``/``99`` and aborts the
+# ANOMALY A-ACAS029-33 - the record-size FATAL. ``if A < B`` sets ``901``/``99`` and aborts the
 # bridge call outright [common/acas029.cbl:L562-L564, L580]. WE-Error for the record-
 # size mismatch [common/acas029.cbl:L563].
 RECORD_SIZE_WE_ERROR: Final[int] = int(WeError.RECORD_SIZE_MISMATCH)
@@ -286,7 +298,7 @@ READ_INDEXED_EMPTY_WE_ERROR: Final[int] = int(WeError.READ_INDEXED_UNEXPECTED)
 
 READ_INDEXED_MISS_FS_REPLY: Final[FsReply] = FsReply.KEY_NOT_FOUND
 
-# ANOMALY A11 - three distinct end-of-file markers written into the logging key field,
+# ANOMALY A-ACAS029-11 - three distinct end-of-file markers written into the logging key field,
 # all returning ``(10, 10)``.
 EOF_FILE_KEYS: Final[tuple[str, str, str]] = ("EOF", "EOF2", "EOF3")
 
@@ -296,7 +308,7 @@ NO_DATA_FILE_KEY: Final[str] = "No Data"
 
 SEQUENTIAL_LOW_KEY: Final[str] = "0" * KEY_LENGTH
 
-# ANOMALY A22 / A23 - the sales-terminology leaks.
+# ANOMALY A-ACAS029-22 / A-ACAS029-23 - the sales-terminology leaks.
 OPEN_FILE_KEY: Final[str] = "OPEN PL OTM5"
 
 CLOSE_FILE_KEY: Final[str] = "CLOSE PL OTM5"
@@ -306,7 +318,7 @@ CLOSE_FILE_KEY: Final[str] = "CLOSE PL OTM5"
 HANDLER_OPEN_FILE_KEY: Final[str] = "OPEN SL OTM5 File"
 HANDLER_CLOSE_FILE_KEY: Final[str] = "CLOSE SL OTM5 File"
 
-# ANOMALY A9 - THREE cursors are declared for a single-key table with no repeating
+# ANOMALY A-ACAS029-9 - THREE cursors are declared for a single-key table with no repeating
 # group.
 CURSOR_SLOT: Final[CursorSlot] = CursorSlot.PRIMARY
 
@@ -393,7 +405,7 @@ _MONEY_FIELDS: Final[Mapping[str, Any]] = descriptors_of(Filler1)
 _CONNECTION: MySQLConnectionAbstract | None = None
 
 # One cursor-state table, holding the single slot this handler's path uses - see
-# anomalies A9 and A10 above.
+# anomalies A-ACAS029-9 and A-ACAS029-10 above.
 _STATES: Final[CursorStateTable] = CursorStateTable()
 
 # ``77 A pic 9(4) value zero`` / ``77 B pic 9(4) value zero``
@@ -501,7 +513,7 @@ def mysql_edit(value: decimal.Decimal | int) -> str:
 def render_integer_column(value: int) -> str:
     """Render an ``int`` column exactly as the statement builders do.
 
-    ANOMALY A35 - THE SIGN IS DROPPED. The window starts at position 11 and the sign
+    ANOMALY A-ACAS029-35 - THE SIGN IS DROPPED. The window starts at position 11 and the sign
     lives at position 1, so a negative ``OI5-CR`` renders as its MAGNITUDE and MySQL
     stores a positive value into a signed ``int(8)`` column.
     """
@@ -512,7 +524,8 @@ def render_tinyint_column(value: int) -> str:
     """Render a ``tinyint`` column: ``FUNCTION TRIM (WS-MYSQL-EDIT(18:03))``.
 
     Used for ``OI5-DEDUCT-DAYS`` [common/otm5MT.cbl:L1723] and ``OI5-DAYS``, which carry
-    no fraction. Anomaly A35 applies here too, though anomaly A4 has already reduced
+    no fraction. Anomaly A-ACAS029-35 applies here too, though anomaly A-ACAS029-4
+    has already reduced
     both to a magnitude at the host variable.
     """
     return mysql_edit(value)[_WINDOW_INTEGER_03].strip()
@@ -523,7 +536,7 @@ def render_money_column(value: decimal.Decimal) -> str:
 
     ``FUNCTION TRIM (WS-MYSQL-EDIT(14:07))`` then a literal ``"."`` then ``WS-MYSQL-
     EDIT(22:02)`` - untrimmed, because it is exactly two digits
-    [common/otm5MT.cbl:L1558-L1567]. Anomaly A35: the sign is dropped, so ``-123.45``
+    [common/otm5MT.cbl:L1558-L1567]. Anomaly A-ACAS029-35: the sign is dropped, so ``-123.45``
     renders ``123.45``. Measured on GnuCOBOL 3.2.0.
     """
     edited = mysql_edit(value)
@@ -537,7 +550,7 @@ def render_deduction_column(value: decimal.Decimal) -> str:
 
     ``FUNCTION TRIM (WS-MYSQL-EDIT(18:03))`` then ``"."`` then ``WS-MYSQL-EDIT(22:02)``
     [common/otm5MT.cbl:L1730-L1741]. The integer window is three characters wide rather
-    than seven, matching ``s999v99`` [copybooks/plwsoi.cob:L57-L58]. Anomaly A35.
+    than seven, matching ``s999v99`` [copybooks/plwsoi.cob:L57-L58]. Anomaly A-ACAS029-35.
     """
     edited = mysql_edit(value)
     return (
@@ -592,9 +605,9 @@ def supplier_characters(supplier: OiSupplier) -> str:
 
 
 def compose_key(supplier: str, invoice: int) -> str:
-    """Compose ``HV-OI5-KEY`` - ANOMALY A3, the key built by concatenation.
+    """Compose ``HV-OI5-KEY`` - ANOMALY A-ACAS029-3, the key built by concatenation.
 
-    ANOMALY A25 - that last statement has NO TERMINATING PERIOD, so it runs on into the
+    ANOMALY A-ACAS029-25 - that last statement has NO TERMINATING PERIOD, so it runs on into the
     following moves as a single sentence. Harmless in GnuCOBOL, and the same punctuation
     defect class as [common/glpostingMT.cbl:L1059]. Not corrected.
 
@@ -612,7 +625,7 @@ def compose_key(supplier: str, invoice: int) -> str:
 
 
 def compose_batch(b_nos: int, b_item: int) -> str:
-    """Compose ``HV-OI5-BATCH`` - ANOMALY A2, binary in, DIGITS out.
+    """Compose ``HV-OI5-BATCH`` - ANOMALY A-ACAS029-2, binary in, DIGITS out.
 
     ``WS-Temp-ED-Batch-Nos`` is ``pic 9(5)`` and ``WS-Temp-ED-Batch-Item`` is ``pic
     999`` [common/otm5MT.cbl:L239-L240], both DISPLAY, so the two moves perform a
@@ -641,7 +654,7 @@ def _zoned_integer(text: str, *, column: str) -> int:
     times - ``move HV-OI5-BATCH-NOS to OI-B-Nos`` [common/otm5MT.cbl:L1398], ``HV-
     OI5-BATCH-ITEM to OI-B-Item`` [common/otm5MT.cbl:L1399], ``HV-OI5-TYPE to OI-Type``
     [common/otm5MT.cbl:L1401] and ``HV-OI5-STATUS to OI-Status``
-    [common/otm5MT.cbl:L1415]. Anomalies A5 and A6.
+    [common/otm5MT.cbl:L1415]. Anomalies A-ACAS029-5 and A-ACAS029-6.
 
     Args:
         text: the column value as retrieved.
@@ -713,7 +726,7 @@ def blank_host_variables() -> dict[str, str | int | decimal.Decimal]:
 def blank_record() -> OiHeader:
     """Reproduce ``initialize WS-OTM5-Record`` [common/otm5MT.cbl:L1392].
 
-    ANOMALY A29 - the unload paragraph's ``INITIALIZE`` is PLAIN, while three other
+    ANOMALY A-ACAS029-29 - the unload paragraph's ``INITIALIZE`` is PLAIN, while three other
     sites in the same bridge write ``initialize WS-OTM5-Record with filler``
     [common/otm5MT.cbl:L630, L1129, L1284]. One field, two initialisation semantics, in
     one file.
@@ -728,7 +741,7 @@ def blank_record() -> OiHeader:
     )
     return OiHeader(
         # OI-Key is a group; OI-Customer wraps OI-Supplier and is itself a group of
-        # exactly one child - ANOMALY A7 [copybooks/plwsoi.cob:L14-L15].
+        # exactly one child - ANOMALY A-ACAS029-7 [copybooks/plwsoi.cob:L14-L15].
         oi_key=OiKey(
             oi_customer=OiCustomer(oi_supplier=supplier),
             oi_invoice=_KEY_FIELDS["oi_invoice"].store(0),
@@ -744,7 +757,7 @@ def blank_record() -> OiHeader:
         oi_hold_flag=_HEADER_FIELDS["oi_hold_flag"].store(""),
         oi_unapl=_HEADER_FIELDS["oi_unapl"].store(""),
         # The unnamed COMP-3 group [copybooks/plwsoi.cob:L41] holding the nine money
-        # fields. OI-Approp REDEFINES OI-Net - ANOMALY A8 - and has no host variable and
+        # fields. OI-Approp REDEFINES OI-Net - ANOMALY A-ACAS029-8 - and has no host variable and
         # no column [copybooks/plwsoi.cob:L44-L45].
         filler_1=Filler1(
             oi_p_c=_MONEY_FIELDS["oi_p_c"].store(0),
@@ -772,7 +785,7 @@ def blank_record() -> OiHeader:
 def _drop_sign(value: int, *, column: str) -> int:
     """Narrow a signed COBOL value into an unsigned host variable.
 
-    ANOMALY A4 - FOUR of this table's columns are signed in the copybook,
+    ANOMALY A-ACAS029-4 - FOUR of this table's columns are signed in the copybook,
     unsigned at the host variable and unsigned in the column, so the sign is
     lost AT THE BRIDGE, before any SQL executes:
 
@@ -822,7 +835,7 @@ def _drop_sign(value: int, *, column: str) -> int:
     if value < 0:
         #  NO RECORD HERE. The frozen `move` into an unsigned host variable
         #  narrows in silence - it writes no status, sets no flag and displays
-        #  nothing - so a record was invented (R-4), and the silence IS anomaly A4
+        #  nothing - so a record was invented (R-4), and the silence IS anomaly A-ACAS029-4
         #  as the register describes it. It is documented in `ANOMALIES` and in
         #  `docs/migration/anomaly-log.md`, where a reader finds it without an
         #  operator seeing it once per column per row.
@@ -856,27 +869,27 @@ def load_host_variables(otm5: OiHeader) -> dict[str, str | int | decimal.Decimal
 
     host_variables["OI5-SUPPLIER"] = supplier_text
 
-    # ANOMALY A3 - the key is COMPOSED from the staging area
+    # ANOMALY A-ACAS029-3 - the key is COMPOSED from the staging area
     # [common/otm5MT.cbl:L233-L236], not copied from the record's own OI-Key group.
     host_variables["OI5-KEY"] = compose_key(supplier_text, invoice)
 
-    # ANOMALY A6 - both are COMP (binary) in the copybook [copybooks/plwsoi.cob:L21-L22]
+    # ANOMALY A-ACAS029-6 - both are COMP (binary) in the copybook [copybooks/plwsoi.cob:L21-L22]
     # and char(5)/char(3) in the table.
     b_nos = int(_BATCH_FIELDS["oi_b_nos"].store(otm5.oi_batch.oi_b_nos))
     b_item = int(_BATCH_FIELDS["oi_b_item"].store(otm5.oi_batch.oi_b_item))
     host_variables["OI5-BATCH-NOS"] = f"{b_nos:0{_BATCH_NOS_DIGITS}d}"
     host_variables["OI5-BATCH-ITEM"] = f"{b_item:0{_BATCH_ITEM_DIGITS}d}"
 
-    # ANOMALY A2 - the batch group carries COMP at the GROUP level
+    # ANOMALY A-ACAS029-2 - the batch group carries COMP at the GROUP level
     # [copybooks/plwsoi.cob:L20] and is SIX bytes wide, yet its column is char(8).
     host_variables["OI5-BATCH"] = compose_batch(b_nos, b_item)
 
-    # ANOMALY A4, sign loss 1 of 4.
+    # ANOMALY A-ACAS029-4, sign loss 1 of 4.
     host_variables["OI5-DAT"] = _drop_sign(
         int(_HEADER_FIELDS["oi_date"].store(otm5.oi_date)), column="OI5-DAT"
     )
 
-    # ANOMALY A5, numeric-to-char 1 of 2. OI-Type is PIC 9 [copybooks/plwsoi.cob:L23];
+    # ANOMALY A-ACAS029-5, numeric-to-char 1 of 2. OI-Type is PIC 9 [copybooks/plwsoi.cob:L23];
     # the host variable is X(1). Measured: OI-Type = 2 -> "2".
     host_variables["OI5-TYPE"] = f"{int(_HEADER_FIELDS['oi_type'].store(otm5.oi_type)):01d}"
 
@@ -891,7 +904,7 @@ def load_host_variables(otm5: OiHeader) -> dict[str, str | int | decimal.Decimal
     # host variable [common/otm5MT.cbl:L316-L324], decimal(9,2) in the table.
     money = otm5.filler_1
     host_variables["OI5-P-C"] = _MONEY_FIELDS["oi_p_c"].store(money.oi_p_c)
-    # OI-Approp REDEFINES OI-Net and is NOT loaded - ANOMALY A8.
+    # OI-Approp REDEFINES OI-Net and is NOT loaded - ANOMALY A-ACAS029-8.
     host_variables["OI5-NET"] = _MONEY_FIELDS["oi_net"].store(money.oi_net)
     host_variables["OI5-EXTRA"] = _MONEY_FIELDS["oi_extra"].store(money.oi_extra)
     host_variables["OI5-CARRIAGE"] = _MONEY_FIELDS["oi_carriage"].store(
@@ -905,13 +918,13 @@ def load_host_variables(otm5: OiHeader) -> dict[str, str | int | decimal.Decimal
     host_variables["OI5-C-VAT"] = _MONEY_FIELDS["oi_c_vat"].store(money.oi_c_vat)
     host_variables["OI5-PAID"] = _MONEY_FIELDS["oi_paid"].store(money.oi_paid)
 
-    # ANOMALY A5, numeric-to-char 2 of 2. OI-Status is PIC 9 with the 88-level names
+    # ANOMALY A-ACAS029-5, numeric-to-char 2 of 2. OI-Status is PIC 9 with the 88-level names
     # S-Open and S-Closed [copybooks/plwsoi.cob:L53-L55].
     host_variables["OI5-STATUS"] = (
         f"{int(_HEADER_FIELDS['oi_status'].store(otm5.oi_status)):01d}"
     )
 
-    # ANOMALY A4, sign loss 2 of 4 - BINARY-CHAR signed to PIC 9(03) COMP.
+    # ANOMALY A-ACAS029-4, sign loss 2 of 4 - BINARY-CHAR signed to PIC 9(03) COMP.
     host_variables["OI5-DEDUCT-DAYS"] = _drop_sign(
         int(_HEADER_FIELDS["oi_deduct_days"].store(otm5.oi_deduct_days)),
         column="OI5-DEDUCT-DAYS",
@@ -927,7 +940,7 @@ def load_host_variables(otm5: OiHeader) -> dict[str, str | int | decimal.Decimal
         otm5.oi_deduct_vat
     )
 
-    # ANOMALY A4, sign loss 3 of 4.
+    # ANOMALY A-ACAS029-4, sign loss 3 of 4.
     host_variables["OI5-DAYS"] = _drop_sign(
         int(_HEADER_FIELDS["oi_days"].store(otm5.oi_days)), column="OI5-DAYS"
     )
@@ -938,7 +951,7 @@ def load_host_variables(otm5: OiHeader) -> dict[str, str | int | decimal.Decimal
         otm5.oi_applied
     )
 
-    # ANOMALY A4, sign loss 4 of 4. The last statement of the paragraph, and the only
+    # ANOMALY A-ACAS029-4, sign loss 4 of 4. The last statement of the paragraph, and the only
     # one that carries a terminating period.
     host_variables["OI5-DATE-CLEARED"] = _drop_sign(
         int(_HEADER_FIELDS["oi_date_cleared"].store(otm5.oi_date_cleared)),
@@ -975,7 +988,7 @@ def unload_host_variables(
 ) -> OiHeader:
     """Reproduce ``bb100-UnloadHVs`` [common/otm5MT.cbl:L1387-L1422].
 
-    ANOMALY A1, THE HEADLINE DEFECT OF THIS BRIDGE. ``bb000-HV-Load`` loads ALL 29 host
+    ANOMALY A-ACAS029-1, THE HEADLINE DEFECT OF THIS BRIDGE. ``bb000-HV-Load`` loads ALL 29 host
     variables; this paragraph moves back only TWENTY-SEVEN. ``HV-OI5-KEY`` and ``HV-
     OI5-BATCH`` - precisely the two DERIVED host variables - are loaded
     [common/otm5MT.cbl:L1352, L1358] and unloaded NOWHERE
@@ -1015,11 +1028,11 @@ def unload_host_variables(
         _zoned_integer(supplier_text[6:7], column="OI5-SUPPLIER")
     )
 
-    # ANOMALY A4 in reverse: the column is unsigned, the field signed.
+    # ANOMALY A-ACAS029-4 in reverse: the column is unsigned, the field signed.
     record.oi_date = _HEADER_FIELDS["oi_date"].store(row["OI5-DAT"])
 
-    # ANOMALY A6 in reverse: char(5) and char(3) back into COMP fields, by the measured
-    # alphanumeric-to-numeric MOVE. ANOMALY A1: HV-OI5-BATCH itself is NOT read.
+    # ANOMALY A-ACAS029-6 in reverse: char(5) and char(3) back into COMP fields, by the measured
+    # alphanumeric-to-numeric MOVE. ANOMALY A-ACAS029-1: HV-OI5-BATCH itself is NOT read.
     record.oi_batch.oi_b_nos = _BATCH_FIELDS["oi_b_nos"].store(
         _zoned_integer(_column_text(row, "OI5-BATCH-NOS"), column="OI5-BATCH-NOS")
     )
@@ -1027,7 +1040,7 @@ def unload_host_variables(
         _zoned_integer(_column_text(row, "OI5-BATCH-ITEM"), column="OI5-BATCH-ITEM")
     )
 
-    # ANOMALY A5 in reverse: char(1) back into PIC 9. No validation against the type
+    # ANOMALY A-ACAS029-5 in reverse: char(1) back into PIC 9. No validation against the type
     # legend [copybooks/plwsoi.cob:L25-L34] - rule R-3.
     record.oi_type = _HEADER_FIELDS["oi_type"].store(
         _zoned_integer(_column_text(row, "OI5-TYPE"), column="OI5-TYPE")
@@ -1044,7 +1057,7 @@ def unload_host_variables(
     money = record.filler_1
     money.oi_p_c = _MONEY_FIELDS["oi_p_c"].store(row["OI5-P-C"])
     money.oi_net = _MONEY_FIELDS["oi_net"].store(row["OI5-NET"])
-    # ANOMALY A8 - OI-Approp REDEFINES OI-Net: one storage location, two names. The
+    # ANOMALY A-ACAS029-8 - OI-Approp REDEFINES OI-Net: one storage location, two names. The
     # bridge moves only into OI-Net [common/otm5MT.cbl:L1407].
     money.oi_approp = money.oi_net
     money.oi_extra = _MONEY_FIELDS["oi_extra"].store(row["OI5-EXTRA"])
@@ -1055,7 +1068,7 @@ def unload_host_variables(
     money.oi_c_vat = _MONEY_FIELDS["oi_c_vat"].store(row["OI5-C-VAT"])
     money.oi_paid = _MONEY_FIELDS["oi_paid"].store(row["OI5-PAID"])
 
-    # ANOMALY A5 in reverse. The 88-level predicates S-Open and S-Closed
+    # ANOMALY A-ACAS029-5 in reverse. The 88-level predicates S-Open and S-Closed
     # [copybooks/plwsoi.cob:L54-L55] live in records/otm5.py, not here.
     record.oi_status = _HEADER_FIELDS["oi_status"].store(
         _zoned_integer(_column_text(row, "OI5-STATUS"), column="OI5-STATUS")
@@ -1081,12 +1094,12 @@ def unload_host_variables(
         _column_text(row, "OI5-APPLIED")
     )
 
-    # The last move of the paragraph. ANOMALY A4 in reverse, sign already lost.
+    # The last move of the paragraph. ANOMALY A-ACAS029-4 in reverse, sign already lost.
     record.oi_date_cleared = _HEADER_FIELDS["oi_date_cleared"].store(
         row["OI5-DATE-CLEARED"]
     )
 
-    # NOT UNLOADED, and deliberately so - ANOMALY A1: HV-OI5-KEY
+    # NOT UNLOADED, and deliberately so - ANOMALY A-ACAS029-1: HV-OI5-KEY
     # [common/otm5MT.cbl:L304, loaded L1352] HV-OI5-BATCH [common/otm5MT.cbl:L308,
     # loaded L1358] Twenty-seven moves for twenty-nine host variables.
     return record
@@ -1095,7 +1108,7 @@ def unload_host_variables(
 def _bridge_initialise(file_access: FileAccess) -> None:
     """Reproduce ``ba010-Initialise`` [common/otm5MT.cbl:L387-L399].
 
-    ANOMALY A36, NEW AND NOT IN THE WORKING SPECIFICATION. The paragraph zeroes ``SQL-
+    ANOMALY A-ACAS029-36, NEW AND NOT IN THE WORKING SPECIFICATION. The paragraph zeroes ``SQL-
     State`` and blanks six diagnostic fields, but its zeroing of ``We-Error`` and ``Fs-
     Reply`` is COMMENTED OUT [common/otm5MT.cbl:L390-L391].
 
@@ -1113,7 +1126,7 @@ def _bridge_initialise(file_access: FileAccess) -> None:
     logging_data.sql_msg = " " * SQL_MSG_WIDTH
     logging_data.sql_err = " " * SQL_ERR_WIDTH
     # L390-L391 - the zeroing of We-Error and Fs-Reply is COMMENTED OUT and is therefore
-    # NOT performed here. Anomaly A36.
+    # NOT performed here. Anomaly A-ACAS029-36.
 
 
 def _set_file_key(file_access: FileAccess, value: str) -> None:
@@ -1197,7 +1210,7 @@ def record_size_gate(file_access: FileAccess) -> StatusPair | None:
     global _A, _B
     if _A == 0:
         # L556-L561: function Length (WS-OTM5-Record) and function length (Open-Item-
-        # Record-5). ANOMALY A40, NEW - the same intrinsic is spelled "Length" then
+        # Record-5). ANOMALY A-ACAS029-40, NEW - the same intrinsic is spelled "Length" then
         # "length" on adjacent statements.
         _A = RECORD_LENGTH
         _B = RECORD_LENGTH
@@ -1280,7 +1293,7 @@ def rendered_values(
 ) -> tuple[str, ...]:
     """Render all 29 host variables, in COLUMN order.
 
-    ANOMALY A28 - column order is the third of the bridge's three orders, and it is the
+    ANOMALY A-ACAS029-28 - column order is the third of the bridge's three orders, and it is the
     one both mutating paragraphs emit [common/otm5MT.cbl:L1441-L1805, L1831-L2195].
 
     Args:
@@ -1496,7 +1509,7 @@ def open_(
     """Reproduce ``ba020-Process-Open`` [common/otm5MT.cbl:L433-L475].
 
     1. String the six connection fields, each ``delimited by space`` and terminated
-    ``X"00"`` [common/otm5MT.cbl:L438-L461]. ANOMALY A32 - the order here is Schema,
+    ``X"00"`` [common/otm5MT.cbl:L438-L461]. ANOMALY A-ACAS029-32 - the order here is Schema,
     HOST, UName, UPass, Port, Socket, which is the THIRD order these six fields appear
     in; see :func:`record_size_gate`.
 
@@ -1567,7 +1580,7 @@ open_extend = open_
 def close(file_access: FileAccess) -> StatusPair:
     """Reproduce ``ba030-Process-Close`` [common/otm5MT.cbl:L477-L489].
 
-    ANOMALY A36 - the paragraph ASSIGNS NO STATUS. Combined with ``ba010-Initialise``
+    ANOMALY A-ACAS029-36 - the paragraph ASSIGNS NO STATUS. Combined with ``ba010-Initialise``
     declining to zero the pair [common/otm5MT.cbl:L390-L391], a close therefore returns
     the caller's INCOMING ``FS-Reply`` and ``WE-Error`` untouched.
 
@@ -1578,7 +1591,7 @@ def close(file_access: FileAccess) -> StatusPair:
         The incoming status pair, unmodified.
     """
     global _CONNECTION
-    # Step 1 - L478-L479, and ANOMALY A10.
+    # Step 1 - L478-L479, and ANOMALY A-ACAS029-10.
     state = _STATES.state_for(TABLE, CURSOR_SLOT)
     if state.cursor_active():
         _trace(file_access, BRIDGE_TRACE_NUMBERS["ba998-Free"][0])
@@ -1588,7 +1601,7 @@ def close(file_access: FileAccess) -> StatusPair:
     mysql_1980_close(_CONNECTION)
     mysql_1999_exit()
     _CONNECTION = None
-    # ANOMALY A36 - no status is written; the incoming pair stands.
+    # ANOMALY A-ACAS029-36 - no status is written; the incoming pair stands.
     incoming = int(file_access.fs_reply)
     return (
         FsReply(incoming) if incoming in _FS_REPLY_VALUES else incoming,
@@ -1640,7 +1653,7 @@ def start(
     if outcome.statement:
         _set_log_where(file_access, outcome.statement)
     if not outcome.status_written:
-        # ANOMALY A41 - otm5MT ALWAYS writes (21, 0) here, unlike glpostingMT.
+        # ANOMALY A-ACAS029-41 - otm5MT ALWAYS writes (21, 0) here, unlike glpostingMT.
         # [common/otm5MT.cbl:L850-L851].
         _set_file_key(file_access, key)
         return _status(
@@ -1700,7 +1713,7 @@ def read_next(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
         _set_log_where(file_access, outcome.statement)
     if outcome.row is None:
         # L551-L554 / L613-L618 / L622-L636 / L639-L642 - every exhaustion path is (10,
-        # 10) and each stamps its own marker. ANOMALY A11.
+        # 10) and each stamps its own marker. ANOMALY A-ACAS029-11.
         _set_file_key(file_access, outcome.file_key or EOF_FILE_KEYS[0])
         return _status(file_access, int(outcome.fs_reply), int(outcome.we_error))
     # L645-L647: perform bb100-UnloadHVs, then the KEY column becomes the file key, then
@@ -1747,7 +1760,7 @@ def read_indexed(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
     _STATES.state_for(TABLE, CURSOR_SLOT).free()
     _trace(file_access, BRIDGE_TRACE_NUMBERS["ba998-Free"][0])
     if outcome.row is None:
-        # ANOMALY A49, NEW - THE SHARED HELPER CARRIES ANOTHER BRIDGE'S CODES,
+        # ANOMALY A-ACAS029-49, NEW - THE SHARED HELPER CARRIES ANOTHER BRIDGE'S CODES,
         # `dal.cursor_state.read_indexed` is written against `glpostingMT`, whose ba050
         # does `move 21 to fs-Reply *> could also be 23 or 14`
         # [common/glpostingMT.cbl:L634] and deliberately leaves `We-Error` at the
@@ -1771,7 +1784,7 @@ def write(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
     """Reproduce ``ba070-Process-Write`` [common/otm5MT.cbl:L867-L892].
 
     1. ``perform bb000-HV-Load`` [common/otm5MT.cbl:L868] - all 29 host variables,
-    including the two write-only ones (ANOMALY A1). 2. ``move OI-Key to WS-File-Key``
+    including the two write-only ones (ANOMALY A-ACAS029-1). 2. ``move OI-Key to WS-File-Key``
     [common/otm5MT.cbl:L869] - the RECORD's key group, not ``HV-OI5-KEY``. 3.
 
     Args:
@@ -1808,14 +1821,14 @@ def write(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
         # L886-L889: the duplicate test, delegated to status.py so the "1062" or "1022"
         # or SQLSTATE "23000" triple is expressed in one place.
         if is_duplicate_key_bridge_level(sql_err, sql_state):
-            # ANOMALY A44 - WE-Error stays zero even here.
+            # ANOMALY A-ACAS029-44 - WE-Error stays zero even here.
             return _status(
                 file_access, FsReply.DUPLICATE_KEY, int(WeError.SUCCESS)
             )
         return _status(file_access, FsReply.ERROR, int(WeError.SUCCESS))
     if affected != 1:
         # L877 with no exception raised - the row count disagreed, and the
-        # frozen source's only outcome for that is (99, 0). ANOMALY A44.
+        # frozen source's only outcome for that is (99, 0). ANOMALY A-ACAS029-44.
         # ONE ERROR, through the shared reporter. The arm writes (99, 0) back to
         # the caller, so it is a failure and WARNING put it below the level an
         # operator watches; the row COUNT is safe to name, the row is not.
@@ -1827,7 +1840,7 @@ def write(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
             fs_reply=int(FsReply.ERROR),
             we_error=int(WeError.SUCCESS),
             detail="the INSERT affected %d rows, not 1; WE-Error stays zero "
-            "(anomaly A44)" % affected,
+            "(anomaly A-ACAS029-44)" % affected,
         )
         return _status(file_access, FsReply.ERROR, int(WeError.SUCCESS))
     return _status(file_access, FsReply.SUCCESS, int(WeError.SUCCESS))
@@ -1932,7 +1945,7 @@ def delete(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
             detail="the DELETE affected %d rows, not 1" % affected,
         )
         return _status(file_access, FsReply.ERROR, DELETE_ROWCOUNT_WE_ERROR)
-    # Step 6 - L943-L945: the diagnostics only. ANOMALY A36 - the status pair is NOT
+    # Step 6 - L943-L945: the diagnostics only. ANOMALY A-ACAS029-36 - the status pair is NOT
     # written, so the caller's incoming values stand.
     _clear_sql_diagnostics(file_access)
     incoming = int(file_access.fs_reply)
@@ -1945,18 +1958,20 @@ def delete(otm5: OiHeader, file_access: FileAccess) -> StatusPair:
 def delete_all(file_access: FileAccess) -> StatusPair:
     """Refuse ``fn-Delete-All`` - this pair implements no such verb.
 
-    ANOMALY A16, stated as an ABSENCE. Function code 6 is dispatched by NEITHER program.
+    ANOMALY A-ACAS029-16, stated as an ABSENCE. Function code 6 is dispatched by NEITHER program.
 
     Args:
         file_access: the ``File-Access`` linkage block.
 
     Returns:
-        ``(99, 990)`` - the BRIDGE's bad-function pair, per ANOMALY A12.
+        ``(99, 990)`` - the BRIDGE's bad-function pair, per ANOMALY A-ACAS029-12.
     """
     # ONE ERROR, through the shared reporter. A published facade verb that can
     # NEVER succeed is exactly what an operator must be able to find; at DEBUG it
     # was invisible at the level anyone watches - the same reasoning that took
-    # anomaly A6's refusal in `acas008` off DEBUG.
+    # anomaly `A-6`'s refusal in `acas008` off DEBUG. `A-6` is the canonical
+    # register entry in `docs/migration/anomaly-log.md` and not a tag of this
+    # module's own family.
     log_handler_failure(
         _LOG,
         program=HANDLER,
@@ -1964,7 +1979,7 @@ def delete_all(file_access: FileAccess) -> StatusPair:
         locator="[common/acas029.cbl:L294]",
         detail="fn-Delete-All is implemented by neither program; function code 6 "
         "is 'spare / unused' and reaches bad-function in both, so no statement "
-        "is issued (anomaly A12)",
+        "is issued (anomaly A-ACAS029-12)",
     )
     return bad_function(file_access)
 
@@ -2059,7 +2074,7 @@ def _sorted_reread(
     """The body ``ba141-Reread`` and ``ba151-Reread`` share.
 
     Three exhaustion arms, ALL of them ``(10, 10)``, each stamping its own marker - the
-    same anomaly A11 that ``ba041`` carries, here duplicated twice more.
+    same anomaly A-ACAS029-11 that ``ba041`` carries, here duplicated twice more.
 
     Args:
         otm5: The linkage record, filled in place on a successful fetch.
@@ -2080,7 +2095,7 @@ def _sorted_reread(
     _trace(file_access, BRIDGE_TRACE_NUMBERS[paragraph][1])
     # The caller's pair, read LIVE rather than snapshotted, because the frozen source
     # tests the shared field after the fetch and nothing between entry and the test
-    # writes it - `ba010-Initialise` does not reset the pair (anomaly A36) and neither
+    # writes it - `ba010-Initialise` does not reset the pair (anomaly A-ACAS029-36) and neither
     # the SELECT half's success path nor this paragraph's own moves touch it.
     incoming_fs_reply = int(file_access.fs_reply)
     row = state.fetch_record()
@@ -2198,7 +2213,7 @@ def read_next_sorted_by_batch(otm5: OiHeader, file_access: FileAccess) -> Status
 
     It drives ``Most-Cursor-Set-2`` [common/otm5MT.cbl:L1002, L1057], so a by-batch walk
     and a by-key walk can be open at once - and ``ba998-Free`` clears only the first,
-    which is part of anomaly A10.
+    which is part of anomaly A-ACAS029-10.
 
     Args:
         otm5: The linkage record, filled in place on a successful fetch.
@@ -2312,7 +2327,7 @@ def _process_logs(file_access: FileAccess, dal_common: AcasDalCommonData) -> Non
 def _key_guard(file_access: FileAccess) -> StatusPair | None:
     """Reproduce the handler's key guard [common/acas029.cbl:L239-L253].
 
-    ANOMALY A18 - THE 996/998 SPLIT. The guard is a three-branch ``evaluate File-
+    ANOMALY A-ACAS029-18 - THE 996/998 SPLIT. The guard is a three-branch ``evaluate File-
     Function`` in which ``fn-read-indexed`` (4) and ``fn-start`` (9) FALL THROUGH into
     one shared body returning ``998`` [L240-L246] while ``fn-delete`` (8) has its own
     body returning ``996`` [L247-L252].
@@ -2424,8 +2439,14 @@ def dispatch(
     fatal = record_size_gate(file_access)
     if fatal is not None:
         # [L576-L578] the 901 path logs INLINE - the one place other than the key guard
-        # where the handler logs on the RDB path (anomaly A45) - and then [L580] go to
-        # ba-rdbms-exit, which is [L613] followed by exit section [L614].
+        # where the handler logs on the RDB path - and then [L580] go to ba-rdbms-exit,
+        # which is [L613] followed by exit section [L614].
+        #  ANOMALY A-ACAS029-45 - THE HANDLER'S RDB PATH LOGS FROM TWO PLACES AND
+        #  DELEGATES THE REST. Every other diagnostic on this path is left to the
+        #  bridge, so a reader tracing where a record comes from finds the handler
+        #  silent everywhere except the key-number guard and this record-size fatal
+        #  [common/acas029.cbl:L576-L578]. Reproduced as the asymmetry it is: this
+        #  branch logs here and the surrounding verbs do not.
         _process_logs(file_access, dal_common)
         return fatal
 

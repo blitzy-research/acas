@@ -162,8 +162,10 @@ import argparse
 import ast
 import builtins
 import dataclasses
+import doctest
 import importlib.util
 import inspect
+import pkgutil
 import symtable
 import textwrap
 import tomllib
@@ -5598,6 +5600,12 @@ def test_no_document_claims_an_unused_data_access_boundary() -> None:
         "used at CORE level only",
         "| **core level only**",
         "sqlalchemy core is",
+        #  The bare declarative shape, added because `acas_posting/dal/__init__.py`
+        #  stated the constraint that way - "SQLAlchemy at Core level; no ORM entity
+        #  layer" - and matched none of the patterns above. A constraint list is
+        #  precisely where a reader looks to learn what the layer does, so the
+        #  shortest spelling of the claim needs a pattern of its own.
+        "sqlalchemy at core level",
     )
     # And a sentence that names a finding, or that states the declared-not-imported pair
     # in as many words, is the record of the decision rather than a claim.
@@ -5614,6 +5622,12 @@ def test_no_document_claims_an_unused_data_access_boundary() -> None:
         "pyproject.toml",
         "requirements.txt",
         "README-python-migration.md",
+        #  The package docstring of the layer itself, which was NOT scanned and was
+        #  the one place a reader arrives at by reading the code rather than the
+        #  documentation. Its constraint list described the boundary as active while
+        #  the three artifacts above had already been corrected, so the scan's own
+        #  omission was what let the last copy of the claim survive.
+        "acas_posting/dal/__init__.py",
     ):
         path = root / relative
         assert path.is_file(), f"a declared artifact is absent: {path}"
@@ -5663,6 +5677,237 @@ def test_the_declared_and_unimported_decision_is_stated_in_every_artifact() -> N
         "  A declared-and-unimported dependency is an auditable decision only while "
         "every artifact says so; unstated, it is undetectable drift."
     )
+
+
+# ==========================================================================
+#  DOCSTRING EXAMPLE INTEGRITY  (R-5)
+#
+#  WHAT WENT WRONG, AND WHY A SHAPE CHECK IS NOT ENOUGH ON ITS OWN. A reflow pass over
+#  the data-access docstrings wrapped thirteen doctest blocks INTO the prose of the
+#  `Returns:` and `Raises:` sections they sat under, so that several `>>>` prompts and
+#  their expected outputs ran together on one line - `... pair to store into
+#  ``FileAccess``. >>> end_of_file_status() (<FsReply.END_OF_FILE: 10>, 10).` One of
+#  them was truncated mid-call and showed no result at all. Every one had stopped being
+#  an executable example, and none of them could fail, because
+#  `--doctest-modules` is deliberately absent from `pyproject.toml`'s `addopts`: the
+#  config excludes it along with every other flag that changes collection.
+#
+#  SO BOTH PROPERTIES ARE ASSERTED, AND THEY CATCH DIFFERENT THINGS.
+#
+#   (1) THE SHAPE. A `>>>` must begin its own line and a line must carry at most one.
+#   That is the exact damage the reflow did, and it is checkable without importing
+#   anything, so it holds for every module in the package including ones this tier
+#   would otherwise never load.
+#
+#   (2) THE EXECUTION. The examples must actually run and produce what they claim.
+#   A shape check alone would pass an example whose expected output had gone stale,
+#   which is the slower version of the same defect. This runs `doctest` over the
+#   package IN PROCESS rather than by enabling `--doctest-modules`, so the config's
+#   own decision about collection is left exactly as it is.
+#
+#  WHY THE EXAMPLES MATTER AT ALL, given they are documentation. Under R-5 a docstring
+#  is the traceable statement of what a paragraph does, and a `>>>` line is the part of
+#  it a reader will trust without checking. An example that cannot run is a claim
+#  nothing tests; one that runs and is wrong is worse.
+# ==========================================================================
+
+
+def test_no_docstring_example_is_reflowed_into_prose() -> None:
+    """Every `>>>` begins its own line, and no line carries two.
+
+    The reflow defect is mechanically recognisable: it leaves a prompt in the middle of
+    a sentence, or two prompts on one line with an expected output wedged between them.
+    Asserted over the whole shipped package by TEXT, so a module this tier does not
+    import is covered exactly as well as one it does.
+    """
+    root = Path(__file__).resolve().parents[2]
+    offenders: list[str] = []
+    scanned = 0
+    for path in sorted((root / "acas_posting").rglob("*.py")):
+        scanned += 1
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            if ">>>" not in line:
+                continue
+            stripped = line.strip()
+            if line.count(">>>") > 1:
+                offenders.append(
+                    f"{path.relative_to(root)}:{number}: two prompts on one line: "
+                    f"{stripped[:96]}"
+                )
+            elif not stripped.startswith(">>>"):
+                offenders.append(
+                    f"{path.relative_to(root)}:{number}: prompt inside prose: "
+                    f"{stripped[:96]}"
+                )
+
+    assert scanned, "no module was scanned, so this assertion is vacuous"
+    assert offenders == [], (
+        "these lines carry a doctest prompt that is not at the start of its own line, "
+        "which is what a reflow pass does to an example and what stops it being "
+        "executable:\n  " + "\n  ".join(offenders) + "\n"
+        "  Move the example into an `Examples:` section, one statement per `>>>` line "
+        "with its expected output on the following line."
+    )
+
+
+def test_every_docstring_example_in_the_package_runs_and_passes() -> None:
+    """The examples execute, and produce what they say they produce.
+
+    Run in process with `doctest` rather than by adding `--doctest-modules` to
+    `addopts`, because `pyproject.toml` excludes that flag deliberately - along with
+    every other flag that changes collection - and a documentation guard is not a
+    reason to reopen that decision.
+
+    The attempted count is asserted non-zero as well. Deleting every example would
+    otherwise satisfy a "no failures" assertion perfectly, which is the one way this
+    test could go quiet while the property it protects disappeared.
+    """
+    import acas_posting
+
+    names = ["acas_posting"] + sorted(
+        found.name
+        for found in pkgutil.walk_packages(acas_posting.__path__, "acas_posting.")
+    )
+
+    failures: list[str] = []
+    attempted = 0
+    for name in names:
+        module = importlib.import_module(name)
+        reported: list[str] = []
+        runner = doctest.DocTestRunner(verbose=False)
+        for test in doctest.DocTestFinder().find(module, name):
+            runner.run(test, out=reported.append)
+        attempted += runner.tries
+        if runner.failures:
+            failures.append(f"{name}: {runner.failures} failing example(s)")
+            failures.extend(
+                line for line in "".join(reported).splitlines() if line.strip()
+            )
+
+    assert attempted, (
+        "no docstring example was found anywhere in acas_posting, so this assertion "
+        "is vacuous. The package carried thirty-eight; if they were removed "
+        "deliberately, remove this test in the same change and say why."
+    )
+    assert failures == [], (
+        f"{attempted} examples were attempted and these did not produce what they "
+        "claim:\n  " + "\n  ".join(failures[:60])
+    )
+
+
+#: The bare identifier shapes `docs/migration/anomaly-log.md` section 15 forbids, each
+#: written so that a legitimate scoped form cannot match it. A tag is bare when the
+#: digits follow the letter directly with no owning program between them:
+#:
+#:      A14           bare        <- refused
+#:      F-14          bare        <- refused
+#:      A-14          canonical   <- allowed, it IS the register's own id
+#:      A-NEW-14      canonical   <- allowed, it IS the register's candidate namespace
+#:      A-CURSOR-14   scoped      <- allowed
+#:      F-PL100-14    scoped      <- allowed
+#:      F-ARGS-1      scoped      <- allowed
+#:
+#: `A-NEW-<n>` is deliberately NOT among the refused shapes, and the distinction is
+#: worth stating because section 15's rule names it. What that rule forbids is
+#: ALLOCATING a fresh `A-NEW-<n>` inside one module, not citing the register's own
+#: candidate namespace - and a text scan cannot tell those apart, since
+#: `programs/pl060_order_posting.py` legitimately cites `A-NEW-1` (the one number the
+#: register and the module agree on) while `programs/pl100_payment_posting.py`
+#: legitimately quotes `A-NEW-5` as the OLD alias section 15.1 renamed. The allocation
+#: case is bounded instead by the range check below.
+_BARE_ANOMALY_TAG_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"(?<![-\w])A\d+\b", "a bare A<n>"),
+    (r"(?<![-\w])F-\d+\b", "a bare F-<n>"),
+)
+
+#: The register's `A-NEW-` namespace is 18 entries [docs/migration/anomaly-log.md
+#: section 15]. A module citing a higher number is allocating its own, which is the
+#: case the patterns above cannot see.
+_REGISTER_A_NEW_HIGHEST: Final[int] = 18
+
+
+def test_no_module_allocates_a_bare_anomaly_identifier() -> None:
+    """No shipped module tags an anomaly with a bare `A<n>` or a bare `F-<n>`.
+
+    THE RULE IS THE REGISTER'S OWN, and it exists because the digits alone do not say
+    which register a reader is in. `docs/migration/anomaly-log.md` section 15 closes with
+    it: *"A bare `A<n>`, a bare `A-NEW-<n>` and a bare `F-<n>` allocated inside a single
+    module are each not an acceptable identifier."*
+
+    WHAT WENT WRONG WHILE THE RULE WAS ONLY WRITTEN DOWN. Six modules had opened families
+    numbered from 1 with no prefix, so `A14` meant the discarded row of a `READ NEXT` in
+    `dal/cursor_state.py`, a commented-out `open extend` in `dal/acas029_otm5.py`, and
+    `gl072`'s sequential nominal read in the register itself - three defects at one
+    spelling. Three other modules were using a bare `A6` to mean the register's `A-6`, so
+    one shape carried both scopes at once. Section 15.2 renamed all of them and declared
+    the families; this test is what stops a seventh from being opened the same way, since
+    a rule enforced only by review is a rule that returns.
+
+    TWO EXEMPTIONS, BOTH NARROW. A line carrying the word "bare" is a line that names the
+    shape in order to forbid it - every family declaration ends with one - so it is a
+    DECLARATION of the convention rather than an allocation under it. And
+    `A-NEW-<n>` is not scanned as a shape at all, for the reason given above the
+    patterns; what is checked instead is that no module cites a number beyond the
+    register's own 18.
+
+    Scope: every `.py` file under `acas_posting/`. The tests and the harness are excluded
+    deliberately - a test may legitimately quote a bare form while asserting against it,
+    as this file's own patterns above do.
+    """
+    root = Path(__file__).resolve().parents[2]
+    package = root / "acas_posting"
+    assert package.is_dir(), f"the shipped package is absent: {package}"
+
+    compiled = tuple(
+        (re.compile(pattern), description)
+        for pattern, description in _BARE_ANOMALY_TAG_PATTERNS
+    )
+    a_new = re.compile(r"(?<![-\w])A-NEW-(\d+)\b")
+    offenders: list[str] = []
+    over_range: list[str] = []
+    scanned = 0
+    for path in sorted(package.rglob("*.py")):
+        scanned += 1
+        relative = path.relative_to(root).as_posix()
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), 1
+        ):
+            for allocated in a_new.finditer(line):
+                if int(allocated.group(1)) > _REGISTER_A_NEW_HIGHEST:
+                    over_range.append(
+                        f"{relative}:{number}: {allocated.group(0)} is beyond the "
+                        f"register's {_REGISTER_A_NEW_HIGHEST}: {line.strip()[:80]}"
+                    )
+            if "bare" in line.lower():
+                #  The declaration of the convention, not an allocation under it.
+                continue
+            for expression, description in compiled:
+                match = expression.search(line)
+                if match is not None:
+                    offenders.append(
+                        f"{relative}:{number}: {description} "
+                        f"({match.group(0)}): {line.strip()[:88]}"
+                    )
+    assert scanned >= 89, (
+        f"only {scanned} modules were scanned; the package holds at least 89, so the "
+        f"scan is not reaching the tree it is meant to police."
+    )
+    assert not offenders, (
+        f"{len(offenders)} bare anomaly identifier(s) in the shipped package. Each one "
+        f"means a different defect depending on which file a reader is in, which is the "
+        f"collision docs/migration/anomaly-log.md section 15.2 exists to have removed. "
+        f"Give the tag its owning program - `A-CURSOR-14`, `A-ACAS029-14`, "
+        f"`F-ARGS-1` - and declare the family in section 15:\n  "
+        + "\n  ".join(offenders)
+    )
+    assert not over_range, (
+        "these citations allocate a candidate number the register does not have, which "
+        "is the ambiguity section 15.1 removed once already:\n  "
+        + "\n  ".join(over_range)
+    )
+
 
 
 # ---------------------------------------------------------------------------

@@ -28,6 +28,21 @@ Everything here follows from those three sentences:
 3. **The interface defines which key and the relation** - the caller supplies
    both, the key through the key-of-reference number and the relation through
    ``Access-Type``.
+
+THIS MODULE'S ANOMALY FAMILY IS ``A-CURSOR-<n>``, PREFIX INCLUDED.
+The twelve positioning-level readings reproduced here - numbered 1 to 14 with 5 and 6
+unused, because 6 would collide with the canonical register entry this module cites -
+are numbered inside this module and nowhere else, so the tag carries the module that
+owns it. ``A-CURSOR-10``
+is the fetched-then-discarded row of `read_next`; the canonical register's ``A-10``
+in [docs/migration/anomaly-log.md] is the three inconsistent moving-average guards,
+a different defect. Each entry is stated in full at the site that reproduces it, and
+sibling modules cite it by the prefixed name - `acas000_system.py` and
+`acas007_gl_batch.py` both do. The family is registered by name, size and owning
+module in section 15 of that register, which states the rule this spelling obeys: a
+bare ``A10`` is not an identifier this project allocates in either direction. Where
+this module cites the canonical register instead - ``A-6``, the published verb that
+can never succeed - it says so and spells it the register's way.
 """
 
 from __future__ import annotations
@@ -466,7 +481,7 @@ class OrderTerm:
         """Render the term as the bridge renders it, quoting included.
 
         A term the bridge single-quoted is rendered single-quoted, because rendering it
-        as an identifier would FIX anomaly A8 and rule R-4 makes a defect fixed a
+        as an identifier would FIX anomaly A-CURSOR-8 and rule R-4 makes a defect fixed a
         failure.
         """
         if self.quoting is OrderQuoting.STRING_CONSTANT:
@@ -481,7 +496,7 @@ class OrderTerm:
 class SequentialReadStart:
     """How one bridge self-positions a ``READ NEXT`` on an inactive cursor.
 
-    ANOMALY A1 - REPRODUCED, NOT FIXED. The frozen source names ``'99RNP'`` for "read
+    ANOMALY A-CURSOR-1 - REPRODUCED, NOT FIXED. The frozen source names ``'99RNP'`` for "read
     next with no position (no start 1st)" [copybooks/mysql-procedures.cpy:L118] and then
     never tests for it.
     """
@@ -513,7 +528,7 @@ class ExtraReadOrder:
     order_terms: tuple[OrderTerm, ...]
 
     #: Whether the bridge builds a WHERE predicate for this verb at all. ``False`` for
-    #: the two OTM sorted reads - see anomaly A8 below.
+    #: the two OTM sorted reads - see anomaly A-CURSOR-8 below.
     predicate_present: bool
 
     owning_handlers: tuple[str, ...]
@@ -644,7 +659,7 @@ TABLE_OF_KEYNAMES: Final[Mapping[str, tuple[KeyOfReference, ...]]] = (
             ),
             # The ONLY key declared `"BNT"` rather than `"STR"`, the bridge's own
             # comment being `*> key is bigint` [common/slpostingMT.scb:L216]. Carried,
-            # never branched on - anomaly A4.
+            # never branched on - anomaly A-CURSOR-4.
             "PSIRSPOST-REC": (
                 KeyOfReference.from_offset_length_string(
                     key_name="IRS-POST-KEY",
@@ -1072,7 +1087,7 @@ EXTRA_READ_ORDERS: Final[Mapping[str, Mapping[FileFunction, ExtraReadOrder]]] = 
                     ),
                 }
             ),
-            # ANOMALY A8 - REPRODUCED, NOT FIXED. Two independent defects.
+            # ANOMALY A-CURSOR-8 - REPRODUCED, NOT FIXED. Two independent defects.
             "SAITM3-REC": MappingProxyType(
                 {
                     FileFunction.READ_BY_BATCH: ExtraReadOrder(
@@ -1114,7 +1129,7 @@ EXTRA_READ_ORDERS: Final[Mapping[str, Mapping[FileFunction, ExtraReadOrder]]] = 
                         owning_handlers=("acas019",),
                         source_locator="[common/otm3MT.cbl:L997-L1012]",
                         note=(
-                            "anomaly A8: single-quoted terms order nothing, and "
+                            "anomaly A-CURSOR-8: single-quoted terms order nothing, and "
                             "WHERE carries no predicate, so the statement is a "
                             "syntax error returning (99, 911)"
                         ),
@@ -1151,7 +1166,7 @@ EXTRA_READ_ORDERS: Final[Mapping[str, Mapping[FileFunction, ExtraReadOrder]]] = 
                         predicate_present=False,
                         owning_handlers=("acas019",),
                         source_locator="[common/otm3MT.cbl:L1153-L1166]",
-                        note="anomaly A8, as for READ_BY_BATCH above",
+                        note="anomaly A-CURSOR-8, as for READ_BY_BATCH above",
                     ),
                 }
             ),
@@ -1195,7 +1210,7 @@ EXTRA_READ_ORDERS: Final[Mapping[str, Mapping[FileFunction, ExtraReadOrder]]] = 
                         predicate_present=False,
                         owning_handlers=("acas029",),
                         source_locator="[common/otm5MT.cbl:L1000-L1015]",
-                        note="anomaly A8, as for SAITM3-REC",
+                        note="anomaly A-CURSOR-8, as for SAITM3-REC",
                     ),
                     FileFunction.READ_BY_CUST: ExtraReadOrder(
                         file_function=FileFunction.READ_BY_CUST,
@@ -1229,7 +1244,7 @@ EXTRA_READ_ORDERS: Final[Mapping[str, Mapping[FileFunction, ExtraReadOrder]]] = 
                         predicate_present=False,
                         owning_handlers=("acas029",),
                         source_locator="[common/otm5MT.cbl:L1159-L1172]",
-                        note="anomaly A8, as for SAITM3-REC",
+                        note="anomaly A-CURSOR-8, as for SAITM3-REC",
                     ),
                 }
             ),
@@ -1498,11 +1513,11 @@ class CursorOutcome:
     parameters: tuple[object, ...]
 
     #: Whether the bridge writes the status pair on this path at all. ``False`` only on
-    #: the no-rows START of anomaly A7.
+    #: the no-rows START of anomaly A-CURSOR-7.
     status_written: bool = True
 
     #: The internal SQLSTATE that DESCRIBES this outcome, for diagnostics only - anomaly
-    #: A3.
+    #: A-CURSOR-3.
     sql_state: str = ""
 
     #: The bridge's own `WS-File-Key` log tag for this path, verbatim.
@@ -1619,17 +1634,17 @@ def _deliver_from_stored_result(
         empty_tag: The ``WS-File-Key`` tag for exhaustion - ``"EOF"`` when entered
             directly [common/glpostingMT.cbl:L558], ``"No Data"`` when reached through
             ``ba040``'s self-positioning [:L510].
-        incoming_fs_reply: The caller's ``FS-Reply`` on entry, which anomaly A10 tests
+        incoming_fs_reply: The caller's ``FS-Reply`` on entry, which anomaly A-CURSOR-10 tests
             AFTER the fetch.
         incoming_we_error: The caller's ``We-Error`` on entry, preserved unchanged on
-            the A10 path where no status is written.
+            the A-CURSOR-10 path where no status is written.
         file_access: Applied to before returning when given.
         statement: The statement that materialised the snapshot, for the outcome. Empty
             when this paragraph was entered directly, as the bridge issues none there.
         parameters: That statement's bound parameters, for the same reason.
 
     Returns:
-        The outcome - a delivered row, exhaustion, or an A10 discard.
+        The outcome - a delivered row, exhaustion, or an A-CURSOR-10 discard.
     """
     row = state.fetch_record()
 
@@ -1649,7 +1664,7 @@ def _deliver_from_stored_result(
         return outcome
 
     if incoming_fs_reply == FsReply.END_OF_FILE:
-        # ANOMALY A10: the row was fetched and is now THROWN AWAY, because the
+        # ANOMALY A-CURSOR-10: the row was fetched and is now THROWN AWAY, because the
         # caller's `FS-Reply` still holds 10 from a previous end of file
         # [common/glpostingMT.cbl:L580-L583]. No status is written - the stale
         # pair simply persists - and the cursor is deactivated, so the next call
@@ -1660,9 +1675,12 @@ def _deliver_from_stored_result(
         #  row is consumed and dropped without a trace. A record here was an
         #  invented diagnostic on a path the compiled program says nothing about,
         #  which rule R-4 forbids - the anomaly is reproduced, and it is recorded
-        #  as A10 in `docs/migration/anomaly-log.md`, which is where a reader is
-        #  meant to learn about it rather than from a log line the original cannot
-        #  produce.
+        #  as `A-CURSOR-10` in THIS MODULE'S OWN FAMILY, declared at the head of the
+        #  file and registered in `docs/migration/anomaly-log.md` section 15, which is
+        #  where a reader is meant to learn about it rather than from a log line the
+        #  original cannot produce. The register's own `A-10` is a DIFFERENT defect -
+        #  the three inconsistent moving-average guards - so the family prefix is what
+        #  makes the citation resolve.
         state.set_cursor_not_active()
         outcome = CursorOutcome(
             fs_reply=incoming_fs_reply,
@@ -1703,7 +1721,11 @@ def keys_for(table_name: str) -> tuple[KeyOfReference, ...]:
         The declared keys, index 0 being ``KOR-x1`` of 1.
 
     Raises:
-        KeyError: If the table is not in scope. >>> len(keys_for("GLPOSTING-REC")) 1.
+        KeyError: If the table is not in scope.
+
+    Examples:
+        >>> len(keys_for("GLPOSTING-REC"))
+        1
     """
     try:
         return TABLE_OF_KEYNAMES[table_name]
@@ -1731,8 +1753,14 @@ def key_of_reference(table_name: str, key_number: int = 1) -> KeyOfReference:
 
     Raises:
         KeyError: If the table is not in scope.
-        IndexError: If ``key_number`` is outside the table's ``occurs`` range. >>>
-            key_of_reference("GLPOSTING-REC").name 'POST-KEY'.
+        IndexError: If ``key_number`` is outside the table's ``occurs`` range.
+
+    Examples:
+        The default is 1, which is the only value the compiled system reaches for
+        this table:
+
+        >>> key_of_reference("GLPOSTING-REC").name
+        'POST-KEY'
     """
     keys = keys_for(table_name)
     if not 1 <= key_number <= len(keys):
@@ -1746,7 +1774,7 @@ def key_of_reference(table_name: str, key_number: int = 1) -> KeyOfReference:
 def _incoming_status(file_access: FileAccess | None) -> tuple[FsReply, int]:
     """Snapshot the status pair the caller already holds.
 
-    Needed by exactly one path - the no-rows START of anomaly A7, where the bridge
+    Needed by exactly one path - the no-rows START of anomaly A-CURSOR-7, where the bridge
     writes NEITHER status field [common/glpostingMT.cbl:L771-L781] and the caller's
     existing pair therefore survives the call.
 
@@ -1788,8 +1816,8 @@ def _driver_failure_fields(error: BaseException) -> tuple[str, str]:
 
     NOTHING BRANCHES ON THE RESULT. The status pair each caller then reports is
     the one the frozen source dictates - ``(21, 0)`` for `fn-start`, end of file
-    for `fn-read-next` (anomaly A11) and ``(21, 911)`` for `fn-read-indexed`
-    (anomaly A14) - and it is chosen by the exception being caught at all, never
+    for `fn-read-next` (anomaly A-CURSOR-11) and ``(21, 911)`` for `fn-read-indexed`
+    (anomaly A-CURSOR-14) - and it is chosen by the exception being caught at all, never
     by what the exception said. Rules R-3 and R-4 are therefore untouched: the
     only thing that changes is the rendering of a log line.
 
@@ -1877,7 +1905,7 @@ def start(
             :attr:`CursorOutcome.row` is ALWAYS ``None``.
     """
     table = states if states is not None else _DEFAULT_STATES
-    # Anomaly A7 needs the pair the caller ALREADY holds, so snapshot it before anything
+    # Anomaly A-CURSOR-7 needs the pair the caller ALREADY holds, so snapshot it before anything
     # is issued. [common/glpostingMT.cbl:L771-L781].
     incoming_fs_reply, incoming_we_error = _incoming_status(file_access)
 
@@ -1886,7 +1914,8 @@ def start(
         fs_reply, we_error, locator = refusal
         #  ONE ERROR, at the level a refusal deserves. The verb was rejected and
         #  `FS-Reply` 99 goes back to the caller, so this is a failure and not a
-        #  trace. At DEBUG it would leave a permanently-failing verb (anomaly A6)
+        #  trace. At DEBUG it would leave a permanently-failing verb (anomaly ``A-6``
+        #  of [docs/migration/anomaly-log.md], not a tag of this module's family)
         #  invisible at the level an operator watches. Only the table
         #  name, the paragraph and the frozen locator are reported: no key, no
         #  statement, no value.
@@ -1911,7 +1940,7 @@ def start(
         return outcome
 
     # the never-implemented `'99NKS'` situation, so it is reported with the SQLSTATE for
-    # diagnostics and the compiled system's `(99, 911)` pair - anomaly A3.
+    # diagnostics and the compiled system's `(99, 911)` pair - anomaly A-CURSOR-3.
     # [copybooks/mysql-procedures.cpy:L115, :L127-L128].
     try:
         key = key_of_reference(table_name, key_number)
@@ -2026,7 +2055,7 @@ def start(
     row = None if count == 0 else state.stored_rows[0]
 
     if row is None:
-        # ANOMALY A7: no row, no driver error -> NEITHER status field written.
+        # ANOMALY A-CURSOR-7: no row, no driver error -> NEITHER status field written.
         # [common/glpostingMT.cbl:L771-L781]. The cursor is not touched here
         # either: L767's `if` does not fire and L771-L781 never mentions it, so
         # the inactive state established at step 3 stands.
@@ -2036,7 +2065,10 @@ def start(
         # pair back and no indication that the answer is stale. A log line here
         # would be a diagnostic the compiled program cannot produce and would make
         # the silence look like an oversight rather than the reproduced defect it
-        # is (rule R-4). A7 is recorded in `docs/migration/anomaly-log.md`.
+        # is (rule R-4). `A-CURSOR-7` is this module's own tag, declared at the head
+        # of the file and registered by family in `docs/migration/anomaly-log.md`
+        # section 15; the register's `A-7` is the guarded IRS date derivation and is a
+        # different defect entirely.
         outcome = CursorOutcome(
             fs_reply=incoming_fs_reply,
             we_error=incoming_we_error,
@@ -2087,7 +2119,7 @@ def read_next(
             per read order [common/otm3MT.cbl:L265-L270].
         states: The cursors to use; the module-level set when ``None``.
         file_access: When given, the outcome is applied to it before returning and its
-            incoming ``FS-Reply`` participates in the A10 test, as it must.
+            incoming ``FS-Reply`` participates in the A-CURSOR-10 test, as it must.
 
     Returns:
         The outcome. On success :attr:`CursorOutcome.row` holds the row keyed by column
@@ -2096,10 +2128,10 @@ def read_next(
     Raises:
         KeyError: If the table declares no key of reference.
         LookupError: If the table has no sequential read in the frozen bridges - the two
-            lines tables of anomaly A12, unreachable from COBOL.
+            lines tables of anomaly A-CURSOR-12, unreachable from COBOL.
     """
     table = states if states is not None else _DEFAULT_STATES
-    # Anomaly A10 reads the caller's own field, so snapshot before anything runs.
+    # Anomaly A-CURSOR-10 reads the caller's own field, so snapshot before anything runs.
     incoming_fs_reply, incoming_we_error = _incoming_status(file_access)
 
     # The handler entry guard, data-driven. `fn-read-next` is NOT among the four verbs
@@ -2144,14 +2176,14 @@ def read_next(
         )
 
     # [common/glpostingMT.cbl:L454-L473]. `set KOR-x1 to 1` - key 1 always, per anomaly
-    # A12 - and the bridge's own hard-coded relation and low key, per anomaly A9.
+    # A-CURSOR-12 - and the bridge's own hard-coded relation and low key, per anomaly A-CURSOR-9.
     key = key_of_reference(table_name, 1)
     low = SEQUENTIAL_READ_START.get(table_name)
     if low is None:
         raise LookupError(
             f"{table_name} has no ba040-Process-Read-Next in the frozen "
             f"bridges, so the compiled system cannot read it sequentially; "
-            f"see anomaly A12. Reach it through its header bridge's second "
+            f"see anomaly A-CURSOR-12. Reach it through its header bridge's second "
             f"key of reference instead."
         )
     relation = low.relation
@@ -2166,7 +2198,7 @@ def read_next(
     try:
         cursor.execute(statement, parameters)
     except Exception as error:  # any driver error takes this path - see below
-        # ANOMALY A11: the error is MASKED as end of file, because the two
+        # ANOMALY A-CURSOR-11: the error is MASKED as end of file, because the two
         # unconditional moves overwrite `Mysql-1100-Db-Error`'s `(99, 911)`
         # [common/glpostingMT.cbl:L508-L509]. Reported at ERROR - one record, with
         # the status pair that will actually be returned - so that the masking is
@@ -2186,7 +2218,7 @@ def read_next(
             + key.table_name
             + "."
             + key.column_name
-            + " and is MASKED as end of file (anomaly A11)",
+            + " and is MASKED as end of file (anomaly A-CURSOR-11)",
         )
         state.set_cursor_not_active()
         end_fs_reply, end_we_error = end_of_file_status()
@@ -2283,7 +2315,7 @@ def read_indexed(
     if refusal is not None:
         fs_reply, we_error, locator = refusal
         #  ONE ERROR: `FS-Reply` 99 goes back to the caller, so the verb failed.
-        #  This is the arm anomaly A6 travels on - `acas008` refuses read-indexed
+        #  This is the arm anomaly ``A-6`` travels on - `acas008` refuses read-indexed
         #  unconditionally - and reporting it at DEBUG made a verb that can never
         #  succeed invisible at the level an operator watches.
         log_handler_failure(
@@ -2307,7 +2339,7 @@ def read_indexed(
         return outcome
 
     # An out-of-range key number is the never-implemented `'99NKU'` situation, "No valid
-    # key used" [copybooks/mysql-procedures.cpy:L116]. Anomaly A3.
+    # key used" [copybooks/mysql-procedures.cpy:L116]. Anomaly A-CURSOR-3.
     try:
         key = key_of_reference(table_name, key_number)
     except IndexError:
@@ -2351,7 +2383,7 @@ def read_indexed(
         # sequential read [:L488-L489] and the START [:L762-L763].
         count = state.store_result(_store_result(cursor))
     except Exception as error:  # any driver error takes this path - see below
-        # ANOMALY A14: `(21, 911)` - 21 overwrites the 99, 911 survives.
+        # ANOMALY A-CURSOR-14: `(21, 911)` - 21 overwrites the 99, 911 survives.
         # A FAILURE OF EITHER CALL LANDS HERE, and the frozen source is why:
         # `Mysql-1100-Db-Error` is performed both from `Mysql-1210-Command` on a
         # non-zero `MySQL_query` return [copybooks/mysql-procedures.cpy:L165-L177]
@@ -2374,7 +2406,7 @@ def read_indexed(
             + key.table_name
             + "."
             + key.column_name
-            + " and is reported as (21, 911) (anomaly A14)",
+            + " and is reported as (21, 911) (anomaly A-CURSOR-14)",
         )
         state.free()
         outcome = CursorOutcome(
@@ -2390,7 +2422,7 @@ def read_indexed(
         return outcome
 
     # `if WS-MYSQL-Count-Rows = zero move 21 to fs-Reply go to ba998-Free`
-    # [common/glpostingMT.cbl:L633-L636] is the FIRST guard and, per anomaly A13 in this
+    # [common/glpostingMT.cbl:L633-L636] is the FIRST guard and, per anomaly A-CURSOR-13 in this
     # function's docstring, the only reachable one - so the fetch is reached only when
     # the snapshot holds a record.
     row = state.fetch_record() if count > 0 else None
@@ -2400,7 +2432,7 @@ def read_indexed(
     state.free()
 
     if row is None:
-        # ANOMALY A2 and A13: 21, never 23; and `We-Error` is NOT written, so the
+        # ANOMALY A-CURSOR-2 and A-CURSOR-13: 21, never 23; and `We-Error` is NOT written, so the
         # caller's value survives [common/glpostingMT.cbl:L633-L636].
         #
         # AND NOTHING IS REPORTED. "Key not found" is an ORDINARY outcome that

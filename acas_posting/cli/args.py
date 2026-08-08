@@ -1206,7 +1206,6 @@ TRANSPORT_ALLOW_PLACEHOLDER_CREDENTIALS_VARIABLE: Final[str] = (
     "ACAS_DB_ALLOW_PLACEHOLDER_CREDENTIALS"
 )
 
-#: The spellings read as YES, compared case-insensitively after stripping. A
 #: The three driver deadlines, in whole seconds. The frozen C
 #: interface passes none - `mysql_real_connect` is called with a literal zero
 #: client-flag word and no option is set on the handle
@@ -3832,7 +3831,7 @@ def overrewrite(
     #  The load's close does NOT have this shape: `aa010-Get-System-Recs`
     #  leaves the key at 1 [general/general.cbl:L408] and its close at
     #  [general/general.cbl:L460] therefore closes key 1. The asymmetry is
-    #  transcribed, not reconciled (rule R-4). Recorded as FINDING F-A1 in
+    #  transcribed, not reconciled (rule R-4). Recorded as FINDING F-ARGS-1 in
     #  the footer.
     facade.system_close(_system_context(system_record, state, file_defs))
 
@@ -5267,7 +5266,16 @@ def require_stated(
 
 # FINDINGS IN THE FROZEN MENUS  -  reproduced, never corrected (rule R-4)
 #
-#  F-A1  `overrewrite` CLOSES KEY 4, NOT KEY 1. `acas000` dispatches every
+# THE FAMILY IS `F-ARGS-<n>`, PREFIX INCLUDED, AND IT IS SEVEN ENTRIES. These are
+# readings of the frozen MENU shells that this module binds, numbered inside this
+# module and nowhere else, so the tag carries the module that owns them. They are
+# registered - by name, size and owning module - in section 15 of
+# [docs/migration/anomaly-log.md], beside the three `F-<PROGRAM>-<n>` program
+# families, because that section owns the namespace and its closing rule is explicit:
+# a bare `F-<n>` allocated inside a single module is not an acceptable identifier.
+# These were spelled `F-A<n>` until that rule was applied to them.
+#
+#  F-ARGS-1  `overrewrite` CLOSES KEY 4, NOT KEY 1. `acas000` dispatches every
 #  function on `File-Key-No` [common/acas000.cbl:L574-L600], and nothing
 #  between the key-4 rewrite and the close resets the key
 #  [general/general.cbl:L667-L670], [sales/sales.cbl:L639-L642],
@@ -5276,29 +5284,29 @@ def require_stated(
 #  close is different - `aa010-Get-System-Recs` leaves the key at 1 and so
 #  closes key 1 [general/general.cbl:L408], [general/general.cbl:L460].
 #  Both are transcribed as written.
-#  F-A2  THE KEY IS SET TWICE IN A ROW at the head of `overrewrite`: `move 1 to
+#  F-ARGS-2  THE KEY IS SET TWICE IN A ROW at the head of `overrewrite`: `move 1 to
 #  File-Key-No` immediately before `System-Open` and again immediately
 #  after it [general/general.cbl:L659-L661]. Redundant, and kept.
-#  F-A3  THE LOAD AND THE PERSIST DISAGREE ABOUT KEY ORDER. The load reads 4, 2,
+#  F-ARGS-3  THE LOAD AND THE PERSIST DISAGREE ABOUT KEY ORDER. The load reads 4, 2,
 #  1 [general/general.cbl:L402-L410]; the persist writes 1, 2, 4
 #  [general/general.cbl:L661-L669]. Neither is changed to match the other.
-#  F-A4  THE `File-System-Used NOT = zero` GATE ON THE RDB ARM CAN NEVER BE
+#  F-ARGS-4  THE `File-System-Used NOT = zero` GATE ON THE RDB ARM CAN NEVER BE
 #  DECIDED BY THE MENU ITSELF. It is a SYSTEM-REC column, zeroed before the
 #  load [general/general.cbl:L399] and then overwritten by the key-1 read;
 #  the only code that would have set it deliberately is commented out
 #  [general/general.cbl:L428-L432]. Its value at `overrewrite` is whatever
 #  the seed stored. See `overrewrite` for why the gate is therefore not
 #  reproduced as a gate.
-#  F-A5  `zz090` AND `zz095` DISAGREE ABOUT FIELD ORDER. `zz090` fills
+#  F-ARGS-5  `zz090` AND `zz095` DISAGREE ABOUT FIELD ORDER. `zz090` fills
 #  `WS-First-Time-Flag` last [irs/irs.cbl:L965-L966]; `zz095` tests it
 #  fifth of seven [irs/irs.cbl:L1023]. Each function follows its own
 #  paragraph's order.
-#  F-A6  `zz090`'s THREE DATE CONVERSIONS SHARE ONE `maps03-ws`, so a zero
+#  F-ARGS-6  `zz090`'s THREE DATE CONVERSIONS SHARE ONE `maps03-ws`, so a zero
 #  Start-Date or End-Date yields the PREVIOUS conversion's text rather than
 #  a blank - `maps04` unpacks only for a positive binary and leaves
 #  `u-date` untouched on rejection [common/maps04.cbl:L146]. One
 #  `Maps03Ws` is reused for all three so the carry-over survives.
-#  F-A7  TWO OF `zz090`'s MOVES TRUNCATE: `Usera pic x(32)` into `suser pic
+#  F-ARGS-7  TWO OF `zz090`'s MOVES TRUNCATE: `Usera pic x(32)` into `suser pic
 #  x(24)` and `Print-Spool-Name pic x(48)` into `pic x(32)`. Both go
 #  through the MOVE layer with the receiving field's descriptor.
 #

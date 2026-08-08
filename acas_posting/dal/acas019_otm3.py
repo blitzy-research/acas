@@ -3140,7 +3140,9 @@ def aa020_process_open(context: _HandlerContext) -> tuple[int, int]:
         context.status(FsReply.ERROR, int(WeError.ACCESS_TYPE_WRONG))  # [:L332-L333]
         # ONE ERROR, through the shared reporter. A published verb that can never
         # succeed is exactly what an operator must be able to find - the same reasoning
-        # that took anomaly A6's refusal in `acas008` off DEBUG.
+        # that took anomaly `A-6`'s refusal in `acas008` off DEBUG - `A-6` being the
+        # canonical register entry in `docs/migration/anomaly-log.md`, not a tag of
+        # this module.
         log_handler_failure(
             _LOG,
             program=HANDLER_PROGRAM_ID,

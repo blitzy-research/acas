@@ -497,14 +497,16 @@ def main(argv: Sequence[str] | None = None) -> int:
        [copybooks/wscall.cob:L10], so the caller sees the code the cycle
        produced rather than a re-encoding of it.
 
-    NO EXCEPTION IS CAUGHT HERE, and that is deliberate rather than an omission.
-    `args.bind_slpl_linkage` raises `rdbms_params.RdbmsParamError` when the
-    deployment contract is absent or unusable, and letting it propagate is the
-    documented contract of that binder: a run that cannot reach the provisioned
-    database must stop before it writes, the alternative being a silent
-    connection to the copybook's placeholder endpoint. Catching it to return a
-    tidy status would invent an error-handling behaviour the frozen source has
-    not got (rule R-3) and would hide a misconfiguration behind an exit code.
+    NO CONNECTION CONTRACT, NO RUN - AND ONE STATUS FOR IT ACROSS THE PACKAGE.
+    `args.bind_slpl_linkage` raises `args.RdbmsParamError` when the deployment
+    contract is absent or unusable, and that EXACT TYPE is caught here and turned
+    into the status every route of this package shares, through
+    `args.report_configuration_failure`: 8 when the contract is absent, 1 when it
+    is present but unusable. Nothing has been written when it surfaces - the raise
+    happens while the six `SYSTEM-REC` connection fields are still being resolved,
+    before the system store is opened and before any program is entered. The base
+    class is deliberately NOT caught: `ValueError` at large would swallow a genuine
+    defect as though it were a misconfiguration.
 
     Args:
         argv: the argument vector WITHOUT the program name. `None` - the normal case -

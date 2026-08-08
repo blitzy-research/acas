@@ -5,7 +5,7 @@ handler-named facade aliases the IRS convention uses.
 
 The array holds 33 entries. The bridge only ever handles 32. Both facts are
 declared separately, as :data:`OCCURS` and :data:`BRIDGE_LIMIT`, so that the gap
-cannot be closed by accident - see anomaly **A2**.
+cannot be closed by accident - see anomaly **A-IRSUB3-2**.
 
 WHAT THIS MODULE OWNS
 =====================
@@ -36,7 +36,7 @@ because Agent Action Plan section 0.3.1 fixes the boundary at the handler:
   are schema metadata.
 * Pre-translation source ``common/irsdfltMT.scb`` (764 lines) is cited wherever
   it settles whether something was authored or produced by the JC preSQL
-  translator. That distinction matters twice below (A21 and the ``UPDATE``
+  translator. That distinction matters twice below (A-IRSUB3-21 and the ``UPDATE``
   column list).
 
 HOW TO READ A LOCATOR IN THIS FILE
@@ -111,15 +111,25 @@ THE THIRTY-FOUR ANOMALIES
 =========================
 Rule R-4 is unconditional: "A defect reproduced is correct; a defect fixed is a
 failure." Section 0.7.4 C-4 adds the mechanism - "a comment at each reproduction
-site citing the COBOL locator". Anomalies **A1-A34** are each reproduced with
-such a comment, and each is stated in full there rather than twice; the four that
-dominate the module's shape are A1 (a failed write always reports success,
-because the handler retries it as a rewrite and the rewrite clears its own error
-fields), A2 (33 defaults declared, 32 handled, so ``irs030``'s 33rd lives only in
-memory), A3 (a fetched key above 32 moves the key VALUE into ``WE-Error``, a row
-number masquerading as an error code) and A7 (the post-read status reset is
+site citing the COBOL locator". Anomalies **A-IRSUB3-1** to **A-IRSUB3-34** are each
+reproduced with such a comment, and each is stated in full there rather than twice.
+
+THE PREFIX IS PART OF THE IDENTIFIER. The thirty-four readings are numbered inside
+this module and nowhere else, so ``A-IRSUB3-13`` is the discarded close status below
+while the canonical register's ``A-13`` in [docs/migration/anomaly-log.md] is
+`gl072`'s two silent skips - different defects at the same digits. The family is
+registered by name, size and owning module in section 15 of that register, which
+states the rule this spelling obeys: a bare ``A13`` is not an identifier this project
+allocates in either direction.
+
+Of the thirty-four, the four that dominate the module's shape are A-IRSUB3-1 (a
+failed write always reports success, because the handler retries it as a rewrite and
+the rewrite clears its own error fields), A-IRSUB3-2 (33 defaults declared, 32
+handled, so ``irs030``'s 33rd lives only in memory), A-IRSUB3-3 (a fetched key above
+32 moves the key VALUE into ``WE-Error``, a row number masquerading as an error code)
+and A-IRSUB3-7 (the post-read status reset is
 commented out, so a short table returns end-of-file even though every row
-loaded). A1 is the one to trace first, because it spans the handler/bridge
+loaded). A-IRSUB3-1 is the one to trace first, because it spans the handler/bridge
 boundary and neither layer alone hides the error.
 
 TWO CORRECTED ANOMALIES - MEASURED, NOT RECEIVED
@@ -130,7 +140,7 @@ anomaly list itself falsified two of its claims. Both corrections matter, becaus
 acting on either as received would have *introduced* a defect into a module whose
 purpose is to introduce none.
 
-* **A20 as stated is wrong.** The claim was that this bridge's three-way
+* **A-IRSUB3-20 as stated is wrong.** The claim was that this bridge's three-way
   duplicate test (``1062``, ``1022``, SQLSTATE ``23000``
   [common/irsdfltMT.cbl:L651-L653]) is richer than ``glpostingMT``'s single
   ``23000`` test. ``glpostingMT.cbl:L818-L820`` carries the identical three-way
@@ -143,7 +153,7 @@ purpose is to introduce none.
   :func:`~acas_posting.dal.status.is_duplicate_key_bridge_level` implements
   exactly that rule, so reusing it changes no behaviour; the equivalence is
   asserted at the call site.
-* **A21 has no behavioural effect at all.** The two error-number comparisons
+* **A-IRSUB3-21 has no behavioural effect at all.** The two error-number comparisons
   really are padded differently - a THREE-CHARACTER ``"0  "`` at
   [common/irsdfltMT.cbl:L647] against a FOUR-CHARACTER ``"0   "`` at [:L723] -
   and the divergence is *authored* rather than a translator artifact, appearing
@@ -186,7 +196,7 @@ Three facts about that convention were verified here and are load-bearing:
   ``Open-Input``, ``Close``, ``Read-Next``, ``Write`` and ``ReWrite`` (with the
   copybook's own capital W). There is no ``Open-Output``, ``Open-Extend``,
   ``Start``, ``Read-Indexed``, ``Delete`` or ``Delete-All``. Combined with the
-  bridge having no ``DELETE`` section at all (A24) and ``fn-Delete-All`` being
+  bridge having no ``DELETE`` section at all (A-IRSUB3-24) and ``fn-Delete-All`` being
   dispatched by no handler in the package, that is three independent
   confirmations that those verbs are unreachable here. They are still
   implemented, and they route to bad function.
@@ -196,7 +206,7 @@ Three facts about that convention were verified here and are load-bearing:
 * **``Access-Type`` is set to ZERO for Read-Next, Write and ReWrite**
   [:L241] [:L246] [:L251]. Zero is not a legal access type - the vocabulary
   runs 1..9 [copybooks/wsfnctn.cob:L107-L116]. This is decisive corroboration
-  of A16: the read's relation *cannot* be derived from ``Access-Type``, because
+  of A-IRSUB3-16: the read's relation *cannot* be derived from ``Access-Type``, because
   the facade never supplies a valid one. Hard-coding ``" > "`` is not a
   shortcut the author took but the only thing that could have worked, and it is
   why this module builds its own ``SELECT`` instead of calling
@@ -205,11 +215,12 @@ Three facts about that convention were verified here and are load-bearing:
 The facade also allocates this handler a message, ``IR913``
 [copybooks/Proc-ZZ100-ACAS-IRS-Calls.cob:L343], entirely disjoint from the
 handler's own ``IR917``/``IR918``/``IR919`` - two independent
-``IR9xx`` allocations for one handler (A34). And its recovery path performs
-``acasirsub3-Close`` [:L344] before bailing out, which per A10 is a no-op that
+``IR9xx`` allocations for one handler (A-IRSUB3-34). And its recovery path performs
+``acasirsub3-Close`` [:L344] before bailing out, which per A-IRSUB3-10 is a no-op that
 touches nothing: the facade's cleanup cleans up nothing for this handler.
 
-CONVENTION DRIFT RECORDED FOR TRACEABILITY (A25, A28, A29, A33, A34)
+CONVENTION DRIFT RECORDED FOR TRACEABILITY
+(A-IRSUB3-25, A-IRSUB3-28, A-IRSUB3-29, A-IRSUB3-33, A-IRSUB3-34)
 ====================================================================
 Five of the thirty-four anomalies have no executable reproduction site: they are
 facts about how the frozen source is *written*, not about what it *does*. Rule
@@ -217,17 +228,17 @@ R-4 still requires each to be recorded with its locator and rule R-5 requires th
 record to be a document, so they are inventoried here; the traceability footer's
 anomaly table points back at this section rather than restating them.
 
-* **A25 - the FD record is a flat, unstructured byte blob.** ``01 Record-3 pic
+* **A-IRSUB3-25 - the FD record is a flat, unstructured byte blob.** ``01 Record-3 pic
   x(264)`` [common/acasirsub3.cbl:L113], no copybook and no fields, where every
   other handler declares a structured FD. All structure lives in the linkage
   record instead; 264 bytes is 33 x 8 exactly [copybooks/irswsdflt.cob:L7].
-* **A28 - ``ba020-Call-DAL`` is the fourth DAL-call naming variant in the
+* **A-IRSUB3-28 - ``ba020-Call-DAL`` is the fourth DAL-call naming variant in the
   package** [common/acasirsub3.cbl:L521-L526]; the others are
   ``ba020-Process-DAL`` (``acas005``, ``acas006``, ``acas007``, ``acas012``,
   ``acasirsub1``), ``ba020-Call`` (``acas013``), and an inline ``call`` with no
   paragraph in eight handlers. Only three of the handler's five linkage
   parameters cross to the bridge [:L522-L525].
-* **A29 - the handler and the bridge disagree on the record's name.** The handler
+* **A-IRSUB3-29 - the handler and the bridge disagree on the record's name.** The handler
   copies the layout ``replacing Default-Record by WS-IRS-Default-Record``
   [common/acasirsub3.cbl:L141] and passes it under that name [:L525]; the bridge
   copies the same copybook with **no ``replacing`` clause**
@@ -236,7 +247,7 @@ anomaly table points back at this section rather than restating them.
   [common/irsdfltMT.cbl:L362] - one storage layout under two names across a
   ``CALL``, the third such instance in the package after ``plinvoiceMT`` and
   ``irsnominalMT``. Python has one object and one name, so it survives only here.
-* **A33 - the logging comments contradict themselves.** ``Ca-Process-Logs`` is
+* **A-IRSUB3-33 - the logging comments contradict themselves.** ``Ca-Process-Logs`` is
   annotated "Not called on DAL access as it does it already"
   [common/acasirsub3.cbl:L534] yet is performed FIVE times inside ``ba015``
   [:L436] [:L454] [:L465] [:L487] [:L511], each marked "temp only during
@@ -246,7 +257,7 @@ anomaly table points back at this section rather than restating them.
   verifying the ``SELECT``; and "COULD LET caller module deal with these errors
   !!!!!!!" [common/acasirsub3.cbl:L383], beside a record-size abort that does the
   opposite.
-* **A34 - the ``IR9xx`` space has gaps in at least three places.** This handler
+* **A-IRSUB3-34 - the ``IR9xx`` space has gaps in at least three places.** This handler
   owns ``IR917``-``IR919`` only [common/acasirsub3.cbl:L135-L137]; ``IR901`` and
   ``IR902`` are duplicated verbatim from ``acasirsub1`` [:L133-L134];
   ``IR903``-``IR916`` are absent here and ``IR903``-``IR905`` from ``acasirsub1``
@@ -266,7 +277,7 @@ DELIBERATE OMISSIONS - RECORDED AS OMISSIONS (RULE R-5, SECTION 0.5.3)
   against the frozen schema and the target tree has no flat-file module, so the
   flat ``READ``/``WRITE`` verbs themselves are not reimplemented. What IS
   reproduced is the flat *dispatch shape*, published as
-  :data:`FLAT_PATH_DISPATCH`, because that is where anomaly A11 lives.
+  :data:`FLAT_PATH_DISPATCH`, because that is where anomaly A-IRSUB3-11 lives.
 * **The commented-out flat open and close** [common/acasirsub3.cbl:L220-L256] -
   some 38 lines of fully formed dead code, and with them error codes ``997``
   [:L232] and ``1`` [:L226] and trace numbers ``201`` [:L222] and ``202``
@@ -287,7 +298,7 @@ DELIBERATE OMISSIONS - RECORDED AS OMISSIONS (RULE R-5, SECTION 0.5.3)
   [common/irsdfltMT.cbl:L908-L912], both of which ``call "fhlogger"`` - out of
   scope per section 0.2.2 and forbidden by R-1, so the hook becomes a Python log
   record at the sites the frozen source reaches and nothing at the sites it does
-  not, which is itself observable (A30).
+  not, which is itself observable (A-IRSUB3-30).
 * **``Def-Group``** [copybooks/irswsdflt.cob:L9], the ``OCCURS`` group name, and
   **``Record-3 pic x(264)``** [common/acasirsub3.cbl:L113], the flat FD record.
   Neither has a column or a host variable.
@@ -317,7 +328,7 @@ each statement so the two can be compared.
 DETERMINISM (RULE R-6)
 ======================
 No clock, no randomness, no identifier generation. The single ``ORDER BY`` in
-the frozen source is preserved verbatim (A17) and none is added anywhere else.
+the frozen source is preserved verbatim (A-IRSUB3-17) and none is added anywhere else.
 Two questions this module could not settle from the source alone are now RESOLVED
 BY MEASUREMENT against MariaDB 10.11.7 - the server version the frozen schema
 records as its producer [mysql/ACASDB.sql:L1] - rather than guessed; each is
@@ -427,13 +438,13 @@ DICTIONARY_KEYS: Final[tuple[str, ...]] = tuple(
 )
 
 
-# A16. The relation is HARD-CODED and the key value is a QUOTED STRING LITERAL.
+# A-IRSUB3-16. The relation is HARD-CODED and the key value is a QUOTED STRING LITERAL.
 
 READ_RELATION: Final[str] = ">"
 
 READ_KEY_LITERAL: Final[str] = "000"
 
-# A15. DEAD KEY METADATA - COMPUTED BY THE BRIDGE AND NEVER USED.
+# A-IRSUB3-15. DEAD KEY METADATA - COMPUTED BY THE BRIDGE AND NEVER USED.
 
 KEY_OFFSET: Final[int] = 1
 
@@ -469,18 +480,18 @@ RECORD_SIZE_MISMATCH_WE_ERROR: Final[int] = int(
     _status.WeError.RECORD_SIZE_MISMATCH
 )
 
-# A18. `WE-Error 994` IS PERMANENTLY UNOBSERVABLE. Set inside the rewrite's error branch
+# A-IRSUB3-18. `WE-Error 994` IS PERMANENTLY UNOBSERVABLE. Set inside the rewrite's error branch
 # [common/irsdfltMT.cbl:L728], then cleared unconditionally after the loop [:L736].
 REWRITE_UNOBSERVABLE_WE_ERROR: Final[int] = int(
     _status.WeError.REWRITE_SQLSTATE_NOT_00000
 )
 
-# A10 / DELIBERATE OMISSION. Codes reachable only from the commented-out flat open,
+# A-IRSUB3-10 / DELIBERATE OMISSION. Codes reachable only from the commented-out flat open,
 # declared so the omission is visible and never executed.
 _DEAD_FLAT_ACCESS_TYPE_WRONG: Final[int] = int(_status.WeError.ACCESS_TYPE_WRONG)
 _DEAD_FLAT_OPEN_FAILED: Final[int] = 1
 
-# A20 - CORRECTED. The duplicate test consults BOTH the error number and the SQLSTATE
+# A-IRSUB3-20 - CORRECTED. The duplicate test consults BOTH the error number and the SQLSTATE
 # [common/irsdfltMT.cbl:L651-L653].
 _DUPLICATE_KEY_ERRNOS: Final[tuple[str, ...]] = ("1062", "1022")
 _DUPLICATE_KEY_SQLSTATE: Final[str] = "23000"
@@ -517,11 +528,11 @@ _KEY_OPEN_READ_CLOSE: Final[str] = "Open, Read, Close"
 _KEY_OPEN_WRITE_FAILED_CLOSE: Final[str] = "Open, Write failed, Close"
 _KEY_OPEN_REWRITE_CLOSE: Final[str] = "Open, Rewrite, Close"
 
-# A11. VERB IDENTITY IS PATH-DEPENDENT, WHICH NO SHARED MAPPING COULD EXPRESS.
+# A-IRSUB3-11. VERB IDENTITY IS PATH-DEPENDENT, WHICH NO SHARED MAPPING COULD EXPRESS.
 
 #: The flat-path ``evaluate`` [common/acasirsub3.cbl:L199-L215], as frozen data.
 #: ``FileFunction.WRITE`` and ``FileFunction.RE_WRITE`` both name ``"write"`` - that
-#: identity is anomaly A11.
+#: identity is anomaly A-IRSUB3-11.
 FLAT_PATH_DISPATCH: Final[Mapping[int, str]] = {
     int(_status.FileFunction.OPEN): "open",
     int(_status.FileFunction.CLOSE): "close",
@@ -642,7 +653,7 @@ def _numeric_digits(dictionary_key: str) -> int:
     return host_variable.digits
 
 
-# A4. THE PRIMARY KEY HAS NO COPYBOOK FIELD, AND THE DICTIONARY SAYS SO. Asserted from
+# A-IRSUB3-4. THE PRIMARY KEY HAS NO COPYBOOK FIELD, AND THE DICTIONARY SAYS SO. Asserted from
 # the artifact rather than asserted in prose.
 _KEY_ENTRY: Final = _loader.get_entry(f"{TABLE}.{PRIMARY_KEY}")
 _KEY_DERIVATION: Final = _loader.derivation_for(f"{TABLE}.{PRIMARY_KEY}")
@@ -733,7 +744,7 @@ def _load_host_variables(
     """
     group = dflt.def_group[index - 1]
 
-    # A4. `DEF-REC-KEY` COMES FROM THE SUBSCRIPT, NOT FROM THE RECORD. `move A to WS-
+    # A-IRSUB3-4. `DEF-REC-KEY` COMES FROM THE SUBSCRIPT, NOT FROM THE RECORD. `move A to WS-
     # Key` then `move WS-Key to HV-DEF-REC-KEY` [common/irsdfltMT.cbl:L637] [:L639].
     hv_def_rec_key = index
 
@@ -754,7 +765,7 @@ def _load_host_variables(
 def _unload_row_into(dflt: WsIrsDefaultRecord, row: Mapping[str, object]) -> int:
     """Unload one fetched row into the array slot its own key selects.
 
-    A6. THE SUBSCRIPT IS THE DATABASE VALUE, AND IT IS NOT BOUNDS-CHECKED. The frozen
+    A-IRSUB3-6. THE SUBSCRIPT IS THE DATABASE VALUE, AND IT IS NOT BOUNDS-CHECKED. The frozen
     moves index a 33-element array with ``HV-DEF-REC-KEY`` - a value read from the
     database - under the comment "KEY = table position" [common/irsdfltMT.cbl:L603].
 
@@ -775,7 +786,7 @@ def _unload_row_into(dflt: WsIrsDefaultRecord, row: Mapping[str, object]) -> int
     hv_def_codes = _pad_to(str(row["DEF-CODES"]), _DEF_CODES_WIDTH)
     hv_def_vat = _pad_to(str(row["DEF-VAT"]), _DEF_VAT_WIDTH)
 
-    # A6. The raw database value is the subscript.
+    # A-IRSUB3-6. The raw database value is the subscript.
     group = dflt.def_group[hv_def_rec_key - 1]
     group.def_acs = hv_def_acs
     group.def_vat = hv_def_vat
@@ -804,7 +815,7 @@ def _clear_all_slots(dflt: WsIrsDefaultRecord) -> None:
 
 
 #: ``Ws-Mysql-Error-Number`` is ``pic x(5)`` [copybooks/mysql-variables.cpy:L84] -
-#: "changed to 5 char 18/09/16", per the comment there. THE WIDTH IS WHY A21 HAS NO
+#: "changed to 5 char 18/09/16", per the comment there. THE WIDTH IS WHY A-IRSUB3-21 HAS NO
 #: EFFECT.
 _ERRNO_FIELD_WIDTH: Final[int] = 5
 
@@ -828,7 +839,7 @@ def _set_status(file_access: FileAccess, fs_reply: int, we_error: int) -> Status
 def _errno_is_zero(errno_text: str) -> bool:
     """Reproduce ``if WS-MYSQL-Error-Number not = "0..."`` as ONE predicate.
 
-    A21 - MEASURED, AND CORRECTED. The frozen source compares this field against a zero
+    A-IRSUB3-21 - MEASURED, AND CORRECTED. The frozen source compares this field against a zero
     literal at four sites, and the padding is not uniform: three spaces at
     [common/irsdfltMT.cbl:L526], [:L589] and [:L647], four spaces at [:L723].
 
@@ -1034,9 +1045,9 @@ def _ba012_test_ws_rec_size_2(
 
 
 # These correspond to `irsdfltMT`'s OWN open and close, which the handler synthesises
-# around every read, write and rewrite (A5).
+# around every read, write and rewrite (A-IRSUB3-5).
 
-#: Cursor state for this table, at module scope so that the read's skipped close (A12)
+#: Cursor state for this table, at module scope so that the read's skipped close (A-IRSUB3-12)
 #: leaks a cursor across calls exactly as the frozen bridge's working storage does.
 _CURSOR_STATES: Final[_cursor_state.CursorStateTable] = (
     _cursor_state.CursorStateTable()
@@ -1108,7 +1119,7 @@ def _ba020_process_open(
 def _ba030_process_close(connection: object | None, file_access: FileAccess) -> None:
     """Disconnect, as ``ba030-Process-Close`` does.
 
-    A13. THIS PARAGRAPH'S STATUS IS ALWAYS DISCARDED, so it returns nothing.
+    A-IRSUB3-13. THIS PARAGRAPH'S STATUS IS ALWAYS DISCARDED, so it returns nothing.
 
     Args:
         connection: The connection to close, or ``None`` if the open failed.
@@ -1125,7 +1136,7 @@ def _ba030_process_close(connection: object | None, file_access: FileAccess) -> 
 def _ba100_bad_function(file_access: FileAccess) -> StatusPair:
     """The bridge's bad-function paragraph.
 
-    A26. The handler's own bad-function paragraph sets 999 rather than 990
+    A-IRSUB3-26. The handler's own bad-function paragraph sets 999 rather than 990
     [common/acasirsub3.cbl:L344], and the two are NOT reconciled. This paragraph is
     unreachable through :func:`dispatch`, which filters the function code before the
     bridge would see it.
@@ -1144,7 +1155,7 @@ def _aa100_bad_function(file_access: FileAccess) -> StatusPair:
 
     ``aa100-Bad-Function`` [common/acasirsub3.cbl:L340-L345], sets ``999``/ ``99``. The
     RDB section carries a SECOND, textually distinct site with the same codes
-    [:L517-L519] (A27).
+    [:L517-L519] (A-IRSUB3-27).
 
     Args:
         file_access: Receives the status.
@@ -1175,7 +1186,7 @@ def _ba040_process_read_next(
         file_access: Receives the status, trace numbers and diagnostics.
 
     Returns:
-        The status pair as the loop left it - see A7, which is why that phrasing is
+        The status pair as the loop left it - see A-IRSUB3-7, which is why that phrasing is
             exact.
     """
     cursor = _cursor()
@@ -1185,7 +1196,7 @@ def _ba040_process_read_next(
         # `if Cursor-Not-Active` [common/irsdfltMT.cbl:L476]. Always true when reached
         # through this handler, because the synthesised open resets the cursor [:L452].
 
-        # A15. `set KOR-x1 to 1` [:L477] then `move KOR-offset (KOR-x1) to K` [:L478]
+        # A-IRSUB3-15. `set KOR-x1 to 1` [:L477] then `move KOR-offset (KOR-x1) to K` [:L478]
         # and `move KOR-length (KOR-x1) to L` [:L479]. BOTH ARE THEN NEVER USED.
         key_of_reference = _cursor_state.key_of_reference(TABLE, 1)
         dead_k = key_of_reference.kor_offset
@@ -1229,14 +1240,14 @@ def _ba040_process_read_next(
     _clear_all_slots(dflt)
 
     # `perform varying A from 1 by 1 until A > 32` [:L544-L545]. The bound is
-    # BRIDGE_LIMIT, never OCCURS (A2).
+    # BRIDGE_LIMIT, never OCCURS (A-IRSUB3-2).
     for a in range(1, BRIDGE_LIMIT + 1):
         row = cursor.fetch_record()
 
-        # A31. `if return-code = -1 or A > 32 or = zero` [:L564-L565].
+        # A-IRSUB3-31. `if return-code = -1 or A > 32 or = zero` [:L564-L565].
         if row is None or a > BRIDGE_LIMIT or a == 0:
             # `move 10 to fs-Reply WE-Error` [:L566], `move "EOF"` [:L567], `move zero
-            # to Most-Cursor-Set` [common/irsdfltMT.cbl:L568]. A7's CONSEQUENCE LIVES
+            # to Most-Cursor-Set` [common/irsdfltMT.cbl:L568]. A-IRSUB3-7's CONSEQUENCE LIVES
             # HERE.
             _set_status(
                 file_access,
@@ -1249,7 +1260,7 @@ def _ba040_process_read_next(
 
         key_value = int(row[PRIMARY_KEY])
 
-        # A3. THE OFF-BY-ONE GUARD [common/irsdfltMT.cbl:L575-L583].
+        # A-IRSUB3-3. THE OFF-BY-ONE GUARD [common/irsdfltMT.cbl:L575-L583].
         if key_value == 0 or key_value > BRIDGE_LIMIT:
             logging_data.ws_file_key = _KEY_EOF3
             # `move HV-DEF-REC-KEY to WE-Error` - the VALUE, not a code. Set directly
@@ -1263,7 +1274,7 @@ def _ba040_process_read_next(
                 None, file_access
             )
             if not _errno_is_zero(errno_text):
-                # A32. `move 10 to fs-reply *> EOF equivilent !!` [:L593] - a GENUINE
+                # A-IRSUB3-32. `move 10 to fs-reply *> EOF equivilent !!` [:L593] - a GENUINE
                 # SQL ERROR REPORTED AS END-OF-FILE. The mapping is reproduced.
                 _set_status(
                     file_access,
@@ -1314,7 +1325,7 @@ def _ba070_process_write(
         file_access: Receives the status and diagnostics.
 
     Returns:
-        The status pair, which reports only the LAST failing row - see A9.
+        The status pair, which reports only the LAST failing row - see A-IRSUB3-9.
     """
     logging_data = file_access.logging_data
 
@@ -1330,21 +1341,21 @@ def _ba070_process_write(
 
     saved_fs_reply = 0
 
-    # `perform varying A from 1 by 1 until A > 32` [:L626]. A2: never OCCURS.
+    # `perform varying A from 1 by 1 until A > 32` [:L626]. A-IRSUB3-2: never OCCURS.
     for a in range(1, BRIDGE_LIMIT + 1):
-        # A8. THE EMPTY-SLOT SKIP IS COMMENTED OUT [:L627-L631].
+        # A-IRSUB3-8. THE EMPTY-SLOT SKIP IS COMMENTED OUT [:L627-L631].
 
         parameters = _load_host_variables(dflt, a)
 
         logging_data.ws_file_key = str(a)
 
-        # `perform bb200-Insert` [:L642] - one statement, never batched (A5).
+        # `perform bb200-Insert` [:L642] - one statement, never batched (A-IRSUB3-5).
         affected_rows, error = _execute_one(connection, _INSERT_STATEMENT, parameters)
         logging_data.ws_count_rows = affected_rows
 
         if affected_rows != 1:
             errno_text, _message, sql_state = _probe_driver_error(error, file_access)
-            # [:L647] - three-space zero literal; see A21 for why one predicate serves
+            # [:L647] - three-space zero literal; see A-IRSUB3-21 for why one predicate serves
             # all four sites.
             if not _errno_is_zero(errno_text):
                 if _is_duplicate_key(errno_text, sql_state):
@@ -1352,7 +1363,7 @@ def _ba070_process_write(
                 else:
                     file_access.fs_reply = int(_status.FsReply.ERROR)
 
-            # A19. THE WRITE SETS `FS-Reply` ONLY, NEVER `WE-Error`. The rewrite sets
+            # A-IRSUB3-19. THE WRITE SETS `FS-Reply` ONLY, NEVER `WE-Error`. The rewrite sets
             # both and then discards both [:L727-L728]. The asymmetry is reproduced.
 
         # [:L660-L662] `if Testing-1 perform Ca-Process-Logs`.
@@ -1398,7 +1409,7 @@ def _ba090_process_rewrite(
     # again. NOTE WHAT IS MISSING.
     logging_data.ws_no_paragraph = _PARA_REWRITE
 
-    # A23. THERE IS NO `initialise TD-IRSDFLT-REC` HERE, where the write has one at
+    # A-IRSUB3-23. THERE IS NO `initialise TD-IRSDFLT-REC` HERE, where the write has one at
     # [:L625]. Absence reproduced by absence.
 
     for a in range(1, BRIDGE_LIMIT + 1):
@@ -1408,7 +1419,7 @@ def _ba090_process_rewrite(
         parameters = _load_host_variables(dflt, a)
         logging_data.ws_file_key = str(a)
 
-        # A15. `set KOR-x1 to 1` / `move KOR-offset to K` / `move KOR-length to L`
+        # A-IRSUB3-15. `set KOR-x1 to 1` / `move KOR-offset to K` / `move KOR-length to L`
         # [:L695-L697] - computed, never used, for the second time.
         key_of_reference = _cursor_state.key_of_reference(TABLE, 1)
         dead_k = key_of_reference.kor_offset
@@ -1420,7 +1431,7 @@ def _ba090_process_rewrite(
                 BRIDGE,
             )
 
-        # A15, continued.
+        # A-IRSUB3-15, continued.
         logging_data.ws_log_where = f'{PRIMARY_KEY}="{a}"'
 
         affected_rows, error = _execute_one(
@@ -1433,12 +1444,12 @@ def _ba090_process_rewrite(
             errno_text, _message, _sql_state = _probe_driver_error(error, file_access)
             if not _errno_is_zero(errno_text):
                 file_access.fs_reply = int(_status.FsReply.ERROR)
-                # A18. `WE-Error 994` IS SET HERE AND CLEARED BELOW, so it is
+                # A-IRSUB3-18. `WE-Error 994` IS SET HERE AND CLEARED BELOW, so it is
                 # permanently unobservable - a dead error code.
                 file_access.we_error = REWRITE_UNOBSERVABLE_WE_ERROR
 
         # [:L731-L733] `if Testing-1 perform Ca-Process-Logs`. The status this
-        # loop is about to destroy [:L736-L738] is anomaly A19's own content, and it
+        # loop is about to destroy [:L736-L738] is anomaly A-IRSUB3-19's own content, and it
         # is documented in `docs/migration/anomaly-log.md` rather than narrated once
         # per row.
         # THE OTHER `perform Ca-Process-Logs` SITES ARE A RECORDED OMISSION. The
@@ -1462,14 +1473,14 @@ def _ba090_process_rewrite(
     return int(_status.FsReply.SUCCESS), int(_status.WeError.SUCCESS)
 
 
-# A10. OPEN AND CLOSE ARE NO-OPS ON BOTH PATHS, AND NEITHER REACHES THE BRIDGE. The
+# A-IRSUB3-10. OPEN AND CLOSE ARE NO-OPS ON BOTH PATHS, AND NEITHER REACHES THE BRIDGE. The
 # maintainer explains the shape himself [common/acasirsub3.cbl:L169-L176].
 
 
 def _no_op_open_or_close(file_access: FileAccess, *, is_close: bool) -> StatusPair:
     """Return ``(0, 0)`` without touching the database.
 
-    A30. CODES 1 AND 2 JUMP TO `aa-Exit`, BYPASSING `aa999-main-exit`
+    A-IRSUB3-30. CODES 1 AND 2 JUMP TO `aa-Exit`, BYPASSING `aa999-main-exit`
     [common/acasirsub3.cbl:L203] [:L207], and `aa999-main-exit` is where the logging
     hook lives [:L347-L350].
 
@@ -1570,7 +1581,7 @@ def _unsupported_verb(file_access: FileAccess, verb: str) -> StatusPair:
         verb: The verb name, for the log record only.
 
     Returns:
-        ``(99, 999)`` - the HANDLER's code. A26: the bridge's own bad-function paragraph
+        ``(99, 999)`` - the HANDLER's code. A-IRSUB3-26: the bridge's own bad-function paragraph
             would say 990 [common/irsdfltMT.cbl:L743], and the two are not reconciled.
     """
     # ONE ERROR, through the shared reporter. The refusal returns (99, 999) to the
@@ -1585,7 +1596,7 @@ def _unsupported_verb(file_access: FileAccess, verb: str) -> StatusPair:
         fs_reply=int(_status.FsReply.ERROR),
         we_error=int(_status.WeError.NOT_USED),
         detail="verb %s is not dispatched by this handler; the bridge's own "
-        "bad-function paragraph would report 990 instead (anomaly A26)" % verb,
+        "bad-function paragraph would report 990 instead (anomaly A-IRSUB3-26)" % verb,
     )
     return _aa100_bad_function(file_access)
 
@@ -1692,11 +1703,11 @@ def read_next(
     if saved_fs_reply != int(_status.FsReply.SUCCESS) or saved_we_error != int(
         _status.WeError.SUCCESS
     ):
-        # A12. THE READ SKIPS ITS CLOSE ON FAILURE [:L455-L458], leaving an
+        # A-IRSUB3-12. THE READ SKIPS ITS CLOSE ON FAILURE [:L455-L458], leaving an
         # unbalanced open. THE WRITE DOES NOT [:L480-L481] - a real asymmetry
         # between two adjacent blocks, and it is not levelled here.
         #
-        # Because A7 makes ANY table of fewer than 32 rows report end-of-file,
+        # Because A-IRSUB3-7 makes ANY table of fewer than 32 rows report end-of-file,
         # this path is the normal one for a short table, not an edge case.
         #
         # What is observable, and therefore what is reproduced, is that NO
@@ -1730,7 +1741,7 @@ def write(
 ) -> StatusPair:
     """``fn-write``: open, 32 inserts, close - then silently retry as a rewrite.
 
-    A1, FIRST HALF. On failure this DOES NOT REPORT THE FAILURE. It writes a diagnostic
+    A-IRSUB3-1, FIRST HALF. On failure this DOES NOT REPORT THE FAILURE. It writes a diagnostic
     key, sets ``fn-Re-write``, CLEARS ``fs-reply`` and ``we-error`` [:L488-L489], and
     falls through into the rewrite block - which then clears its own errors
     unconditionally [common/irsdfltMT.cbl:L736-L738].
@@ -1773,7 +1784,7 @@ def write(
 
     file_access.logging_data.ws_file_key = _KEY_OPEN_WRITE_FAILED_CLOSE
 
-    # `perform Ca-Process-Logs` [:L487]. Anomalies A1 and A14 - a failed write is
+    # `perform Ca-Process-Logs` [:L487]. Anomalies A-IRSUB3-1 and A-IRSUB3-14 - a failed write is
     # retried as a rewrite that reports success, destroying the status - are recorded
     # in `docs/migration/anomaly-log.md`, which is where a reader finds them.
     # THE OTHER `perform Ca-Process-Logs` SITES ARE A RECORDED OMISSION. The
@@ -1908,18 +1919,19 @@ def dispatch(
 
     function_code = int(file_access.file_function)
 
-    # A11. The two dispatch tables differ on code 7, so the path is chosen before the
+    # A-IRSUB3-11. The two dispatch tables differ on code 7, so the path is chosen before the
     # verb is.
     dispatch_table = RDB_PATH_DISPATCH if rdb_path else FLAT_PATH_DISPATCH
     verb = dispatch_table.get(function_code)
 
     if verb is None:
         # `when other` -> `aa100-Bad-Function` [:L213-L214] on the flat path, and the
-        # second, textually distinct site [:L517-L519] on the RDB path (A27).
+        # second, textually distinct site [:L517-L519] on the RDB path (A-IRSUB3-27).
         return _aa100_bad_function(file_access)
 
     if verb == "open":
-        # A10 / A30. Codes 1 and 2 never reach the bridge on either path, and bypass the
+        # A-IRSUB3-10 / A-IRSUB3-30. Codes 1 and 2 never reach the bridge on either
+        # path, and bypass the
         # logging hook. Flat: [:L200-L203]. RDB: [:L429-L432].
         return _no_op_open_or_close(file_access, is_close=False)
     if verb == "close":
@@ -2013,13 +2025,13 @@ def ca_process_logs(
 # ==============================================
 #   L97-L98    environment division, copy "envdiv.cob"      omitted (no FD)
 #   L103-L106  select Default-File ... line sequential      omitted: flat path
-#   L111-L113  fd Default-File / 01 Record-3 pic x(264)     omitted (A25)
+#   L111-L113  fd Default-File / 01 Record-3 pic x(264)     omitted (A-IRSUB3-25)
 #   L118       77 prog-name "acasirsub3 (3.3.00)"           HANDLER
 #   L121-L122  WS-Save-FS-Reply / WS-Save-WE-Error          locals in read_next,
-#                                                           write, rewrite (A13)
+#                                                           write, rewrite (A-IRSUB3-13)
 #   L124-L125  77 A / 77 B                                  _ba012_test_ws_rec_size_2
 #   L130-L137  IR901 IR902 IR917 IR918 IR919                omitted: presentation
-#   L141-L149  copy ... replacing Default-Record            the imports (A29)
+#   L141-L149  copy ... replacing Default-Record            the imports (A-IRSUB3-29)
 #   L151-L157  Procedure Division Using (5 params)          dispatch()
 #   L166-L167  WS-Log-System 1 / WS-Log-File-No 12          dispatch()
 #   L169-L176  the WARNING comment block                    quoted at the verbs
@@ -2027,8 +2039,8 @@ def ca_process_logs(
 #   L188       perform ba012 (flat path)                    dispatch()
 #   L196-L197  clear WE-Error, SQL-Err/Msg/State            dispatch()
 #   L199-L218  evaluate File-Function (5 codes)             FLAT_PATH_DISPATCH
-#                                                           (A11, A30)
-#   L220-L256  aa020-Process-Open / aa030-Process-Close     omitted: dead (A10)
+#                                                           (A-IRSUB3-11, A-IRSUB3-30)
+#   L220-L256  aa020-Process-Open / aa030-Process-Close     omitted: dead (A-IRSUB3-10)
 #   L258-L310  aa040-Process-Read-Next (flat)               omitted: flat path
 #   L312-L338  aa070-Process-Write (flat)                   omitted: flat path
 #   L340-L345  aa100-Bad-Function (999/99)                  _aa100_bad_function
@@ -2040,13 +2052,15 @@ def ca_process_logs(
 #   L416       ba015-Test-Ends                              dispatch() + the verbs
 #   L429-L432  if fn-open -> ignore                         _no_op_open_or_close
 #   L433-L438  if fn-close -> ignore + close logger         _no_op_open_or_close
-#   L440-L467  if fn-read-next (3 calls)                    read_next (A12, A13)
-#   L468-L492  if fn-Write (3 calls + silent retry)         write (A1, A13, A14)
-#   L494-L513  if fn-Re-write (3 calls)                     rewrite (A1, A13)
-#   L517-L519  second bad-function site (999/99)            dispatch() (A27)
-#   L521-L526  ba020-Call-DAL (4th naming variant, A28)     the _ba0* calls
+#   L440-L467  if fn-read-next (3 calls)                    read_next (A-IRSUB3-12, A-IRSUB3-13)
+#   L468-L492  if fn-Write (3 calls + silent retry)         write (A-IRSUB3-1,
+#                                                           A-IRSUB3-13, A-IRSUB3-14)
+#   L494-L513  if fn-Re-write (3 calls)                     rewrite (A-IRSUB3-1, A-IRSUB3-13)
+#   L517-L519  second bad-function site (999/99)            dispatch() (A-IRSUB3-27)
+#   L521-L526  ba020-Call-DAL, the 4th naming variant     the _ba0* calls
+#                                              (A-IRSUB3-28)
 #   L530-L531  ba-rdbms-exit / exit section                 the returns
-#   L534-L538  Ca-Process-Logs -> call "fhlogger"           omitted: R-1 (A33)
+#   L534-L538  Ca-Process-Logs -> call "fhlogger"           omitted: R-1 (A-IRSUB3-33)
 #   L540       ca-Exit / exit                               n/a
 #
 # BRIDGE  -  common/irsdfltMT.cbl (916 lines)
@@ -2054,26 +2068,26 @@ def ca_process_logs(
 #   L257-L258  WS-MYSQL-EDIT / WS-Key pic 99                _load_host_variables,
 #                                                           read_next
 #   L266-L275  Table-Of-Keynames + keyOfReference           KEY_OFFSET/LENGTH,
-#                                                           dead (A15)
+#                                                           dead (A-IRSUB3-15)
 #   L282-L286  DAL-Data / Most-Cursor-Set + 88s             _cursor()
-#   L291-L294  subscripts J K L                             dead K/L (A15)
+#   L291-L294  subscripts J K L                             dead K/L (A-IRSUB3-15)
 #   L298-L310  work-fields / ws-saved-fs-reply / A          _ba070_process_write
 #   L313       SM901                                        omitted: presentation
 #   L315-L328  /MYSQL VAR\ + TD-IRSDFLT-REC (4 HVs)         COLUMNS,
 #                                                           _load_host_variables
-#   L340       copy "irswsdflt.cob" (no replacing)          the import (A29)
+#   L340       copy "irswsdflt.cob" (no replacing)          the import (A-IRSUB3-29)
 #   L342-L357  screen section                               omitted: presentation
 #   L360-L362  PROCEDURE DIVISION using (3 params)          the _ba0* signatures
 #   L364-L365  section head + accept ws-env-lines           omitted: presentation
 #   L375-L383  ba010-Initialise                             _ba020_process_open,
 #                                                           dispatch()
-#   L392-L405  evaluate (5 codes, 5 and 7 DISTINCT)         RDB_PATH_DISPATCH (A11)
+#   L392-L405  evaluate (5 codes, 5 and 7 DISTINCT)         RDB_PATH_DISPATCH (A-IRSUB3-11)
 #   L407-L453  ba020-Process-Open (connect, cursor reset)   _ba020_process_open
 #   L455-L468  ba030-Process-Close (free + disconnect)      _ba030_process_close
 #   L470-L615  ba040-Process-Read-Next                      _ba040_process_read_next
 #   L617-L671  ba070-Process-Write (32 inserts)             _ba070_process_write
 #   L673-L739  ba090-Process-Rewrite (32 updates + reset)   _ba090_process_rewrite
-#   L741-L747  ba100-Bad-Function (990/99)                  _ba100_bad_function (A26)
+#   L741-L747  ba100-Bad-Function (990/99)                  _ba100_bad_function (A-IRSUB3-26)
 #   L751       COPY "mysql-procedures.cpy" (dead ladder)    omitted: unreachable
 #   L753-L763  ba998-Free                                   _ba998_free
 #   L765-L769  ba999-end + Testing-1 hook                   the returns
@@ -2097,18 +2111,18 @@ def ca_process_logs(
 # they are transformed individually rather than by pattern:
 #   * [common/irsdfltMT.cbl:L571]  `exit perform` after the EOF branch. Post-loop
 #     work: none but the commented-out reset [:L613-L614] - so the (10, 10) it
-#     just set is what the caller receives (A7).
+#     just set is what the caller receives (A-IRSUB3-7).
 #   * [:L582]  `exit perform` after the key-above-32 guard. Post-loop work: none;
-#     `WE-Error` carries the KEY VALUE and `FS-Reply` was never set (A3).
+#     `WE-Error` carries the KEY VALUE and `FS-Reply` was never set (A-IRSUB3-3).
 #   * [:L601]  `exit perform` after the count-rows probe. Post-loop work: none;
-#     a real SQL error leaves (10, 10) (A32).
+#     a real SQL error leaves (10, 10) (A-IRSUB3-32).
 #   * [:L611]  the loop's own normal exit at `end-perform`. Post-loop work: none;
 #     the status is whatever the last iteration left, which for a full
 #     thirty-two rows is the (0, 0) the handler set at
 #     [common/acasirsub3.cbl:L441].
 #   Also CLASS 2 in the write loop: `exit perform cycle`
 #   [common/irsdfltMT.cbl:L630], inside the
-#   COMMENTED-OUT empty-slot skip - a Class 2 transfer that cannot execute (A8).
+#   COMMENTED-OUT empty-slot skip - a Class 2 transfer that cannot execute (A-IRSUB3-8).
 #
 # CLASS 3, section or paragraph exit -> `return`. Every `go to ba999-exit`
 #   [:L615] [:L671] [:L739], `go to ba999-end` [:L443] [:L453] [:L468] [:L747],
@@ -2122,7 +2136,7 @@ def ca_process_logs(
 # TWO sites, each proved individually as the class requires:
 #   * [common/acasirsub3.cbl:L488-L492]  `set fn-Re-write to true` followed by
 #     fall-through into `if fn-Re-write` [:L494]. THE ONLY TRUE SIBLING
-#     RE-DISPATCH IN EITHER FILE, and reachable only because of A14's single
+#     RE-DISPATCH IN EITHER FILE, and reachable only because of A-IRSUB3-14's single
 #     `end-if.`. Transformed as `return rewrite(...)` at the end of `write`, and
 #     the equivalence is proved in `write`'s docstring: the period closes the
 #     outer `if fn-Write`, so the `else go to ba-RDBMS-Exit` [:L490-L491] binds
@@ -2138,42 +2152,42 @@ def ca_process_logs(
 #
 # THE THIRTY-FOUR ANOMALIES, AND WHERE EACH IS REPRODUCED
 # =======================================================
-#   A1  write failure always reports success   write, _ba090_process_rewrite
-#   A2  33 declared, 32 handled                OCCURS vs BRIDGE_LIMIT
-#   A3  key > 32 puts the VALUE in WE-Error    _ba040_process_read_next
-#   A4  DEF-REC-KEY has no copybook field      _load_host_variables, _KEY_ENTRY
-#   A5  32 statements + synthesised open/close read_next, write, rewrite
-#   A6  unbounded array subscript              _unload_row_into
-#   A7  post-read status reset commented out   _ba040_process_read_next tail
-#   A8  empty-slot skip commented out          _ba070_process_write,
-#                                              _ba090_process_rewrite
-#   A9  write failures squashed                _ba070_process_write
-#   A10 open and close are no-ops              _no_op_open_or_close, open_*, close
-#   A11 verb identity is path-dependent        FLAT_/RDB_PATH_DISPATCH, rewrite
-#   A12 read skips its close, write does not   read_next
-#   A13 the close's status is discarded        _ba030_process_close and callers
-#   A14 one end-if. closes two nested ifs      write (the Class 4 proof)
-#   A15 key metadata indexes a missing field   KEY_OFFSET/LENGTH and both loops
-#   A16 relation hard-coded, literal "000"     READ_RELATION, READ_KEY_LITERAL
-#   A17 the only explicit ORDER BY             ORDER_BY_CLAUSE
-#   A18 WE-Error 994 unobservable              _ba090_process_rewrite
-#   A19 write sets FS-Reply only               _ba070_process_write
-#   A20 duplicate test - CORRECTED             _is_duplicate_key
-#   A21 errno padding - CORRECTED, no effect   _errno_is_zero
-#   A22 WS-File-Key cannot hold the bad row    both write loops
-#   A23 initialise once, and absent in rewrite _ba070_process_write vs rewrite
-#   A24 no HV-Load, no Unload, no DELETE       _unsupported_verb, the inline loads
-#   A25 the FD record is a flat byte blob      docstring: CONVENTION DRIFT
-#   A26 handler 999 vs bridge 990              HANDLER_/BRIDGE_BAD_FUNCTION
-#   A27 a second bad-function site             dispatch()
-#   A28 ba020-Call-DAL, 4th naming variant     docstring: CONVENTION DRIFT
-#   A29 handler/bridge record-name mismatch    docstring: CONVENTION DRIFT
-#   A30 codes 1 and 2 bypass the log hook      _no_op_open_or_close
-#   A31 `or A > 32 or = zero` is dead          _ba040_process_read_next
-#   A32 a real SQL error reported as EOF       _ba040_process_read_next
-#   A33 self-contradicting log comments        docstring: CONVENTION DRIFT
-#   A34 IR9xx gaps and spelling drift          docstring: CONVENTION DRIFT,
-#                                              _ba012_test_ws_rec_size_2
+#   A-IRSUB3-1  write failure always reports success   write, _ba090_process_rewrite
+#   A-IRSUB3-2  33 declared, 32 handled                OCCURS vs BRIDGE_LIMIT
+#   A-IRSUB3-3  key > 32 puts the VALUE in WE-Error    _ba040_process_read_next
+#   A-IRSUB3-4  DEF-REC-KEY has no copybook field      _load_host_variables, _KEY_ENTRY
+#   A-IRSUB3-5  32 statements + synthesised open/close read_next, write, rewrite
+#   A-IRSUB3-6  unbounded array subscript              _unload_row_into
+#   A-IRSUB3-7  post-read status reset commented out   _ba040_process_read_next tail
+#   A-IRSUB3-8  empty-slot skip commented out          _ba070_process_write,
+#                                                      _ba090_process_rewrite
+#   A-IRSUB3-9  write failures squashed                _ba070_process_write
+#   A-IRSUB3-10 open and close are no-ops              _no_op_open_or_close, open_*, close
+#   A-IRSUB3-11 verb identity is path-dependent        FLAT_/RDB_PATH_DISPATCH, rewrite
+#   A-IRSUB3-12 read skips its close, write does not   read_next
+#   A-IRSUB3-13 the close's status is discarded        _ba030_process_close and callers
+#   A-IRSUB3-14 one end-if. closes two nested ifs      write (the Class 4 proof)
+#   A-IRSUB3-15 key metadata indexes a missing field   KEY_OFFSET/LENGTH and both loops
+#   A-IRSUB3-16 relation hard-coded, literal "000"     READ_RELATION, READ_KEY_LITERAL
+#   A-IRSUB3-17 the only explicit ORDER BY             ORDER_BY_CLAUSE
+#   A-IRSUB3-18 WE-Error 994 unobservable              _ba090_process_rewrite
+#   A-IRSUB3-19 write sets FS-Reply only               _ba070_process_write
+#   A-IRSUB3-20 duplicate test - CORRECTED             _is_duplicate_key
+#   A-IRSUB3-21 errno padding - CORRECTED, no effect   _errno_is_zero
+#   A-IRSUB3-22 WS-File-Key cannot hold the bad row    both write loops
+#   A-IRSUB3-23 initialise once, and absent in rewrite _ba070_process_write vs rewrite
+#   A-IRSUB3-24 no HV-Load, no Unload, no DELETE       _unsupported_verb, the inline loads
+#   A-IRSUB3-25 the FD record is a flat byte blob      docstring: CONVENTION DRIFT
+#   A-IRSUB3-26 handler 999 vs bridge 990              HANDLER_/BRIDGE_BAD_FUNCTION
+#   A-IRSUB3-27 a second bad-function site             dispatch()
+#   A-IRSUB3-28 ba020-Call-DAL, 4th naming variant     docstring: CONVENTION DRIFT
+#   A-IRSUB3-29 handler/bridge record-name mismatch    docstring: CONVENTION DRIFT
+#   A-IRSUB3-30 codes 1 and 2 bypass the log hook      _no_op_open_or_close
+#   A-IRSUB3-31 `or A > 32 or = zero` is dead          _ba040_process_read_next
+#   A-IRSUB3-32 a real SQL error reported as EOF       _ba040_process_read_next
+#   A-IRSUB3-33 self-contradicting log comments        docstring: CONVENTION DRIFT
+#   A-IRSUB3-34 IR9xx gaps and spelling drift          docstring: CONVENTION DRIFT,
+#                                                      _ba012_test_ws_rec_size_2
 #
 # The last five carry no executable site because they are facts about how the
 # frozen source is written rather than about what it does; each is inventoried

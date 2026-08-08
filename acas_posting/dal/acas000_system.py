@@ -2623,7 +2623,8 @@ def _read_one_row(bridge: BridgeProfile) -> CursorOutcome:
 
     Delegates the mechanics to :func:`acas_posting.dal.cursor_state.read_next`, which
     reproduces the identical two-stage shape from a sibling bridge and carries its
-    anomalies A1, A9, A11 and A12 with it. ``file_access`` is NOT passed, deliberately.
+    anomalies ``A-CURSOR-1``, ``A-CURSOR-9``, ``A-CURSOR-11`` and ``A-CURSOR-12`` with
+    it. ``file_access`` is NOT passed, deliberately.
 
     Args:
         bridge: The bridge's profile.
@@ -2766,9 +2767,9 @@ def _status_is_dirty(file_access: FileAccess) -> bool:
 def _outcome_errno(outcome: CursorOutcome) -> str:
     """What ``call "MySQL_errno"`` would report after a positioning stage.
 
-    RECORDED OMISSION, precisely bounded. ``dal/cursor_state.py`` reproduces anomaly A11
-    - a failed statement is reported as end of file - and in doing so it collapses two
-    distinguishable situations into one outcome.
+    RECORDED OMISSION, precisely bounded. ``dal/cursor_state.py`` reproduces anomaly
+    ``A-CURSOR-11`` - a failed statement is reported as end of file - and in doing so
+    it collapses two distinguishable situations into one outcome.
 
     Args:
         outcome: What the positioning stage returned.
@@ -2847,7 +2848,7 @@ def _ba040_single_row(
         return BA999_END
 
     if file_access.fs_reply == int(FsReply.END_OF_FILE):
-        # ANOMALY A10 spelled inline - `if fs-reply = 10 *> belts and braces`
+        # ANOMALY A-CURSOR-10 spelled inline - `if fs-reply = 10 *> belts and braces`
         # [common/systemMT.cbl:L925-L929], [common/sys4MT.cbl:L619-L623].
         cursor_state.set_cursor_not_active()
         logging_data.ws_file_key = _ws_file_key_move(
@@ -3596,8 +3597,14 @@ def key_range_guard_applies(file_function: int) -> bool:
         file_function: The requested function code.
 
     Returns:
-        Whether the guard applies. >>> key_range_guard_applies(4),
-            key_range_guard_applies(1) (True, False).
+        Whether the guard applies.
+
+    Examples:
+        Function 4 - the read-indexed - is guarded; function 1 - the open - is not,
+        which is the asymmetry the paragraph above describes:
+
+        >>> key_range_guard_applies(4), key_range_guard_applies(1)
+        (True, False)
     """
     return file_function in KEY_RANGE_GUARDED_FUNCTIONS
 

@@ -158,8 +158,11 @@ def end_of_file_status() -> tuple[FsReply, int]:
     assignments at each call site.
 
     Returns:
-        The ``(FS-Reply, We-Error)`` pair to store into ``FileAccess``. >>>
-            end_of_file_status() (<FsReply.END_OF_FILE: 10>, 10).
+        The ``(FS-Reply, We-Error)`` pair to store into ``FileAccess``.
+
+    Examples:
+        >>> end_of_file_status()
+        (<FsReply.END_OF_FILE: 10>, 10)
     """
     return FsReply.END_OF_FILE, END_OF_FILE_WE_ERROR
 
@@ -299,10 +302,21 @@ def start_access_type_is_valid(access_type: int) -> bool:
             ``FileAccess.access_type`` holds.
 
     Returns:
-        ``True`` if the value lies within the guard's inclusive 5-8 range. >>>
-            start_access_type_is_valid(AccessType.NOT_LESS_THAN) True >>>
-            start_access_type_is_valid(AccessType.NOT_GREATER_THAN) # N5 False >>>
-            start_access_type_is_valid(AccessType.INPUT) False.
+        ``True`` if the value lies within the guard's inclusive 5-8 range.
+
+    Examples:
+        >>> start_access_type_is_valid(AccessType.NOT_LESS_THAN)
+        True
+
+        Anomaly N5 in one line: ``NOT_GREATER_THAN`` is 9, so the guard's upper
+        bound of 8 REFUSES it - even though
+        :data:`START_RELATION_BY_ACCESS_TYPE` still maps it to ``"<= "``, which is
+        why that relation is unreachable behind this guard.
+
+        >>> start_access_type_is_valid(AccessType.NOT_GREATER_THAN)
+        False
+        >>> start_access_type_is_valid(AccessType.INPUT)
+        False
     """
     lower, upper = START_ACCESS_TYPE_RANGE
     return lower <= int(access_type) <= upper
@@ -779,9 +793,18 @@ def sanitise_for_log(text: str, *, limit: int = LOG_FIELD_MAX_CHARS) -> str:
 
     Returns:
         A single-line rendering, at most ``limit`` characters plus :data:`LOG_ELISION`.
-            >>> sanitise_for_log("first\r\nWARNING forged second")
-            'first\\x0d\\x0aWARNING forged second' >>> sanitise_for_log("abcdef",
-            limit=3) 'abc[...]'.
+
+    Examples:
+        A forged second log record cannot be injected, because the CR and LF are
+        escaped rather than emitted:
+
+        >>> sanitise_for_log("first\r\nWARNING forged second")
+        'first\\x0d\\x0aWARNING forged second'
+
+        And an over-long rendering is elided rather than truncated silently:
+
+        >>> sanitise_for_log("abcdef", limit=3)
+        'abc[...]'
     """
     escaped = text.translate(_CONTROL_CHARACTER_ESCAPES)
     if len(escaped) <= limit:
@@ -821,11 +844,23 @@ def db_error_log_category(errno: int | str, sql_state: str = "") -> str:
 
     Returns:
         One of the tokens of :data:`_LOG_CATEGORY_BY_ERRNO`, or ``"duplicate-key"``,
-            ``"lock"`` or :data:`LOG_CATEGORY_UNCLASSIFIED`. >>>
-            db_error_log_category(1045) 'access-denied' >>>
-            db_error_log_category("1062") 'duplicate-key' >>>
-            db_error_log_category("1036") 'lock' >>> db_error_log_category(0)
-            'unclassified'.
+        ``"lock"`` or :data:`LOG_CATEGORY_UNCLASSIFIED`.
+
+    Examples:
+        The number may arrive as an ``int`` or as text, because the bridge carries it
+        as text:
+
+        >>> db_error_log_category(1045)
+        'access-denied'
+        >>> db_error_log_category("1062")
+        'duplicate-key'
+        >>> db_error_log_category("1036")
+        'lock'
+
+        An unrecognised number is categorised rather than dropped:
+
+        >>> db_error_log_category(0)
+        'unclassified'
     """
     number = str(errno).strip()
     if number in DUPLICATE_KEY_ERRNOS or sql_state.strip() == DUPLICATE_KEY_SQLSTATE:
@@ -1194,8 +1229,21 @@ def mysql_1100_db_error(
 
     Returns:
         A :class:`DbErrorStatus` with the fields already fitted to their picture widths.
-            >>> status = mysql_1100_db_error( ... errno="1062", ... message="Duplicate
-            entry '1' for key 'PRIMARY'", ...
+
+    Examples:
+        The duplicate path, which is the one the frozen ``evaluate`` narrows to
+        ``INSERT``:
+
+        >>> status = mysql_1100_db_error(
+        ...     errno="1062",
+        ...     message="Duplicate entry '1' for key 'PRIMARY'",
+        ...     sql_state="23000",
+        ...     command="INSERT INTO GLPOSTING-REC VALUES (1)",
+        ... )
+        >>> status.fs_reply
+        <FsReply.DUPLICATE_KEY: 22>
+        >>> status.duplicate_key
+        True
     """
     fitted_err = _pic_x(errno, SQL_ERR_WIDTH)
     fitted_msg = _pic_x(message, SQL_MSG_WIDTH)
@@ -1513,8 +1561,13 @@ def is_ok(fs_reply: int) -> bool:
             what ``FileAccess.fs_reply`` holds.
 
     Returns:
-        ``True`` only if the value is zero. >>> is_ok(FsReply.SUCCESS), is_ok(0) (True,
-            True) >>> is_ok(FsReply.END_OF_FILE), is_ok(FsReply.ERROR) (False, False).
+        ``True`` only if the value is zero.
+
+    Examples:
+        >>> is_ok(FsReply.SUCCESS), is_ok(0)
+        (True, True)
+        >>> is_ok(FsReply.END_OF_FILE), is_ok(FsReply.ERROR)
+        (False, False)
     """
     return int(fs_reply) == FsReply.SUCCESS
 
@@ -1547,15 +1600,30 @@ def raise_for_status(
             on the strength of the detail code alone, testing ``if WE-Error = 901``
             [common/acas008.cbl:L537].
         AcasFileHandlerError: If the reply is any other non-zero value, reproducing ``if
-            fs-reply not = zero`` followed by ``goback``. >>>
-            raise_for_status(FsReply.SUCCESS) is None True >>>
-            raise_for_status(FsReply.ERROR, WeError.RDB_INIT_ERROR).
-        Traceback(most recent call last): ...
-        acas_posting.dal.status.AcasFileHandlerError: ACAS file handler failed: FS-
-            Reply=99 WE-Error=911 >>> raise_for_status(0, WeError.RECORD_SIZE_MISMATCH).
-        Traceback(most recent call last): ...
-        acas_posting.dal.status.AcasFileHandlerFatalError: ACAS file handler failed: FS-
-            Reply=0 WE-Error=901.
+            fs-reply not = zero`` followed by ``goback``.
+
+    Examples:
+        A zero reply returns, and returns nothing:
+
+        >>> raise_for_status(FsReply.SUCCESS) is None
+        True
+
+        A non-zero reply raises, and the message carries both codes:
+
+        >>> raise_for_status(FsReply.ERROR, WeError.RDB_INIT_ERROR)
+        Traceback (most recent call last):
+        ...
+        acas_posting.dal.status.AcasFileHandlerError: ACAS file handler failed: \
+FS-Reply=99 WE-Error=911
+
+        And 901 selects the fatal subclass on the strength of the detail code alone,
+        even though the reply here is zero:
+
+        >>> raise_for_status(0, WeError.RECORD_SIZE_MISMATCH)
+        Traceback (most recent call last):
+        ...
+        acas_posting.dal.status.AcasFileHandlerFatalError: ACAS file handler failed: \
+FS-Reply=0 WE-Error=901
     """
     # `if WE-Error = 901` [common/acas008.cbl:L537] - tested on the detail code alone,
     # before and independently of the reply, because a length mismatch is a programming

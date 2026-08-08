@@ -617,7 +617,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     A DEFECT IS NOT SWALLOWED; AN EXPECTED CONFIGURATION FAILURE IS NOT RAISED.
     The two are different, and the distinction is what the boundary is for. A
-    deployment contract that is absent or unusable (`rdbms_params.RdbmsParamError`,
+    deployment contract that is absent or unusable (`args.RdbmsParamError`,
     a `ValueError`) and a transport declaration the data-access layer refuses
     (`ConnectionPolicyError`) are BOTH configuration failures at the process
     boundary; both stop the run before anything is connected, opened or written,
