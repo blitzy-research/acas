@@ -1445,6 +1445,13 @@ def _verify_tree(directory: Path, label: str) -> dict[str, Any]:
     Raises:
         ManifestError: The tree carries no manifest, over-declares, holds a file whose
             digest has changed, or holds an undeclared dump.
+        TableNotInScopeError: It holds a `<NAME>.json` for one of the eleven
+            out-of-scope tables. Raised from `discover_tables` rather than from the
+            manifest read, and NAMED here because a caller that catches only
+            `ManifestError` lets it escape - which is exactly how it once reached a
+            caller as an unhandled traceback and exit 1.
+        UnknownTableError: It holds a `<NAME>.json` whose name is not a table of the
+            frozen schema at all. Same origin, same reason for naming it.
     """
     manifest = read_manifest(directory)
     if manifest is None:
@@ -1606,6 +1613,15 @@ def verify_trees(
     Raises:
         ManifestError: Either tree is incomplete, or the two disagree about which
             scenario they belong to.
+        MissingTreeError: Either directory is absent or is not a directory.
+        TableNotInScopeError: Either tree holds a dump for one of the eleven
+            out-of-scope tables.
+        UnknownTableError: Either tree holds a dump whose name is not a table of the
+            frozen schema.
+        DiffStatesError: The root class of all four above. A command-line caller
+            should catch THIS and report exit 2 - every failure this module raises is
+            a "cannot compare", never a difference, and enumerating subclasses is how
+            the discovery-time refusals once escaped as a traceback.
     """
     left_label = LABEL_RUN_A if same_side else LABEL_COBOL
     right_label = LABEL_RUN_B if same_side else LABEL_PYTHON
@@ -4004,14 +4020,35 @@ def main(argv: Sequence[str] | None = None) -> int:
                 right,
                 require_identity=not bool(arguments.allow_unattested),
             )
-        except ManifestError as exc:
-            print(f"{_PROG}: {exc}", file=sys.stderr)
-            return EX_ERROR
         except MissingTreeError as exc:
             print(
                 f"{_PROG}: {exc}{_describe_missing_tree(left)}",
                 file=sys.stderr,
             )
+            return EX_ERROR
+        #  EVERY REFUSAL FROM THE VERIFICATION STAGE IS EXIT 2, WITHOUT EXCEPTION.
+        #
+        #  `DiffStatesError` and not `ManifestError`, and the difference is the whole
+        #  point: verification does not only read the two manifests, it also DISCOVERS
+        #  what each tree holds, and `discover_tables` refuses an unexpected
+        #  `<NAME>.json` through `table_spec` - `TableNotInScopeError` for one of the
+        #  eleven out-of-scope tables, `UnknownTableError` for a name that is not a
+        #  table of the frozen schema at all. Neither is a `ManifestError`, so with
+        #  only that clause here both escaped `main` as an unhandled traceback and the
+        #  interpreter exited 1 -- the ONE status this tool reserves for "the two states
+        #  really differ" (`EX_DIFFERENT`). A corrupt or mixed artifact tree would then
+        #  have been reported to any caller keying on the status as a parity FAILURE,
+        #  which is a finding about the migration rather than about the evidence, and a
+        #  traceback naming internal paths and line numbers is not a diagnosis an
+        #  operator can act on.
+        #
+        #  `DiffStatesError` is this module's documented root - "Base class for every
+        #  failure this module reports. Always exit 2" - so catching it here makes the
+        #  code match the contract for every present and future sibling instead of for
+        #  an enumerated two. The message is the exception's own, which already names
+        #  the offending table and says why it is refused.
+        except DiffStatesError as exc:
+            print(f"{_PROG}: {exc}", file=sys.stderr)
             return EX_ERROR
 
         # A requested table that neither side ever captured is a harness malfunction,

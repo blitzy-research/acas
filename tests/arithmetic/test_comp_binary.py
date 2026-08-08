@@ -1599,6 +1599,123 @@ def test_q3_the_bridge_stores_the_absolute_value_for_a_negative() -> None:
     assert BRIDGE_SIGN_ANOMALY in field.anomaly_refs()
 
 
+def test_a11_the_shipped_handler_drops_the_sign_at_its_own_load_paragraph() -> None:
+    """A-11, LOCKED ON THE CODE THAT SHIPS - `acas012_sales`, not `usage.coerce`.
+
+    WHY THIS EXISTS BESIDE THE TEST ABOVE, WHICH LOOKS LIKE IT COVERS THE SAME GROUND.
+    The test above drives `acas_posting/cobol/usage.py::coerce`, the SEMANTICS helper.
+    That is the right subject for "what does a `PIC 9(10) COMP` receiver store", and it
+    is not the subject of A-11: the anomaly is that the sales-ledger handler's
+    `bb000-HV-Load` PUTS a signed statistic INTO such a receiver
+    [copybooks/wssl.cob:L43-L53] -> [common/salesMT.cbl:L302-L312]. Those are two
+    different pieces of code, and the reproduction rule R-4 protects is the second one.
+
+    THE GAP THIS CLOSES, MEASURED RATHER THAN SUPPOSED. Making
+    `acas_posting/dal/acas012_sales.py`'s narrowing sign-PRESERVING left the whole
+    arithmetic tier green - the mutation was never invoked, because every lock lived on
+    `usage.coerce` or on the dictionary's `anomaly_refs()` - and left the sales scenario
+    green too, because that scenario exercises the helper twenty times and NO SEEDED
+    VALUE IS NEGATIVE, so removing the narrowing changed no stored byte. A repair of a
+    reproduced defect that turns nothing red is exactly what R-4 forbids, so the
+    negative value the seeds do not carry is supplied HERE.
+
+    WHAT IS ASSERTED, at three depths of the shipped path:
+
+    1. THE HELPER, for all ELEVEN A-11 columns - `_sign_loss_at_the_bridge` returns the
+       ABSOLUTE VALUE, and a negative and its magnitude become indistinguishable. Also
+       that the receiving host variable's own digit count bounds the magnitude, which is
+       the second half of the measured `MOVE` semantics.
+    2. THE SIBLING HELPER `_store_into_unsigned_host_variable`, which serves the columns
+       whose copybook field is unsigned TOO. It has no sign to lose and drops one all
+       the same, because the frozen bridge's `MOVE` into an unsigned receiver does; both
+       its zero-scale branch and its scaled branch are driven.
+    3. THE PARAGRAPH - `bb000_hv_load` on a real `WS-Sales-Record` carrying a NEGATIVE
+       `Sales-Average` and a NEGATIVE `Sales-Current`. The statistic arrives at the host
+       variable positive (the sign is gone before any SQL is built) while the money
+       column arrives NEGATIVE, which is Agent Action Plan 0.6.2's own point that the
+       drift is "specific rather than systemic" - and it is what stops this test from
+       being satisfied by a handler that simply took `abs` of everything.
+
+    NO DATABASE AND NO CONNECTION. `bb000_hv_load` is a pure `MOVE` paragraph over two
+    dataclasses; the module-level autouse fixture purges `acas_posting.dal` afterwards,
+    so the tier's import contract is unchanged (R-1).
+    """
+    module = _shipped("acas_posting.dal.acas012_sales")
+
+    assert len(module.SIGN_LOSS_COLUMNS) == 11, (
+        f"A-11 covers eleven columns; the shipped module reports "
+        f"{len(module.SIGN_LOSS_COLUMNS)}."
+    )
+
+    #  1 - THE HELPER, every one of the eleven.
+    for column in module.SIGN_LOSS_COLUMNS:
+        digits = module.ENTRIES[column].bridge_host_variable.digits
+        assert digits is not None, f"{column} declares no host-variable digit count"
+
+        negative = module._sign_loss_at_the_bridge(-12, column=column)
+        assert negative == 12, (
+            f"{column}: the shipped handler stored {negative!r} for -12. GnuCOBOL 3.2.0 "
+            f"stores the ABSOLUTE VALUE in an unsigned receiver, and A-11 is that this "
+            f"handler moves a signed statistic into one. A sign-preserving store here "
+            f"REPAIRS a reproduced defect, which rule R-4 makes a failure."
+        )
+        assert negative == module._sign_loss_at_the_bridge(12, column=column), (
+            f"{column}: -12 and +12 must be INDISTINGUISHABLE once stored. That "
+            f"indistinguishability IS the anomaly - the debit-versus-credit sense of "
+            f"the statistic is gone from the database."
+        )
+        # The receiving digit count bounds the magnitude, identically either way.
+        assert module._sign_loss_at_the_bridge(
+            -(10**digits + 34), column=column
+        ) == 34, (
+            f"{column}: a magnitude past the host variable's {digits} digits must be "
+            f"bounded by the receiver, exactly as the compiled MOVE bounds it."
+        )
+
+    # And the guard that stops the anomaly being applied where the bridge does not have
+    # it: a money column, signed at all three layers, is refused by this helper.
+    with pytest.raises(ValueError):
+        module._sign_loss_at_the_bridge(-12, column=module.MONEY_COLUMNS[0])
+
+    #  2 - THE SIBLING HELPER, both branches.
+    assert module._store_into_unsigned_host_variable(-7, column="SALES-CREDIT") == 7, (
+        "SALES-CREDIT: the zero-scale branch of `_store_into_unsigned_host_variable` "
+        "must store the absolute value. This is the exact site whose sign-preserving "
+        "mutation previously left the whole corpus green."
+    )
+    assert module._store_into_unsigned_host_variable(
+        Decimal("-1.25"), column="SALES-DISCOUNT"
+    ) == Decimal("1.25"), (
+        "SALES-DISCOUNT: the scaled branch must store the absolute value at the host "
+        "variable's own scale."
+    )
+
+    #  3 - THE PARAGRAPH, on a real record, with the money control beside it.
+    record = module.WsSalesRecord()
+    setattr(record, module.RECORD_ATTRIBUTE_FOR_COLUMN["SALES-AVERAGE"], -12)
+    setattr(
+        record,
+        module.RECORD_ATTRIBUTE_FOR_COLUMN["SALES-CURRENT"],
+        Decimal("-1.25"),
+    )
+
+    loaded = module.bb000_hv_load(record)
+
+    assert loaded.values["SALES-AVERAGE"] == 12, (
+        f"bb000-HV-Load carried Sales-Average -12 into HV-SALES-AVERAGE as "
+        f"{loaded.values['SALES-AVERAGE']!r}. The sign must be gone BEFORE any SQL is "
+        f"built [common/salesMT.cbl:L308], which is what makes A-11 a bridge anomaly "
+        f"rather than a database one."
+    )
+    assert loaded.values["SALES-CURRENT"] == Decimal("-1.25"), (
+        f"bb000-HV-Load also dropped the sign of the MONEY column SALES-CURRENT "
+        f"({loaded.values['SALES-CURRENT']!r}). It is signed at all three layers "
+        f"[common/salesMT.cbl:L313-L319], so narrowing it invents an anomaly the frozen "
+        f"bridge does not have - and a handler that merely took `abs` of everything "
+        f"would pass every other assertion in this test."
+    )
+
+
 # ---------------------------------------------------------------------------
 #  GROUP 6  -  A-8, TRUNCATION #2: THE INTEGER DIVIDE INTO A `binary-long`
 #
@@ -3687,6 +3804,188 @@ def test_no_harness_file_pins_the_seeding_window_to_the_deviation() -> None:
             ), f"{name} bakes a seeding window into the image: {stripped!r}"
 
 
+def test_no_document_claims_the_seeding_deviation_is_the_default() -> None:
+    """The prose must not contradict the script it documents.
+
+    The two guards above hold the *scripts* to the AAP-mandated default. Neither
+    of them can see the documentation, and the documentation is what an operator
+    reads before running anything -- so it drifted. A superseded revision of
+    `docs/migration/scenario-diff-evidence.md` section 4.3 stated that `on` was "the
+    shipped default", that an unset `ACAS_SEED_AUTOCOMMIT` selected it, and that
+    `harness/docker-compose.yml` "declares it explicitly, so no caller needs a
+    flag to obtain a durable seed". Every clause of that was false by the time it
+    was read: the default had moved to `off` and the Compose pin had been removed
+    (the guard above now forbids it). Section 15 of the same document had already
+    been corrected and pointed *at* the stale passage as its authority.
+
+    An operator who believed the stale text would omit the flag, and stage 1 would
+    exit 76 -- correct behaviour, reported clearly, and completely baffling if the
+    document said no flag was needed.
+
+    So the claim is asserted to be absent from the prose as well. The matcher is
+    deliberately narrow: it looks for a *claim about the default*, not for any
+    mention of the deviation, because these documents are required to discuss the
+    deviation at length and a matcher that banned the name would forbid the very
+    disclosure R-6 asks for. Prose that names the deviation while calling it a
+    deviation passes; prose that calls it the default, or says the Compose file
+    declares it, does not.
+    """
+    root = Path(__file__).resolve().parents[2]
+    documents = sorted((root / "docs" / "migration").glob("*.md"))
+    documents.append(root / "README-python-migration.md")
+    assert len(documents) >= 5, (
+        "the migration document set is smaller than the four AAP-mandated files "
+        f"plus the README: {[p.name for p in documents]}"
+    )
+
+    # Each pattern is a claim that measurement refutes, paired with what was
+    # measured instead. Written against the collapsed single-line form of each
+    # paragraph so that a claim split across a line break is still caught.
+    refuted: Final[tuple[tuple[str, str], str], ...] = (
+        (
+            (
+                r"(?<![A-Za-z])`?on`?\s+is\s+(therefore\s+)?the\s+"
+                r"(shipped|canonical|default)\s*(default)?\b"
+            ),
+            "unset resolves to `off` in "
+            "[harness/seed.sh acas_open_seed_autocommit_window]; reset_db.sh with "
+            "the variable unset was measured at exit 76",
+        ),
+        (
+            # The pronoun form is banned outright rather than resolved: "unset
+            # selects it" was the stale text's phrasing, and a reader cannot tell
+            # which mode "it" is without trusting the sentence before. Name the
+            # mode -- "unset selects `off`" -- and this passes.
+            r"unset\s+selects\s+it\b",
+            "name the mode explicitly instead of using a pronoun: an unset "
+            "ACAS_SEED_AUTOCOMMIT selects `off`, the AAP-mandated window",
+        ),
+        (
+            r"docker-compose\.yml`?\s+declares\s+it",
+            "the Compose file carries no ACAS_SEED_AUTOCOMMIT setting, and "
+            "test_no_harness_file_pins_the_seeding_window_to_the_deviation "
+            "forbids one",
+        ),
+        (
+            r"no\s+caller\s+needs\s+a\s+flag\s+to\s+obtain\s+a\s+durable\s+seed",
+            "every durable seed needs -e ACAS_SEED_AUTOCOMMIT=on; without it a "
+            "seed from an empty database exits 76",
+        ),
+    )
+
+    for document in documents:
+        text = document.read_text(encoding="utf-8")
+        for paragraph in text.split("\n\n"):
+            collapsed = " ".join(paragraph.split())
+            if "ACAS_SEED_AUTOCOMMIT" not in collapsed and "autocommit" not in collapsed:
+                continue
+            # A paragraph that quotes the superseded claim in order to correct it
+            # is the record this finding asked for, not a recurrence of it.
+            if re.search(r"superseded|earlier revision|Correction,|was false", collapsed):
+                continue
+            for pattern, measured in refuted:
+                found = re.search(pattern, collapsed, re.I)
+                assert found is None, (
+                    f"{document.name} states a seeding-window default that "
+                    f"measurement refutes: {found.group(0)!r}. Measured instead: "
+                    f"{measured}. The paragraph is: {collapsed[:400]!r}"
+                )
+
+
+def test_the_durability_gate_measures_this_seeds_own_writes() -> None:
+    """The gate judges the DIFFERENCE a seed makes, not the rows it happens to find.
+
+    The superseded gate summed the row counts of the tables whose loaders ran and
+    passed whenever the sum was positive. Against the target the protocol always
+    hands it -- a schema re-applied one stage earlier -- that is the right question
+    asked the wrong way, because every table starts empty and the sum IS the delta.
+    Run standalone against a database an earlier seed had committed rows into, the
+    two questions come apart: measured on the shipped harness, `harness/seed.sh`
+    with `ACAS_SEED_AUTOCOMMIT=off` over an already-seeded `clean_batch_gl` exited
+    **0** and printed "the seed is present -- 8 row(s)" while the AAP-literal
+    window had made nothing durable at all. The rows were the previous seed's.
+
+    So a pre-seed census is taken BEFORE the window opens and the gate compares
+    against it. This test asserts the three properties that make that measurement
+    sound, on the shipped script text, because the gate is stack-bound and an
+    ordinary run never reaches it:
+
+      1. the census runs before the window and after the database is reachable -
+         a census taken INSIDE the window would read the loaders' own uncommitted
+         writes on some future server configuration and measure nothing;
+      2. the gate reads the census rather than comparing a total against zero; and
+      3. the census is READ-ONLY - it may not become a fixture-writing step, which
+         would put the harness's own rows into a state the protocol then compares.
+    """
+    seed = (_harness_dir() / "seed.sh").read_text(encoding="utf-8")
+
+    for name in (
+        "acas_census_pre_seed_rows",
+        "acas_census_table_state",
+        "ACAS_SEED_ROWS_BEFORE",
+        "ACAS_SEED_SUM_BEFORE",
+    ):
+        assert name in seed, (
+            f"harness/seed.sh no longer defines {name}, so the durability gate has "
+            f"no pre-seed baseline to compare against and is back to measuring "
+            f"absolute row counts."
+        )
+
+    #  1. ORDER, in acas_main: database ready -> census -> window -> loaders ->
+    #     window closed -> gate.
+    positions = {}
+    for call in (
+        "  acas_wait_for_database",
+        "  acas_census_pre_seed_rows",
+        "  acas_open_seed_autocommit_window",
+        "  acas_seed_system_block",
+        "  acas_close_seed_autocommit_window",
+        "  acas_assert_seed_durability",
+    ):
+        index = seed.find(f"\n{call}\n")
+        assert index != -1, f"harness/seed.sh::acas_main no longer calls{call}"
+        positions[call.strip()] = index
+
+    ordered = [
+        "acas_wait_for_database",
+        "acas_census_pre_seed_rows",
+        "acas_open_seed_autocommit_window",
+        "acas_seed_system_block",
+        "acas_close_seed_autocommit_window",
+        "acas_assert_seed_durability",
+    ]
+    for earlier, later in zip(ordered, ordered[1:]):
+        assert positions[earlier] < positions[later], (
+            f"harness/seed.sh calls {later} before {earlier}. The census must be "
+            f"taken after the database is reachable and BEFORE the seeding window "
+            f"opens, and the gate must read the database after the window has "
+            f"closed - that is what makes the difference it reports this seed's."
+        )
+
+    #  2. The gate compares against the baseline. The superseded pass condition was
+    #     a bare positive-total test, and it must not be the gate's first arm again.
+    gate = seed[seed.index("acas_assert_seed_durability() {"):]
+    gate = gate[: gate.index("\n}\n")]
+    assert "ACAS_SEED_ROWS_BEFORE[" in gate, (
+        "the durability gate no longer reads the pre-seed census, so it cannot "
+        "tell this seed's rows from an earlier seed's."
+    )
+    assert "count - before" in gate, (
+        "the durability gate no longer computes a per-table delta; a total "
+        "compared against zero is the measurement this finding replaced."
+    )
+
+    #  3. READ-ONLY. The census reads state to measure it and must never write any.
+    census = seed[seed.index("acas_census_table_state() {"):]
+    census = census[: census.index("\nacas_census_pre_seed_rows() {")]
+    for verb in ("insert ", "update ", "delete ", "truncate ", "drop ", "create "):
+        assert verb not in census.lower(), (
+            f"the pre-seed census issues {verb.strip()!r}. It exists to OBSERVE the "
+            f"state a seed starts from; a census that wrote would put the harness's "
+            f"own rows into the state the protocol compares."
+        )
+
+
 def test_the_seed_transport_is_control_free_and_length_prefixed() -> None:
     """The YAML-to-shell seed protocol cannot be forged by a scenario file.
 
@@ -4010,6 +4309,109 @@ def test_both_sides_are_checked_against_every_declared_operation() -> None:
     assert "acas_resolve_operations()" in cobol_runner
     assert "One status slot per operation" in cobol_runner
     assert "ACAS_RUN_OP_STATUS" in cobol_runner
+
+
+def test_a_protocol_capture_carries_every_field_the_verdict_must_match(
+    tmp_path,
+) -> None:
+    """SELECTION and PROVENANCE are different jobs, and conflating them closed stage 10.
+
+    The three tools once disagreed with each other in a way no single tool's own
+    tests could see. `--all-in-scope` became the comparison bound, so the capture
+    stages stopped passing `--scenario-file`; `harness/dump_tables.py` refused the
+    two options TOGETHER as "alternative ways of choosing the same list", and filled
+    `provenance.scenario_file_sha256` from `--scenario-file` alone; and
+    `harness/diff_states.py` requires that field to be present and EQUAL on both
+    sides before it compares a row. The field was therefore empty on both sides of
+    every capture, stage 10 exited 2 for EVERY scenario, and the pass condition of
+    Agent Action Plan §0.8.5 could not be produced at all.
+
+    A guard is cheap and belongs here: this asserts the three-way contract from the
+    provenance side, with no database, no oracle and no container, so a capture that
+    could not be compared is a red test rather than a protocol that runs nine stages
+    and then refuses.
+    """
+    dump_tables = _load_harness_module("dump_tables")
+    diff_states = _load_harness_module("diff_states")
+
+    scenario_file = tmp_path / "clean_batch_gl.yaml"
+    scenario_file.write_text("scenario: clean_batch_gl\n", encoding="utf-8")
+    repository = _repo_root()
+
+    #  1. THE PARSER ACCEPTS THE TWO TOGETHER. This is the argument vector the
+    #     documented recipe and tests/conftest.py both use at stages 3 and 7.
+    parsed = dump_tables.build_parser().parse_args(
+        [
+            "--scenario",
+            "clean_batch_gl",
+            "--side",
+            "cobol",
+            "--all-in-scope",
+            "--scenario-file",
+            str(scenario_file),
+        ]
+    )
+    assert parsed.all_in_scope is True
+    assert parsed.scenario_file == str(scenario_file), (
+        "--scenario-file was rejected or dropped alongside --all-in-scope. It is "
+        "PROVENANCE there, not a selector: its digest is the field stage 10 "
+        "requires, and refusing the pair is what emptied it."
+    )
+
+    #  2. THE BOUND IS STILL ALL 22. Provenance must not narrow the comparison: a
+    #     capture bounded by a scenario's declared effect cannot show a difference in
+    #     a table the scenario did not expect to move.
+    resolved = dump_tables.resolve_tables(
+        scenario_file=scenario_file, all_in_scope=True
+    )
+    assert resolved == dump_tables.IN_SCOPE_TABLES, (
+        f"--all-in-scope with --scenario-file resolved {len(resolved)} table(s), not "
+        f"the {len(dump_tables.IN_SCOPE_TABLES)} the protocol compares."
+    )
+    #  And the two REAL selectors remain mutually exclusive, because those two really
+    #  are alternative ways of naming one list.
+    with pytest.raises(ValueError):
+        dump_tables.resolve_tables(tables="GLBATCH-REC", all_in_scope=True)
+
+    #  3. EVERY FIELD THE VERDICT MATCHES ON IS POPULATED. Read from
+    #     diff_states.PROVENANCE_MUST_MATCH rather than restated, so a fourth field
+    #     added there is covered here the day it is added.
+    provenance = dump_tables.build_provenance(
+        run_id="parity-guard-1",
+        scenario_file=scenario_file,
+        repository=repository,
+        command=["harness/dump_tables.py", "--all-in-scope"],
+    )
+    for field in diff_states.PROVENANCE_MUST_MATCH:
+        assert provenance.get(field), (
+            f"a stage-3/7 capture would carry no {field!r}, and "
+            f"harness/diff_states.py requires every field of "
+            f"PROVENANCE_MUST_MATCH to be present and equal on both sides before it "
+            f"compares a single row - so stage 10 would exit "
+            f"{diff_states.EX_ERROR} for every scenario."
+        )
+    assert provenance["scenario_file_sha256"] == dump_tables.file_digest(scenario_file)
+
+    #  4. AND THE COMPOSED DRIVER NAMES THE DEFINITION ON EVERY CAPTURE. The recipe
+    #     in README-python-migration.md is prose; tests/conftest.py is code, and it
+    #     is what the scenario and determinism tiers drive, so its argv is asserted.
+    conftest_text = (_repo_root() / "tests" / "conftest.py").read_text(
+        encoding="utf-8"
+    )
+    publish = conftest_text[conftest_text.index("\ndef dump(\n") :]
+    publish = publish[1:]
+    publish = publish[: publish.index("\ndef ")]
+    assert '"--all-in-scope"' in publish, (
+        "tests/conftest.py's dump stage no longer bounds the capture with "
+        "--all-in-scope, so an empty diff would attest agreement over a fraction of "
+        "the surface."
+    )
+    assert '"--scenario-file"' in publish, (
+        "tests/conftest.py's dump stage no longer names the scenario definition, so "
+        "scenario_file_sha256 would be empty on both sides and stage 10 would refuse "
+        "every comparison - the exact regression this guard exists for."
+    )
+
 
 
 # ---------------------------------------------------------------------------
@@ -5019,6 +5421,166 @@ def test_a6_the_supported_functions_are_not_refused() -> None:
 
 
 # ---------------------------------------------------------------------------
+# SECTION 20a -- THE STATUS VOCABULARY ITSELF, ASSERTED RATHER THAN ONLY DECLARED
+#
+# WHY THIS SITS BESIDE SECTION 20. Section 20 locks ONE pair - 988/99 - because that
+# pair is anomaly A-6's whole observable. The vocabulary those numbers come from was
+# only DECLARED: the `FS-Reply` value set, the `We-Error` codes and the two-layer
+# duplicate-key test are what the Agent Action Plan calls an EMULATED status protocol
+# (section 0.1.1, "the `FS-Reply` status protocol"), and three of the helpers that
+# publish it were reached by no test and no scenario at all. Measured directly in this
+# checkout: forcing `implies_fs_reply_error` to answer True, and forcing
+# `is_duplicate_key_bridge_level` to answer True, each left the whole arithmetic tier
+# green. A mapping nothing asserts is a mapping that can be wrong in the direction
+# nobody notices - and for a duplicate-key test, being wrong means a write that
+# collided is reported as an unexplained failure, or an unexplained failure is reported
+# as a collision.
+#
+# `end_of_file_status` IS already locked, incidentally but genuinely, by the docstring
+# example guard in test_pic_field_descriptors.py: giving it the wrong pair fails that
+# test. It is asserted here as well, because a documentation guard is the wrong place
+# for the protocol's own contract to live, and because the (10, 10) pairing is the one
+# every reader expects to be (10, 0).
+# ---------------------------------------------------------------------------
+
+
+def test_the_fs_reply_value_set_is_exactly_the_frozen_prose_table() -> None:
+    """`FS-Reply` carries six values and no others - 0, 10, 21, 22, 23, 99.
+
+    The set is the bridges' own prose table [common/glpostingMT.cbl:L125-L131], and it
+    is asserted as a SET so that neither an addition nor a removal can pass. Two
+    details of it are easy to get wrong and are asserted individually:
+
+    * `end_of_file_status()` returns (10, **10**) and not (10, 0). One frozen statement
+      writes BOTH fields - `move 10 to fs-Reply WE-Error`
+      [common/glpostingMT.cbl:L557] - so the detail code equals the reply, which is why
+      the helper exists instead of two assignments per call site.
+    * `FsReply` is an `IntEnum`, because `FileAccess.fs_reply` holds a plain `int` and a
+      handler's stored value must compare equal to a member.
+    """
+    from acas_posting.dal import status
+
+    assert {int(member) for member in status.FsReply} == {0, 10, 21, 22, 23, 99}, (
+        f"the FS-Reply value set is {sorted(int(m) for m in status.FsReply)}; the "
+        f"frozen prose table declares 0, 10, 21, 22, 23 and 99 "
+        f"[common/glpostingMT.cbl:L125-L131]. An extra value is a status this "
+        f"migration invented; a missing one is a status a caller can no longer be told."
+    )
+    assert int(status.FsReply.SUCCESS) == 0
+    assert int(status.FsReply.END_OF_FILE) == 10
+    assert int(status.FsReply.INVALID_KEY_ON_START) == 21
+    assert int(status.FsReply.DUPLICATE_KEY) == 22
+    assert int(status.FsReply.KEY_NOT_FOUND) == 23
+    assert int(status.FsReply.ERROR) == 99
+
+    reply, we_error = status.end_of_file_status()
+    assert (int(reply), int(we_error)) == (10, 10), (
+        f"end_of_file_status() answered {(int(reply), int(we_error))}; "
+        f"[common/glpostingMT.cbl:L557] moves 10 into BOTH fs-Reply and WE-Error in one "
+        f"statement, so the pair is (10, 10). (10, 0) is the plausible wrong answer."
+    )
+    assert isinstance(status.FsReply.SUCCESS, int) and status.FsReply.SUCCESS == 0
+
+
+def test_every_we_error_code_that_arrives_with_fs_reply_99_is_classified() -> None:
+    """`implies_fs_reply_error` partitions the fourteen `We-Error` codes correctly.
+
+    The predicate reports whether a detail code is one the frozen source pairs with
+    `FS-Reply 99`. Both directions are asserted, because a predicate that answered True
+    for everything - the mutation this test was written against - is as useless as one
+    that answered False for everything, and the tier could not previously tell the
+    difference.
+
+    THE THREE CODES THAT MUST NOT IMPLY 99 are the ones that arrive with a reply of
+    their own: `SUCCESS` (0), `NOT_USED` (999) - the value the gl072 silent skip tests
+    for [general/gl072.cbl:L306-L307] - and any integer that is not a member at all,
+    which a `File-Access` block can legitimately hold because `We-Error` is `pic 999`
+    [copybooks/wsfnctn.cob:L23-L38] and nothing constrains it to the table.
+    """
+    from acas_posting.dal import status
+
+    assert len(status.WeError) == 14, (
+        f"the We-Error table has {len(status.WeError)} members; the frozen table's "
+        f"twelve plus the two that exist only in handler source is fourteen."
+    )
+
+    for member in status.WE_ERRORS_IMPLYING_FS_REPLY_ERROR:
+        assert status.implies_fs_reply_error(int(member)), (
+            f"We-Error {int(member)} is in WE_ERRORS_IMPLYING_FS_REPLY_ERROR and the "
+            f"predicate denies it, so the two disagree about the same fact."
+        )
+
+    not_implying = set(status.WeError) - set(status.WE_ERRORS_IMPLYING_FS_REPLY_ERROR)
+    assert {int(member) for member in not_implying} == {0, 999}, (
+        f"exactly SUCCESS (0) and NOT_USED (999) arrive with a reply of their own; "
+        f"this checkout reports {sorted(int(m) for m in not_implying)}."
+    )
+    for member in not_implying:
+        assert not status.implies_fs_reply_error(int(member)), (
+            f"We-Error {int(member)} does not arrive with FS-Reply 99, and the "
+            f"predicate claims it does. 999 in particular is what gl072's second "
+            f"silent skip tests for [general/gl072.cbl:L306-L307]."
+        )
+
+    # A value outside the table is not an error by implication - the predicate reports,
+    # it does not validate, so an unknown code must simply answer False.
+    assert not status.implies_fs_reply_error(1)
+    assert not status.implies_fs_reply_error(-1)
+    assert not status.implies_fs_reply_error(1000)
+
+    # The two documentation-only codes are still classified as implying 99, because the
+    # prose table pairs them with it even though no statement produces them (N6).
+    for orphan in status.DOCUMENTATION_ONLY_WE_ERRORS:
+        assert status.implies_fs_reply_error(int(orphan))
+
+
+def test_the_bridge_level_duplicate_key_test_reads_four_characters_and_sqlstate() -> None:
+    """`is_duplicate_key_bridge_level` reproduces [common/glpostingMT.cbl:L818-L824].
+
+    Three properties of the frozen fragment, each asserted because each is a way an
+    implementation can look right and behave differently:
+
+    1. EITHER duplicate errno - `"1062"` or `"1022"` - answers True, and so does
+       SQLSTATE `"23000"` INDEPENDENTLY of the errno. The frozen test is a three-way
+       `or`, not a conjunction.
+    2. ONLY THE FIRST FOUR CHARACTERS of `SQL-Err` are compared
+       [copybooks/wsfnctn.cob:L49], so a fifth character - and any trailing text - is
+       never examined. `"10620"` therefore answers True on its first four.
+    3. NEITHER duplicate errno NOR `23000` means False, which the caller turns into
+       `FS-Reply 99`.
+
+    A True answer becomes `move 22 to fs-reply` and a False one `move 99`, so this
+    predicate decides whether a collided write is reported as a duplicate or as an
+    unexplained failure. Nothing in the corpus asserted it before.
+    """
+    from acas_posting.dal import status
+
+    assert status.DUPLICATE_KEY_ERRNOS == frozenset({"1062", "1022"})
+
+    # 1 - each alternative on its own.
+    assert status.is_duplicate_key_bridge_level("1062", "00000")
+    assert status.is_duplicate_key_bridge_level("1022", "00000")
+    assert status.is_duplicate_key_bridge_level("0000", str(status.SqlState.DUPLICATE_KEY))
+    assert str(status.SqlState.DUPLICATE_KEY) == "23000"
+
+    # 2 - four characters, and only four.
+    assert status.is_duplicate_key_bridge_level("10620", "00000"), (
+        "only SQL-Err(1:4) is compared [common/glpostingMT.cbl:L819], so a fifth "
+        "character cannot change the answer."
+    )
+    assert not status.is_duplicate_key_bridge_level("106", "00000"), (
+        "a three-character field does not match the four-character literal"
+    )
+
+    # 3 - neither alternative.
+    assert not status.is_duplicate_key_bridge_level("1146", "42S02"), (
+        "a table-missing errno with a table-missing SQLSTATE is NOT a duplicate; "
+        "reporting it as FS-Reply 22 would tell a caller its row already existed."
+    )
+    assert not status.is_duplicate_key_bridge_level("0000", "00000")
+
+
+# ---------------------------------------------------------------------------
 # SECTION 21 -- THE TIER-IMPORT CONTRACT, MADE EXPLICIT AND BOUNDED
 #
 # WHY THIS SECTION EXISTS. Agent Action Plan section 0.4.3 gives `tests/arithmetic/*`
@@ -5518,6 +6080,328 @@ def test_an_in_memory_post_key_round_trip_is_byte_symmetric() -> None:
         "the group's last two bytes are the alphanumeric space pad, so Post-Number "
         "reads `000` followed by two spaces - low nibbles 0,0,0,0,0"
     )
+
+
+# ---------------------------------------------------------------------------
+# SECTION 22B -- WHAT A CORRUPT `Batch` COMPARES AS, AND AGAINST WHAT
+#
+# WHY THIS SECTION EXISTS. Section 22 above pinned the BYTES and the numeric reading of
+# a `Batch` that came back through the bridge, and stopped there. That was not enough,
+# and a QA arbitration proved it: the migrated `gl080` deleted a posting row per posting
+# while the compiled `gl080` deleted none, at a batch number - 75261 - the migration's
+# own recorded reading names. Final table state was identical on both sides, so no
+# scenario diff, no determinism check and no test in this repository could see it. The
+# reading was not wrong; it was applied to a relation that does not use it.
+#
+# THE MEASUREMENT, taken on the compiled oracle (GnuCOBOL 3.2.0) with both operands
+# declared exactly as the frozen copybooks declare them - `Batch pic 9(5)`
+# [copybooks/wspost.cob:L15] and `WS-Batch-Nos pic 9(5)` [copybooks/wsbatch.cob:L19] -
+# `HV-POST-KEY` set to the value the compiled bridge stores, and the frozen unload
+# performed:
+#
+#   Batch IS NUMERIC                                     no
+#   if batch = 75261            (numeric LITERAL)        EQUAL
+#   if batch = WS-Batch-Nos     (same-picture FIELD)     NOT EQUAL, for all 100,000
+#                                                        values a pic 9(5) can hold
+#   if batch = ws-save5, that field holding 75261        NOT EQUAL
+#   a group of spaces = ZERO    (GROUP vs figurative)    FALSE  -> byte comparison
+#   a group of '0'    = ZERO                             TRUE
+#   if batch = zero             (ELEMENTARY vs figurative, Batch holding spaces)
+#                                                        TRUE   -> numeric comparison
+#   move batch to another pic 9(5)                       BYTE COPY: 06 8E 0C 15 3B
+#   move batch to a pic 9(6)                             30 06 8E 0C 15 3B
+#
+# So a relation between two same-picture unsigned DISPLAY items compares STORAGE, while a
+# relation with a literal or with the figurative constant compares the tolerant numeric
+# reading. The frozen cycle turns on the first at three gates -
+# [general/gl070.cbl:L492-L493], [general/gl080.cbl:L460] and [general/gl080.cbl:L617] -
+# and at a fourth inside the in-scope part of gl051 [general/gl051.cbl:L1029]. Every one
+# of them therefore discards EVERY posting the database returns, which is the third face
+# of ANOMALY N-KEY: gl070 writes no work record, gl080 archives and deletes nothing, and
+# gl051's proof loop admits nothing to its totals.
+#
+# The two MOVE readings are recorded above but deliberately NOT implemented: see
+# `Q-NKEY-CMP` in docs/migration/ambiguity-resolutions.md for the trace showing that no
+# site a corrupt value can reach through a MOVE has a database effect.
+# ---------------------------------------------------------------------------
+
+#: The five bytes `Batch` holds after the frozen unload - section 22's measurement,
+#: sliced to the first item so the gate tests can hand it about.
+_MEASURED_BATCH_IMAGE: Final[bytes] = _MEASURED_POST_KEY_GROUP_IMAGE[:5]
+
+#: The whole domain of a `pic 9(5)` batch number, which the compiled probe swept.
+_BATCH_NUMBER_DOMAIN: Final[range] = range(0, 100_000)
+
+
+def _corrupt_batch() -> object:
+    """The `Batch` value a fetch produces, value and bytes together."""
+    from acas_posting.cobol import usage as cobol_usage
+
+    return cobol_usage.ZonedDisplayInt(
+        _MEASURED_BATCH_COMPARES_AS, zoned_image=_MEASURED_BATCH_IMAGE
+    )
+
+
+def test_the_unload_carries_the_measured_bytes_beside_the_value() -> None:
+    """`_split_post_key` publishes the storage, not only the reading.
+
+    The bytes cannot be recovered from the value - that is the whole reason they travel
+    with it - so a reproduction that returned a bare `int` could not answer a
+    field-to-field relation at all. Both halves are checked, because the second one's
+    image is where the two-space pad shows up.
+    """
+    from acas_posting.dal import acas006_gl_posting as gl_posting
+
+    batch, post_number = gl_posting._split_post_key(
+        Decimal(_MEASURED_POST_KEY_COLUMN_VALUE)
+    )
+
+    assert batch.zoned_image == _MEASURED_POST_KEY_GROUP_IMAGE[:5]
+    assert post_number.zoned_image == _MEASURED_POST_KEY_GROUP_IMAGE[5:10]
+    # And the values are unchanged by carrying them: section 22's readings still hold.
+    assert (int(batch), int(post_number)) == (_MEASURED_BATCH_COMPARES_AS, 40000)
+
+
+def test_a_fetched_key_rewritten_puts_the_same_column_value_back() -> None:
+    """Unload then load is exact, because both moves move BYTES.
+
+    `move HV-POST-KEY to WS-Post-Key` [common/glpostingMT.cbl:L1085] and
+    `move WS-Post-Key to HV-POST-KEY` [common/glpostingMT.cbl:L1054] are both group
+    moves, so a row read and written back carries the key it arrived with. Before the
+    bytes travelled with the value this composition returned the digits of 75261 instead
+    - a different column value, and one no frozen path can produce.
+    """
+    from acas_posting.dal import acas006_gl_posting as gl_posting
+    from acas_posting.records.gl_posting import WsPostKey
+
+    fetched = Decimal(_MEASURED_POST_KEY_COLUMN_VALUE)
+    batch, post_number = gl_posting._split_post_key(fetched)
+
+    reloaded = gl_posting._join_post_key(
+        WsPostKey(batch=batch, post_number=post_number)
+    )
+
+    assert reloaded == fetched
+
+
+def test_a_corrupt_batch_matches_no_batch_number_field_in_the_whole_domain() -> None:
+    """The compiled sweep, re-run against the migrated comparison.
+
+    100,000 field-to-field relations, which is the measurement rather than a sample: the
+    compiled probe compared `Batch` with `WS-Batch-Nos` for every value a `pic 9(5)`
+    batch number can hold and matched none of them.
+    """
+    from acas_posting.cobol import arithmetic
+    from acas_posting.records.gl_batch import WsBatchKey
+    from acas_posting.records.gl_posting import WsPostKey
+
+    batch_field = next(f for f in WsPostKey.FIELDS if f.name == "Batch")
+    batch_nos_field = next(f for f in WsBatchKey.FIELDS if f.name == "WS-Batch-Nos")
+    corrupt = _corrupt_batch()
+
+    matches = [
+        candidate
+        for candidate in _BATCH_NUMBER_DOMAIN
+        if arithmetic.compare_zoned_display_fields(
+            corrupt,
+            candidate,
+            left_field=batch_field,
+            right_field=batch_nos_field,
+        )
+        == 0
+    ]
+
+    assert matches == [], (
+        f"the compiled probe matched none of 0..99999; this comparison matched "
+        f"{matches[:5]}"
+    )
+
+    #  AND THE READING THAT IS STILL CORRECT IS STILL CORRECT. A relation with a
+    # numeric LITERAL uses the tolerant value, measured EQUAL at 75261, so the two
+    # functions are not interchangeable and neither replaces the other.
+    assert arithmetic.compare(corrupt, _MEASURED_BATCH_COMPARES_AS) == 0
+    assert arithmetic.compare(corrupt, 1) != 0
+
+
+def test_the_algebraic_comparison_is_what_matched_and_is_no_longer_the_gate() -> None:
+    """The defect, stated as a test so it cannot come back.
+
+    An algebraic comparison of the same two operands DOES match at 75261. That is the
+    exact input the QA arbitration used, and the reason the migrated `gl080` issued one
+    `DELETE` per posting row where the compiled `gl080` issued none. Keeping both
+    assertions in one place records the difference rather than leaving a reader to infer
+    why the gate does not use `compare`.
+    """
+    from acas_posting.cobol import arithmetic
+    from acas_posting.records.gl_batch import WsBatchKey
+    from acas_posting.records.gl_posting import WsPostKey
+
+    batch_field = next(f for f in WsPostKey.FIELDS if f.name == "Batch")
+    batch_nos_field = next(f for f in WsBatchKey.FIELDS if f.name == "WS-Batch-Nos")
+    corrupt = _corrupt_batch()
+
+    assert arithmetic.compare(corrupt, _MEASURED_BATCH_COMPARES_AS) == 0, (
+        "the algebraic reading matches, which is what the frozen program does NOT do "
+        "for a field-to-field relation"
+    )
+    assert (
+        arithmetic.compare_zoned_display_fields(
+            corrupt,
+            _MEASURED_BATCH_COMPARES_AS,
+            left_field=batch_field,
+            right_field=batch_nos_field,
+        )
+        != 0
+    )
+
+
+def test_the_four_frozen_gates_discard_every_posting_the_bridge_returns() -> None:
+    """gl070, gl080's two passes and gl051, driven through their own predicates.
+
+    FOUR gate SITES, THREE predicates: gl080's archive pass and deletion pass are
+    textually identical [general/gl080.cbl:L459-L461,L616-L618] and share one migrated
+    predicate, so driving that predicate once covers both sites. The two counts are
+    stated separately because they differ, and a reader comparing this test with the
+    frozen source would otherwise find one gate unaccounted for.
+
+    Each gate is the program's own function, not a re-implementation, so a future change
+    that reverted any one of them to an algebraic comparison fails here. The sweep is the
+    whole batch-number domain for the two that own a named predicate, and the four
+    corners plus the tolerant reading for the two that are expressions inside a loop.
+    """
+    from acas_posting.cobol import arithmetic
+    from acas_posting.programs import gl051_batch_control_check as gl051
+    from acas_posting.programs import gl070_transaction_pre_process as gl070
+    from acas_posting.programs import gl080_end_of_cycle as gl080
+    from acas_posting.records.gl_batch import GlBatchRecord
+    from acas_posting.records.gl_posting import WsPostingRecord, WsPostKey
+
+    corrupt = _corrupt_batch()
+    interesting = (0, 1, _MEASURED_BATCH_COMPARES_AS, 62444, 99999)
+
+    for candidate in interesting:
+        posting = WsPostingRecord(
+            ws_post_key=WsPostKey(batch=corrupt, post_number=40000)
+        )
+        batch = GlBatchRecord()
+        batch.ws_batch_key.ws_batch_nos = candidate
+
+        gl070_store = types.SimpleNamespace(posting=posting, batch=batch)
+        assert gl070._batch_is_not_the_one_being_processed(gl070_store), candidate
+        assert not gl070._post_key_is_zero(gl070_store), candidate
+
+        gl080_store = types.SimpleNamespace(posting=posting, batch=batch)
+        assert gl080._batch_is_not_the_one_being_processed(gl080_store), candidate
+        assert not gl080._post_key_is_zero(gl080_store), candidate
+
+        # gl051's gate is an `elif` inside `batch-print`, so its comparison is driven
+        # with the module's own descriptors rather than through a loop that would need
+        # a printer, a batch header read and a proof state.
+        assert (
+            arithmetic.compare_zoned_display_fields(
+                corrupt,
+                candidate,
+                left_field=gl051._POST_BATCH,
+                right_field=gl051._WS_BATCH_NOS,
+            )
+            != 0
+        ), candidate
+
+
+def test_a_clean_key_still_passes_the_gates_which_is_the_contrast() -> None:
+    """The gates are not simply always closed.
+
+    A `Batch` holding the digits of its own batch number matches, so the byte comparison
+    has not turned the guard into an unconditional skip - it is the CORRUPT image, and
+    only that, which no batch number equals.
+    """
+    from acas_posting.programs import gl070_transaction_pre_process as gl070
+    from acas_posting.programs import gl080_end_of_cycle as gl080
+    from acas_posting.records.gl_batch import GlBatchRecord
+    from acas_posting.records.gl_posting import WsPostingRecord, WsPostKey
+
+    posting = WsPostingRecord(ws_post_key=WsPostKey(batch=7, post_number=3))
+    batch = GlBatchRecord()
+    batch.ws_batch_key.ws_batch_nos = 7
+
+    store = types.SimpleNamespace(posting=posting, batch=batch)
+    assert not gl070._batch_is_not_the_one_being_processed(store)
+    assert not gl080._batch_is_not_the_one_being_processed(store)
+
+    batch.ws_batch_key.ws_batch_nos = 8
+    assert gl070._batch_is_not_the_one_being_processed(store)
+    assert gl080._batch_is_not_the_one_being_processed(store)
+
+
+def test_the_group_zero_test_is_a_byte_comparison_and_the_elementary_one_is_not() -> (
+    None
+):
+    """`WS-Post-Key = zero` against `batch = zero`: the two readings, both measured.
+
+    A group of ten SPACES is not `ZERO` and a group of ten `0` characters is - so the
+    group test compares bytes. An ELEMENTARY item of spaces IS zero, so the elementary
+    test compares the tolerant reading. `gl070` and `gl080` have the group form and
+    `gl051` [general/gl051.cbl:L1012] has the elementary one, and this pins both against
+    the same pair of images.
+    """
+    from acas_posting.cobol import arithmetic
+    from acas_posting.cobol import usage as cobol_usage
+    from acas_posting.programs import gl070_transaction_pre_process as gl070
+    from acas_posting.programs import gl080_end_of_cycle as gl080
+    from acas_posting.records.gl_batch import GlBatchRecord
+    from acas_posting.records.gl_posting import WsPostingRecord, WsPostKey
+
+    spaces = cobol_usage.ZonedDisplayInt(0, zoned_image=b"     ")
+    posting = WsPostingRecord(
+        ws_post_key=WsPostKey(batch=spaces, post_number=spaces)
+    )
+    store = types.SimpleNamespace(posting=posting, batch=GlBatchRecord())
+
+    # The GROUP form: spaces are not the character zero, so the key is NOT zero.
+    assert not gl070._post_key_is_zero(store)
+    assert not gl080._post_key_is_zero(store)
+
+    # The ELEMENTARY form, which `gl051` uses: the tolerant reading of five spaces is
+    # zero, and `compare` is what gl051 keeps.
+    assert arithmetic.compare(spaces, 0) == 0
+
+    # A genuinely zero key is zero on both readings, which is the contrast.
+    zero_key = WsPostingRecord(ws_post_key=WsPostKey(batch=0, post_number=0))
+    zero_store = types.SimpleNamespace(posting=zero_key, batch=GlBatchRecord())
+    assert gl070._post_key_is_zero(zero_store)
+    assert gl080._post_key_is_zero(zero_store)
+
+
+def test_the_byte_comparison_refuses_shapes_it_was_not_measured_for() -> None:
+    """The primitive is not a general comparison, and says so.
+
+    Restricted to two unsigned zoned DISPLAY items of scale zero and EQUAL width,
+    because that is the shape the compiled measurement covers. A signed operand, a
+    packed one, a scaled one or a width mismatch is a call-site error rather than a data
+    condition, so it raises rather than guessing at a layout.
+    """
+    from acas_posting.cobol import arithmetic
+    from acas_posting.records.gl_batch import WsBatchKey
+    from acas_posting.records.gl_posting import WsPostingRecord, WsPostKey
+
+    batch_field = next(f for f in WsPostKey.FIELDS if f.name == "Batch")
+    batch_nos_field = next(f for f in WsBatchKey.FIELDS if f.name == "WS-Batch-Nos")
+    amount_field = next(f for f in WsPostingRecord.FIELDS if f.name == "Post-Amount")
+    account_field = next(f for f in WsPostingRecord.FIELDS if f.name == "Post-DR")
+
+    with pytest.raises(ValueError, match="unsigned zoned DISPLAY"):
+        arithmetic.compare_zoned_display_fields(
+            1, 1, left_field=amount_field, right_field=batch_nos_field
+        )
+    with pytest.raises(ValueError, match="unsigned zoned DISPLAY"):
+        arithmetic.compare_zoned_display_fields(
+            1, 1, left_field=batch_field, right_field=amount_field
+        )
+    with pytest.raises(ValueError, match="EQUAL declared width"):
+        arithmetic.compare_zoned_display_fields(
+            1, 1, left_field=batch_field, right_field=account_field
+        )
+
 
 
 # ---------------------------------------------------------------------------

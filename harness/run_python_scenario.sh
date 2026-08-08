@@ -677,11 +677,15 @@ readonly -a ACAS_PY_AUTOGEN_TABLES=(
   SAAUTOGEN-REC SAAUTOGEN-LINES-REC PUAUTOGEN-REC PUAUTOGEN-LINES-REC
 )
 
-# The IRS transfer table, named once. The end-of-job answer decides whether
-# every one of its rows is removed [irs/irs030.cbl:L1723], because for that
-# handler an open-for-output is not a file open but a mass delete:
+# The IRS transfer table, named once. The end-of-job answer decides whether a
+# delete is issued against it at all [irs/irs030.cbl:L1723], because for that
+# handler an open-for-output is not a file open but a delete-all:
 # `if fn-Open and fn-output and not FS-Cobol-Files-Used / set fn-delete-all to
 # true' [common/acas008.cbl:L309-L319], reinforced at [common/acas008.cbl:L571-L574].
+# WHAT IT REMOVES IS BOUNDED, not every row: the bridge deletes only keys strictly
+# below the key text 9999999999 [common/slpostingMT.cbl:L850-L891], which no
+# bridge-written key falls below. See the key-bound note under A-NEW-8 in
+# docs/migration/anomaly-log.md.
 readonly ACAS_PY_IRS_TRANSFER_TABLE='PSIRSPOST-REC'
 
 # The name the capture stage writes LAST, recording the run identity and the
@@ -3075,8 +3079,9 @@ acas_py_resolve_gating_answers() {
   # harness default and the module default cannot silently drift.
   #
   # `if WS-Reply = "Y" / perform acas008-Open-Output' [irs/irs030.cbl:L1720-L1723]
-  # and for that handler an open-for-output is a mass delete of every row of the
-  # IRS transfer table [common/acas008.cbl:L309-L319].
+  # and for that handler an open-for-output is a delete-all against the IRS transfer
+  # table [common/acas008.cbl:L309-L319], bounded by the bridge to keys strictly below
+  # 9999999999 [common/slpostingMT.cbl:L850-L891].
   #
   # AND NOTE, because it is counter-intuitive: despite the "[Y]" in the prompt
   # text at [irs/irs030.cbl:L1716], AN EMPTY REPLY DOES NOT ANSWER Y. The test at
@@ -3089,8 +3094,8 @@ acas_py_resolve_gating_answers() {
       'an irs_post scenario must pin the end-of-job clear answer.' \
       'Add an irs_clear_postings: key with "Y" or "N".' \
       'ONE ANSWER IS DESTRUCTIVE: "Y" performs acas008-Open-Output' \
-      '[irs/irs030.cbl:L1723], which for that handler is a mass delete of every row' \
-      "of $ACAS_PY_IRS_TRANSFER_TABLE [common/acas008.cbl:L309-L319]." \
+      '[irs/irs030.cbl:L1723], which for that handler is a delete-all -- bounded by the' \
+      "bridge -- against $ACAS_PY_IRS_TRANSFER_TABLE [common/acas008.cbl:L309-L319]." \
       'There is no default because the frozen program has none: the prompt shows' \
       '"[Y]" but an empty reply re-asks for ever [irs/irs030.cbl:L1718-L1719].'
     case "$ACAS_PY_IRS_CLEAR" in
@@ -5242,12 +5247,25 @@ acas_py_assert_repo_untouched() {
 # has exited by the time they run it.
 # =============================================================================
 acas_py_capture_command() {
+  #  BOTH SELECTION-RELATED OPTIONS ARE NAMED, AND THEY DO DIFFERENT JOBS.
+  #  `--all-in-scope' is the BOUND -- all 22 in-scope tables, because both cycles
+  #  perform the menu's own `overrewrite.' [general/general.cbl:L656-L672] and a
+  #  capture bounded by the scenario's declared effect could report an empty diff
+  #  while a system row differed. `--scenario-file' is the PROVENANCE: its sha256
+  #  becomes `scenario_file_sha256', one of the three fields harness/diff_states.py
+  #  requires PRESENT AND EQUAL on both sides before it compares a row. A command
+  #  printed without it produces a capture the diff stage refuses outright with "the
+  #  provenance field 'scenario_file_sha256' is empty on both sides", which is a
+  #  wasted run of the whole cycle -- so the line an operator copies carries it.
+  #  The two are complementary, not alternatives; only `--tables' and
+  #  `--all-in-scope' are mutually exclusive.
   printf '%s\0' \
     "$ACAS_PY_PYTHON" \
     "$ACAS_REPO/harness/dump_tables.py" \
     '--scenario' "$ACAS_PY_SCENARIO" \
     '--side' "$ACAS_PY_SIDE" \
     '--all-in-scope' \
+    '--scenario-file' "$ACAS_PY_SCENARIO_FILE" \
     '--out-dir' "$ACAS_PY_OUT_DIR"
 }
 

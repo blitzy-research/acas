@@ -178,12 +178,26 @@ named after the called program: `maps03 section.` at `[general/gl070.cbl:L603]`,
 `call "maps04" using maps03-ws.` at `[general/gl070.cbl:L606]` and `maps04-exit.` at
 `[general/gl070.cbl:L608-L609]`. Preserved, never harmonised.
 
-A-NEW-8 - `acas007` AND `acas008` DISAGREE ABOUT WHETHER `Open-Output` TRUNCATES.
-`[common/acas007.cbl:L305-L312]` carries the same open-output special case as its
-sibling BUT `set fn-delete-all to true` IS COMMENTED OUT AT L308 (and
-`move zero to access-type` at L309), so GL-Batch `Open-Output` does NOT truncate
-`GLBATCH-REC` on the RDB path - whereas `[common/acas008.cbl:L316]` is live and DOES
-truncate `PSIRSPOST-REC`. Preserved on both sides, never harmonised (R-4).
+A-NEW-8 - THREE SIBLING HANDLERS ALL SUBSTITUTE A DELETE-ALL ON `Open-Output`, AND
+WHAT IT REACHES DIFFERS PER TABLE. `[common/acas007.cbl:L305-L312]` carries the same
+open-output special case as its siblings BUT `set fn-delete-all to true` IS COMMENTED
+OUT AT L308 (and `move zero to access-type` at L309) - which leaves `fn-Open` with
+`fn-Output` intact as far as `ba015-Test-Ends` `[common/acas007.cbl:L622-L631]`, whose
+`[ Backup code ]` performs the bridge and then sets `fn-Delete-All` before falling
+through into the bridge again. MEASURED: GL-Batch `Open-Output` returns FS-Reply 0 /
+WE-Error 0 and EMPTIES `GLBATCH-REC` of every key strictly below its 999999 bound
+`[common/glbatchMT.cbl:L922,L933]`. `[common/acas008.cbl:L316]` is live and reaches the
+same paragraph in one call instead of two, but its bound is the key text `9999999999`
+while a bridge-written `PSIRSPOST-REC` key lands near 4.7e17, so THAT clear is a
+measured no-op for every row the bridge wrote. Preserved on all three sides, never
+harmonised (R-4); the measured table is the key-bound note under A-NEW-8 in
+`docs/migration/anomaly-log.md`, and §15.3 there records the correction of the earlier
+reading this docstring used to carry.
+
+NOTHING ON THIS ROUTE ASKS FOR EITHER `Open-Output`: the only one in the General
+Ledger family is `GL-Posting-Open-Output` in `gl080` `[general/gl080.cbl:L673]`, which
+belongs to `end_of_cycle_gl`. So the seeded batch row's survival here is the ABSENCE of
+the verb, not evidence about what it does.
 
 A-15 - THE BATCH-RECORD LENGTH CONTRADICTION, `[copybooks/wsbatch.cob:L7-L9]`
 verbatim:

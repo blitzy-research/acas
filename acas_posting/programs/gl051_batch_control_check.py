@@ -426,7 +426,7 @@ from acas_posting.records.gl_batch import (
 # written here - `WS-Ledger-Nos` and `Ledger-PC` - and only the reply is read back.
 from acas_posting.records.gl_ledger import WsLedgerKey, WsLedgerRecord
 
-from acas_posting.records.gl_posting import WsPostingRecord
+from acas_posting.records.gl_posting import WsPostingRecord, WsPostKey
 
 from acas_posting.records.maps03 import Maps03Ws
 
@@ -499,6 +499,13 @@ _INPUT_GROSS: Final = _from_record(BatchAmounts.FIELDS, "Input-Gross")
 _INPUT_VAT: Final = _from_record(BatchAmounts.FIELDS, "Input-Vat")
 _ACTUAL_GROSS: Final = _from_record(BatchAmounts.FIELDS, "Actual-Gross")
 _ACTUAL_VAT: Final = _from_record(BatchAmounts.FIELDS, "Actual-Vat")
+
+#: `05  Batch  pic 9(5).` [copybooks/wspost.cob:L15], needed as a SENDING descriptor
+#: because [general/gl051.cbl:L1029] compares it with `WS-Batch-Nos`, a field of the
+#: same picture, and a field-to-field relation between two unsigned zoned DISPLAY items
+#: is a comparison of their STORAGE - measured on the compiled oracle, and carried by
+#: `arithmetic.compare_zoned_display_fields`.
+_POST_BATCH: Final = _from_record(WsPostKey.FIELDS, "Batch")
 
 _POST_DR: Final = _from_record(WsPostingRecord.FIELDS, "Post-DR")
 _POST_CR: Final = _from_record(WsPostingRecord.FIELDS, "Post-CR")
@@ -1262,10 +1269,26 @@ def _loop(storage: _WorkingStorage, linkage: _HandlerLinkage) -> None:
 
         # 1028 else 1029 if batch not = WS-Batch-Nos 1030 go to loop. GO TO class 1 -
         # loop-back.
+        #  A STORAGE COMPARISON, MEASURED. Two unsigned zoned DISPLAY items of the same
+        # picture - `Batch` [copybooks/wspost.cob:L15] and `WS-Batch-Nos`
+        # [copybooks/wsbatch.cob:L19] - are compared BYTE-WISE by GnuCOBOL 3.2.0, and
+        # `Batch` arrives from the bridge holding bytes its picture cannot produce
+        # (ANOMALY N-KEY). So this guard discards every posting the database returns,
+        # whatever batch number the caller named, and none of them reaches the proof
+        # totals `end-batch` then compares. An algebraic comparison here would admit a
+        # posting on any run whose batch number happened to equal the corrupt key's
+        # tolerant reading, which the compiled program never does. The preceding
+        # `if batch = zero` [general/gl051.cbl:L1012] is the OTHER reading - an
+        # elementary item against the figurative constant, measured NUMERIC - and stays
+        # with `arithmetic.compare`, as does [general/gl051.cbl:L1016]'s
+        # `save-batch not = batch`, whose left operand is `pic 9(5) COMP`
+        # [general/gl051.cbl:L174] and therefore a different storage class.
         elif (
-            arithmetic.compare(
+            arithmetic.compare_zoned_display_fields(
                 linkage.posting.ws_post_key.batch,
                 linkage.batch.ws_batch_key.ws_batch_nos,
+                left_field=_POST_BATCH,
+                right_field=_WS_BATCH_NOS,
             )
             != 0
         ):

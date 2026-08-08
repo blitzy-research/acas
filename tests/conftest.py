@@ -1995,9 +1995,13 @@ IRS_INSTEAD_STATES: Final[tuple[str, str, str]] = (
 # in the prompt, `if WS-Reply not = "Y" and not = "N" / go to EOJ-q1` means AN EMPTY
 # REPLY LOOPS FOREVER. Answering "Y" performs `acas008-Open-Output`
 # [irs/irs030.cbl:L1720-L1724], and for this handler `fn-Open` with `fn-output` sets
-# `fn-delete-all` [common/acas008.cbl:L313-L319], which DELETES EVERY ROW of
-# PSIRSPOST-REC. So the answer changes table state, and any IRS scenario must both
-# pin it and list PSIRSPOST-REC among its affected tables. The trailing accept at
+# `fn-delete-all` [common/acas008.cbl:L313-L319], which the bridge issues as a delete
+# BOUNDED to keys strictly below the key text `9999999999`
+# [common/slpostingMT.cbl:L850-L891] - measured to reach no bridge-written key, so the
+# table is not emptied; see the key-bound note under A-NEW-8 in
+# docs/migration/anomaly-log.md. So the answer decides whether the statement is issued
+# at all, and any IRS scenario must both pin it and list PSIRSPOST-REC among its
+# affected tables. The trailing accept at
 # [irs/irs030.cbl:L1725-L1726] is pure acknowledgement and is dropped on the Python
 # side.
 #
@@ -4746,14 +4750,23 @@ def assert_autogen_tables_empty(connection: Any) -> None:
 #
 #  1  harness/reset_db.sh             "$S"  (schema + seed)
 #  2  harness/run_cobol_scenario.sh   "$S"  (every declared operation, in order)
-#  3  harness/dump_tables.py  --scenario N --side cobol  --scenario-file "$S"
+#  3  harness/dump_tables.py  --scenario N --side cobol  --all-in-scope --scenario-file "$S"
 #  4  harness/normalize.py    --scenario N --side cobol
 #  5  harness/reset_db.sh             "$S"  (the SAME fixture bytes)
 #  6  harness/run_python_scenario.sh  "$S"
-#  7  harness/dump_tables.py  --scenario N --side python --scenario-file "$S"
+#  7  harness/dump_tables.py  --scenario N --side python --all-in-scope --scenario-file "$S"
 #  8  harness/normalize.py    --scenario N --side python
 #  9  both captures declare themselves complete   (an in-driver check)
-#  10  harness/diff_states.py  --scenario N --scenario-file "$S"
+#  10  harness/diff_states.py  --scenario N --all-in-scope --scenario-file "$S"
+#
+#  THE TWO OPTIONS ON STAGES 3, 7 AND 10 ARE NOT ALTERNATIVES. `--all-in-scope' is the
+#  BOUND -- all 22 in-scope tables, for the `overrewrite.' reason stated above
+#  `capture_state' -- and `--scenario-file' is the PROVENANCE, whose sha256 becomes the
+#  `scenario_file_sha256' stage 10 requires present and EQUAL on both sides. Passing
+#  only the second NARROWS the bound to the scenario's declared effect, which is the
+#  debugging mode; passing only the first leaves the provenance field empty and stage 10
+#  refuses the pair. So both are passed together, here and in the hand-driven recipe
+#  (README section 11.1a). Only `--tables' and `--all-in-scope' are mutually exclusive.
 #
 #  The Agent Action Plan's EIGHT logical stages (section 0.3.2) become these ten by
 #  numbering both normalisations and the publication check instead of folding them in,
@@ -5735,8 +5748,20 @@ def assert_tables_unchanged_by_run(
             first, second = before.get(table), after.get(table)
             assert first is not None and second is not None, (
                 f"{run.scenario}: {table} is absent from the {side} side's "
-                f"{'pre' if first is None else 'post'}-run record. It is bounded by "
-                f"the scenario, so both records must carry it."
+                f"{'pre' if first is None else 'post'}-run record, so nothing about "
+                f"whether this run changed it has been established.\n"
+                f"  WHAT THE RECORD COVERS, which is what a caller must pass: the "
+                f"scenario's own declared `affected_tables` plus the menu-persisted "
+                f"parameter row, and nothing else. Both runners fingerprint exactly "
+                f"that set.\n"
+                f"  IT IS NOT `run.tables`. That is the 22-table COMPARISON bound, "
+                f"which is asserted side-to-side by the diff; asking the pre/post "
+                f"record about a table it never fingerprinted reports this missing "
+                f"record rather than an unchanged table. Pass "
+                f"`scenario_definition(scenario)['affected_tables']`, as "
+                f"tests/scenarios/test_empty_batch.py and "
+                f"test_mixed_accepted_rejected_batch.py do.\n"
+                f"  record: {before_path if first is None else after_path}"
             )
             assert first.readable and second.readable, (
                 f"{run.scenario}: {table} could not be read on the {side} side "

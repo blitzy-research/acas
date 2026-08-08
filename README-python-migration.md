@@ -212,8 +212,15 @@ Defects present in the compiled behaviour are part of the specification.
 
 **Consequence.** `docs/migration/anomaly-log.md` carries 22 canonical entries,
 each citing its locator and naming the Python module that reproduces it.
-**Fourteen are locked in by tests** so that a future well-intentioned
-correction fails the suite rather than passing unnoticed. The load-bearing ones
+**Fifteen are locked in by tests** — A-1 to A-11, A-13, A-14, A-19 and A-21, exactly
+the dagger set — so that a future well-intentioned correction fails the suite rather
+than passing unnoticed. Fifteen, not fourteen: A-6 gained a behaviour lock when
+`tests/arithmetic/test_comp_binary.py` began calling the migrated `acas008` directly
+and asserting the measured `WE-Error 988` / `FS-Reply 99` pair, which moved it out of
+the "state-level lock only" row it used to occupy. The register's census reconciles
+the whole set as 15 behaviour locks + 3 record-only locks (A-12, A-15, A-20) + 4 with
+no lock (A-16, A-17, A-18, A-22) = 22, and §1's figure says fifteen for the same
+reason. The load-bearing ones
 are reproduced with deliberate care: the missing terminating period stays a
 nested conditional and is explicitly not normalised against its three sibling
 programs; the credit-note average path's missing counter increment is left
@@ -398,8 +405,13 @@ most apparent omissions:
    parameter**, with the COBOL default preserved. The clearest case is the
    end-of-job question in the IRS posting section that decides whether the
    transfer file is cleared `[irs/irs030.cbl:L1715-L1724]`: answering yes
-   performs an open-output that deletes every row, so the answer is a genuine
-   input to the migrated program rather than decoration.
+   performs an open-output that this handler turns into a delete-all, so the
+   answer is a genuine input to the migrated program rather than decoration. What
+   that delete REACHES is bounded and measured to be nothing on this path — the
+   key-bound note under **A-NEW-8** in
+   [`docs/migration/anomaly-log.md`](docs/migration/anomaly-log.md) carries the
+   figures, and §15.3 there records the correction of the earlier reading — but
+   the answer still decides whether the statement is issued at all.
 3. **An `ACCEPT` that merely pauses for acknowledgement is dropped**, since its
    only effect is to block a terminal. Where such a prompt sits inside an error
    path that then transfers control, **the control transfer is preserved** and
@@ -471,7 +483,8 @@ eleven files plus `scenarios/` and such a driver is not among them, and §0.8.5'
 acceptance sequence is satisfied by the stages themselves. Every gate such a driver
 would uniquely own lives in the stage that owns the state it protects, and the
 orchestration was already implemented in `tests/conftest.py` — §11.1 tabulates
-where each went, and §11.1a is the operator's own ten-stage recipe.
+where each went, and §11.1's operator contract carries the operator's own
+ten-stage recipe.
 
 **What was NOT retained on this reasoning.** The same review flagged
 `requirements-harness.txt` and `requirements-dev.txt`, and those were **removed**,
@@ -536,6 +549,22 @@ Plan §0.3.1 fixes it at `data_dictionary/`, so it is neither relocated into the
 package by a `package-dir` mapping nor carried as `package-data`, and
 `acas_posting/dictionary/loader.py` resolves exactly that committed path. One
 artifact, one location, no possibility of two copies disagreeing.
+
+**The sdist carries two `README` files, and that is left alone deliberately.** `python -m
+build` produces a source distribution as well as a wheel, and setuptools' default rule
+sweeps every top-level `README*` into it — so the sdist holds the migration's own
+`README-python-migration.md` **and** the maintainer's `README`, the COBOL system's
+readme. R-1 governs what the *shipped package* may contain, and the wheel is clean
+(93 entries, `acas_posting/` plus `dist-info`, zero `README*`); the sdist additionally
+carries no `.cbl`, `.cob`, `.scb` or `.sql` member at all, and `readme =
+"README-python-migration.md"` means `PKG-INFO`'s long description is the migration's
+document rather than the maintainer's. Excluding the file would take a `MANIFEST.in`,
+which would add a **new tracked path** to a tree the completeness review fixed at exactly
+the 141 the Agent Action Plan names plus the two ignore files it discloses (§17.2 of
+[traceability.md](docs/migration/traceability.md)) — and the only other route, renaming or
+moving the maintainer's file, is forbidden outright by AAP §0.8.1. A plain text file
+naming the system this work migrates is legitimate provenance for a source
+distribution, so the cost is not paid.
 
 So neither mode ships: both belong to harness files, which is what R-1
 requires of them. **The connection-parameter resolver is not among them.** It is
@@ -967,10 +996,20 @@ piped stage would appear to hang. Redirect stdin from `/dev/null` as well when a
 command is backgrounded.
 
 **`ACAS_SEED_AUTOCOMMIT=on` is REQUIRED to obtain a fixture, and it is a
-declared deviation from the AAP.** The default is the AAP-mandated `off` (§9.4), and
-without this flag every seeding stage — `harness/seed.sh`, `harness/reset_db.sh` and
-therefore protocol stages 1 and 5 — exits **76**, "the seed reported success
-and left no rows". That is not a harness bug: it is the reproduced legacy defect. The frozen loaders
+declared deviation from the AAP.** The default is the AAP-mandated `off` (§9.4),
+and without this flag a seeding stage that starts from an empty database exits
+**76**, "the seed reported success and left no rows". Measured on this checkout,
+per stage, because the blanket phrasing "every seeding stage exits 76" is not
+quite true and the two exceptions matter to an operator:
+
+| Invocation, with `ACAS_SEED_AUTOCOMMIT` unset | Measured | Why |
+| --- | --- | --- |
+| `harness/reset_db.sh …` — and therefore protocol **stages 1 and 5** | **exit 76** | It re-applies the frozen schema first, so the loaders always run against empty tables and the durability gate always measures zero. This is the case that matters: the protocol cannot proceed without the flag. |
+| `harness/seed.sh …` against an **empty** database | **exit 76** | Same gate, same measurement. |
+| `harness/seed.sh …` against an **already-populated** database | **exit 0** — having persisted **nothing** | The gate counts the rows *present* in the tables the loaders wrote, not the rows those loaders added, so rows left by an earlier durable seed satisfy it. Measured: seed durably, count (8 rows across the 7 tables), re-run with the variable unset — seven loaders return 0, the script exits 0, and the counts are **byte-for-byte the same 8 rows**, so the second run's writes were discarded exactly as the defect predicts. Nothing in the protocol reaches this state (stages 1 and 5 both go through `reset_db.sh`, which re-applies the schema first), but a hand-run `seed.sh` can, and its success then means only "these tables are not empty". |
+| `harness/seed.sh --build-fixtures` | **exit 0** | A different mode: it writes the flat-file fixtures and runs no load program, so there is no seeded state to measure and the gate reports "no load program ran". |
+
+The refusal is not a harness bug: it is the reproduced legacy defect. The frozen loaders
 reach **no** `COMMIT` and **no** `ROLLBACK` — across all 28 `common/*LD.cbl`
 every `perform aa020-Rollback` is commented out, 78 sites and none live, and
 `perform aa030-Commit` occurs exactly once anywhere, at
@@ -998,6 +1037,24 @@ $C /repo/harness/build_oracle.sh --no-refresh
 $C /repo/harness/build_oracle.sh --from 4
 $C /repo/harness/build_oracle.sh --help
 ```
+
+**Those two flags are not interchangeable, and only one of them leaves an oracle
+you can produce evidence with.** `--no-refresh` still runs all five steps, so it
+finishes by republishing the attestation and the result is a usable oracle —
+measured on this checkout, `--no-refresh` after a full build exits `0` and the
+following stage 1 exits `0`. `--from N` and `--only N` **stop before
+finalisation and publish no attestation at all** (§8.9), which is the honest
+outcome for a half-built tree but has a consequence worth stating here rather
+than only where the attestation is described: steps 4 and 5 recompile the
+modules, so the attestation *left behind by the previous build* now describes a
+module set that no longer exists, and `harness/reset_db.sh` re-derives that
+digest from the modules on disk and **refuses the oracle before it drops a
+single table**. Measured: `--from 5` exits `0`, and the next stage 1 exits **81**
+with `THE COMPILED MODULES DO NOT MATCH THE ATTESTATION`, quoting both digests.
+**The way back is a full build** — `build_oracle.sh`, or
+`build_oracle.sh --no-refresh` if you want to keep the tree; either republishes
+the attestation and stage 1 then exits `0`. So use `--from`/`--only` to debug a
+step, never as the last build before a comparison.
 
 ### 8.3 What the five steps are
 
@@ -1736,6 +1793,28 @@ python -m acas_posting irs      post           --help
 
 Each route is also directly runnable as
 `python -m acas_posting.cli.<module>`, and the two forms return the same status.
+
+**One process per run unit, and that is a faithfulness property rather than a
+limitation.** A COBOL sub-program's `WORKING-STORAGE` survives between `CALL`s for
+as long as the module stays loaded, and each bridge keeps its host-variable group
+and its cursor state there. The data-access modules mirror that with module-level
+working storage, so anything a bridge left behind — a host-variable group, an open
+connection, a cursor position, the sentinel a delete-all wrote into the caller's key
+— is still there on the next call **in the same process**, exactly as the compiled
+system leaves it. The harness therefore runs each route as its own `python -m`
+invocation, and any other driver must do the same: two runs of a scenario inside one
+process are not two runs of the frozen system, and a driver that reuses a process
+will read the first run's leftovers as if they were seeded state. Nor is there a
+reset to reach for instead: enumerated over the seventeen handler modules, **eleven
+publish some reset helper and six publish none**, the eleven spread across nine
+different names (`reset_working_storage`, `reset_handler_state`,
+`reset_handler_storage`, `reset_session`, `reset_module_state`,
+`reset_bridge_storage`, `reset_bridge_state`, `reset_record_size_gate`, `reset`), and
+not one of them resets another handler. That spread is itself faithful — the frozen
+handlers have no shared teardown either — so **a fresh process is the supported way
+to start clean**, and `harness/run_python_scenario.sh` invokes
+`"$ACAS_PY_PYTHON" -m "$module"` once per route for exactly this reason.
+
 What each dispatches:
 
 | Route module | Dispatches | Derived from |
@@ -1766,7 +1845,18 @@ behaviour change (R-4).
 | `sales cash-post` | `--run-date`, **`--ok-to-post` / `--no-ok-to-post`** | none — the switch has **no default at all**, so the command exits `2` without it. The frozen prompt is `[sales/sl100.cbl:L311-L319]`: it accepts at `L314`, exits on `"NO"` at `L316-L317` and **re-prompts on anything that is not `"YES"`** at `L318-L319`, so a blank answer neither proceeds nor declines. It sits before the first `OTM3-Open` at `L321`, so declining reaches no file at all |
 | `purchase order-post` | `--run-date` | — |
 | `purchase payment-post` | `--run-date`, **`--ok-to-post` / `--no-ok-to-post`** | as above, from `[purchase/pl100.cbl:L303-L311]`: accept at `L306`, exit on `"NO"` at `L308-L309`, re-prompt on anything not `"YES"` at `L310-L311`, and the first `Purch-Open` only at `L313` |
-| `irs post` | `--run-date`, **`--clear-posting-file` / `--no-clear-posting-file`** | none. `--clear-posting-file` **truncates the transfer table**: `[irs/irs030.cbl:L1720-L1724]` opens it for output, which the handler implements as *delete every row*. The accept at `[irs/irs030.cbl:L1717]` carries no `WITH UPDATE`, so the `[Y]` in the prompt is display text and a bare Enter re-prompts — which is exactly why there is no default here either |
+| `irs post` | `--run-date`, **`--clear-posting-file` / `--no-clear-posting-file`** | none. `--clear-posting-file` **issues a delete against the transfer table**: `[irs/irs030.cbl:L1720-L1724]` opens it for output, which the handler implements as a *delete-all*. That delete is BOUNDED and is measured to remove no row the bridge itself wrote — see the key-bound note under **A-NEW-8** in [`docs/migration/anomaly-log.md`](docs/migration/anomaly-log.md) — but the answer still decides whether the statement is issued. The accept at `[irs/irs030.cbl:L1717]` carries no `WITH UPDATE`, so the `[Y]` in the prompt is display text and a bare Enter re-prompts — which is exactly why there is no default here either |
+
+**Every route below needs the six-parameter connection contract of §10.2a in its
+environment, and that is a prerequisite of the command rather than of the write.** The
+options table above is complete for `argv`; the connection is not on `argv` at all. Run
+these inside the `gnucobol` service — `harness/docker-compose.yml` sets all six for it —
+or export `ACAS_DB_HOST`, `ACAS_DB_USER`, `ACAS_DB_PASSWORD`, `ACAS_DB_NAME`,
+`ACAS_DB_PORT` and `ACAS_DB_SOCKET` first. With none of them set, a route exits **8**
+before it reaches any file: measured on a host carrying only the §7 install, the
+declining form below exits `8` and names the remedy in its own error, and **no table is
+touched** — so its "reaches no file and no write" property holds, but its exit status is
+`8` rather than `0` and the run did not get as far as the decision the flag expresses.
 
 A worked pair, safe form first:
 
@@ -1951,6 +2041,68 @@ construction, so the **control-total mismatch scenario is
 General-Ledger-specific**. There is no meaningful way to construct an unbalanced
 sales batch.
 
+### 10.6 What a route writes, and where — the observability contract
+
+Every one of the seven routes has the same output contract, and it is worth stating
+because the interesting half of it is what is *absent*.
+
+**stdout is empty. Always, on every route, at every log level, whether the run
+succeeds or fails.** Measured: 0 bytes. The frozen programs' `DISPLAY … AT` output
+was a curses screen and has no place in a batch process's stdout (§4), so nothing
+replaced it. The route's result is its **exit status**, which is `WS-Term-Code`
+itself (§10.2).
+
+**Diagnostics go to stderr, as `logging` records, through the package's single
+`logging.basicConfig`.** `--log-level` filters them — `DEBUG`, `INFO` (the
+default), `WARNING`, `ERROR`, `CRITICAL` — and it filters records only: it cannot
+change the exit status, and it cannot change one row of what the run writes to the
+database. That is asserted rather than asserted-to: the same scenario driven at
+`DEBUG` and at `CRITICAL` leaves five table digests identical.
+
+**Two consequences an operator should be told about rather than discover.**
+
+1. **At `--log-level CRITICAL` a failing run explains nothing at all.** Measured on
+   a run given a wrong database password: exit **8**, stdout 0 bytes and stderr
+   **0 bytes**. That is the contract working — a level is a filter and the package
+   does not smuggle a message past it — but it means the **exit status is the only
+   failure signal at that level**. Run at the default level, the same failure
+   reports its `FS-Reply`, `We-Error`, `SQLSTATE`, driver errno and error category,
+   with the credential and the server identity redacted. Do not diagnose at
+   `CRITICAL`.
+
+2. **The pinned driver emits its own records into the same stderr, and they are not
+   this migration's output.** At the default level `mysql-connector-python` logs
+   several `INFO mysql.connector:` records while it selects an authentication
+   plugin — `plugin_name: mysql_native_password` among them, so the server's auth
+   plugin appears in the log. Harmless, and *not* something the package suppresses:
+   `configure_logging` claims the root logger only when it installed the handler
+   itself, and reaching into a third-party logger's level would be this package
+   reconfiguring logging it does not own. Silence them from the host instead, which
+   keeps the decision where the ownership is:
+
+   ```python
+   import logging
+   logging.getLogger("mysql.connector").setLevel(logging.WARNING)
+   ```
+
+   or run the route at `--log-level WARNING`, which filters them along with
+   everything else at `INFO`.
+
+**Nothing is written to a file.** The package opens no log file, adds no handler
+beyond the one `basicConfig` installs, and emits no telemetry off the host — R-3
+forbids added externally visible behaviour, and a log file the frozen programs
+never wrote would be exactly that. Everything a run produces, other than its
+database effect, is the stderr stream and the exit status.
+
+**Three things the container itself logs, which are not the cycle's output
+either.** MariaDB records its own `Access denied for user` line in the server error
+log when a credential is rejected; the oracle build reports that it is using
+plaintext transport to a non-local server (`ACAS_DB_ALLOW_PLAINTEXT=1`, which
+`harness/docker-compose.yml` sets for the private Compose network) and that
+`ldconfig` needs root it does not have inside the image. All three are
+container-configuration facts, all three are visible in the harness logs, and none
+of them is produced by `acas_posting`.
+
 ---
 
 ## 11. Diffing state — the verification protocol
@@ -2099,32 +2251,64 @@ not show a difference in anything the scenario did not expect to move. AAP §0.8
 makes an empty diff **the** pass condition, so the narrower bound would let a
 scenario certify parity while a system row differed.
 
+**A `-e` flag is only accepted BEFORE the service name**, so the run id cannot be
+appended to §8.1's `$C` — `docker compose run … gnucobol -e ACAS_PARITY_RUN_ID=…`
+makes compose try to *execute* `-e` and fails with `executable file not found in
+$PATH`. The two protocol runners below therefore carry their `-e` flags in full
+rather than wrapping `$C`; `$C` itself stays exactly as §8.1 defines it and is what
+every non-protocol command in this document uses.
+
 ```bash
 N=clean_batch_gl
 S="/repo/harness/scenarios/$N.yaml"
 R="parity-$(date -u +%Y%m%dT%H%M%SZ)"     # ONE id for all ten stages
 D="/data/$N"                              # the per-scenario staged data
-P="-e ACAS_PARITY_RUN_ID=$R"              # every stage
-Q="$P -e ACAS_DATA=$D -e ACAS_LEDGERS=$D" # the two RUN stages, additionally
+
+# `docker compose run' takes its OPTIONS BEFORE the service name, so the per-stage
+# -e settings cannot be appended to $C -- $C already ends in `gnucobol', and anything
+# after a service name is the COMMAND. So the two prefixes below are COMPLETE
+# runners that each end in the service name, and every stage is written `$CP …' or
+# `$CR …' rather than `$C …'.
+
+# every stage: the one run id
+CP="docker compose -f harness/docker-compose.yml run --rm -T \
+      -e ACAS_SEED_AUTOCOMMIT=on -e ACAS_PARITY_RUN_ID=$R gnucobol"
+# the two RUN stages, additionally: the per-scenario staged data
+CR="docker compose -f harness/docker-compose.yml run --rm -T \
+      -e ACAS_SEED_AUTOCOMMIT=on -e ACAS_PARITY_RUN_ID=$R \
+      -e ACAS_DATA=$D -e ACAS_LEDGERS=$D gnucobol"
 
 # 1  reset the schema and seed the scenario
-$C $P /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$CP /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
 # 2  run the compiled COBOL cycle
-$C $Q /repo/harness/run_cobol_scenario.sh "$S"
+$CR /repo/harness/run_cobol_scenario.sh "$S"
 # 3  capture the COBOL state          4  normalise it
-$C $P python3 /repo/harness/dump_tables.py --scenario "$N" --side cobol --all-in-scope --scenario-file "$S"
-$C $P python3 /repo/harness/normalize.py   --scenario "$N" --side cobol
+$CP python3 /repo/harness/dump_tables.py --scenario "$N" --side cobol --all-in-scope --scenario-file "$S"
+$CP python3 /repo/harness/normalize.py   --scenario "$N" --side cobol
 # 5  reset and RE-SEED the same scenario
-$C $P /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
+$CP /repo/harness/reset_db.sh --seed-dir "/data/fixtures/$N" "$S"
 # 6  run the migrated Python cycle
-$C $Q /repo/harness/run_python_scenario.sh "$S"
+$CR /repo/harness/run_python_scenario.sh "$S"
 # 7  capture the Python state         8  normalise it
-$C $P python3 /repo/harness/dump_tables.py --scenario "$N" --side python --all-in-scope --scenario-file "$S"
-$C $P python3 /repo/harness/normalize.py   --scenario "$N" --side python
+$CP python3 /repo/harness/dump_tables.py --scenario "$N" --side python --all-in-scope --scenario-file "$S"
+$CP python3 /repo/harness/normalize.py   --scenario "$N" --side python
 # 9  and 10: the comparison verifies both captures are published before it compares
 #     a single row, so stage 9 is enforced by stage 10 rather than skipped
-$C $P python3 /repo/harness/diff_states.py --scenario "$N" --all-in-scope --scenario-file "$S"
+$CP python3 /repo/harness/diff_states.py --scenario "$N" --all-in-scope --scenario-file "$S"
 ```
+
+**On THIS checkout stages 1 and 5 need `--accept-transformed-oracle` as well**, and
+that is not a detail a reader should have to reconstruct: the frozen build fails with
+exit 74 because a frozen copybook member is missing (§8.7), so the only obtainable
+oracle is the diagnostic one and `reset_db.sh` refuses it as evidence with exit **77
+— EVIDENCE UNAVAILABLE** until the flag acknowledges it (§8.9). Add it to both reset
+stages — the **flag**, not the environment variable: `ACAS_ACCEPT_TRANSFORMED_ORACLE=1`
+is read only by `tests/conftest.py`, which translates it into that same flag for the
+composed protocol as described earlier in this section. Every verdict such a run
+prints is marked **NO PARITY CLAIM** — the honest label, not a formality. Driven
+exactly this way, all ten stages exit `0` and stage 10 publishes `verdict.json` with
+`"outcome": "identical"`, `"tables_compared": 22`, `"tables_differing": 0` and a
+zero-byte `diff.txt`.
 
 **Stage 9 has no command of its own by design.** `harness/diff_states.py` calls the
 same `verify_trees` check before it compares anything and exits `2` rather than `0`
@@ -2244,6 +2428,19 @@ merely intended:
 | It cannot be shared with, or destroyed by, a sibling clone | The name is `acas-harness-${CLONE_INDEX}-out`, and `CLONE_INDEX` is a **required** variable — Compose refuses to start without it rather than defaulting to a name another run owns |
 | Nothing rotates, prunes or expires it | Deliberate. A verdict cannot be re-derived by re-reading the tree; it can only be re-produced by re-running the protocol against the same seed and the same oracle. Automatic deletion would therefore destroy evidence, not tidy it |
 
+**A tree is keyed by SCENARIO, not by run id, so re-running a scenario OVERWRITES it.**
+`ACAS_PARITY_RUN_ID` binds the ten stages of one attempt together and is recorded in
+every manifest and in `verdict.json`; it does not appear in the path. So a second run of
+the same scenario replaces the first tree whatever id it carries, including a reused
+one — which is what makes the retention rule below a rule about citations rather than
+about accumulation. That is deliberate for a *sequential* re-run and safe, because the
+superseded tree can be re-produced from the same seed and oracle. Two runs at the same
+time are a different matter and are refused rather than interleaved: `reset_db.sh` takes
+an `O_EXCL` lock outside the checkout and exits **88** — *"another harness/reset_db.sh
+(pid N) is already resetting ACASDB. Resets are strictly sequential (R-3)"* — so two
+attempts can never write one tree between them. Copy a tree aside before re-running if
+its digests are cited anywhere.
+
 **Retention period.** Keep a scenario's tree **for as long as any document cites
 it**. In this repository the citing document is
 [`docs/migration/scenario-diff-evidence.md`](docs/migration/scenario-diff-evidence.md),
@@ -2298,7 +2495,7 @@ No tie-breaking logic, no timestamp masking, no surrogate-key remapping.
 
 THE COMPARISON IS BOUNDED BY ALL 22 IN-SCOPE TABLES. Pass `--all-in-scope` to
 both `dump_tables.py` (stages 3 and 7) and `diff_states.py` (stage 10);
-the recipe in §11.1a and `tests/conftest.py` both do. A scenario's
+the recipe in §11.1 and `tests/conftest.py` both do. A scenario's
 `affected_tables` is its **declared effect**, which the runners assert against —
 it is *not* the bound, because a bound drawn from what a scenario expects to move
 cannot show a difference in anything it did not expect to move, and an empty diff
@@ -2350,6 +2547,27 @@ It does **not** make different stored values compare equal. That is the point of
 keeping the list to three: because the normaliser cannot hide a difference, **a
 non-empty diff is always a real behavioural difference and never an artefact of
 the comparison.**
+
+**Job 3 renders each allow-listed column in the form that column declares, and it
+neither expands nor contracts a component.** Five columns are allow-listed, each
+with one declared form: the `char(8)` `NN/NN/NN` date — `GLPOSTING-REC.POST-DAT`,
+`IRSPOSTING-REC.POST4-DAT`, `PSIRSPOST-REC.IRS-POST-DAT` — and the `char(4)`
+all-digit period, `SALEDGER-REC.SALES-STATS-DATE` and
+`SYSTEM-REC.STATS-DATE-PERIOD`. Those are the two forms the schema stores side by
+side, and each column is rebuilt from its parsed components so its rendering is
+canonical by construction.
+
+A value that does not match its column's declared form is therefore **left exactly
+as found and reported as a finding** — measured: `21/09/2025` in `POST-DAT`
+survives unchanged and is recorded under category `wrong-length`, with the value
+itself withheld from stderr and written to the 0600 findings report. That is
+deliberate and it is the safe direction. Whether a four-digit year in an
+eight-character field should be read as a year or as a truncation is a question
+about what the compiled program does, which rule **R-6** reserves for the oracle
+and the ambiguity register; a normaliser that "fixed" it would be erasing a
+difference the diff exists to show, and §11.3's guarantee above would stop being
+true. Nothing is silently ignored either: the finding names the table, the column
+and the category, and the run says how many it recorded.
 
 ### 11.4 State fingerprints — the bound that is not a dump
 
@@ -2541,9 +2759,28 @@ is out of scope.
 
 ### 12.2 The scenario tier — the state-parity proof
 
+**`python3`, not `python`, in every in-container command.** The interpreter naming
+differs on the two sides of the boundary and it is not a stylistic choice: on the host
+a 3.12 virtual environment publishes `python`, while inside the image
+`harness/Dockerfile.gnucobol` installs Ubuntu's `python3` and there is **no** `python`
+on `PATH` at all — `command -v python` returns nothing, so `sh -lc 'python -m pytest …'`
+exits **127** with `python: not found` before a single test is collected. Host commands
+in this document therefore read `python`, and container commands read `python3`.
+`-p no:cacheprovider` is added because `/repo` is mounted read-only, so pytest cannot
+write its cache directory there.
+
 ```bash
-$C sh -lc 'cd /repo && python -m pytest -m scenario'
+$C sh -lc 'cd /repo && python3 -m pytest -p no:cacheprovider -m scenario'
 ```
+
+**Read the skip count, not just the exit status.** On this checkout the only obtainable
+oracle is the diagnostic build (§8.7), and `tests/conftest.py` will not run a
+stack-bound tier against one unless `ACAS_ACCEPT_TRANSFORMED_ORACLE=1` is set — it
+**skips** instead. So the command above, run with §8.1's `$C` alone, exits `0` with
+**35 passed, 71 skipped**, and an exit status read on its own would look like a
+passing tier. With the acknowledgement added it reads **106 passed**. The combined
+invocation at the end of §12.3 shows the flag in place; the same applies to §12.3's
+determinism command.
 
 Each asserts an empty normalised diff for one scenario. There are **eight**, and they
 are exactly the eight AAP §0.8.5 mandates — the committed count and the mandated count
@@ -2594,7 +2831,7 @@ and the removed definition's design is described in
 ### 12.3 The determinism tier
 
 ```bash
-$C sh -lc 'cd /repo && python -m pytest -m determinism'
+$C sh -lc 'cd /repo && python3 -m pytest -p no:cacheprovider -m determinism'
 ```
 
 Two Python runs of one scenario under the same pinned clock must produce
@@ -2602,11 +2839,20 @@ byte-identical dumps. Determinism follows from §10.4 plus §11.2: there is no
 hidden time source, no random seed, and no ordering nondeterminism from a
 secondary index.
 
-Both stack-backed tiers together:
+Both stack-backed tiers together — and on this checkout the transformed-oracle
+acknowledgement has to travel with them, or `tests/conftest.py` skips both tiers
+rather than running them against a diagnostic build:
 
 ```bash
-$C sh -lc 'cd /repo && python -m pytest -m "scenario or determinism"'
+docker compose -f harness/docker-compose.yml run --rm -T \
+  -e ACAS_SEED_AUTOCOMMIT=on -e ACAS_ACCEPT_TRANSFORMED_ORACLE=1 gnucobol \
+  sh -lc 'cd /repo && python3 -m pytest -p no:cacheprovider -m "scenario or determinism"'
 ```
+
+Measured that way: **114 passed, 1222 deselected**, exit `0` — **106** scenario tests
+and **8** determinism tests, every scenario reaching stage 10 with an empty diff over
+all 22 in-scope tables, and every verdict marked NO PARITY CLAIM because the oracle is
+the diagnostic build (§8.7).
 
 Everything a bare host can run, which is the useful form while developing:
 
@@ -2640,13 +2886,49 @@ CPython 3.12.13:
 
 | | |
 |---|---|
-| Tests run | **1,219 passed**, 114 deselected (the stack-backed tiers) |
+| Tests run | **1,229 passed**, 114 deselected (the stack-backed tiers) |
 | `acas_posting` modules measured | **89 of 89** |
 | Modules with **zero** coverage | **0** |
 | Modules at 100 % | 18 |
-| Statements | 15,293 of 31,865 |
-| Branches | 1,529 of 6,874 |
-| Overall, branch-inclusive | **43.4 %** |
+| Statements | 16,484 of 31,842 |
+| Branches | 2,190 of 6,864 |
+| Overall, branch-inclusive | **48.25 %** |
+
+**COVERAGE CANNOT SEE THE MIGRATED CYCLE, AND THAT IS A PROPERTY OF THE PROTOCOL
+RATHER THAN A GAP TO CLOSE.** Measured in the container, same command with the
+stack-backed tiers included — all eight scenarios and both determinism runs, 1,343
+passed — the figure moves from **48.25 %** to **48.29 %**: fifteen statements and
+four branch outcomes. It is not that those tiers exercise nothing; it is that
+`harness/run_python_scenario.sh` drives the cycle as a SEPARATE PROCESS, which is what
+the protocol requires — the runner scripts are the only actors at stages 2 and 6, and
+the Python side must be driven exactly as the compiled side is. A child process is
+outside the parent's instrumentation unless `COVERAGE_PROCESS_START` and a parallel data
+file are arranged for it, which the shipped configuration deliberately does not do:
+enabling it by default would put a writer into the one run whose value is being
+byte-identical twice over (§12.3).
+
+**So the reachability instrument for the cycle is not the coverage artifact.** Three
+things evidence it instead, and each is stronger than a line count: the runner's own
+per-operation dispositions and its pre/post state fingerprints, which say what ran and
+what it changed; the **empty diff itself** over all 22 in-scope tables, which no run
+that never reached the database can produce; and **mutation probes** — perturb a shipped
+paragraph, re-drive the scenario, and watch a named node fail. A number that rises when
+a subprocess is instrumented would say less than any of them.
+
+**If you want subprocess-inclusive coverage for a diagnostic run**, it is available
+without changing the committed configuration: set `COVERAGE_PROCESS_START` to this
+`pyproject.toml`, add `parallel = true` to a private rcfile, and combine afterwards. Do
+not read a parity verdict from that run — it is diagnostic, and the cycle it measured
+carried an instrumentation hook the frozen side did not.
+
+**One operator trap, measured.** Inside the container `/repo` is mounted READ-ONLY, so
+`--cov` fails with `OSError: [Errno 30] Read-only file system: '/repo/.coverage'` unless
+`COVERAGE_FILE` points somewhere writable — `/out` is the natural choice:
+
+```bash
+$C -e COVERAGE_FILE=/out/cov/.coverage sh -lc \
+   'mkdir -p /out/cov && cd /repo && python3 -m pytest -m arithmetic --cov --cov-branch'
+```
 
 **What that number is, and is not.** Every figure above is re-measured against the
 tree as it stands rather than carried forward, because two of them are sensitive to
@@ -2655,27 +2937,39 @@ files changes the deselection arithmetic, and keeping the connection-parameter
 resolver inside `cli/args.py` rather than in a module of its own changes the module
 count.
 
-**NO MODULE IS AT ZERO.** The lowest is the dictionary **generator**, reached at
-**24 %** by the merged deployment-contract group, which reads it to close the
-traceability census. Its own exercise is still the one that matters, because the
-generator's job is to be *run*:
+**NO MODULE IS AT ZERO, AND THE GENERATOR IS NOW RUN BY THE SUITE.** It used to be
+the one module the tests only READ: measured at 0.0 % of its statements while 163 nodes
+validated the artifact it produces, so a generator regression would have shown up as an
+unexplained diff the next time someone regenerated by hand. `tests/arithmetic/
+test_pic_field_descriptors.py::test_the_committed_dictionary_is_reproducible_from_the_
+frozen_sources` now calls `generate.main(["--check"])` in process — which re-parses the
+frozen bridges, copybooks and schema, compares against the committed file and **writes
+nothing** — in both invocation shapes, and asserts the exit-3 direction as well so exit
+0 is not the only outcome the tool can produce. Measured: the generator comes out at
+**90 %** of its 1,707 statements from the arithmetic tier alone.
+
+By hand, which is still the right thing to do after touching it:
 
 ```bash
+python -m acas_posting.dictionary.generate --check
 python -m coverage run -m acas_posting.dictionary.generate --check
 python -m coverage report --include='acas_posting/dictionary/generate.py'
 ```
 
-Measured: `--check` exits **0** — the committed artifact is byte-reproducible
-from the frozen sources — and the generator itself comes out at **90 %** of
-1,707 statements with branch coverage on.
+Measured: `--check` exits **0** — the committed artifact is byte-reproducible from the
+frozen sources. `--repo-root <root>` on its own is now sufficient too: `--output`
+defaults relative to the root it was given, where it previously defaulted beside the
+INSTALLED package, so from a wheel install `--repo-root /repo` parsed the right sources
+and then compared against the wrong tree.
 
 Every module in the package is now reached by the infrastructure-free tier,
 which is the R-5 claim being evidenced: the traced modules are exercised, not
-merely present. The 43.4 % is a *branch-inclusive* figure over a package whose
+merely present. The 48.25 % is a *branch-inclusive* figure over a package whose
 program modules are dominated by paths a state comparison drives rather than a
 unit test — the scenario and determinism tiers, which this host cannot run and
-which are therefore deselected above. Reading it as a quality score would be
-reading it as the gate it is deliberately not.
+which are therefore deselected above, and which add only fifteen statements even
+when they DO run, for the subprocess reason recorded above. Reading it as a
+quality score would be reading it as the gate it is deliberately not.
 
 Execution is never randomised and never parallelised. Posting order is
 load-bearing and the comparison is order-sensitive, so no `xdist`, no
@@ -2936,6 +3230,84 @@ cannot gain an index, no caching layer may be introduced, and statement ordering
 must match the original because the state diff is sensitive to it.
 Exact-decimal arithmetic is inherently slower than binary floating point, **and
 that trade is accepted without qualification.**
+
+### 14.1 Two operating limits, for whoever sizes a deployment
+
+Neither of the two below is a defect and neither may be "fixed" — both are
+faithful to the compiled program, and changing either would be an added
+behaviour under R-3 and R-4. They are recorded here because they are the two
+places where *operating* a run needs knowledge that the code cannot supply, and
+because in both the failure mode is silent or misleading rather than loud.
+
+**A sequential read buffers the WHOLE result, so memory is set by row count and
+the ceiling is per table.** `Mysql-1220-Store-Result` pulls every qualifying row
+to the client before `MySQL_num_rows` counts it and `MySQL_fetch_record` walks it
+`[copybooks/mysql-procedures.cpy:L187-L192]`, and every `ba040-Process-Read-Next`
+in the bridges is built on that sequence
+`[common/glpostingMT.cbl:L448]`. `acas_posting/dal/cursor_state.py::_store_result`
+reproduces it exactly, draining the driver in a loop rather than widening the
+protocol with `fetchall`. So **"`READ NEXT` fetches one row" is true of
+*delivery* and false of *transport*** — the caller sees one record at a time, and
+the process is holding all of them.
+
+*Measured end to end on the real path*, by driving `gl_end_of_cycle` over a
+`GLPOSTING-REC` multiplied to three sizes and reading the process's peak RSS:
+
+| `GLPOSTING-REC` rows | peak RSS | implied slope |
+| ---: | ---: | --- |
+| 1,001 | 40.5 MiB | — |
+| 20,001 | 80.2 MiB | 2.14 KiB/row against the point above |
+| 60,001 | 167.1 MiB | 2.22 KiB/row against the point above |
+
+The two independent slopes agree within 4 % across a 60× row range, so the model
+is **linear with a fixed base**: about **38 MiB of base plus ~2.2 KiB per
+`GLPOSTING-REC` row**. Under a 4 GiB container limit that puts a single
+sequentially-read `GLPOSTING-REC` at roughly **1.9 million rows**. A separate
+reading of the transport alone — a genuine 60,001-row fetch through the same
+driver — cost 1.45 KiB/row, i.e. the majority of the 2.2, with the remainder in
+the record decode.
+
+**Size against the widest table a route traverses, not against that number.** The
+cost per row scales with the row's width, and `GLPOSTING-REC` is a 14-column
+table; `SALEDGER-REC` has 37 columns and `SAINVOICE-REC` 31. An independent
+measurement at this checkpoint put `SAINVOICE-REC` at ~4.5 kB per row end to end,
+validated at 100,003 rows against a linear model accurate to 2 %, which gives a
+ceiling near **870,000 rows** — attributed here as a third-party figure rather
+than one of ours, and it is the conservative end of the observed range and
+therefore the one to plan with. **The failure mode at the ceiling is an OOM
+kill, not a graceful error**, so a run that is sized wrong does not report a
+capacity problem: it disappears. A `LIMIT`, a server-side cursor or a chunked
+read would each be a disposition the compiled program does not have.
+
+**Exit status cannot distinguish a complete run from a connection-truncated one.**
+Every bridge maps *any* driver failure on a sequential read onto end-of-file:
+after the duplicate-key check, two unconditional moves overwrite whatever
+`Mysql-1100-Db-Error` had set, leaving `FS-Reply` and `WE-Error` at 10 and the key
+field reading `"No Data"` `[common/glpostingMT.cbl:L505-L509]`. A lost connection
+is therefore indistinguishable from a clean end of file, the traversal ends
+normally, the route completes, and **the process exits 0** having posted only part
+of its work. The migration reproduces this at
+`acas_posting/dal/cursor_state.py` and `acas_posting/dal/acas012_sales.py`, under
+the identifier **`A-CURSOR-11`** (declared with its family in
+[`docs/migration/anomaly-log.md`](docs/migration/anomaly-log.md) §15.2).
+
+*The operating consequence, stated plainly:* **read the log, not the exit code.**
+The masking is not silent in the migration even though it is silent in the
+compiled program — every occurrence writes one record at **ERROR** carrying the
+frozen locator, the driver's `errno` and SQLSTATE, and the status pair that will
+actually be returned, which is the most that can be added without changing what
+the caller observes. An operator or a scheduler that treats exit 0 as "the batch
+posted" will accept a truncated post; the check that distinguishes them is the
+absence of any ERROR record naming this masking, together with the batch's own
+cleared status.
+
+**One identifier warning, because two registers disagree.** A QA report for this
+checkpoint calls the masking above "anomaly A11". In *this* project's register
+`A-11` is a different defect entirely — the signed value narrowed to an unsigned
+host variable and an unsigned column, which is entry `A-11` of
+[`docs/migration/anomaly-log.md`](docs/migration/anomaly-log.md). The
+masking is `A-CURSOR-11`. Anyone tracing "A11" from that report should follow it
+to `A-CURSOR-11` and not to `A-11`.
 
 **Plaintext database transport is reproduced, and reported every time.** The
 compiled program has no stronger policy, so the migration does not invent one;

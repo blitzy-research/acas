@@ -75,17 +75,47 @@
 #      D=/data/"$N"                        the per-scenario staged data, which stage 1
 #                                          writes and stages 2 and 6 must be pointed
 #                                          at -- system.dat is there, not in /data
-#  so each stage below is prefixed `-e ACAS_PARITY_RUN_ID="$R"', and the two RUN
-#  stages additionally with `-e ACAS_DATA="$D" -e ACAS_LEDGERS="$D"'. The ten, in
-#  order:
+#  so every stage carries `-e ACAS_PARITY_RUN_ID="$R"', and the two RUN stages
+#  additionally `-e ACAS_DATA="$D" -e ACAS_LEDGERS="$D"'. `docker compose run' takes
+#  its OPTIONS BEFORE THE SERVICE NAME, so those `-e' settings belong inside `$C'
+#  ahead of `gnucobol' -- appended after it they would be read as the command, and
+#  the stage fails with `exec: "-e": executable file not found'. README section 11.1a
+#  writes the two prefixes out in full. The ten, in order:
 #      $C /repo/harness/reset_db.sh --seed-dir /data/fixtures/"$N"  "$S"
 #      $C /repo/harness/run_cobol_scenario.sh          "$S"
 #      $C python3 /repo/harness/dump_tables.py --scenario "$N" --side cobol \
-#                                              --scenario-file "$S"
+#                                              --all-in-scope --scenario-file "$S"
 #      $C python3 /repo/harness/normalize.py   --scenario "$N" --side cobol
 #      $C /repo/harness/reset_db.sh --seed-dir /data/fixtures/"$N"  "$S"
 #  then the Python cycle is driven the same way with `--side python', and finally
-#      $C python3 /repo/harness/diff_states.py --scenario "$N" --scenario-file "$S"
+#      $C python3 /repo/harness/diff_states.py --scenario "$N" \
+#                                              --all-in-scope --scenario-file "$S"
+#
+#  BOTH FLAGS ARE REQUIRED ON ALL THREE OF STAGES 3, 7 AND 10, AND THEY DO
+#  DIFFERENT JOBS. `--all-in-scope' is the BOUND: it sets the comparison to all 22
+#  in-scope tables, which is the protocol, because both cycles perform the menu's
+#  own `overrewrite.' [general/general.cbl:L656-L672] and a capture bounded by what
+#  a scenario DECLARES it affects could report an empty diff while the run date, the
+#  allocators, the flags, the defaults or the period totals differed. `--scenario-file'
+#  is the PROVENANCE: it NAMES THE DEFINITION, and its sha256 becomes
+#  `scenario_file_sha256', one of the three fields `diff_states.py' requires to be
+#  present and EQUAL on both sides before it compares a row, so omitting it at the
+#  dump stages leaves the field empty and stage 10 refuses the pair outright. The two
+#  options are therefore complementary and are passed TOGETHER; they are not
+#  alternatives. Only `--tables' and `--all-in-scope' are mutually exclusive, being
+#  two spellings of one list.
+#
+#  OMITTING `--all-in-scope' DOES NOT FAIL, WHICH IS WHY IT IS WRITTEN OUT ABOVE.
+#  Given alone, `--scenario-file' also SELECTS, so the capture silently NARROWS to
+#  the scenario's declared `affected_tables' -- the debugging mode, not this recipe --
+#  and the verdict reads "identical - 5 table(s) compared" instead of 22. That is a
+#  measured outcome of this recipe as it was previously written, and a narrower bound
+#  cannot reveal a difference in anything the scenario did not expect to move,
+#  including the system rows `overrewrite.' writes on BOTH sides. `tests/conftest.py'
+#  passes both flags at stages 3, 7 and 10, and README-python-migration.md section 8
+#  states the same requirement, so this list now agrees with the two routes that
+#  already implemented it.
+#
 #  AN EMPTY DIFF FROM THAT LAST COMMAND IS THE PASS CONDITION, and the only one:
 #  a stage that exits non-zero has produced no evidence, so re-seed rather than
 #  carry a partial capture forward -- and note that diff_states.py now REFUSES a

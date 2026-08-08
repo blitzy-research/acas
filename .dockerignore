@@ -214,6 +214,17 @@ blitzy_adhoc_test_*
 **/blitzy_adhoc_test_*
 .blitzyignore
 
+#  `tmp/' is ignored by `.gitignore' (its "Runtime scratch" stanza) and was NOT ignored
+#  here, so a working tree that had one shipped it into both image build contexts while
+#  git never saw it. A pristine checkout has no `tmp/' and neither image reads one, so
+#  the omission had no measurable effect -- it is closed for parity between the two
+#  ignore files, because a path that git is told to disregard is exactly a path a
+#  reproducible build must not depend on. Both forms are listed for the same reason the
+#  scratch entries above are: the bare name excludes the directory, the `/**' form its
+#  contents, and Docker's matcher does not infer one from the other.
+tmp
+tmp/**
+
 
 # -----------------------------------------------------------------------------
 #  VENDORED ARCHIVE THAT NEITHER IMAGE USES

@@ -1,4 +1,4 @@
-"""IRS CLEAN-BATCH STATE PARITY — THE ONLY SCENARIO THAT TRUNCATES A TABLE.
+"""IRS CLEAN-BATCH STATE PARITY — THE ONLY SCENARIO THAT ASKS FOR A TABLE CLEAR.
 
 Scenario `clean_batch_irs`, subsystem `irs`, operation `irs_post`. It drives the
 ten-stage parity protocol and asserts an EMPTY ordering-normalised table diff
@@ -8,8 +8,11 @@ tables the scenario declares.
 It is the most dangerous of the scenario files, for three reasons that all
 belong to the same route:
 
-  1. Its end-of-job answer DELETES EVERY ROW of the Sales-and-Purchase-to-IRS
-     transfer table. No other scenario destroys seeded state.
+  1. Its end-of-job answer ISSUES A DELETE against the Sales-and-Purchase-to-IRS
+     transfer table — the only scenario that asks for one at all. What that delete
+     REACHES is bounded and measured, and the paragraph "ONE HOP FURTHER" below
+     carries the numbers; treating the paragraph name "Delete-ALL" as proof that the
+     table is emptied is the exact mistake this file exists to prevent.
   2. It deliberately produces an UNBALANCED double entry (A-4) and a LOST UPDATE
      (A-5). The resulting nominal ledger is wrong, and reproducing that wrongness
      exactly is the entire point.
@@ -339,19 +342,32 @@ both halves of the posting key
 [common/slpostingMT.cbl:L860-L868, L885-L891] — its own log text is "Deleting back
 from" [common/slpostingMT.cbl:L870-L871]:
     DELETE FROM `PSIRSPOST-REC` WHERE `IRS-POST-KEY` < "9999999999"
-A row AT the sentinel would survive the bound built from it. MEASURED on this seed:
-all six rows carry keys 0000101000 to 0000106000, so all six go and ZERO are retained
-— the table does end empty HERE, but as a property of the SEED, not of the handler.
-The bound is described in full in [harness/scenarios/clean_batch_irs.yaml] and
-reproduced at [acas_posting/dal/acas008_spl_posting.py ba085_process_delete_all]. That is why the transfer
-table is on the affected-table list and why the protocol's reset-and-re-seed stage is
-load-bearing rather than hygienic.
+A row AT the sentinel would survive the bound built from it. MEASURED: the sentinel is
+a TEN-CHARACTER KEY TEXT, `9999999999`, while every key the bridge itself writes is a
+GROUP-MOVE IMAGE [common/slpostingMT.cbl:L1001] landing near 4.7e17 — six seeded
+postings with batch 1 and post numbers 1000 to 6000 store six distinct keys near
+472328296244457776, all far ABOVE the bound. SO ALL SIX ARE RETAINED and the table
+does NOT end empty; `test_psirspost_rec_clear_reproduces_the_frozen_high_key_threshold`
+below asserts exactly that, on both sides, and additionally that no key below the bound
+survives. The bound is described in full in [harness/scenarios/clean_batch_irs.yaml]
+and reproduced at [acas_posting/dal/acas008_spl_posting.py ba085_process_delete_all].
+That is why the transfer table is on the affected-table list and why the protocol's
+reset-and-re-seed stage is load-bearing rather than hygienic: the seeded keys must be
+identical on both sides for the comparison to mean anything.
 
 CONTRAST, PRESERVED AND NEVER HARMONISED (A-NEW-8): the sibling handler
 [common/acas007.cbl:L305-L312] carries the same block with
-`set fn-delete-all to true` COMMENTED OUT at [common/acas007.cbl:L308], so a
-General-Ledger batch `Open-Output` does NOT truncate. The asymmetry is what decides
-whether an `Open-Output` empties a table, and it is directly diff-visible.
+`set fn-delete-all to true` COMMENTED OUT at [common/acas007.cbl:L308] — and STILL
+reaches a delete-all, through the `[ Backup code ]` at
+[common/acas007.cbl:L622-L631], which performs the bridge and then sets
+`fn-Delete-All` before falling through into it again. MEASURED: GL-Batch
+`Open-Output` EMPTIES `GLBATCH-REC` of every key strictly below 999999. So the
+asymmetry is not whether a delete-all runs — all of them run one — but whether the
+bound can reach the keys that bridge stores: `glbatchMT` stores six digits through a
+numeric move [common/glbatchMT.cbl:L1069], below its bound; `slpostingMT` stores a
+group image, above its bound. The measured table is the key-bound note under A-NEW-8
+in [docs/migration/anomaly-log.md], and §15.3 there records the correction of the
+earlier reading this docstring used to carry.
 
 The trailing accept at [irs/irs030.cbl:L1726] is a bare pause with no database
 effect and is dropped on the Python side, per Agent Action Plan section 0.3.4. The
@@ -752,11 +768,14 @@ SCENARIO = "clean_batch_irs"
 # or every assertion in this file holds just as well against four empty tables.
 #
 # `PSIRSPOST-REC` IS DELIBERATELY NOT HERE even though postings2irs.dat seeds it. The
-# end-of-job answer is pinned "Y", so the route DELETES EVERY ROW of it
-# [irs/irs030.cbl:L1720-L1723] via [common/acas008.cbl:L313-L319, L571-L574]. Whether
-# that truncation actually happened is a BEHAVIOURAL claim owned by
-# `test_psirspost_rec_is_emptied_by_the_clear_answer`, where a Python side that failed
-# to empty it is a FAILURE; asserting it here would report that regression as an ERROR.
+# end-of-job answer is pinned "Y", so the route ISSUES THE BRIDGE'S BOUNDED DELETE
+# against it [irs/irs030.cbl:L1720-L1723] via [common/acas008.cbl:L313-L319, L571-L574].
+# What that delete actually REACHES is a BEHAVIOURAL claim owned by
+# `test_psirspost_rec_clear_reproduces_the_frozen_high_key_threshold`, where a side that
+# disagrees with the measured threshold is a FAILURE; asserting it here would report
+# that regression as an ERROR. MEASURED: the bound is the key text `9999999999` and the
+# six seeded keys are group-move images near 4.7e17, so all six are RETAINED - see the
+# key-bound note under A-NEW-8 in docs/migration/anomaly-log.md.
 SEEDED_TABLES = (
     "IRSDFLT-REC",
     "IRSNL-REC",
@@ -1071,7 +1090,8 @@ def parity(
     if answer == "Y":
         assert "PSIRSPOST-REC" in tables, (
             f"HARNESS FAULT: {SCENARIO} answers Y to "
-            f"[irs/irs030.cbl:L1716], which DELETES EVERY ROW of PSIRSPOST-REC "
+            f"[irs/irs030.cbl:L1716], which ISSUES THE BRIDGE'S BOUNDED DELETE against "
+            f"PSIRSPOST-REC "
             f"[common/acas008.cbl:L313-L319], yet PSIRSPOST-REC is not among "
             f"{list(tables)}. The most distinctive effect of this scenario would go "
             f"unobserved."
@@ -1695,15 +1715,21 @@ def test_clear_posting_file_answer_is_pinned(scenario_loader: object) -> None:
     handler `fn-Open` with `fn-output` and `not FS-Cobol-Files-Used` sets
     `fn-delete-all` [common/acas008.cbl:L313-L319], with a second unguarded
     substitution at [common/acas008.cbl:L566] and
-    [common/acas008.cbl:L571-L574]. The answer therefore CHANGES TABLE STATE. The
-    trailing accept at [irs/irs030.cbl:L1726] is a bare acknowledgement with no
-    database effect and is dropped.
+    [common/acas008.cbl:L571-L574]. The answer therefore DECIDES WHETHER A DELETE IS
+    ISSUED AT ALL, which is why it is an input rather than decoration - even though the
+    delete it issues is measured to reach no bridge-written row. The trailing accept at
+    [irs/irs030.cbl:L1726] is a bare acknowledgement with no database effect and is
+    dropped.
 
     THE CONTRAST IS PRESERVED AND NEVER HARMONISED (A-NEW-8): the sibling handler
     [common/acas007.cbl:L305-L312] carries the same block with
-    `set fn-delete-all to true` COMMENTED OUT at [common/acas007.cbl:L308], so a
-    General-Ledger batch `Open-Output` does NOT truncate. Both behaviours are
-    reproduced (R-4).
+    `set fn-delete-all to true` COMMENTED OUT at [common/acas007.cbl:L308] - and STILL
+    reaches a delete-all through the `[ Backup code ]` at
+    [common/acas007.cbl:L622-L631]. MEASURED: a General-Ledger batch `Open-Output`
+    EMPTIES `GLBATCH-REC` of every key strictly below 999999, while this handler's
+    identical request cannot reach a bridge-written transfer key. Both behaviours are
+    reproduced (R-4); the measured table is the key-bound note under A-NEW-8 in
+    docs/migration/anomaly-log.md.
 
     Args:
         scenario_loader: Loads the scenario definition.
@@ -1715,17 +1741,17 @@ def test_clear_posting_file_answer_is_pinned(scenario_loader: object) -> None:
         f"{SCENARIO} must pin the end-of-job answer to Y; it pins {answer!r}. The "
         f"frozen program has NO DEFAULT - [irs/irs030.cbl:L1718-L1719] re-asks for "
         f"ever - so the value is an input and not decoration, and Y is what makes the "
-        f"scenario exercise the truncation at [irs/irs030.cbl:L1723]."
+        f"scenario reach the clear at [irs/irs030.cbl:L1723] at all."
     )
 
     declared = _declared_tables(definition)
     assert "PSIRSPOST-REC" in declared, (
-        f"answering Y DELETES EVERY ROW of PSIRSPOST-REC "
+        f"answering Y ISSUES THE BRIDGE'S BOUNDED DELETE against PSIRSPOST-REC "
         f"[common/acas008.cbl:L313-L319], so it must be among the compared tables; "
         f"{SCENARIO} declares {list(declared)}. This is also why the protocol's "
-        f"reset-and-re-seed stage is load-bearing rather than hygienic: the oracle run "
-        f"empties the transfer file, and without the re-seed the Python run would "
-        f"start from an emptied file, walk nothing and post nothing."
+        f"reset-and-re-seed stage is load-bearing rather than hygienic: both sides must "
+        f"walk the SAME six seeded transfer rows, and a Python run inheriting the "
+        f"oracle run's leftovers would post from a different starting state."
     )
 
 

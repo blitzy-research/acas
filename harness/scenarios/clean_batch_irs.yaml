@@ -34,12 +34,18 @@
 #      row above it would survive too.
 #        WHAT THIS SEED MEASURES, AND WHAT IT DOES NOT. The six PSIRSPOST-REC
 #      rows seeded below carry batch 1 with post numbers 1000 through 6000, so
-#      their keys run 0000101000 to 0000106000 -- ALL below the sentinel.
-#      MEASURED: six deleted, ZERO retained, so the table does end empty here
-#      and the diff is a faithful comparison. But the emptiness is a property of
-#      THIS SEED, not a guarantee of the handler, and no scenario in this
-#      directory seeds a row at or above the sentinel, so the surviving-row
-#      branch is reproduced in code and NOT witnessed in any table state.
+#      their ten-character key TEXT runs 0000101000 to 0000106000 -- but the SQL
+#      key each row is stored under is not that text. The bridge loads its key
+#      host variable with a GROUP move [common/slpostingMT.cbl:L1001], which
+#      reinterprets the digits' bytes, so the six stored keys land near
+#      472328296244457776 -- five orders of magnitude ABOVE the sentinel.
+#      MEASURED: ZERO deleted, all six RETAINED, so the table does NOT end empty
+#      and what the diff compares is six rows on each side. The sentinel is
+#      unreachable for any key the bridge itself writes, so the deleting branch
+#      is reproduced in code and NOT witnessed in any table state; only a row
+#      inserted by hand below the bound would take it. The key-bound note under
+#      A-NEW-8 in docs/migration/anomaly-log.md carries the measured table, and
+#      section 15.3 there records the correction of the earlier reading.
 #      The Python leg parameterises the identical threshold, at
 #      [acas_posting/dal/acas008_spl_posting.py ba085_process_delete_all], where
 #      the caller-record mutation the move performs is recorded as
@@ -176,10 +182,10 @@ description: |
   indexed files, leave both dumps empty, and let the diff stage exit clean
   having compared nothing. On this route the flag is doubly load-bearing,
   because the destructive end-of-job answer only reaches the database through
-  the same gate. The conversion of an open-output into a mass delete is guarded
+  the same gate. The conversion of an open-output into a delete-all is guarded
   at [common/acas008.cbl:L313-L319], and the third leg of that guard, at
   [common/acas008.cbl:L315], is NOT FS-Cobol-Files-Used. With a seeded zero the
-  transfer table would never be emptied and the most distinctive effect of the
+  delete would never be issued at all and the most distinctive effect of the
   scenario would silently disappear. SECOND, irs_instead. It is IRS-Instead pic
   x at [copybooks/wssystem.cob:L179], with exactly two condition names --
   IRS-Used for "Y" at [copybooks/wssystem.cob:L180] and IRS-Both-Used for "B" at
@@ -513,29 +519,33 @@ description: |
   of "Y" reaches [irs/irs030.cbl:L1720] and then performs an open-output on the
   transfer file at [irs/irs030.cbl:L1723] followed by a close at
   [irs/irs030.cbl:L1724]. On this handler an open-output is not an open. The
-  guard at [common/acas008.cbl:L313-L319] converts it into a mass delete, and
+  guard at [common/acas008.cbl:L313-L319] converts it into a delete-all, and
   the handler forces the same conversion again at [common/acas008.cbl:L571-L574]
-  under the paragraph at [common/acas008.cbl:L566]. THE TABLE IS PSIRSPOST-REC
-  AND THE RUN LEAVES IT EMPTY. Two consequences follow, and both are honoured
-  below. PSIRSPOST-REC must appear in affected_tables, because the answer is a
-  pinned input whose whole effect lands there and leaving the table out would
-  hide a real behavioural difference from the diff. And the protocol's
-  reset-and-re-seed stage becomes load-bearing rather than hygienic: without a
-  full re-seed from the same fixture, the second run would begin with an
-  already-empty transfer file, post nothing at all, and produce an empty diff
-  that means nothing. Worth recording as a contrast: the equivalent conversion
-  in the General Ledger batch handler is present in shape but DISABLED -- the
-  line that would force the mass delete is commented out at
+  under the paragraph at [common/acas008.cbl:L566]. THE TABLE IS PSIRSPOST-REC,
+  AND WHAT THE DELETE REACHES IS BOUNDED: the bridge builds a strict less-than
+  predicate from the key text 9999999999 [common/slpostingMT.cbl:L850-L891],
+  which no bridge-written key can fall below, so on this seed the run leaves all
+  six rows in place. Two consequences follow, and both are honoured below.
+  PSIRSPOST-REC must appear in affected_tables, because the answer is a pinned
+  input whose whole effect lands there and leaving the table out would hide a
+  real behavioural difference from the diff. And the protocol's reset-and-re-seed
+  stage becomes load-bearing rather than hygienic: without a full re-seed from
+  the same fixture the two runs would not walk the identical six transfer rows,
+  and an empty diff over mismatched starting states means nothing. Worth
+  recording as a contrast, and it is the opposite of what it looks like: in the
+  General Ledger batch handler the equivalent conversion is commented out at
   [common/acas007.cbl:L308-L309], under the same explanatory note at
-  [common/acas007.cbl:L301-L303]. So this behaviour is live in the transfer-file
-  handler specifically, not a uniform property of every handler, and it must not
-  be generalised.
+  [common/acas007.cbl:L301-L303] -- yet that handler's backup code at
+  [common/acas007.cbl:L622-L631] forces the delete-all anyway, and it is MEASURED
+  to empty GLBATCH-REC of every key strictly below 999999. So a reachable delete
+  is not a property peculiar to the transfer-file handler; what differs is the
+  bound each bridge composes against the keys it stores.
 
   THE DISPLAY AND ACCEPT RULE, APPLIED THREE WAYS IN ONE SECTION
   This section is the clearest illustration in the whole migration of the
   three-way rule for interactive statements entangled with business logic.
   PROMOTED: the reply at [irs/irs030.cbl:L1717]. It gates a database write -- in
-  fact a mass delete -- so it becomes an explicit pinned parameter, with the
+  fact the bridge's bounded delete -- so it becomes an explicit pinned parameter, with the
   frozen program's own absence of a default faithfully preserved as a hard
   requirement rather than smoothed into a convenient assumption. DROPPED: the
   bare acknowledgement pause at [irs/irs030.cbl:L1726], which follows a
@@ -950,10 +960,12 @@ expected_status:
 # is neither Y nor N. Both runners refuse an irs_post scenario that omits it
 # [harness/run_cobol_scenario.sh acas_resolve_pinned_values],
 # [harness/run_python_scenario.sh acas_py_resolve_gating_answers]. "Y" performs an open-output on
-# the transfer file [irs/irs030.cbl:L1723], which this handler turns into a mass
-# delete of every row of PSIRSPOST-REC [common/acas008.cbl:L313-L319],
-# [common/acas008.cbl:L571-L574]. That is why PSIRSPOST-REC is listed below and
-# why the protocol's reset-and-re-seed stage is load-bearing rather than
+# the transfer file [irs/irs030.cbl:L1723], which this handler turns into a
+# delete-all against PSIRSPOST-REC [common/acas008.cbl:L313-L319],
+# [common/acas008.cbl:L571-L574] -- bounded by the bridge to keys strictly below
+# 9999999999 [common/slpostingMT.cbl:L850-L891], and therefore unreachable for
+# every key the bridge itself writes. That is why PSIRSPOST-REC is listed below
+# and why the protocol's reset-and-re-seed stage is load-bearing rather than
 # hygienic. The three answer keys belonging to the payment and end-of-cycle
 # routes are not declared, because none of them is on this path; leaving them
 # unstated is what keeps this scenario's inputs exactly the inputs the frozen

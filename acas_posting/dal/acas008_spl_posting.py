@@ -11,9 +11,16 @@ the facade publishes Rewrite anyway, so a caller invoking it always fails. The
 guard is reproduced and returns the same status pair rather than performing an
 update.
 
-OPEN-OUTPUT MEANS DELETE EVERY ROW [common/acas008.cbl:L313-L319],
+OPEN-OUTPUT MEANS A DELETE-ALL [common/acas008.cbl:L313-L319],
 [common/acas008.cbl:L571-L574], which is how `irs030`'s end-of-job clear is
-implemented [irs/irs030.cbl:L1720-L1724] - so that answer truncates a table.
+implemented [irs/irs030.cbl:L1720-L1724]. IT IS NOT A TRUNCATE, and this is the
+one claim about this handler most likely to be got wrong: the bridge builds a
+STRICT `<` predicate from the ten-character key text `9999999999`
+[common/slpostingMT.cbl:L850-L891], while every key it stores is a group-move
+image near 4.7e17 [common/slpostingMT.cbl:L1001] - so the clear is MEASURED to
+remove no row this bridge ever wrote. The measured table for this handler and its
+three siblings is the key-bound note under A-NEW-8 in
+docs/migration/anomaly-log.md; `N-DELALLMUTATES` is registered there too.
 
 The handler also labels its own log identity as the IRS subsystem
 [common/acas008.cbl:L293-L294] although it serves the Sales and Purchase side;
@@ -1376,6 +1383,14 @@ def ba085_process_delete_all(
     """``ba085-Process-Delete-ALL.`` [common/slpostingMT.cbl:L827].
 
     FOUR ANOMALIES LIVE IN THOSE FORTY LINES, and all four are reproduced.
+
+    THE PREDICATE IS BOUNDED, NOT A TRUNCATE. The sentinel this paragraph moves in
+    renders as the ten-character key text ``9999999999``, and the ``WHERE`` clause is a
+    STRICT ``<`` against it - so a row AT the bound survives the bound built from it,
+    and a row above it survives too. Because a bridge-written key is a group-move image
+    near 4.7e17 [common/slpostingMT.cbl:L1001], MEASURED: this delete removes nothing
+    the bridge itself wrote. Registered as the key-bound note under A-NEW-8 in
+    ``docs/migration/anomaly-log.md``, together with ``N-DELALLMUTATES`` below.
     """
     ws = working_storage()
     log = file_access.logging_data

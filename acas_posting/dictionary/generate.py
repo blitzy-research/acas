@@ -3490,9 +3490,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo-root", type=Path, default=REPOSITORY_ROOT,
                         help="repository root holding common/, copybooks/ and mysql/ "
                              "(default: the root of the installed package)")
-    parser.add_argument("--output", type=Path, default=DATA_DICTIONARY_PATH,
+    #  `--output` DEFAULTS RELATIVE TO `--repo-root`, resolved after parsing rather than
+    #  bound here as `DATA_DICTIONARY_PATH`. From a checkout the two are the same path,
+    #  so nothing changes for the documented invocation. From an INSTALLED distribution
+    #  they are not: `REPOSITORY_ROOT` is the parent of the installed package, so
+    #  `--repo-root /repo` alone parsed the frozen sources correctly and then tried to
+    #  write beside `site-packages/acas_posting`, which is not the repository's
+    #  `data_dictionary/` and is not writable in a normal install. A reader had to pass
+    #  BOTH options to get a coherent pair, and passing one was silently incoherent
+    #  rather than refused. The default now follows the root it is derived from, which
+    #  is the only pairing that can be right.
+    parser.add_argument("--output", type=Path, default=None,
                         help="where to write the dictionary "
-                             "(default: data_dictionary/acas_posting_dictionary.json)")
+                             "(default: <--repo-root>/data_dictionary/"
+                             "acas_posting_dictionary.json)")
     # One mode at a time.
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--check", action="store_true",
@@ -3503,6 +3514,15 @@ def main(argv: list[str] | None = None) -> int:
                        help="write the document to standard output instead of a file. "
                             "Cannot be combined with --check")
     args = parser.parse_args(argv)
+
+    #  The pairing described at `--output` above, applied once, before any use of it.
+    if args.output is None:
+        args.output = (
+            DATA_DICTIONARY_PATH
+            if Path(args.repo_root) == REPOSITORY_ROOT
+            else Path(args.repo_root) / DATA_DICTIONARY_PATH.parent.name
+            / DATA_DICTIONARY_PATH.name
+        )
 
     try:
         dictionary = build_dictionary(args.repo_root)

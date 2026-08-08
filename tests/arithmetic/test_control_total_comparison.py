@@ -2053,9 +2053,9 @@ def test_the_shipped_gate_leaves_no_driver_loaded() -> None:
 #  4. THE REQUIRED OPTIONS. Two routes refuse to run without an explicit answer: the
 #  General route needs `--run-date`, because rule R-6 forbids taking a date from the
 #  clock, and the IRS route needs `--clear-posting-file` or `--no-clear-posting-file`,
-#  because one of those answers DELETES EVERY ROW of the transfer table
-#  [irs/irs030.cbl:L1715-L1724]. An implied default for either would be an invented
-#  behaviour.
+#  because one of those answers ISSUES THE BRIDGE'S BOUNDED DELETE against the transfer
+#  table [irs/irs030.cbl:L1715-L1724], [common/slpostingMT.cbl:L850-L891]. An implied
+#  default for either would be an invented behaviour.
 #
 #  5. THE CONFIGURATION CONTRACT'S STATUS CODES [acas_posting/cli/args.py SECTION 0]. The
 #  frozen parameter reader publishes 8 for "no source" and 1 for "malformed"
@@ -2784,11 +2784,13 @@ def test_the_general_route_refuses_to_run_without_a_run_date() -> None:
 
 
 def test_the_irs_route_requires_an_explicit_clear_posting_file_answer() -> None:
-    """ONE ANSWER DELETES EVERY ROW OF THE TRANSFER TABLE, so neither is defaulted.
+    """ONE ANSWER ISSUES A DELETE AGAINST THE TRANSFER TABLE, so neither is defaulted.
 
     `irs030`'s end-of-job question [irs/irs030.cbl:L1715-L1724] decides whether the
     transfer file is cleared, and answering yes performs an open-output which for this
-    handler is a MASS DELETE [common/acas008.cbl:L313-L319]. Agent Action Plan section
+    handler substitutes a DELETE-ALL [common/acas008.cbl:L313-L319] - bounded by the
+    bridge to keys strictly below the key text `9999999999`
+    [common/slpostingMT.cbl:L850-L891], and measured to reach no bridge-written key. Agent Action Plan section
     0.3.4 promotes exactly this kind of prompt to a parameter *"with the COBOL default
     preserved"* - and the frozen program HAS NO DEFAULT: the `[Y]` in the prompt is
     display text, the accept carries no `WITH UPDATE`, and any reply that is neither Y nor
@@ -3355,9 +3357,11 @@ def test_cli_args_import_star_binds_every_published_name() -> None:
 #  `WS-Reply pic x` is never set to "Y" anywhere in the program; and L1718-L1719 send
 #  anything that is neither `Y` nor `N` back to the prompt, so a bare Enter RE-PROMPTS.
 #
-#  Answering `Y` reaches `acas008-Open-Output`, which for that handler DELETES EVERY ROW
-#  of `PSIRSPOST-REC` [common/acas008.cbl:L313-L319]. So a default would not merely be
-#  wrong, it would be the destructive answer applied to an operator who said nothing -
+#  Answering `Y` reaches `acas008-Open-Output`, which for that handler substitutes a
+#  DELETE-ALL against `PSIRSPOST-REC` [common/acas008.cbl:L313-L319] - the bridge bounds
+#  it [common/slpostingMT.cbl:L850-L891], so what it reaches depends on the keys present.
+#  So a default would not merely be wrong, it would be the destructive answer applied to
+#  an operator who said nothing -
 #  which is why the seam requires the answer, and why prose claiming otherwise is worth
 #  a test rather than a correction alone. Three comment sites still claimed a `True`
 #  default after the seam had stopped having one.
@@ -3373,7 +3377,8 @@ def test_the_clear_answer_is_required_at_both_layers() -> None:
         f"{parameter.default!r}. The frozen prompt has no default -- the [Y] at "
         "[irs/irs030.cbl:L1716] is prompt text, the accept carries no WITH UPDATE, and "
         "L1718-L1719 re-prompt on anything but Y or N -- so a default here invents one, "
-        "and answering Y deletes every row of PSIRSPOST-REC (MN-05)."
+        "and answering Y issues the bridge's bounded delete against PSIRSPOST-REC "
+        "(MN-05)."
     )
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, (
         "clear_posting_file must stay keyword-only so a caller cannot supply the "

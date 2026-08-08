@@ -112,14 +112,19 @@ RE-PROMPTS - it does not clear. Reading the `[Y]` as a pre-filled default was
 and it would invent the destructive answer. `Y` performs
 `acas008-Open-Output` [irs/irs030.cbl:L1723] followed by `acas008-Close`
 [irs/irs030.cbl:L1724]. For that handler an open-for-output is not a file
-operation at all - it is a mass delete: `if fn-Open and fn-output and not
+operation at all - it is a delete-all: `if fn-Open and fn-output and not
 FS-Cobol-Files-Used / set fn-delete-all to true / perform ba-Process-RDBMS`
 [common/acas008.cbl:L313-L319], reinforced at [common/acas008.cbl:L571-L574].
 The handler's own inline comment at [irs/irs030.cbl:L1723] says so: "performs a
-acas008-Delete-All". Agent Action Plan section 0.3.4 is explicit that this makes
-the answer a genuine input rather than decoration, because "the answer changes
-table state". Pass `--clear-posting-file` to answer `Y` or
-`--no-clear-posting-file` to answer `N` and leave the transfer table populated;
+acas008-Delete-All". WHAT THAT DELETE REACHES IS BOUNDED, and on this path it is a
+MEASURED NO-OP: the bridge deletes only keys strictly below the ten-character key
+text `9999999999` [common/slpostingMT.cbl:L850-L891] while every key it stores is a
+group-move image near 4.7e17 [common/slpostingMT.cbl:L1001], and `EOJ` has already
+closed the handler [irs/irs030.cbl:L1712] before the clear is attempted. See the
+key-bound note under A-NEW-8 in docs/migration/anomaly-log.md. Agent Action Plan
+section 0.3.4 still makes the answer a genuine input rather than decoration,
+because it decides whether the statement is issued at all. Pass
+`--clear-posting-file` to answer `Y` or `--no-clear-posting-file` to answer `N`;
 omitting both is a usage error, not an implied yes.
 
     Entity   SPL-Posting        Handler  acas008
@@ -256,9 +261,11 @@ _PROGRAM_ID: Final[str] = "irs030"
 #  reproducing the original's default under rule R-4. There is no such default to
 #  reproduce: that reading invents one, and it invents THE DESTRUCTIVE ANSWER. `Y`
 #  reaches `acas008-Open-Output`
-#  [irs/irs030.cbl:L1723], which for this handler DELETES EVERY ROW of
-#  `PSIRSPOST-REC` [common/acas008.cbl:L313-L319], [common/acas008.cbl:L571-L574].
-#  So an operator who said nothing would have emptied a table (rule R-3).
+#  [irs/irs030.cbl:L1723], which for this handler issues a DELETE against
+#  `PSIRSPOST-REC` [common/acas008.cbl:L313-L319], [common/acas008.cbl:L571-L574] -
+#  bounded to keys strictly below `9999999999` [common/slpostingMT.cbl:L850-L891].
+#  So an operator who said nothing would have issued a destructive statement they
+#  never asked for (rule R-3), whatever that statement turns out to reach.
 #
 #  THE RESOLUTION: the answer is REQUIRED on the command line - `required=True`
 #  and no `default`. Agent Action Plan section 0.8.1 promotes a write-gating prompt
@@ -373,12 +380,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "Ledgers Posting file? [Y]' (irs/irs030.cbl:L1716). *** ONE ANSWER "
             "IS DESTRUCTIVE. *** --clear-posting-file performs "
             "acas008-Open-Output (irs/irs030.cbl:L1723), which for this handler "
-            "is not a file open but a mass delete - it sets fn-delete-all and "
+            "is not a file open but a delete-all - it sets fn-delete-all and "
             "calls the DAL (common/acas008.cbl:L313-L319, reinforced at "
-            "L571-L574) - so EVERY ROW of the IRS transfer table PSIRSPOST-REC "
-            "(entity SPL-Posting, bridge slpostingMT, record "
-            "copybooks/wspost-irs.cob) is deleted. --no-clear-posting-file "
-            "answers N and leaves the transfer table populated. THERE IS NO "
+            "L571-L574) - so a DELETE is issued against the IRS transfer table "
+            "PSIRSPOST-REC (entity SPL-Posting, bridge slpostingMT, record "
+            "copybooks/wspost-irs.cob). The bridge BOUNDS that delete to keys "
+            "strictly below 9999999999 (common/slpostingMT.cbl:L850-L891), which "
+            "no key the bridge itself wrote falls below, so it is measured to "
+            "remove nothing on this path - see A-NEW-8 in "
+            "docs/migration/anomaly-log.md. --no-clear-posting-file "
+            "answers N and issues no delete at all. THERE IS NO "
             "DEFAULT, because the frozen program has none: the [Y] at L1716 is "
             "display text, the accept at L1717 carries no WITH UPDATE, WS-Reply "
             "is never set to Y anywhere in the program, and L1718-L1719 re-prompt "
@@ -418,8 +429,9 @@ def main_loop_option_4(
         clear_posting_file: the answer to the end-of-job question
             [irs/irs030.cbl:L1715-L1724]. KEYWORD-ONLY and REQUIRED, with no
             default anywhere on the path from argv to here - THE FROZEN PROMPT HAS
-            NONE, so inventing one would invent the destructive answer. `True` DELETES EVERY ROW of `PSIRSPOST-REC`
-            [common/acas008.cbl:L313-L319].
+            NONE, so inventing one would invent the destructive answer. `True` issues
+            the bridge's BOUNDED delete against `PSIRSPOST-REC`
+            [common/acas008.cbl:L313-L319], [common/slpostingMT.cbl:L850-L891].
         dal_options: the caller's keyword-only declarations, transport policy among
             them, carried to every facade context `irs030` builds. NOT a COBOL
             operand - the frozen `CALL` [irs/irs.cbl:L668-L671] passes three things
@@ -807,8 +819,9 @@ if __name__ == "__main__":
 #     L1720  `if WS-Reply = "Y"`;  L1723 `perform acas008-Open-Output` - the
 #            comment on that very line reads "performs a acas008-Delete-All";
 #            L1724 `perform acas008-Close.`;  L1725-L1727 the pause, DROPPED
-#     Effect via common/acas008.cbl:L313-L319 and :L571-L574, so the answer
-#     DELETES EVERY ROW of PSIRSPOST-REC. The switch pair is `required=True`:
+#     Effect via common/acas008.cbl:L313-L319 and :L571-L574, so the answer decides
+#     whether a DELETE is issued against PSIRSPOST-REC - bounded by the bridge
+#     [common/slpostingMT.cbl:L850-L891]. The switch pair is `required=True`:
 #     the frozen prompt has no default, so there is nothing to preserve and a
 #     default would be an invention.
 #

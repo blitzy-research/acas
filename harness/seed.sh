@@ -1812,20 +1812,36 @@ acas_read_autocommit() {
 #                                       GLPOSTING-REC 1  (8 rows / 7 tables)
 #
 # TWO THINGS THAT MEASUREMENT SETTLES. First, OFF cannot seed at all: seven
-# loaders report success and the database holds nothing, so the shipped default
-# cannot be a mode this script then proves always fails -- an operator following
-# the documented invocation would get exit 76 every time. Second, THE MODE IS
+# loaders report success and the database holds nothing, so an operator who runs
+# the mandated window and expects a fixture gets exit 76 every time -- which is
+# why every documented invocation that needs a fixture carries an explicit
+# ACAS_SEED_AUTOCOMMIT=on, and why the refusal is loud rather than silent.
+# Second, THE MODE IS
 # INVISIBLE TO THE FROZEN CODE: the loader return codes are identical under both
 # windows, so the choice is observable only to the server and changes no
 # behaviour the migration is reproducing. That is what makes flipping the default
 # a protocol decision rather than a behavioural deviation.
 #
-# So ON is the default -- the measured durable mode, and a deterministic protocol
-# input rather than an operator ritual every caller must remember. `off` remains
-# selectable and is the AAP-literal mode; selecting it REPRODUCES the frozen
-# no-COMMIT defect end to end, which acas_assert_seed_durability then refuses to
-# report as a success. Neither mode issues the COMMIT the loaders omit (R-4).
-# Written up in docs/migration/ambiguity-resolutions.md.
+# SO OFF IS THE DEFAULT, AND ON IS SELECTABLE. The measurement establishes what
+# the modes DO; the AAP establishes which one ships. Unset means OFF -- the
+# AAP-mandated mode -- and selecting it REPRODUCES the frozen no-COMMIT defect end
+# to end, which acas_assert_seed_durability then refuses to report as a success
+# (exit EX_NOT_DURABLE). ON is requested per invocation, as a declared deviation,
+# so it appears in the command that ran; it is the only mode measured to leave a
+# durable row and it yields a working fixture rather than parity evidence. Neither
+# mode issues the COMMIT the loaders omit (R-4). Written up in
+# docs/migration/ambiguity-resolutions.md.
+#
+# A CORRECTION KEPT VISIBLE RATHER THAN ERASED. An earlier revision of this block
+# closed with "So ON is the default", and the paragraph above it argued that a
+# shipped default must not be a mode the script proves always fails. That was the
+# reasoning of the superseded arrangement. It was reversed deliberately: the AAP
+# is the frozen agreement, a harness that silently seeded in an unsanctioned mode
+# would leave a reader of a parity result unable to tell, and exit 76 IS the
+# reproduction R-4 requires rather than a fault to configure away. The stale
+# closing sentence outlived the reversal and is corrected here because
+# acas_open_seed_autocommit_window below resolves an unset variable to OFF -- the
+# code and this comment now say the same thing.
 #
 # EITHER WAY THE MODE IS A WINDOW: opened here, closed the moment the loaders are
 # done, and restored by the exit trap however this script ends. Runtime
@@ -1836,8 +1852,9 @@ acas_read_autocommit() {
 # =============================================================================
 acas_open_seed_autocommit_window() {
   # The requested window mode, validated BEFORE the stage line so the banner names
-  # the mode actually selected rather than the default. UNSET means the CANONICAL
-  # mode, which is ON: see the R-6 arbitration above.
+  # the mode actually selected rather than the default. UNSET means the
+  # AAP-MANDATED mode, which is OFF: see the R-6 arbitration above, and the
+  # `''|off|0|false|no` branch below, which is the one an unset variable takes.
   local requested="${ACAS_SEED_AUTOCOMMIT-}"
   local window_label
   case "${requested,,}" in
@@ -1976,35 +1993,270 @@ acas_close_seed_autocommit_window() {
 #
 # Only the tables whose loader actually RAN are measured -- a scenario that seeds
 # four files is not expected to fill the other twelve tables.
+#
+# IT MEASURES *THIS* SEED'S WRITES, NOT WHATEVER ROWS HAPPEN TO BE THERE.
+#
+# The gate used to compare the row counts it read after the window against ZERO,
+# and pass whenever their sum was positive. On the target the protocol always
+# hands it -- a schema re-applied one stage earlier -- the two questions are the
+# same, because every table starts empty. Run STANDALONE against a database that
+# a previous seed had already committed rows into, they come apart completely:
+# inside the AAP-literal autocommit-off window the loaders wrote nothing durable,
+# the pre-existing rows satisfied the absolute count, and the gate reported
+# "the seed is present" over a seed that was not. That is precisely the false pass
+# this gate exists to prevent, arriving from the other side.
+#
+# So the state of every table the plan will write is CENSUSED BEFORE THE WINDOW
+# OPENS (acas_census_pre_seed_rows) and measured again after it closes, and what
+# is judged is the difference. Two independent observations of a durable write are
+# accepted, either one being sufficient:
+#
+#   rows gained      a table holds more rows than it did. The protocol's own case.
+#   content changed  the row count is the same but the bytes are not, which is
+#                    what re-seeding DIFFERENT values over an existing seed looks
+#                    like. Measured with CHECKSUM TABLE, which needs no privilege
+#                    beyond the SELECT the application account already holds.
+#
+# THE ONE CASE NEITHER OBSERVATION CAN SETTLE, and why it is not refused. The
+# frozen loaders open their table for output and re-insert, so re-seeding the SAME
+# fixture over itself in the durable window leaves byte-for-byte the state that
+# was already there: measured, exit 0 with identical counts and identical
+# checksums. No reading of end state can tell that apart from a window in which
+# nothing was written at all. The two are told apart by the fact the script
+# already knows -- WHICH WINDOW IT RAN -- and only in this indistinguishable case:
+#
+#   window ON   the mode MEASURED to be the only one in which the frozen loaders
+#               leave a durable row. The seed is accepted, and the log says
+#               plainly that its writes could not be distinguished from the state
+#               that preceded them, so nothing is claimed that was not observed.
+#   window OFF  the AAP-mandated window, in which no frozen loader reaches a live
+#               COMMIT -- 78 commented-out rollback sites, one commented-out
+#               commit, and the maintainer's own note at
+#               [common/analLD.cbl:L442]. Nothing durable can have been written,
+#               so the rows are certainly not this seed's and the gate REFUSES
+#               with EX_NOT_DURABLE.
+#
+# A measurement therefore always outranks the assumption: if something DID change
+# under the off window, the gate passes on the evidence rather than refusing on
+# the premise.
 # =============================================================================
+
+# The pre-seed census, keyed by table name. Written once, before the window opens;
+# read once, after it closes.
+declare -A ACAS_SEED_ROWS_BEFORE=()
+declare -A ACAS_SEED_SUM_BEFORE=()
+
+# Out-parameters of acas_census_table_state.
+ACAS_CENSUS_ROWS=0
+ACAS_CENSUS_SUM='?'
+
+# acas_census_table_state <table> Reads one table's row count and content checksum.
+# Sets ACAS_CENSUS_ROWS (an integer) and ACAS_CENSUS_SUM (an integer, or `?' when
+# the server would not produce one). Returns non-zero only when the COUNT could not
+# be taken: a missing checksum weakens the measurement to counts alone and is
+# reported, never fatal, because a diagnostic that cannot be taken must not stop a
+# seed.
+acas_census_table_state() {
+  local table="$1" quoted rc=0 value
+  quoted="$(acas_sql_quote_ident "$table")"
+
+  ACAS_CENSUS_ROWS=0
+  ACAS_CENSUS_SUM='?'
+
+  acas_sql_scalar "select count(*) from $quoted;" || rc=$?
+  if (( rc != 0 )); then
+    return "$rc"
+  fi
+  value="${ACAS_SQL_OUT##*$'\n'}"
+  [[ "$value" =~ ^[0-9]+$ ]] || value=0
+  ACAS_CENSUS_ROWS="$value"
+
+  # `CHECKSUM TABLE' answers `<schema>.<table><TAB><checksum>', so the checksum is
+  # the last field of the last line. It is a CONTENT fingerprint and nothing more:
+  # it is compared with itself across one seed and never published, so no accounting
+  # value reaches a log through it.
+  rc=0
+  acas_sql_scalar "checksum table $quoted;" || rc=$?
+  if (( rc == 0 )); then
+    value="${ACAS_SQL_OUT##*$'\n'}"
+    value="${value##*$'\t'}"
+    [[ "$value" =~ ^[0-9]+$ ]] && ACAS_CENSUS_SUM="$value"
+  fi
+  return 0
+}
+
+declare -a ACAS_SEED_PLANNED_TABLES=()
+
+# The tables the plan will write, in plan order, deduplicated. Derived from the
+# same two frozen arrays the execution stages walk, under the same guards -- the
+# system block is guarded on system.dat [common/masterLD.sh:L51], each mapping on
+# its own flat file [common/masterLD.sh:L93-L116], and both on --only -- so the
+# census cannot measure a table no loader will touch, nor miss one it will.
+acas_seed_planned_tables() {
+  local entry table known seen
+  ACAS_SEED_PLANNED_TABLES=()
+  if [[ -e "$ACAS_SEED_SYSTEM_FLAT_FILE" ]]; then
+    for entry in "${ACAS_SEED_SYSTEM_BLOCK[@]}"; do
+      acas_split_system_entry "$entry"
+      acas_loader_selected "$ACAS_S_LOADER" || continue
+      acas_split_table_spec "$ACAS_S_TABLE"
+      for table in ${ACAS_TABLE_LIST[@]+"${ACAS_TABLE_LIST[@]}"}; do
+        seen=0
+        for known in ${ACAS_SEED_PLANNED_TABLES[@]+"${ACAS_SEED_PLANNED_TABLES[@]}"}; do
+          [[ "$known" == "$table" ]] && { seen=1; break; }
+        done
+        (( seen )) || ACAS_SEED_PLANNED_TABLES+=("$table")
+      done
+    done
+  fi
+  for entry in "${ACAS_SEED_MAPPINGS[@]}"; do
+    acas_split_entry "$entry"
+    [[ -e "$ACAS_E_FLAT" ]] || continue
+    acas_loader_selected "$ACAS_E_LOADER" || continue
+    acas_split_table_spec "$ACAS_E_TABLE"
+    for table in ${ACAS_TABLE_LIST[@]+"${ACAS_TABLE_LIST[@]}"}; do
+      seen=0
+      for known in ${ACAS_SEED_PLANNED_TABLES[@]+"${ACAS_SEED_PLANNED_TABLES[@]}"}; do
+        [[ "$known" == "$table" ]] && { seen=1; break; }
+      done
+      (( seen )) || ACAS_SEED_PLANNED_TABLES+=("$table")
+    done
+  done
+}
+
+acas_census_pre_seed_rows() {
+  acas_stage 'The pre-seed census: what the tables this seed writes hold BEFORE it runs'
+
+  acas_seed_planned_tables
+  if (( ${#ACAS_SEED_PLANNED_TABLES[@]} == 0 )); then
+    acas_log 'the plan writes no table, so there is no state to census'
+    return 0
+  fi
+
+  local table rc occupied=0
+  for table in "${ACAS_SEED_PLANNED_TABLES[@]}"; do
+    rc=0
+    acas_census_table_state "$table" || rc=$?
+    if (( rc != 0 )); then
+      acas_die "$EX_DATABASE" \
+        "could not count $table before seeding it." \
+        'The census is what makes the durability gate measure THIS seed rather' \
+        'than whatever rows were already there, so it is taken before the first' \
+        'load program runs and a failure to take it stops the run here.' \
+        "$(acas_diag_summary "$ACAS_SQL_DIAG")"
+    fi
+    ACAS_SEED_ROWS_BEFORE["$table"]="$ACAS_CENSUS_ROWS"
+    ACAS_SEED_SUM_BEFORE["$table"]="$ACAS_CENSUS_SUM"
+    acas_log "$(printf '%-34s %s row(s) before this seed' "$table" "$ACAS_CENSUS_ROWS")"
+    (( ACAS_CENSUS_ROWS > 0 )) && occupied=$(( occupied + 1 ))
+  done
+
+  if (( occupied > 0 )); then
+    acas_note "$occupied of the ${#ACAS_SEED_PLANNED_TABLES[@]} table(s) this seed writes ALREADY HOLD ROWS, so this is not a freshly reset target. The durability gate will judge the DIFFERENCE this seed makes and not the rows that are already there; run harness/reset_db.sh instead to seed a target the protocol can compare (it re-applies the frozen 33-table schema first)."
+  else
+    acas_log "verified: every one of the ${#ACAS_SEED_PLANNED_TABLES[@]} table(s) this seed writes is empty before it runs, so any row found afterwards is this seed's"
+  fi
+}
+
 acas_assert_seed_durability() {
-  acas_stage 'The durability gate: the seeded state must actually be there'
+  acas_stage "The durability gate: THIS seed's writes must actually be there"
 
   if (( ${#ACAS_SEED_RAN_TABLES[@]} == 0 )); then
     acas_log 'no load program ran, so there is no seeded state to measure'
     return 0
   fi
 
-  local -a measured=()
-  local table rc total=0 count
+  local table rc total=0 count sum before before_sum
+  local gained=0 changed=0 uncensused=0 delta content
+
   for table in "${ACAS_SEED_RAN_TABLES[@]}"; do
     rc=0
-    acas_sql_scalar "select count(*) from $(acas_sql_quote_ident "$table");" || rc=$?
+    acas_census_table_state "$table" || rc=$?
     if (( rc != 0 )); then
       acas_die "$EX_DATABASE" \
         "could not count $table to confirm the seed reached the database." \
         "$(acas_diag_summary "$ACAS_SQL_DIAG")"
     fi
-    count="${ACAS_SQL_OUT##*$'\n'}"
-    [[ "$count" =~ ^[0-9]+$ ]] || count=0
-    measured+=("$table:$count")
-    acas_log "$(printf '%-34s %s row(s)' "$table" "$count")"
+    count="$ACAS_CENSUS_ROWS"
+    sum="$ACAS_CENSUS_SUM"
     total=$(( total + count ))
+
+    before="${ACAS_SEED_ROWS_BEFORE[$table]-}"
+    before_sum="${ACAS_SEED_SUM_BEFORE[$table]-}"
+
+    if [[ -z "$before" ]]; then
+      # Unreachable while the census walks the same plan the loaders do; kept
+      # because a gate that ABORTED on a missing baseline would turn a bookkeeping
+      # gap into a failed seed.
+      uncensused=1
+      acas_log "$(printf '%-34s %s row(s)  (no pre-seed baseline)' "$table" "$count")"
+      continue
+    fi
+
+    delta=$(( count - before ))
+    (( delta > 0 )) && gained=1
+
+    content='content unchanged'
+    if [[ "$sum" == '?' || "$before_sum" == '?' ]]; then
+      content='content not measured'
+    elif [[ "$sum" != "$before_sum" ]]; then
+      content='content CHANGED'
+      changed=1
+    fi
+
+    acas_log "$(printf '%-34s %s -> %s row(s)  (%+d)  %s' \
+      "$table" "$before" "$count" "$delta" "$content")"
   done
 
-  if (( total > 0 )); then
-    acas_log "verified: the seed is present -- $total row(s) across ${#ACAS_SEED_RAN_TABLES[@]} table(s)"
+  if (( gained || changed )); then
+    local observed=''
+    (( gained )) && observed='rows gained'
+    if (( changed )); then
+      [[ -n "$observed" ]] && observed+=' and '
+      observed+='content changed'
+    fi
+    acas_log "verified: this seed's writes are present and durable -- observed as $observed; $total row(s) now across ${#ACAS_SEED_RAN_TABLES[@]} table(s)"
     return 0
+  fi
+
+  if (( uncensused )) && (( total > 0 )); then
+    acas_warn "the durability gate had no pre-seed baseline for at least one table, so it fell back to the absolute row count: $total row(s) are present across ${#ACAS_SEED_RAN_TABLES[@]} table(s), but nothing here establishes that THIS seed wrote them. Re-seed through harness/reset_db.sh, which re-applies the frozen schema first, if the result is to be compared."
+    return 0
+  fi
+
+  if (( total > 0 )) && (( ACAS_SEED_WINDOW_TARGET == 1 )); then
+    # The indistinguishable case, in the window measured to be durable. Accepted --
+    # and described exactly as what it is, because the reader is entitled to know
+    # that the rows were not OBSERVED to be this seed's.
+    acas_note "the seeding window was autocommit ON -- the mode MEASURED to be the only one in which the frozen loaders leave a durable row -- and every table this seed writes holds byte-for-byte what it held before the seed ran ($total row(s) across ${#ACAS_SEED_RAN_TABLES[@]} table(s), no row gained, no content changed). That is what re-seeding the SAME fixture over itself looks like: the frozen loaders open their table for output and re-insert, so an identical re-seed is invisible in end state. THE SEED IS ACCEPTED AND ITS WRITES WERE NOT OBSERVED: nothing here distinguishes them from the rows that were already present. Seed through harness/reset_db.sh -- which re-applies the frozen 33-table schema first -- when the result is to be compared, so that every row found afterwards is demonstrably this seed's."
+    return 0
+  fi
+
+  if (( total > 0 )); then
+    acas_die "$EX_NOT_DURABLE" \
+      "every load program reported success and left the ${#ACAS_SEED_RAN_TABLES[@]} table(s) they write byte-for-byte as they found them -- $total row(s) were already there before this seed ran, not one row was gained, and no table's content changed." \
+      'THE ROWS IN THE DATABASE ARE NOT THE ROWS THIS SEED WROTE. They belong to whatever' \
+      'seeded the target earlier, and reporting success over them would be the' \
+      'same false pass as reporting success over an empty database -- which is the' \
+      'condition this exit code was created for, arriving from the other side.' \
+      'HOW THIS RUN GOT HERE: the seeding window was autocommit OFF, the mode the' \
+      'Agent Action Plan mandates (sections 0.2.1.1, 0.4.1.7, 0.5.2) and this' \
+      'script'"'"'s default, in which no frozen loader reaches a live COMMIT -- every' \
+      '"perform aa020-Rollback" in all 28 common/*LD.cbl loaders is commented out' \
+      '(78 sites, none live) and "perform aa030-Commit" occurs exactly once' \
+      'anywhere, at [common/irsdfltLD.cbl:L437], commented out as well. So nothing' \
+      'durable was written, and the pre-seed census proves the state did not move.' \
+      'NOTHING HERE ISSUES THE MISSING COMMIT (R-4).' \
+      'DO NOT COMPARE DUMPS TAKEN FROM THIS STATE: they describe an earlier seed,' \
+      'and an empty diff is the only pass condition the protocol has (AAP section' \
+      '0.8.5).' \
+      'TO OBTAIN A WORKING FIXTURE, reset first and request the deviation:' \
+      '    harness/reset_db.sh --seed-dir ... <scenario>.yaml' \
+      '    ACAS_SEED_AUTOCOMMIT=on' \
+      'reset_db.sh re-applies the frozen 33-table schema before it seeds, so the' \
+      'census starts from zero and every row found afterwards is demonstrably this' \
+      'seed'"'"'s. The measurements behind the window are written up in' \
+      'docs/migration/ambiguity-resolutions.md.'
   fi
 
   acas_die "$EX_NOT_DURABLE" \
@@ -2132,15 +2384,18 @@ acas_filter_terminal_bytes() {
   python3 -u -c "$ACAS_SEED_FILTER_PY"
 }
 
-# acas_note_ran_tables <table-spec> Remembers which tables a loader that has just
-# run was supposed to fill, so the durability gate can measure exactly those and
-# nothing else. The spec is the fourth field of a mapping entry and may name two
-# tables joined by ` + ' -- slinvoiceLD and plinvoiceLD each load a header table
-# and a lines table. Duplicates are dropped: sys4LD, finalLD and dfltLD all read
-# the same flat file but write different tables, and two scenarios may name one
-# table twice.
-acas_note_ran_tables() {
-  local spec="$1" table known
+# acas_split_table_spec <table-spec> Expands the fourth field of a mapping entry
+# into ACAS_TABLE_LIST, one table per element. The field may name TWO tables
+# joined by ` + ' -- slinvoiceLD and plinvoiceLD each load a header table and a
+# lines table -- and the entry text is authored by hand in this file, so each name
+# is trimmed. One implementation, because both the pre-seed census and the
+# post-seed gate must expand the same field the same way; two copies of the ` + '
+# rule would be two chances to measure different tables at the two ends of one
+# seed.
+ACAS_TABLE_LIST=()
+acas_split_table_spec() {
+  local spec="$1" table
+  ACAS_TABLE_LIST=()
   while [[ -n "$spec" ]]; do
     if [[ "$spec" == *' + '* ]]; then
       table="${spec%% + *}"
@@ -2149,10 +2404,22 @@ acas_note_ran_tables() {
       table="$spec"
       spec=''
     fi
-    # Trim, defensively: the entry text is authored by hand in this file.
     table="${table#"${table%%[![:space:]]*}"}"
     table="${table%"${table##*[![:space:]]}"}"
     [[ -n "$table" ]] || continue
+    ACAS_TABLE_LIST+=("$table")
+  done
+}
+
+# acas_note_ran_tables <table-spec> Remembers which tables a loader that has just
+# run was supposed to fill, so the durability gate can measure exactly those and
+# nothing else. Duplicates are dropped: sys4LD, finalLD and dfltLD all read
+# the same flat file but write different tables, and two scenarios may name one
+# table twice.
+acas_note_ran_tables() {
+  local table known
+  acas_split_table_spec "$1"
+  for table in ${ACAS_TABLE_LIST[@]+"${ACAS_TABLE_LIST[@]}"}; do
     local seen=0
     for known in ${ACAS_SEED_RAN_TABLES[@]+"${ACAS_SEED_RAN_TABLES[@]}"}; do
       if [[ "$known" == "$table" ]]; then
@@ -3892,6 +4159,11 @@ acas_main() {
   fi
 
   acas_wait_for_database
+
+  # BEFORE the window opens, so the durability gate can judge the DIFFERENCE this
+  # seed makes rather than whatever rows an earlier one committed. Reads only.
+  acas_census_pre_seed_rows
+
   acas_open_seed_autocommit_window
 
   # BEFORE the first loader, so the completion report can bound itself to what

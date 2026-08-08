@@ -20,9 +20,19 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Final
 
 from acas_posting.cobol.field import FieldDescriptor
+from acas_posting.cobol.usage import ZonedDisplayInt
 from acas_posting.dictionary import loader
 
-__all__ = ["WsPostKey", "WsPostingRecord"]
+#  `ZonedDisplayInt` IS RE-EXPORTED HERE ON PURPOSE, and the purpose is a layering rule
+# rather than convenience. `WS-Post-Key`'s two items are the only ones in the migration
+# that can hold bytes their picture cannot produce - the frozen bridge's group move
+# leaves them there (ANOMALY N-KEY) - so `acas_posting/dal/acas006_gl_posting.py` has to
+# build the value/bytes pair when it unloads a fetched row. Agent Action Plan section
+# 0.4.3 does not let a `dal/acas*.py` module import `acas_posting.cobol` at all, but it
+# does let it import one `records` module, which it already does for this record. So the
+# type is DEFINED in the semantics layer that owns storage classes and REACHED through
+# the record layout that declares the two fields.
+__all__ = ["WsPostKey", "WsPostingRecord", "ZonedDisplayInt"]
 
 
 #  KEY LOOKUP  (R-5)  -  asked of the dictionary, never spelled out

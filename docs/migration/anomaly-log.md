@@ -578,8 +578,12 @@ omits them.
 Two related facts about the same handler, recorded here so they are not mistaken for separate
 defects. It declares its own logging identity as the IRS sub system —
 `[common/acas008.cbl:L293-L294]`, system 1, file 15 — even though its callers are Sales and
-Purchase. And `Open-Output` on it means *delete every row*; see A-NEW-8, which records that the
-sibling handler `acas007` does **not** do the same.
+Purchase. And `Open-Output` on it substitutes a **delete-all** `[common/acas008.cbl:L316]`, which is
+a bounded delete and not a truncate: see the key-bound note under A-NEW-8, which records that it
+removes only keys strictly below `9999999999` and is therefore a MEASURED NO-OP for every row the
+bridge itself writes, while the sibling handler `acas007` — whose substitution is commented out —
+nevertheless **does** empty `GLBATCH-REC`, through the backup-code path at
+`[common/acas007.cbl:L622-L631]`.
 
 **Reproducing module.** `acas_posting/dal/acas008_spl_posting.py`, which reproduces the guard in
 `aa010_main` and returns the same pair rather than performing an update. The refused set and its pair
@@ -616,8 +620,10 @@ everything.
 *The state half* — `tests/scenarios/test_clean_batch_post_irs.py`'s `test_a6_rewrite_verb_can_never_succeed`.
 It compares the transfer table's PRE-run digest against its POST-run digest, per side, so the claim
 is "this cycle changed nothing", not merely "the two cycles agree". That comparison is only possible
-because the end-of-job clear is a measured no-op on this fixture (see the key-bound note under
-A-NEW-8); had the table been emptied, an unchanged-table claim would have held for any behaviour.
+because the end-of-job clear is a measured no-op — see the key-bound note under A-NEW-8, which
+records that it is a no-op for **any** bridge-written key rather than only on this fixture, and that
+`irs030` reaches it on a handler it has already closed `[irs/irs030.cbl:L1712]`, `[irs/irs030.cbl:L1723]`;
+had the table been emptied, an unchanged-table claim would have held for any behaviour.
 
 Neither half claims the other's ground, and the earlier "No" in this slot understated the register:
 the status pair *is* assertable, in the tier that can call the handler directly. Seven assertions make
@@ -1447,15 +1453,25 @@ this section carries a row for **every** file, which is the one to read for comp
 | `tests/arithmetic/test_ledger_balance_accumulation.py` | **A-14**, the sequential read | — | A-12, A-13 |
 | `tests/arithmetic/test_irs_date_component_derivation.py` | **A-7**, the guarded derivation | — | A-13 |
 
-**The scenario tier — eight files, all present in this checkout and read to build the rows below.**
-Four entries have their primary lock here rather than in the arithmetic tier, because their only
-observable is end state, and A-6 has its state-level lock here for the same reason:
+**THE SAME FOURTEEN FILES AGAIN, WITH THE MERGED GROUPS FOLDED IN — this is the completeness
+table, and it is the one to read for "does every file have a row?".** The table above lists what each
+planned file owns; this one adds what the six merged groups brought into it, which is where several of
+the strongest locks now live. It is a row per file in `tests/arithmetic/`, fourteen of fourteen. Its
+third column is the same *contextual citation* column as above: a file that merely mentions the
+identifier, which is **not a lock**.
 
-| Entry | Primary lock | Why it cannot be an arithmetic assertion |
+**This table was previously captioned "The scenario tier — eight files".** It never was: every row
+names a `tests/arithmetic/*` file, and its columns were labelled `Entry` and "Why it cannot be an
+arithmetic assertion" while carrying file paths and contextual citations. A reader chasing a
+scenario-tier lock was sent to the wrong tier — the exact failure this section was rewritten to
+prevent. **The scenario tier's own ownership map is the "END STATE" table further down**, which is
+where the eight committed `tests/scenarios/*` files appear by name.
+
+| Test file | Primary lock, including the merged group it absorbed | Contextual citation |
 | --- | --- | --- |
 | `tests/arithmetic/test_pic_field_descriptors.py` | A-11, A-12, A-15, A-20; and, in the merged deployment-contract group, the deployment, manifest and register-consistency contracts, which carry no anomaly of their own | A-7 |
 | `tests/arithmetic/test_comp3_packed_decimal.py` | A-8, first truncation | A-11, A-15, A-20 |
-| `tests/arithmetic/test_comp_binary.py` | A-8, second truncation, and A-11; and, in the merged shared-storage group, **A-6** at §20 — the mechanism half: all four refused functions invoked through both alias sets — and **N-KEY** at §19 | A-2, A-3, A-11, A-13 |
+| `tests/arithmetic/test_comp_binary.py` | A-8, second truncation, and A-11; and, in the merged shared-storage group, **A-6** at §20 — the mechanism half: all four refused functions invoked through both alias sets — and **N-KEY** at §19 (why no seed reaches either silent skip), §22 (the byte-level round trip) and §22B (the **comparison**, added 2026-08-08) | A-2, A-3, A-11, A-13 |
 | `tests/arithmetic/test_sign_leading_display.py` | the two `sign leading` spellings; the primary R-6 site | — |
 | `tests/arithmetic/test_move_truncation.py` | A-13 | A-4 |
 | `tests/arithmetic/test_compute_truncate_unrounded.py` | **A-8, A-9, A-10** — the primary R-4 site | A-11 |
@@ -1467,6 +1483,24 @@ observable is end state, and A-6 has its state-level lock here for the same reas
 | `tests/arithmetic/test_control_total_comparison.py` | the three batch dispositions, and A-15 as context; and, in the merged CLI-seams group, the entry-point seams the scenario tier cannot reach without the stack | A-11 |
 | `tests/arithmetic/test_ledger_balance_accumulation.py` | **A-14**; and, in the merged silent-skip group, **A-13** reachability: both silent skips driven, each with a positive witness | A-12, A-13 |
 | `tests/arithmetic/test_irs_date_component_derivation.py` | **A-7** | A-13 |
+
+**THE SCENARIO TIER — eight files, one row each, all present in this checkout and read to build this
+table.** This is the map the mislabelled caption above used to promise and never delivered. It is by
+FILE, so a reader can see which scenario files carry an anomaly lock and which carry none: four of the
+eight do, and the other four are state-parity proofs that lock a *scenario* rather than an entry. Every
+test named was opened, because a plausible name is not evidence that the test asserts what its name
+suggests.
+
+| Test file | Anomaly lock it owns, by test name | Also asserts |
+| --- | --- | --- |
+| `tests/scenarios/test_clean_batch_post_gl.py` | none — no anomaly's observable is this scenario's end state | the GL state parity, the oracle's disposition, the stamped batch columns, and `GLPOSTING-REC` as an unchanged witness |
+| `tests/scenarios/test_clean_batch_post_sl.py` | **A-1** `::test_a1_missing_period_gl_posting_close_not_executed`, and **A-11** `::test_sign_narrowing_at_the_bridge_agrees` | the SL state parity, the moving-average fields (A-8 to A-10 in state), and that the autogen tables are untouched |
+| `tests/scenarios/test_clean_batch_post_pl.py` | the **A-1 paired control** `::test_a1_control_pl060_terminating_period_is_present`, and the candidate **A-NEW-1** `::test_a_new_1_second_apportionment_pass_never_runs` | the PL state parity and the purchase moving averages |
+| `tests/scenarios/test_clean_batch_post_irs.py` | **A-4** `::test_a4_half_posted_double_entry_reproduced`, **A-5** `::test_a5_lost_update_on_vat_control_accounts_reproduced`, **A-6** (state half) `::test_a6_rewrite_verb_can_never_succeed`, **A-7** (dumped row) `::test_a7_partial_date_component_derivation_is_dumped_as_stored` | the IRS state parity, the transfer-file clear at the frozen high-key threshold, and `IRSDFLT-REC` as a read-only witness |
+| `tests/scenarios/test_mixed_accepted_rejected_batch.py` | **A-13** both skips, `::test_a13_non_numeric_batch_number_skipped_silently` and `::test_a13_we_error_999_record_skipped_silently`, plus the **A-13 / A-14 interaction** `::test_skipped_postings_do_not_perturb_sequential_nominal_cursor` | that the two seeded batches are rejected for two different reasons, and that every bounded row is unchanged |
+| `tests/scenarios/test_period_end_totals_update.py` | none owned; `::test_a2_a3_quarter_handling_is_not_reconciled_here` records **A-2/A-3 as explicitly NOT reconciled here**, which is a boundary rather than a lock | the four operations in declared order, both `flag_p` latches cleared, and `SYSTOT-REC` against the nine write sites |
+| `tests/scenarios/test_control_total_mismatch_rejection.py` | none — the abort is behaviour, not a defect | term code **5**, that `gl071` and `gl072` never ran, that the batch stays open and unstamped, and that the diagnostic display has no database effect |
+| `tests/scenarios/test_empty_batch.py` | none; `::test_no_empty_batch_special_case_was_added` guards against a defect being *introduced* | that the seed is exactly three files with no `posting.dat`, that `GLPOSTING-REC` is empty on both sides, and that the bounded rows are byte-identical to the seed |
 
 Three entries in the dagger set are locked outside the arithmetic tier as well, because their
 observable is end state rather than a computed value:
@@ -1504,7 +1538,7 @@ plausible-looking name is not evidence that the test asserts the entry:
 | **A-4** | `test_clean_batch_post_irs.py::test_a4_half_posted_double_entry_reproduced` | a committed debit with no balancing credit and no posting row is a state, not a computation |
 | **A-5** | `test_clean_batch_post_irs.py::test_a5_lost_update_on_vat_control_accounts_reproduced` | a lost update is an ordering fault across a loop boundary |
 | **A-6** — state-level lock IN ADDITION to its behaviour lock | `test_clean_batch_post_irs.py::test_a6_rewrite_verb_can_never_succeed` | the status pair is invisible to a dump, so at this tier the test asserts the only outcome the guard can leave, NO CHANGE on both sides |
-| **A-13** | `test_mixed_accepted_rejected_batch.py::test_a13_non_numeric_batch_number_skipped_silently` for skip (a) and `::test_a13_we_error_999_record_skipped_silently` for skip (b), with `::test_skipped_postings_do_not_perturb_sequential_nominal_cursor` locking the A-13 / A-14 interaction | a *silent* skip has no observable except the row that is absent and the cursor that did not move |
+| **A-13** — the STATE half only; the behaviour lock is in the arithmetic tier | `tests/arithmetic/test_ledger_balance_accumulation.py` is the PRIMARY lock: it drives the shipped `gl072_transaction_update` with a work record whose `post-batch` is `'1234X'` and with a `we-error = 999` record, and asserts a POSITIVE WITNESS for each — that the branch RAN. Beside it, `test_mixed_accepted_rejected_batch.py::test_a13_non_numeric_batch_number_skipped_silently` and `::test_a13_we_error_999_record_skipped_silently` are SUPPORTING state witnesses, and `::test_skipped_postings_do_not_perturb_sequential_nominal_cursor` locks the A-13 / A-14 interaction | a *silent* skip has no observable except the row that is absent and the cursor that did not move — but neither branch is REACHABLE from any committed seed, because `post-batch` arrives through one numeric column, `POST-KEY bigint(10) unsigned` [mysql/ACASDB.sql:L156], so a non-numeric value cannot be seeded. The two scenario nodes therefore assert an ABSENCE that also holds when nothing was processed, and each says so in its own docstring; ownership of reachability is the arithmetic file's, which is why it is named first here |
 
 **A-7** is locked at both ends: the arithmetic tier owns the derivation, and
 `test_clean_batch_post_irs.py::test_a7_partial_date_component_derivation_is_dumped_as_stored` owns the
@@ -1957,20 +1991,144 @@ by name — and, like A-22, preserved.
 `A-NEW-7` of `acas_posting/programs/pl100_payment_posting.py`**, which is the deduction reversal gated
 on `t-deduct` alone and carries the globally unique name `A-PL100-C`. See §15.1.
 
-**A-NEW-8 — `acas007` and `acas008` disagree about whether `Open-Output` truncates.** The two
-handlers carry the same special-case block, and one of them has two of its lines commented out:
+**A-NEW-8 — the sibling handlers disagree about `Open-Output`, but not where it looks like they do:
+each of `acas006`, `acas007` and `acas008` substitutes a delete-all, and what that delete-all can
+REACH differs per table.** The commented-out lines that look decisive are not, and this entry now
+states the MEASURED outcome. Its earlier reading — that `acas007` leaves `GLBATCH-REC` alone while
+`acas008` empties the transfer table — was taken from the three head-of-handler blocks alone and is
+contradicted on both halves by execution; §15.3 records the correction rather than applying it
+silently, per §8. The handler that genuinely does leave its table alone is a fourth one, `acas005`,
+and for a different reason.
 
-- `[common/acas007.cbl:L305-L312]` has the same shape as its sibling, **but `set fn-delete-all to
-  true` at L308 and `move zero to access-type` at L309 are commented out**. Opening the General
-  Ledger batch table for output therefore does **not** truncate `GLBATCH-REC`.
-- `[common/acas008.cbl:L313-L319]` **does** substitute a delete-all and therefore **does** truncate
-  the transfer table — and only in RDB mode, the extra condition at `[common/acas008.cbl:L315]` being
-  `and not FS-Cobol-Files-Used`.
+The special-case block at the head of each handler is the same shape in all three, and the three
+spellings differ:
 
-There is additionally a **second, unguarded** delete-all substitution in the same handler at
-`[common/acas008.cbl:L571-L574]`, which sets the flag on any open-output regardless of mode. Both
-handlers are preserved exactly, and **never harmonised** — the asymmetry is what decides whether an
-`Open-Output` in a scenario empties a table or leaves it alone, which is directly diff-visible.
+- `[common/acas006.cbl:L313-L318]` carries the block with **no `set fn-delete-all` line at all**,
+  not even a commented-out one.
+- `[common/acas007.cbl:L305-L312]` carries it **with `set fn-delete-all to true` at L308 and
+  `move zero to access-type` at L309 commented out**.
+- `[common/acas008.cbl:L313-L319]` carries the substitution **live** at `[common/acas008.cbl:L316]`,
+  guarded to RDB mode by `and not FS-Cobol-Files-Used` at `[common/acas008.cbl:L315]`.
+
+**Reading only those three blocks says the two General Ledger handlers leave their tables alone. They
+do not**, and the reason is the paragraph the maintainer himself labelled `[ Backup code ]`. Every
+one of the three routes an `Open-Output` through `perform ba-Process-RDBMS`, and that section ends
+with `ba015-Test-Ends` followed by an **unguarded fall-through** into `ba020-Process-DAL`.
+
+**That paragraph is the norm, not an oddity of one handler.** Enumerated over the frozen tree, the
+`[ Backup code ]` comment appears in **ten** handlers — `acas005`, `acas006`, `acas007`, `acas010`,
+`acas014`, `acas017`, `acas023`, `acas032`, `acasirsub1` and `acasirsub4` — of which five are in scope
+here; the other five belong to out-of-scope entities and are counted, not named individually, per
+§14.4. In four of the five in-scope ones the paragraph's body is **live**: `[common/acas006.cbl:L642-L643]`,
+`[common/acas007.cbl:L629-L630]`, `[common/acasirsub1.cbl:L740-L741]` and
+`[common/acasirsub4.cbl:L520-L521]`. In the fifth, `acas005`, **the body itself is commented out** —
+`[common/acas005.cbl:L651-L652]` — which is the one handler in the set whose `Open-Output` reaches no
+delete-all at all, and the measured contrast that makes the rest legible. `acas008` is the exception in
+the other direction: it has the paragraph `[common/acas008.cbl:L566-L574]` but **no inner `perform`**,
+and its test cannot fire in RDB mode because L316 has already replaced the function code.
+
+The three the finding names, in full:
+
+- `[common/acas007.cbl:L622-L631]` — `if fn-Open and fn-Output / perform ba020-Process-Dal / set
+  fn-Delete-All to true`, with the fall-through call at `[common/acas007.cbl:L640-L645]`. Because the
+  first block's substitution is commented out, `fn-Open` with `fn-Output` survives all the way here,
+  the test fires, and the bridge is called **twice** — once as the open, once as a delete-all.
+- `[common/acas006.cbl:L635-L644]` — the identical paragraph, with its fall-through call at
+  `[common/acas006.cbl:L653-L658]`, and the same double call for the same reason.
+- `[common/acas008.cbl:L571-L574]` — the same test but **without** the inner `perform`, so one call
+  rather than two. It never fires in RDB mode anyway: L316 has already replaced `fn-Open` with
+  `fn-Delete-All`, and the four condition names share one `File-Function` field, so `fn-Open` is
+  false by the time the section is entered.
+
+**All three therefore reach `ba085-Process-Delete-ALL`, and none of the three leaves its table
+untouched by choice** — `acas005`, whose backup code is itself commented out, is the one that does.
+What differs among the three is not whether a delete-all runs but what its bound can reach, which is
+the note that follows and which is what a scenario's diff actually sees. All four handlers are
+preserved exactly, and **never harmonised**.
+
+**The key-bound note.** `ba085-Process-Delete-ALL` is a **bounded** delete in every bridge, never the
+unqualified `DELETE FROM <table>` its own comment block describes. Each moves a sentinel into the
+record's key, then builds a **strict** `<` predicate from the key image and issues it:
+
+| bridge | sentinel | strict `<` | predicate built | statement |
+| --- | --- | --- | --- | --- |
+| `glbatchMT` | `move 999999 to ws-BATCH-KEY` `[common/glbatchMT.cbl:L922]` | `[common/glbatchMT.cbl:L933]` | `[common/glbatchMT.cbl:L928-L938]` | `[common/glbatchMT.cbl:L954-L960]` |
+| `glpostingMT` | `move 9999999999 to ws-Post-Key` `[common/glpostingMT.cbl:L907]` | `[common/glpostingMT.cbl:L918]` | `[common/glpostingMT.cbl:L913-L923]` | `[common/glpostingMT.cbl:L939-L945]` |
+| `slpostingMT` | `move 99999 to WS-IRS-Batch WS-IRS-Post-Number` `[common/slpostingMT.cbl:L850-L851]` | `[common/slpostingMT.cbl:L862]` | `[common/slpostingMT.cbl:L857-L868]` | `[common/slpostingMT.cbl:L885-L891]` |
+
+Whether that bound reaches a row is decided by how the SAME bridge stores the key, and the three do
+not agree:
+
+- `glbatchMT` loads its key host variable from `WS-BATCH-KEY9`, the **elementary** `pic 9(6)`
+  redefinition `[copybooks/wsbatch.cob:L20-L21]`, so `move WS-BATCH-KEY9 to HV-BATCH-KEY`
+  `[common/glbatchMT.cbl:L1069]` is an ordinary numeric move and a batch lands on a six-digit key.
+- `glpostingMT` and `slpostingMT` load theirs from a **group** item — `move WS-Post-Key to
+  HV-POST-KEY` `[common/glpostingMT.cbl:L1054]` over the group at `[copybooks/wspost.cob:L14-L16]`,
+  and `move WS-IRS-Post-Key to HV-IRS-POST-KEY` `[common/slpostingMT.cbl:L1001]` over the group at
+  `[copybooks/wspost-irs.cob:L14-L16]`. COBOL treats both operands of a group move as alphanumeric,
+  so the digits' BYTES are reinterpreted as the receiving binary integer and a posting key lands near
+  4.7e17 — the same store **N-KEY** and **A-NEW-18** record from the write side.
+
+**MEASURED**, in this checkout against MariaDB 10.11.7 with `mysql/ACASDB.sql` applied verbatim,
+through the migrated handlers rather than by reasoning about the SQL:
+
+| handler | table | bound | a key the bridge itself writes | `File-Function` after the call | `Open-Output` outcome |
+| --- | --- | ---: | ---: | ---: | --- |
+| `acas007` | `GLBATCH-REC` | 999999 | 100001 | 6 | delete-all runs; **all three seeded rows deleted**, count 0 |
+| `acas006` | `GLPOSTING-REC` | 9999999999 | 472328296244457520 | 6 | delete-all runs; **the row survives** |
+| `acas008` | `PSIRSPOST-REC` | 9999999999 | 472328296244457520 | 6 | delete-all runs; **bridge-written rows survive**, and only a hand-inserted key below the bound went |
+| `acas005` | `GLLEDGER-REC` | — none composed | 1000000 | **1, unchanged** | **no delete-all at all**; both rows survive, because the backup code's body is commented out |
+
+Every figure was watched rather than inferred. Each call returns `FS-Reply 0` with `WE-Error 0`; the
+`File-Function` column is the caller's own block read back after the call, and it is what separates
+"no delete-all was issued" from "one was issued and reached nothing" — a distinction no table dump can
+make. The `acas007` bound was pinned by a control seeded with keys 999998 and 999999, which keeps
+**999999**: the strict `<` at `[common/glbatchMT.cbl:L933]` observed rather than assumed.
+
+So the statement per table, which is what a reader needs and what the earlier text got backwards:
+
+- **GL batch.** An `Open-Output` on `acas007` **empties `GLBATCH-REC`** of every key strictly below
+  999999 — that is, of everything a ledger digit `[copybooks/wsbatch.cob:L15]` with a five-digit
+  batch number `[copybooks/wsbatch.cob:L19]` can hold, except exactly 999999.
+- **GL posting and the IRS transfer table.** The delete-all runs and is a **measured no-op for any
+  row the bridge wrote**, because every such key is some five orders of magnitude above the bound.
+  Only a row inserted by hand below 9,999,999,999 is removable, which no migrated code path does.
+
+**`N-DELALLMUTATES` belongs to this note.** `move 99999 to WS-IRS-Batch WS-IRS-Post-Number`
+`[common/slpostingMT.cbl:L850-L851]` writes the sentinel into the **caller's** record, not into a
+work field, so a program that clears the transfer file finds its own posting key replaced by
+99999/99999 on return. Measured: a caller holding 7/9 gets 99999/99999 back. `glbatchMT` does the
+same to `ws-BATCH-KEY` at `[common/glbatchMT.cbl:L922]`, and the reproducing modules leave both
+mutations in place.
+
+**Reproducing modules.** `acas_posting/dal/acas007_gl_batch.py` (`ba015_test_ends`, which makes the
+call twice, and `mt_ba085_process_delete_all`, which overwrites the key with the sentinel),
+`acas_posting/dal/acas006_gl_posting.py` (the same two paragraphs) and
+`acas_posting/dal/acas008_spl_posting.py` (`ba085_process_delete_all`, one call, bound composed by
+`cobol_group_image`). The end-of-job consequence for `irs030` is recorded at
+`acas_posting/programs/irs030_posting.py` `_eoj_q1`, and the state-level evidence in
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md) §10.4.
+
+**Two identifiers this entry registers by name**, because shipped modules cite them and §15.1's
+`N-<mnemonic>` family declaration reaches neither:
+
+- **`N18b`** — the double bridge call above: one `Open-Output` request calls the bridge twice, first
+  carrying `fn-Open` with `fn-Output` and then carrying `fn-Delete-All`, because `ba015-Test-Ends`
+  performs `ba020-Process-Dal` and then falls through into it again. Locators
+  `[common/acas007.cbl:L305-L312]`, `[common/acas007.cbl:L622-L631]`,
+  `[common/acas007.cbl:L640-L645]`, `[common/acas006.cbl:L313-L318]`,
+  `[common/acas006.cbl:L635-L644]`, `[common/acas006.cbl:L653-L658]`, with
+  `[common/acas008.cbl:L313-L319]` as the one-call contrast. Cited by
+  `acas_posting/dal/acas007_gl_batch.py` and `acas_posting/dal/acas006_gl_posting.py`. Its spelling is
+  a bare `N<n><letter>`, which is neither an `A-<n>`, an `A-NEW-<n>`, an `F-<n>` nor an
+  `N-<mnemonic>`, and that is precisely how it stayed unregistered while two modules asserted it was
+  recorded here.
+- **`N-DELALLMUTATES`** — the caller-record mutation described above, cited three times by
+  `acas_posting/dal/acas008_spl_posting.py`. §15.1's per-module table of the `N-` family names twelve
+  data-access modules and **omits `acas008_spl_posting.py` altogether**; that module owns **11
+  distinct `N-` tags in 18 occurrences** in this checkout, enumerated rather than recalled, so the
+  family's declared totals under-count by that module. The omission is stated here rather than fixed
+  in the table above, for §5's reason: the counts there are cited as they stand.
 
 **A-NEW-9 — a five-source `STRING` the maintainer flagged as wrong.**
 `[general/gl080.cbl:L530]` carries `move space to Arg-Test.` with the inline comment `*> this lot
@@ -2105,7 +2263,7 @@ The Python DAL now scopes process-owned connections explicitly, and the oracle
 build copy suppresses only the destructive local closes. The `irs030`
 reproduction, including the preceding `acasirsub3` read, is runtime verified by driving the IRS
 scenario end to end — the ten protocol stages over `harness/scenarios/clean_batch_irs.yaml`
-(README §11.1a), whose retained
+(README §11.1), whose retained
 `verdict.json` records `identical` over the four IRS tables and whose
 `<ACAS_OUT>/run-logs/clean_batch_irs/cobol.log` carries the facade call sequence — and by
 `tests/scenarios/test_clean_batch_post_irs.py`, which asserts the reproduction against the compared
@@ -2173,7 +2331,18 @@ that identifiers are never renumbered.
    step 2 and **cannot be recovered**. `move HV-POST-KEY to WS-Post-Key`
    `[common/glpostingMT.cbl:L1085]` copies those bytes straight back, so `Batch`
    now holds five control characters and `IF Batch IS NUMERIC` is **false**.
-   Measured directly on the oracle compiler; `Batch` compares as **75261**.
+   **What it then compares as depends on what it is compared with**, and this entry
+   read simply *"`Batch` compares as 75261"* — a half-truth that held for the one
+   operand shape it had been measured against and silently mis-stated the shape the
+   frozen gates actually use. Measured on 2026-08-08 by two standalone probes over
+   the frozen copybooks: against a numeric **literal**, `if batch = 75261` is
+   **EQUAL**, the tolerant low-nibble reading; against another **field**,
+   `if batch = WS-Batch-Nos` matches **none** of the 100,000 values a `pic 9(5)`
+   batch number can hold, because a relation between two same-picture `DISPLAY`
+   items is settled **byte-wise**. `Q-NKEY-CMP` in
+   [`ambiguity-resolutions.md`](ambiguity-resolutions.md) carries all nine readings,
+   including the two that govern `= zero`: a **group** compared with `ZERO` is
+   byte-wise, an **elementary** item compared with `ZERO` is numeric.
 4. `gl070`'s own guard therefore fires — `if batch not = WS-Batch-Nos go to loop`
    `[general/gl070.cbl:L492-L493]` — and **no work record is written**. Measured:
    `pretrans.tmp` and `postrans.tmp` are both **zero bytes** after the run.
@@ -2187,8 +2356,30 @@ that identifiers are never renumbered.
 **One frozen defect with three faces, which is why it is one entry and not three.**
 First, it starves `gl070` → `gl071` → `gl072`: the cycle runs to completion, exits
 zero, and posts nothing. Second, it is why **`gl080`'s deletion phase deletes
-nothing**, measured independently by the `end_of_cycle_gl` scenario — which is not committed, so that
-measurement is a retained report rather than a re-runnable check. Third, it makes
+nothing**. That face is now carried by a **first-party compiled run** rather than by
+the uncommitted `end_of_cycle_gl` scenario it used to cite: on 2026-08-08 the
+compiled `gl080` was driven over 202 seeded `GLPOSTING-REC` rows whose batch number
+is `75261`, under MariaDB statement counters, and the `Com_delete` delta was **0**
+with the row count unchanged at 202 and both batches still stamped cleared. The
+gate is `if WS-Post-Key = zero or batch not = WS-Batch-Nos go to loop`
+`[general/gl080.cbl:L616-L618]`, and byte-wise both disjuncts resolve the way that
+skips every row. The same gate stands verbatim in the archive pass
+`[general/gl080.cbl:L459-L461]` and in `gl070`'s phase-2 loop
+`[general/gl070.cbl:L492-L493]`.
+
+**This face also had a live migration divergence, and 75261 is why it hid.** Read
+numerically — as the migration read it until 2026-08-08 — the corrupt `Batch`
+decodes to `75261`, so `batch not = WS-Batch-Nos` is **false** for precisely one
+batch number in the domain, `75261` itself, and the migrated deletion pass then fell
+through the gate and issued one `DELETE` per posting row where the compiled program
+issues none. **Every one of those statements was a no-op**: measured on the same run,
+`Com_delete` was 202 while `Handler_delete` was **0** and the row count was 202 before
+and after, because the frozen handler builds its `WHERE` from the re-encoded *digits*
+of the key and no row carries those. That is why eight green journeys and an empty diff
+over every in-scope table never surfaced it — the divergence was never a difference in
+state that a diff could express, but 202 units of work the compiled program does not
+do. For every other batch number the two readings agree on *skip* in the first place,
+so reaching the divergence at all requires the seed to name that one number. Third, it makes
 **A-13's two silent skips unreachable by any seed** — the non-numeric value genuinely
 exists, but `gl070` discards the row one layer above, before `gl072` can ever see it.
 That third face is easy to attribute to the wrong program: the corruption is real and it is `gl070`,
@@ -2197,9 +2388,27 @@ not `gl072`, that discards the row.
 **Reproduced, not repaired (R-4).** `acas_posting/dal/acas006_gl_posting.py`
 reproduces the round trip, including `_split_post_key`, which was added after
 measurement established that the compiled unload is a **raw byte copy** rather than
-the arithmetic `int(hv_post_key) % 10**10` the module first used. **Locked** by
+the arithmetic `int(hv_post_key) % 10**10` the module first used. Since 2026-08-08
+that split additionally **carries the five bytes each half was read out of**, as an
+`acas_posting/cobol/usage.py::ZonedDisplayInt`, and `_join_post_key` moves a carried
+image straight back — so a fetched row rewritten puts its own column value back
+rather than the re-encode of a tolerant reading, which is what the frozen group move
+does. `acas_posting/cobol/arithmetic.py::compare_zoned_display_fields` is the
+measured relation primitive, and it is applied at the **four** frozen field-to-field
+gates a bridge-unloaded `POST-KEY` reaches:
+`acas_posting/programs/gl080_end_of_cycle.py` (both the deletion pass and the
+archive pass), `gl070_transaction_pre_process.py` (the phase-2 loop) and
+`gl051_batch_control_check.py` (the proof-total gate). Two neighbouring sites in
+`gl051` deliberately stay **numeric**, because that is what was measured for them:
+`if batch = zero` `[general/gl051.cbl:L1012]` is an elementary item against a
+figurative constant, and `save-batch not = batch` `[general/gl051.cbl:L1016]`
+compares across storage classes, `save-batch` being `pic 9(5) COMP`
+`[general/gl051.cbl:L174]`. **Locked** by
 `tests/arithmetic/test_comp_binary.py` §19, which derives
-why no seed reaches either skip, and §22, which pins the byte-level round trip.
+why no seed reaches either skip, §22, which pins the byte-level round trip, and
+**§22B**, which pins the comparison itself — that the corrupt image matches no batch
+number in the whole `0..99999` domain, that the algebraic reading which used to be
+the gate is no longer it, and that a clean key still passes.
 The consequence — that no batch is stamped — is asserted against the declared seed
 by `tests/scenarios/test_mixed_accepted_rejected_batch.py`.
 
@@ -2383,6 +2592,29 @@ register** or uses a name that cannot collide — a program-scoped letter or a p
 allocated inside a single module are each not an acceptable identifier**, and the test named above is
 what holds that.
 
+### 15.3 A-NEW-8 was corrected against measurement, and the earlier reading is recorded here
+
+**One candidate entry asserted the opposite of what the code does, and the register is the deliverable
+R-4 names, so an inaccurate entry is a real gap even when the behaviour is faithful.** The correction
+is listed here rather than applied silently, for the reason §8 gives: a reader who met the old text —
+in this document, in
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md), or in a scenario test's docstring — must be
+able to find out that it changed and why, instead of quietly disagreeing with the current text.
+
+| | The earlier reading | What was measured | Where the earlier reading came from |
+| --- | --- | --- | --- |
+| `acas007` / `GLBATCH-REC` | `Open-Output` does **not** truncate, because `set fn-delete-all to true` is commented out at `[common/acas007.cbl:L308]` | `Open-Output` returns `FS-Reply 0` / `WE-Error 0` and **deletes every row below the strict bound 999999** — three seeded rows became none | the first special-case block was read on its own; `ba015-Test-Ends` `[common/acas007.cbl:L622-L631]`, the paragraph that actually forces the delete-all, was attributed to `acas008` alone |
+| `acas008` / `PSIRSPOST-REC` | `Open-Output` **does** truncate the transfer table | the delete-all runs, and is a **no-op for every row the bridge wrote**: the bound is the ten-character key text `9999999999` while a bridge-written key lands near 4.7e17 | the substitution at `[common/acas008.cbl:L316]` was read as `DELETE FROM`; `ba085-Process-Delete-ALL` `[common/slpostingMT.cbl:L827-L891]` builds a strict `<` predicate instead |
+| The forward reference | A-6 pointed at "the key-bound note under A-NEW-8" | no such note existed | the note was described from A-6 before it was written under A-NEW-8 |
+| `N18b`, `N-DELALLMUTATES` | asserted by shipped modules to be documented here | neither appeared anywhere in this document | both spellings fall outside every family §15.1 and §15.2 declare |
+
+**Nothing in `acas_posting/` changed behaviour because of this correction, and that is the point.**
+Each of the three handlers was already reproducing its frozen counterpart exactly — the double bridge
+call, the single call, the bounded predicate, the sentinel written into the caller's record. What was
+wrong was the description, in four places, and R-4's obligation is to reproduce **and record**. The
+comments that overstated the effect — `irs030_posting.py`'s "deletes every row of the transfer table"
+among them — now state the measured no-op and both of its independent causes.
+
 ---
 
 ## 16. Self-audit
@@ -2401,6 +2633,22 @@ tier was run independently of the Compose stack. The per-field `anomaly_refs` an
 `ambiguity_refs` counts quoted for A-7, A-11, A-12, A-14, A-15 and A-20 were read out of the committed
 `data_dictionary/acas_posting_dictionary.json`.
 
+**What the A-NEW-8 correction rests on, dated.** On **2026-08-08** the four `Open-Output` outcomes in
+§15's key-bound note were watched against a MariaDB 10.11.7 server with `mysql/ACASDB.sql` applied
+verbatim, driving the shipped handlers through the published facade verbs: `acas007` on `GLBATCH-REC`
+(three rows seeded through `gl_batch_write`, none surviving, plus a 999998/999999 control that pins the
+strict `<`), `acas006` on `GLPOSTING-REC`, `acas008` on `PSIRSPOST-REC` (a hand-inserted key 1 removed,
+two keys above the bound retained, and two rows written through the bridge itself retained), and
+`acas005` on `GLLEDGER-REC` (`File-Function` never leaving 1, so no delete-all is issued at all). The
+`irs030` half was driven through `run(..., clear_posting_file=True)` on a fully seeded IRS side: the
+section completed two postings, the clear was attempted and returned `FS-Reply 99` with
+`WE-Error 911` on the handler `EOJ` had already closed at `[irs/irs030.cbl:L1712]`, and both transfer
+rows survived. The `[ Backup code ]` census of ten handlers and the eleven `N-` tags of
+`acas008_spl_posting.py` were produced by enumeration over the files, not recalled. No compiled-oracle
+run was available for this measurement, and none is claimed: what the frozen source determines is cited
+line by line above, and what only execution can settle was measured on the migrated handlers, which
+reproduce those lines.
+
 **What compiled execution established.** On 2026-08-04 the strict oracle build completed with all
 29 expected `*MT` bridges and 28 loaders. All eight mandated journeys then completed the ten-stage
 protocol with observed empty diffs, and the scenario tier passed 93 tests in both declared and
@@ -2409,11 +2657,30 @@ completed the same ten stages with observed empty diffs, and the scenario tier �
 selected by `pytest -m scenario`, the growth being the ninth file's eleven plus the seed-relative
 tests added to the eight — passed in the containerised run. The ninth definition and its eleven
 tests are **not committed**, so a `pytest -m scenario` run selects fewer; the figure is left as it was
-measured rather than adjusted by arithmetic. The measurements added to A-13 and
+measured rather than adjusted by arithmetic. **Re-measured on this checkout**, in the container with the
+transformed-oracle acknowledgement bound, `pytest -m "scenario or determinism"` reads **114 passed, 1222
+deselected** — **106** scenario tests and **8** determinism tests — and all eight committed journeys again
+completed the ten stages with `identical` verdicts over 22 tables each. The measurements added to A-13 and
 A-NEW-13 through A-NEW-17 are therefore runtime findings, not source-reading predictions.
 **[`scenario-diff-evidence.md`](scenario-diff-evidence.md) is the authority for which run produced
 which verdict**, and it carries the manifest digests; this document deliberately does not restate
 them, so that there is one place a reader has to trust and one place an edit has to change.
+
+**What compiled execution established on 2026-08-08, and with which oracle.** Two instruments were used
+and they do not carry the same weight, so they are separated rather than reported together. **The
+probes** behind `A-NEW-18`'s corrected step 3 were compiled with `-I` the **frozen, untransformed**
+copybook directory, so no build transform can have reached the declarations their readings are about;
+they `COPY` `wspost.cob` and `wsbatch.cob`, perform the frozen bridge unload, and sweep the whole
+`0..99999` batch-number domain. **The run** behind `A-NEW-18`'s deletion-pass face drove the compiled
+`gl080` end-of-cycle route against the **disclosed-transformed diagnostic** oracle, because
+`harness/build_oracle.sh` in its default frozen mode still exits 74 on the copybook
+[`README-python-migration.md`](../../README-python-migration.md) §8.7 records as absent. That
+weakens the claim and the weakening is stated rather than absorbed: what makes the reading usable is
+that **none of the 41 disclosed transforms touches `general/gl070.cbl`, `general/gl072.cbl`,
+`general/gl080.cbl`, `general/gl051.cbl`, `copybooks/wspost.cob` or `copybooks/wsbatch.cob`** — checked
+against the transform list the attestation carries, not assumed. A parity *claim* still requires the
+frozen oracle; a statement counter reading a `Com_delete` delta of 0 does not, because the transforms
+that could change it are enumerable and none of them is present.
 
 **What remains open, and what closed since.** Compiled execution of the mandated *scenarios* never
 answered every `Q-` question, and was never going to: a scenario exercises the paths the scenario
@@ -2438,11 +2705,18 @@ lookup). All five entries remain, for the reasons §2.6 gives.
 passed — the rule that produced the honest `PENDING`s in the first place is the rule that made these
 promotions worth something.
 
-**Two of those measurements have no durable artifact, and are labelled accordingly in place.** The
+**Four of those measurements have no durable artifact, and are labelled accordingly in place.** The
 strict-build console output behind `A-NEW-13` and the handle-sharing probe behind `A-NEW-16` were
 written to a session-scoped temporary directory and have not survived, so the first cites
 the committed shim and the build script instead and the second is carried as an **unverified report**.
-No session log is cited anywhere in this register as though a reader could open it.
+The two added on 2026-08-08 are in the same position and are recorded the same way: the probe sources
+behind `A-NEW-18`'s step 3 are **not committed**, because AAP §0.3.1's file inventory is exhaustive and
+admits no probe directory, and the statement-counter deltas behind its deletion-pass face were read from
+a session run. Both are therefore **reports of observed runs rather than retained artefacts** — and both
+are stated so that re-taking them needs nothing but durable repository state: two frozen copybooks, the
+compiler `harness/Dockerfile.gnucobol` installs, a frozen locator for the input constant, and MariaDB's
+own `Com_delete` counter. No session log is cited anywhere in this register as though a reader could
+open it.
 
 **What was corrected.** Fourteen locators from the Agent Action Plan and three claims from the
 received brief did not survive verification. They are listed in §8 and, for the build scripts, in

@@ -323,6 +323,17 @@ _POST_AMOUNT: Final[cobol_field.FieldDescriptor] = _dictionary_descriptor(
     "GLPOSTING-REC.POST-AMOUNT"
 )
 
+#: `05 Batch pic 9(5).` [copybooks/wspost.cob:L15] and `05 WS-Batch-Nos pic 9(5).`
+#: [copybooks/wsbatch.cob:L19] - the two operands of the four frozen gates that
+#: compare a posting's key with the batch being processed. Both unsigned zoned DISPLAY
+#: of equal width, which is the only shape `compare_zoned_display_fields` accepts.
+_POST_KEY_BATCH: Final[cobol_field.FieldDescriptor] = _dictionary_descriptor(
+    "WS-Posting-Record.Batch"
+)
+_WS_BATCH_NOS_FIELD: Final[cobol_field.FieldDescriptor] = _dictionary_descriptor(
+    "WS-Batch-Record.WS-Batch-Nos"
+)
+
 #: `05 Input-Gross pic 9(9)v99.` under `03 Amounts comp-3.`
 #: [copybooks/wsbatch.cob:L40-L41] - UNSIGNED, which is the whole point: a
 #: negative value stored here loses its sign at the field, before any SQL.
@@ -456,6 +467,46 @@ _DIVIDE_INTO_GIVING_SITES: Final[tuple[str, ...]] = (
     "sales/sl060.cbl:L843",  # divide sales-activety into work-2 giving ...
     "purchase/pl060.cbl:L751",  # divide purch-activety into work-2 giving ...
     "purchase/pl060.cbl:L766",  # divide purch-activety into work-2 giving ...
+)
+
+#: THE MULTIPLY HALF OF THE SAME SIX AVERAGE BLOCKS, one entry per block, paired
+#: positionally with `_AVERAGE_BLOCK_DIVIDE_HALVES` below.
+#:
+#: WHY IT IS A CENSUS OF ITS OWN. The idiom is `multiply <activety> by <average>
+#: giving <work>` and then a divide back out, so the multiply is where the running
+#: total is RECONSTITUTED from the stored average - which is the step that makes the
+#: previous truncation permanent. A census of the divides alone names the visible half
+#: of A-8, A-9 and A-10 and leaves the reconstitution uncited, and these four in
+#: particular - [sales/sl060.cbl:L837], [purchase/pl060.cbl:L745],
+#: [purchase/pl060.cbl:L760] and [purchase/pl100.cbl:L498] - were cited by the shipped
+#: modules that reproduce them and by no test at all, so a reader tracing R-5 from the
+#: frozen line INTO the suite found nothing.
+#:
+#: THE SIX ARE NOT INTERCHANGEABLE, and that is the point of listing them beside their
+#: divides: `sl060`'s sales block increments the counter before dividing
+#: [sales/sl060.cbl:L825], its credit block never increments at all and guards on the
+#: accumulator too [sales/sl060.cbl:L835-L843] (A-9), and the two payment paths use the
+#: `BY ... GIVING` spelling with the operands the other way round
+#: [sales/sl100.cbl:L511], [purchase/pl100.cbl:L502] (A-10).
+_AVERAGE_BLOCK_MULTIPLY_HALVES: Final[tuple[str, ...]] = (
+    "sales/sl060.cbl:L821",  # multiply sales-activety by sales-average giving work-2
+    "sales/sl060.cbl:L837",  # multiply sales-activety by sales-average giving work-2
+    "purchase/pl060.cbl:L745",  # multiply purch-activety by purch-average giving work-2
+    "purchase/pl060.cbl:L760",  # multiply purch-activety by purch-average giving work-2
+    "sales/sl100.cbl:L507",  # multiply sales-pay-activety by ... giving work-b
+    "purchase/pl100.cbl:L498",  # multiply purch-pay-activety by ... giving work-b
+)
+
+#: The divide half of each of those six blocks, in the SAME ORDER, so the pairing is
+#: positional rather than left to a reader. The first four are the `INTO ... GIVING`
+#: spelling and the last two the `BY ... GIVING` one - the A-10 divergence.
+_AVERAGE_BLOCK_DIVIDE_HALVES: Final[tuple[str, ...]] = (
+    "sales/sl060.cbl:L827",
+    "sales/sl060.cbl:L843",
+    "purchase/pl060.cbl:L751",
+    "purchase/pl060.cbl:L766",
+    "sales/sl100.cbl:L511",
+    "purchase/pl100.cbl:L502",
 )
 
 #: Every `ROUNDED` site in the cycle. Five, and no more - which is why
@@ -1855,6 +1906,82 @@ def test_the_divide_census_is_thirteen_by_and_four_into() -> None:
     assert not set(_DIVIDE_BY_GIVING_SITES) & set(_DIVIDE_INTO_GIVING_SITES)
 
 
+def test_every_average_block_multiply_half_resolves_to_its_frozen_statement() -> None:
+    """The six average blocks, cited at BOTH halves and each read from the frozen file.
+
+    WHY BOTH HALVES ARE CITED. The moving-average idiom is a multiply followed by a
+    divide, and only the divide halves were named by any test - so
+    [sales/sl060.cbl:L837], [purchase/pl060.cbl:L745], [purchase/pl060.cbl:L760] and
+    [purchase/pl100.cbl:L498] were cited by the shipped modules that reproduce them and
+    by nothing in the suite. R-5 asks for mechanical traceability in BOTH directions, so
+    a reader starting from one of those frozen lines must be able to find the test that
+    holds it. Naming them in a census that is then verified against the file is what
+    makes the citation a check rather than a decoration.
+
+    WHAT IS VERIFIED, per block: the multiply locator resolves to a `multiply <n> by <n>
+    giving` statement, the divide locator resolves to a `divide`, the two belong to the
+    SAME program, and the multiply precedes the divide - which is the order that makes
+    the reconstitution-then-truncation reading true. The frozen files are read, never
+    written (AAP §0.8.1).
+    """
+    assert len(_AVERAGE_BLOCK_MULTIPLY_HALVES) == len(_AVERAGE_BLOCK_DIVIDE_HALVES) == 6
+    assert len(set(_AVERAGE_BLOCK_MULTIPLY_HALVES)) == 6
+
+    # Four of the six divide halves are the INTO spelling; the two payment paths are
+    # the BY spelling. That split IS anomaly A-10.
+    assert set(_DIVIDE_INTO_GIVING_SITES) <= set(_AVERAGE_BLOCK_DIVIDE_HALVES)
+    assert {"sales/sl100.cbl:L511", "purchase/pl100.cbl:L502"} <= set(
+        _DIVIDE_BY_GIVING_SITES
+    )
+
+    #  Imported in the body rather than at module scope: this is the only test in the
+    #  file that reads a file at all, and the tier's import-surface assertions read the
+    #  module's own module-scope imports.
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).resolve().parents[2]
+
+    def statement_at(locator: str) -> str:
+        """Read one `path:Lnnn` locator's line out of the frozen checkout."""
+        path_text, line_text = locator.split(":L")
+        source = root / path_text
+        assert source.is_file(), f"{locator}: {source} is not a file"
+        lines = source.read_text(encoding="utf-8", errors="strict").splitlines()
+        number = int(line_text)
+        assert 1 <= number <= len(lines), (
+            f"{locator} names line {number} of a {len(lines)}-line file"
+        )
+        return lines[number - 1].strip().lower()
+
+    for multiply_site, divide_site in zip(
+        _AVERAGE_BLOCK_MULTIPLY_HALVES, _AVERAGE_BLOCK_DIVIDE_HALVES, strict=True
+    ):
+        multiply_statement = statement_at(multiply_site)
+        assert multiply_statement.startswith("multiply "), (
+            f"{multiply_site} does not name a MULTIPLY; it reads "
+            f"{multiply_statement!r}. A census whose locators have drifted off their "
+            f"statements is worse than no census."
+        )
+        assert " by " in multiply_statement and " giving " in multiply_statement, (
+            f"{multiply_site} is not the `multiply <activety> by <average> giving "
+            f"<work>` form the idiom uses: {multiply_statement!r}"
+        )
+
+        divide_statement = statement_at(divide_site)
+        assert divide_statement.startswith("divide "), (
+            f"{divide_site} does not name a DIVIDE; it reads {divide_statement!r}"
+        )
+
+        assert multiply_site.split(":L")[0] == divide_site.split(":L")[0], (
+            f"{multiply_site} and {divide_site} are paired but are in different "
+            f"programs, so they cannot be two halves of one block."
+        )
+        assert int(multiply_site.split(":L")[1]) < int(divide_site.split(":L")[1]), (
+            f"{multiply_site} must precede {divide_site}: the block reconstitutes the "
+            f"running total from the stored average FIRST and truncates on the way out."
+        )
+
+
 def test_the_purchase_mirrors_use_the_same_two_divide_forms_as_sales() -> None:
     """`pl060` divides `INTO` and `pl100` divides `BY`, exactly as Sales does.
 
@@ -3218,6 +3345,31 @@ def _layer_observations() -> tuple[tuple[str, str, object], ...]:
             "compare unequal",
             lambda: arithmetic.compare(Decimal("1.50"), Decimal("1.51")),
         ),
+        # -- compare_zoned_display_fields: the BYTE comparison, whose answer must not
+        #    move with the ambient context either. Both operands are unsigned zoned
+        #    DISPLAY of equal width, which is the only shape it accepts, and one of them
+        #    carries the corrupt image the frozen bridge leaves in `Batch` (ANOMALY
+        #    N-KEY) so the measured NOT-EQUAL is the observation being pinned.
+        _observation(
+            "compare_zoned_display_fields equal images",
+            lambda: arithmetic.compare_zoned_display_fields(
+                1,
+                1,
+                left_field=_POST_KEY_BATCH,
+                right_field=_WS_BATCH_NOS_FIELD,
+            ),
+        ),
+        _observation(
+            "compare_zoned_display_fields corrupt image",
+            lambda: arithmetic.compare_zoned_display_fields(
+                cobol_usage.ZonedDisplayInt(
+                    75261, zoned_image=bytes((0x06, 0x8E, 0x0C, 0x15, 0x3B))
+                ),
+                75261,
+                left_field=_POST_KEY_BATCH,
+                right_field=_WS_BATCH_NOS_FIELD,
+            ),
+        ),
     )
 
 
@@ -3374,6 +3526,7 @@ _LAYER_ENTRY_POINTS_COVERED: Final[frozenset[str]] = frozenset(
         "add_giving",
         "add_to",
         "compare",
+        "compare_zoned_display_fields",
         "compute",
         "divide_by_giving",
         "divide_into_giving",

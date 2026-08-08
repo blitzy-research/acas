@@ -980,9 +980,19 @@ def _eoj_q1(ws: _WorkingStorage) -> None:
 
     if ws.clear_posting_file:
 
-        # 1723 perform acas008-Open-Output *> performs a acas008-Delete-All THE
-        # TRUNCATION. Opening this handler's file for output deletes every row of the
-        # transfer table.
+        # 1723 perform acas008-Open-Output *> performs a acas008-Delete-All THE CLEAR,
+        # AND IT IS A MEASURED NO-OP HERE - twice over. Opening this handler's file for
+        # output substitutes a delete-all [common/acas008.cbl:L313-L319], but (1) `EOJ`
+        # has ALREADY CLOSED this handler at [irs/irs030.cbl:L1712], so the delete-all
+        # arrives on a closed connection and returns FS-Reply 99 with WE-Error 911,
+        # which the IRS convention's error check turns into a `goback`; and (2) even on
+        # a warm connection the bridge's predicate is a STRICT `<` against the
+        # ten-character key text `9999999999` [common/slpostingMT.cbl:L850-L868], while
+        # every key the bridge itself writes lands near 4.7e17 through the group move at
+        # [common/slpostingMT.cbl:L1001] - so no bridge-written row is reachable. Both
+        # reasons are the frozen behaviour and are reproduced, not repaired (R-4); the
+        # measured table and the two bounds are the key-bound note under A-NEW-8 in
+        # `docs/migration/anomaly-log.md`.
         facade.acas008_open_output(
             facade.FacadeContext(
                 ws.ws_system_record,
@@ -1039,8 +1049,13 @@ def run(
             the facade copybook's own CALL list passes it.
         file_defs: `File-Defs`, the file and work-file names [irs/irs030.cbl:L450].
         clear_posting_file: the answer to the end-of-job question at
-            [irs/irs030.cbl:L1717].  `True` clears the transfer table by
-            reopening it for output, which for this handler deletes every row.
+            [irs/irs030.cbl:L1717].  `True` reopens the transfer table for output,
+            which for this handler substitutes a delete-all - MEASURED A NO-OP on
+            this path, because `EOJ` has already closed the handler
+            [irs/irs030.cbl:L1712] and because the bridge's bound cannot reach a
+            bridge-written key; see the key-bound note under A-NEW-8 in
+            `docs/migration/anomaly-log.md`.  The answer is still an input and not
+            decoration: it decides whether the statement is issued at all.
             Defaults to `True` as a SIGNATURE CONTRACT fixed by this module's
             file brief, NOT because the COBOL has that default - it has none. The
             `[Y]` at [irs/irs030.cbl:L1716] is prompt text, the accept at L1717

@@ -51,6 +51,7 @@ __all__: Final[tuple[str, ...]] = (
     "ZONED_NEGATIVE_ZONE",
     "ZONED_POSITIVE_BASE",
     "ZONED_POSITIVE_ZONE",
+    "ZonedDisplayInt",
     "byte_length",
     "coerce",
     "decode",
@@ -64,6 +65,7 @@ __all__: Final[tuple[str, ...]] = (
     "python_storage_for",
     "truncate_toward_zero",
     "value_domain",
+    "zoned_image_of",
 )
 
 
@@ -758,6 +760,127 @@ def _sign_carrying_index(digit_count: int, position: SignPosition) -> int:
     if position is SignPosition.LEADING_INCLUDED:
         return 0
     return digit_count - 1
+
+
+class ZonedDisplayInt(int):
+    """An integer that also carries the zoned DISPLAY bytes it was read out of.
+
+    WHY A ZONED FIELD CANNOT ALWAYS BE MODELLED BY ITS VALUE ALONE. A `pic 9(n)`
+    DISPLAY item is n bytes, one per digit, and COBOL reads a digit as a byte's LOW
+    NIBBLE with no validity check - so an item holding bytes that are not characters
+    `0`..`9` still has a numeric reading, and `_decode_zoned` above computes it. What it
+    does NOT have is one reading: GnuCOBOL 3.2 answers a relation on such an item
+    DIFFERENTLY depending on what it is compared WITH, and both answers were measured on
+    the compiled oracle against the frozen declarations:
+
+    ================================================  ==========================
+    `Batch` = 75261, a numeric LITERAL                EQUAL      - numeric reading
+    `Batch` = `WS-Batch-Nos`, a same-picture FIELD    NOT EQUAL  - BYTE comparison
+    ================================================  ==========================
+
+    Both operands there are `pic 9(5)` DISPLAY - `Batch` [copybooks/wspost.cob:L15] and
+    `WS-Batch-Nos` [copybooks/wsbatch.cob:L19] - and `Batch` held the eight bytes the
+    frozen bridge's group move leaves in it, `06 8E 0C 15 3B` (ANOMALY N-KEY). A single
+    `int` can carry the first answer or the second, never both, so the bytes travel
+    beside the value and `arithmetic.compare_zoned_display_fields` uses them.
+
+    IMMUTABLE ON PURPOSE, so the image can never go stale. `int` is immutable, so any
+    later `MOVE` into the same record attribute REPLACES this object rather than
+    mutating it, and a plain `int` carries no image - which is exactly right, because a
+    value that came from anywhere but a byte-level read has the canonical image its
+    digits imply.
+
+    Attributes:
+        zoned_image: The item's declared-width bytes, verbatim. Never re-derived from
+            the value: re-deriving is what loses the anomaly.
+    """
+
+    #  NO `__slots__`: CPython refuses a non-empty one on an `int` subtype, because
+    # `int` is variable-length. The attribute therefore lives in an instance
+    # dictionary, which costs one small dict per corrupt key read and nothing at all
+    # for every value that is a plain `int`.
+    zoned_image: bytes
+
+    def __new__(cls, value: int, *, zoned_image: bytes) -> "ZonedDisplayInt":
+        """Build the value/bytes pair.
+
+        Args:
+            value: The item's numeric reading, as COBOL's tolerant zoned read gives it.
+            zoned_image: The item's storage bytes, exactly its declared width.
+
+        Returns:
+            An `int` that answers every arithmetic and formatting use as `value`, and
+                additionally publishes the bytes.
+
+        Raises:
+            TypeError: `zoned_image` is not `bytes`.
+            ValueError: `zoned_image` is empty. A zero-width DISPLAY item cannot exist,
+                so an empty image is a programmer error rather than a data condition.
+        """
+        if not isinstance(zoned_image, (bytes, bytearray)):
+            raise TypeError(
+                f"zoned_image must be bytes, not {type(zoned_image).__name__}"
+            )
+        if not zoned_image:
+            raise ValueError(
+                "zoned_image is empty; a DISPLAY item is at least one byte wide"
+            )
+        instance = super().__new__(cls, value)
+        object.__setattr__(instance, "zoned_image", bytes(zoned_image))
+        return instance
+
+    def __repr__(self) -> str:
+        """Show the value AND the bytes, because the pair is the point."""
+        return f"ZonedDisplayInt({int(self)}, zoned_image={self.zoned_image!r})"
+
+
+def zoned_image_of(
+    value: object,
+    *,
+    digits: int,
+    signed: bool = False,
+    sign_position: SignPosition | str = SignPosition.NONE,
+) -> bytes:
+    """The zoned DISPLAY bytes of `value`, measured ones in preference to derived ones.
+
+    A `ZonedDisplayInt` publishes the bytes a byte-level read put in the item, and they
+    are returned verbatim when their width matches the declaration. Anything else has
+    only the canonical layout its digits imply, which `encode` lays out.
+
+    Args:
+        value: The item's contents.
+        digits: The item's declared digit count, which is its byte width for an
+            unsigned zoned item.
+        signed: The declaration's sign flag.
+        sign_position: Where the sign sits, which decides the layout.
+
+    Returns:
+        Exactly `digits` bytes for an unsigned item, and `encode`'s width otherwise.
+
+    Raises:
+        TypeError: `value` is a binary floating-point carrier (rule R-2).
+        decimal.InvalidOperation: `value` is not an exact numeric.
+    """
+    carried = getattr(value, "zoned_image", None)
+    if isinstance(carried, bytes) and len(carried) == digits:
+        return carried
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    numeric: decimal.Decimal | int | str
+    if isinstance(value, (decimal.Decimal, int, str)):
+        numeric = value
+    else:
+        raise TypeError(
+            f"a zoned DISPLAY item cannot hold {type(value).__name__} (rule R-2)"
+        )
+    return encode(
+        numeric,
+        usage=Usage.DISPLAY,
+        digits=digits,
+        scale=0,
+        signed=signed,
+        sign_position=sign_position,
+    )
 
 
 def _encode_zoned(

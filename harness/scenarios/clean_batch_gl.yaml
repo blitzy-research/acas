@@ -81,8 +81,20 @@ description: |
   tests/arithmetic/test_double_entry_explosion.py and
   test_ledger_balance_accumulation.py -- and the shortfall against Agent Action
   Plan section 0.8.5's "clean batch post per ledger" is recorded in
-  docs/migration/scenario-diff-evidence.md and
-  docs/migration/ambiguity-resolutions.md (Q-4 sibling, resolution (d)).
+  docs/migration/scenario-diff-evidence.md section 8.0 and in
+  docs/migration/ambiguity-resolutions.md at `Q-EMPTY-BATCH-AT-END' part (d),
+  whose measurement is the same starvation seen from gl072's at-end path, and at
+  `Q-9', which owns the POST-KEY corruption itself.
+  AND THE NO-OP IS ASSERTED RATHER THAN NARRATED, so this scenario is not merely
+  unable to detect a nominal write -- it REFUSES one. An empty diff is symmetric
+  and would pass whether the two sides agreed on a no-op or on a balance
+  movement, so
+  tests/scenarios/test_clean_batch_post_gl.py::test_the_gl_route_leaves_the_measured_no_op_on_both_sides
+  asserts the measured outcome absolutely and PER SIDE: every GLLEDGER-REC
+  balance zero, the seeded GLBATCH-REC row unstamped, and at most one
+  GLPOSTING-REC row with POST-RRN zero. If the frozen path ever changes, or a
+  fixture begins reaching the posting walk, that test fails and this description
+  is re-examined instead of being inherited unread.
   PYTHON MODULES EXERCISED (rule R-5, full traceability)
     acas_posting/programs/gl070_transaction_pre_process.py   from general/gl070.cbl
     acas_posting/programs/gl071_batch_sort.py                from general/gl071.cbl

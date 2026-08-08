@@ -273,19 +273,66 @@ def _cycle_differs(store: _WorkingStorage) -> bool:
 
 
 def _post_key_is_zero(store: _WorkingStorage) -> bool:
-    """`if WS-Post-Key = zero` - the unset-key filter.
+    """`if WS-Post-Key = zero` - the unset-key filter [general/gl070.cbl:L490-L491].
+
+    A GROUP COMPARED WITH `ZERO` IS A BYTE COMPARISON, measured on the compiled oracle
+    (GnuCOBOL 3.2.0) against `WS-Post-Key` as [copybooks/wspost.cob:L14-L16] declares it:
+    a group of ten SPACES is NOT zero, a group of ten `0` characters IS. A group has no
+    numeric reading, so the comparison is against the character `0` repeated across its
+    width - which is each item's zero image, tested here item by item.
 
     Args:
         store: the run's working storage.
 
     Returns:
-        True when the posting record's key is entirely zero, i.e. the record is an
-            unused slot and is to be skipped.
+        True when the posting record's key is entirely the character zero, i.e. the
+            record is an unused slot and is to be skipped.
+    """
+    key = store.posting.ws_post_key
+    return (
+        arithmetic.compare_zoned_display_fields(
+            key.batch,
+            _ZERO,
+            left_field=_POST_KEY["Batch"],
+            right_field=_POST_KEY["Batch"],
+        )
+        == 0
+        and arithmetic.compare_zoned_display_fields(
+            key.post_number,
+            _ZERO,
+            left_field=_POST_KEY["Post-Number"],
+            right_field=_POST_KEY["Post-Number"],
+        )
+        == 0
+    )
+
+
+def _batch_is_not_the_one_being_processed(store: _WorkingStorage) -> bool:
+    """`if batch not = WS-Batch-Nos` [general/gl070.cbl:L492-L493] - the batch gate.
+
+    TWO SAME-PICTURE DISPLAY FIELDS COMPARE BYTE-WISE, measured on the compiled oracle;
+    `arithmetic.compare_zoned_display_fields` carries the measurement. It matters here
+    more than anywhere: `Batch` [copybooks/wspost.cob:L15] arrives from the bridge
+    holding bytes its picture cannot produce (ANOMALY N-KEY), and a field sweep inside
+    the compiled probe matched NONE of the 100,000 values a `pic 9(5)` batch number can
+    take. So this guard discards every posting the database returns, no work record is
+    written, and `gl071` and `gl072` receive nothing - which is the frozen behaviour the
+    anomaly register records and `pretrans.tmp` being zero bytes measured.
+
+    Args:
+        store: the run's working storage.
+
+    Returns:
+        True when the posting belongs to some other batch, and so is passed over.
     """
     return (
-        arithmetic.compare(store.posting.ws_post_key.batch, _ZERO) == 0
-        and arithmetic.compare(store.posting.ws_post_key.post_number, _ZERO)
-        == 0
+        arithmetic.compare_zoned_display_fields(
+            store.posting.ws_post_key.batch,
+            store.batch.ws_batch_key.ws_batch_nos,
+            left_field=_POST_KEY["Batch"],
+            right_field=_BATCH_NOS,
+        )
+        != 0
     )
 
 
@@ -849,13 +896,9 @@ def _gl071b_pre_process_loop(store: _WorkingStorage) -> None:
         if _post_key_is_zero(store):
             continue
 
-        if (
-            arithmetic.compare(
-                store.posting.ws_post_key.batch,
-                store.batch.ws_batch_key.ws_batch_nos,
-            )
-            != 0
-        ):
+        # 492 if batch not = WS-Batch-Nos 493 go to loop. GO TO class 1. A STORAGE
+        # comparison, measured - see `_batch_is_not_the_one_being_processed`.
+        if _batch_is_not_the_one_being_processed(store):
             continue
 
 

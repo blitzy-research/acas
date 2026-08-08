@@ -1664,6 +1664,70 @@ def _arc_process(st: _Gl080Storage) -> None:
     _arc_process_loop(st)
 
 
+def _post_key_is_zero(st: _Gl080Storage) -> bool:
+    """`if WS-Post-Key = zero` - the unset-key filter of both posting passes.
+
+    A GROUP COMPARED WITH `ZERO` IS A BYTE COMPARISON, measured on the compiled oracle
+    (GnuCOBOL 3.2.0) with `WS-Post-Key` declared as [copybooks/wspost.cob:L14-L16]
+    declares it: a group holding ten SPACES is NOT equal to `ZERO`, while a group holding
+    ten `0` characters IS. A group has no numeric reading of its own, so the comparison
+    is against the character `0` repeated across its width, which is the concatenation of
+    each item's zero image.
+
+    THE ELEMENTARY CASE IS THE OTHER WAY ROUND, which is why this is spelled out rather
+    than inferred: `if batch = zero` on an elementary `pic 9(5)` item was measured
+    NUMERIC in the same probe - a `Batch` of spaces IS zero - so a comparison of one item
+    with `ZERO` stays with `arithmetic.compare`. `gl051` has that form
+    [general/gl051.cbl:L1012] and this program has the group form twice.
+
+    Args:
+        st: The program's storage.
+
+    Returns:
+        True when the ten bytes of the group are all the character `0`.
+    """
+    key = st.posting.ws_post_key
+    return (
+        arithmetic.compare_zoned_display_fields(
+            key.batch, 0, left_field=_POST_BATCH, right_field=_POST_BATCH
+        )
+        == 0
+        and arithmetic.compare_zoned_display_fields(
+            key.post_number, 0, left_field=_POST_NUMBER, right_field=_POST_NUMBER
+        )
+        == 0
+    )
+
+
+def _batch_is_not_the_one_being_processed(st: _Gl080Storage) -> bool:
+    """`batch not = WS-Batch-Nos` - the gate both posting passes turn on.
+
+    TWO SAME-PICTURE DISPLAY FIELDS COMPARE BYTE-WISE, measured on the compiled oracle;
+    `arithmetic.compare_zoned_display_fields` carries the measurement and the reason a
+    numeric comparison here is wrong. In this program it decides whether a posting is
+    archived [general/gl080.cbl:L460] and whether it is deleted
+    [general/gl080.cbl:L617]; `Batch` [copybooks/wspost.cob:L15] arrives from the bridge
+    holding bytes its picture cannot produce (ANOMALY N-KEY), so for every posting read
+    back from the database this is TRUE and neither pass touches the row - which is what
+    the compiled program does, measured by statement count on both sides.
+
+    Args:
+        st: The program's storage.
+
+    Returns:
+        True when the posting belongs to some other batch, and so is passed over.
+    """
+    return (
+        arithmetic.compare_zoned_display_fields(
+            st.posting.ws_post_key.batch,
+            st.batch.ws_batch_key.ws_batch_nos,
+            left_field=_POST_BATCH,
+            right_field=_WS_BATCH_NOS,
+        )
+        != 0
+    )
+
+
 def _arc_process_loop(st: _Gl080Storage) -> None:
     """`loop.` - the three-leg archive explosion, once per posting.
 
@@ -1684,12 +1748,11 @@ def _arc_process_loop(st: _Gl080Storage) -> None:
             _arc_process_main_exit(st)
             return
 
-        if (
-            arithmetic.compare(st.posting.ws_post_key.batch, 0) == 0
-            and arithmetic.compare(st.posting.ws_post_key.post_number, 0) == 0
-        ) or arithmetic.compare(
-            st.posting.ws_post_key.batch, st.batch.ws_batch_key.ws_batch_nos
-        ) != 0:
+        # 459 if WS-Post-Key = zero 460 or batch not = WS-Batch-Nos 461 go to loop.
+        # The same two disjuncts as `del-process` [general/gl080.cbl:L616-L618], so the
+        # same two storage comparisons: a posting read back through the bridge is
+        # archived by neither pass.
+        if _post_key_is_zero(st) or _batch_is_not_the_one_being_processed(st):
             # 461 go to loop. GO TO class 1.
             continue
 
@@ -2292,12 +2355,11 @@ def _del_process_loop(st: _Gl080Storage) -> None:
             return
 
         # 616 if WS-Post-Key = zero 617 or batch not = WS-Batch-Nos 618 go to loop.
-        if (
-            arithmetic.compare(st.posting.ws_post_key.batch, 0) == 0
-            and arithmetic.compare(st.posting.ws_post_key.post_number, 0) == 0
-        ) or arithmetic.compare(
-            st.posting.ws_post_key.batch, st.batch.ws_batch_key.ws_batch_nos
-        ) != 0:
+        #  BOTH DISJUNCTS COMPARE STORAGE, NOT VALUES, and that is measured rather than
+        # chosen - see `_post_key_is_zero` and `_batch_is_not_the_one_being_processed`.
+        # For a posting read back through the bridge the second disjunct is TRUE for
+        # every batch number there is, so this loop reads every row and deletes none.
+        if _post_key_is_zero(st) or _batch_is_not_the_one_being_processed(st):
             continue
 
         # 620  display  post-number at 2364 ...

@@ -3728,8 +3728,9 @@ acas_assert_disposable_target() {
         '' \
         'This script DRIVES THE COMPILED POSTING CYCLE. It rewrites nominal' \
         'balances, stamps batches cleared and, for a scenario that answers the IRS' \
-        'end-of-job question with Y, DELETES EVERY ROW of PSIRSPOST-REC' \
-        '[common/acas008.cbl:L313-L319]. The schema name proves nothing: the frozen' \
+        'end-of-job question with Y, ISSUES A DELETE against PSIRSPOST-REC' \
+        '[common/acas008.cbl:L313-L319] -- bounded by the bridge' \
+        '[common/slpostingMT.cbl:L850-L891]. The schema name proves nothing: the frozen' \
         'mysql/ACASDB.sql gives every ACAS installation that same name.' \
         '' \
         'That declaration is written into the server configuration by' \
@@ -4604,7 +4605,7 @@ acas_plan_irs_post() {
   # catch a rejected answer as a failure rather than as a hang.
   acas_plan_add 2 'irs030-clear' react 'Can I clear the Ledgers Posting' \
     "$(acas_plan_escape_data "$ACAS_RUN_IRS_CLEAR")\\r" 2 \
-    "G-1: clear the transfer file = $ACAS_RUN_IRS_CLEAR; \"Y\" deletes every row of PSIRSPOST-REC [irs/irs030.cbl:L1715-L1724]"
+    "G-1: clear the transfer file = $ACAS_RUN_IRS_CLEAR; \"Y\" issues the bridge's bounded delete against PSIRSPOST-REC [irs/irs030.cbl:L1715-L1724]"
   acas_plan_ack 'irs030-note-counts' 'Note counts and any messages' 2 \
     'pure acknowledgement, no database effect [irs/irs030.cbl:L1725-L1726]'
 
@@ -5941,17 +5942,22 @@ acas_run_report() {
   else
     printf '\nThe compiled cycle ran for scenario %s.\n' "$ACAS_RUN_SCENARIO"
 
-    # The next-step commands CARRY THE SELECTOR. Every capture passes
-    # --all-in-scope, which is the protocol bound; the diff additionally passes
-    # --scenario-file so the declared effect is still gated.
+    # The next-step commands CARRY BOTH SELECTION-RELATED OPTIONS, because the two
+    # do different jobs and each capture needs both. --all-in-scope is the BOUND,
+    # all 22 in-scope tables. --scenario-file is the PROVENANCE: its sha256 becomes
+    # scenario_file_sha256, one of the three fields harness/diff_states.py requires
+    # PRESENT AND EQUAL on both sides before it compares a row, so a capture taken
+    # without it is refused at the diff stage -- "the provenance field
+    # 'scenario_file_sha256' is empty on both sides" -- and the whole cycle has to be
+    # driven again. An operator copies these lines, so they must be the protocol.
     printf '\nNext steps -- each capture bounded by all 22 in-scope tables:\n'
-    printf '  harness/dump_tables.py --scenario %s --side cobol --all-in-scope\n' \
-      "$ACAS_RUN_SCENARIO"
+    printf '  harness/dump_tables.py --scenario %s --side cobol --all-in-scope --scenario-file %s\n' \
+      "$ACAS_RUN_SCENARIO" "$ACAS_RUN_SCENARIO_FILE"
     printf '  harness/normalize.py   --scenario %s --side cobol\n' "$ACAS_RUN_SCENARIO"
     printf '  harness/reset_db.sh %s\n' "$ACAS_RUN_SCENARIO_FILE"
     printf '  harness/run_python_scenario.sh --scenario %s\n' "$ACAS_RUN_SCENARIO"
-    printf '  harness/dump_tables.py --scenario %s --side python --all-in-scope\n' \
-      "$ACAS_RUN_SCENARIO"
+    printf '  harness/dump_tables.py --scenario %s --side python --all-in-scope --scenario-file %s\n' \
+      "$ACAS_RUN_SCENARIO" "$ACAS_RUN_SCENARIO_FILE"
     printf '  harness/normalize.py   --scenario %s --side python\n' "$ACAS_RUN_SCENARIO"
     printf '  harness/diff_states.py --scenario %s --all-in-scope --scenario-file %s\n' \
       "$ACAS_RUN_SCENARIO" "$ACAS_RUN_SCENARIO_FILE"

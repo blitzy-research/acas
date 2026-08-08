@@ -1125,7 +1125,8 @@ def test_scenario_definition_preconditions(
     # 3.9  The scenario promotes NO interactive answer, which is why no answer key is
     # declared. `gl_post_cycle` has no prompt whose reply gates a database write -
     # contrast the IRS route, whose clear-the-transfer-file reply performs an
-    # open-output that deletes every row [common/acas008.cbl:L313-L318].
+    # open-output that issues the bridge's bounded delete
+    # [common/acas008.cbl:L313-L318], [common/slpostingMT.cbl:L850-L891].
     assert "answers" not in definition
 
 

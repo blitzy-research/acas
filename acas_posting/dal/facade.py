@@ -150,25 +150,45 @@ class FacadeContext:
     ``dispatch``; an empty mapping forwards nothing. It carries no accounting
     value and nothing here reads it.
 
-    IT IS ALSO THE ONE CHANNEL BY WHICH A SECURITY POLICY REACHES A HANDLER,
-    and that makes an empty mapping a decision rather than an absence. Every
-    handler that opens a connection declares ``transport: TransportSecurity |
-    None = None`` and forwards it to ``connection.mysql_1000_open``, whose
-    ``_require_permitted_connection`` resolves ``None`` AGAINST THE INSTALLED
-    PROCESS POLICY rather than against a permission of its own. Under the
-    exact-parity default that policy reports an unencrypted non-local hop at
+    IT IS ALSO THE ONE CHANNEL BY WHICH A PER-CALL SECURITY POLICY REACHES A
+    HANDLER, and that makes an empty mapping a decision rather than an absence.
+
+    WHAT IS UNIFORM, MEASURED RATHER THAN ASSERTED. Every handler resolves an
+    absent policy the same way: it opens through ``connection.mysql_1000_open``,
+    whose ``_require_permitted_connection`` resolves ``None`` AGAINST THE
+    INSTALLED PROCESS POLICY rather than against a permission of its own. Under
+    the exact-parity default that policy reports an unencrypted non-local hop at
     WARNING and connects, exactly as the compiled open does (rule R-3); under an
     explicitly hardened policy it refuses unless a certificate authority is
     supplied or ``isolated_oracle=True`` is declared. So a caller that leaves
-    ``options`` empty gets the SAME answer for every handler, and a caller that
-    must override it for one verb states it once -
-    ``options={"transport": TransportSecurity(...)}`` - and this context carries
-    it to whichever handler the verb dispatches to.
+    ``options`` empty gets the SAME answer from all seventeen handlers, and that
+    is the property the deployment depends on: no handler can default itself
+    permissive while the others take the process policy, which would make the
+    policy depend on which entity a program happened to touch rather than on what
+    the operator declared (CWE-319, CWE-295).
 
-    That uniformity is the point. Were ONE handler to default itself permissive
-    while the other nineteen took the process policy, the policy would depend on
-    which entity a program happened to touch rather than on what the operator had
-    declared (CWE-319, CWE-295). Nothing here inspects or
+    WHAT IS NOT UNIFORM, AND MUST NOT BE OVERSTATED. The channel for a
+    ``PER-CALL`` override is narrower than the resolution above, because the
+    seventeen handlers do not agree on their signatures. Measured from those
+    signatures, not transcribed: **eleven** declare a keyword-only ``transport``
+    on ``dispatch`` and receive ``options={"transport": TransportSecurity(...)}``;
+    **three** accept a policy only through a module-level setter (see
+    ``_MODULE_LEVEL_TRANSPORT_SETTERS``), of which ``acas007_gl_batch`` also
+    takes one on ``dispatch``; and the remaining **four** -
+    ``acas005_gl_nominal``, ``acas012_sales``, ``acas026_pinvoice`` and
+    ``acasirsub4_irs_posting`` - accept one by NEITHER route. For those four a
+    per-call override does not arrive: ``_forward`` projects the key away and
+    reports it at WARNING rather than raising, so the handler opens under the
+    INSTALLED PROCESS POLICY. That is a safe outcome and not a silent one, but a
+    caller who needs a hardened policy for one of those four must install it as
+    the process policy instead of passing it per call.
+    ``tests/arithmetic/test_pic_field_descriptors.py::test_the_facades_transport_partition_is_the_measured_one``
+    holds this paragraph to the signatures, so the three counts above cannot
+    drift from the code the way an earlier revision of this docstring did - it
+    claimed every connection-opening handler declared ``transport`` and put the
+    remainder at "nineteen" of seventeen.
+
+    Nothing here inspects or
     rewrites the mapping: the enforcement lives in ``dal/connection.py`` and the
     declaration lives with the caller, and this field is only the wire between
     them. Forwarding is by keyword, so a handler that does not accept a given key
@@ -240,9 +260,10 @@ def _keyword_extras_accepted_by(target: Callable[..., object]) -> frozenset[str]
     seventeen handler modules do NOT agree on their keyword-only extras - eleven
     take ``transport``, two of those also take ``states``, three also take
     ``allow_frozen_placeholder_credentials``, ``acas022_purch`` takes
-    ``purchase_file``, ``acas026_pinvoice`` takes ``context``, and six take none
+    ``purchase_file``, ``acas026_pinvoice`` takes ``context``, and five take none
     at all. A transcribed table would be a second opinion that could drift from
-    the first; a signature cannot.
+    the first; a signature cannot - and the count above did drift, reading "six"
+    against a set of five until it was re-measured.
 
     Cached because the answer is fixed for the life of the process and this is
     consulted once per facade verb.
@@ -274,7 +295,7 @@ def _forward(
     ``acas006`` happily and raised ``TypeError`` from ``acas000``, so the only
     way to avoid the error was to leave ``options`` empty everywhere and let each
     handler decide its own transport policy - which is exactly how one handler
-    came to default itself permissive while the other nineteen failed closed
+    came to default itself permissive while the other sixteen failed closed
     (CWE-319, CWE-295).
 
     Projecting makes the uniform declaration work: the caller says it once, every

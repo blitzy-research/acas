@@ -384,13 +384,28 @@ Measured on this checkout, CPython 3.12.13:
 
 | Quantity | Value |
 | --- | --- |
-| Tests run by the command | **1,219 passed**, 114 deselected (the stack-bound tiers) |
+| Tests run by the command | **1,229 passed**, 114 deselected (the stack-bound tiers) |
 | `acas_posting` modules measured | **89 of 89** |
 | Modules with **zero** coverage | **0** |
 | Modules at 100 % | 18 |
-| Statements covered | 15,293 of 31,865 |
-| Branches covered | 1,529 of 6,874 |
-| Overall, branch-inclusive | **43.4 %** |
+| Statements covered | 16,484 of 31,842 |
+| Branches covered | 2,190 of 6,864 |
+| Overall, branch-inclusive | **48.25 %** |
+| The same, with the stack-bound tiers INCLUDED (1,343 passed) | **48.29 %** |
+
+**THE LAST ROW IS THE IMPORTANT ONE, AND IT IS NOT A DISAPPOINTMENT.** Running all eight
+scenarios and both determinism runs moves the figure by fifteen statements and four branch
+outcomes, because `harness/run_python_scenario.sh` drives the cycle as a SEPARATE PROCESS —
+which is what stages 2 and 6 of the protocol require of both sides — and a child process is
+outside the parent's instrumentation unless it is deliberately hooked. The shipped
+configuration does not hook it: the run whose value is being byte-identical twice over is
+not a run to add a writer to. So the coverage artifact evidences the R-5 claim for the
+module surface, and the CYCLE's reachability is evidenced by the three instruments named in
+[`README-python-migration.md`](../../README-python-migration.md) §12.4 — the runner's own
+per-operation dispositions and state fingerprints, the empty diff over all 22 tables, and
+mutation probes against the shipped paragraphs. A reader who wants the subprocess figure can
+have it as a diagnostic, with the recipe in that section; it is not evidence of anything a
+verdict rests on.
 
 **Every figure here is re-measured against the tree as it stands rather than carried forward**, because
 two of them are sensitive to its shape: merging the six extra arithmetic groups into the fourteen
@@ -401,13 +416,18 @@ purpose is to be reproducible has to match what reproducing it yields.
 **There is no `fail_under` and no `--cov` in `addopts`,** deliberately: a coverage number never
 decides whether this migration is correct, and an ordinary `pytest` run must not require the plugin.
 
-**No module is at zero, and the generator is covered by being run.** `dictionary/generate.py` used to
-be the single zero-coverage module because the arithmetic tier reads the committed artifact rather
-than rebuilding it; the merged deployment-contract group now reads the generator to close the
-traceability census, which brings it to **24 %**. Its real exercise is still the run:
-`python -m coverage run -m acas_posting.dictionary.generate --check` reports **90 %** of its 1,707
-statements, with the `--check` itself exiting **0** — the committed dictionary is byte-reproducible
-from the frozen sources. Every module in the package is now reached by the infrastructure-free tier,
+**No module is at zero, and the generator is covered by being RUN BY THE SUITE.**
+`dictionary/generate.py` used to be the single zero-coverage module because the arithmetic tier read
+the committed artifact rather than rebuilding it — 163 nodes validating the output of a producer
+nothing executed, so a generator regression would first have appeared as an unexplained diff at the
+next hand regeneration. `test_pic_field_descriptors.py::test_the_committed_dictionary_is_reproducible_from_the_frozen_sources`
+now calls `generate.main(["--check"])` in process, in both invocation shapes and with the exit-3
+direction asserted too, which brings the module to **90 %** of its 1,707 statements from the
+infrastructure-free tier alone. `--check` writes nothing, so the artifact under test cannot be
+repaired by testing it, and it exits **0** — the committed dictionary is byte-reproducible from the
+frozen sources. `--repo-root <root>` alone now suffices as well: `--output` defaults relative to the
+root it was given rather than beside the installed package, which is what made the two options
+incoherent from a wheel install. Every module in the package is now reached by the infrastructure-free tier,
 which is precisely the R-5 claim being evidenced; §7.2's caveat about the four modules that are only
 **imported** by that tier stands unchanged and is not softened by a coverage percentage.
 
@@ -1783,8 +1803,9 @@ effect is to block a terminal"*. Two rules govern the two shapes it takes:
 
 **The one prompt that is *not* dropped** is the one that gates a database write. `EOJ-q1.` at
 `[irs/irs030.cbl:L1715]` asks whether the Ledger Posting file may be cleared; answering `"Y"` performs
-`acas008-Open-Output` at `[irs/irs030.cbl:L1723]`, which — per §16.5 — deletes every row. Its answer
-therefore changes table state and is a genuine input, so it becomes an explicit parameter:
+`acas008-Open-Output` at `[irs/irs030.cbl:L1723]`, which — per §16.5 — substitutes a delete-all. Its
+answer therefore decides whether a delete is issued at all and is a genuine input, so it becomes an
+explicit parameter:
 `acas_posting/programs/irs030_posting.py`'s `run` takes `clear_posting_file` as a keyword-only
 argument, and `acas_posting/cli/irs_post.py` binds it. The `go to EOJ-q1` retry at
 `[irs/irs030.cbl:L1719]` dissolves along with the prompt, because a parameter cannot be invalid.
@@ -2285,10 +2306,16 @@ performing an update. Cross-reference **A-6**.
 
 Two related behaviours of the same handler are reproduced with it:
 
-- **Opening for output means deleting every row.** `[common/acas008.cbl:L313-L319]` converts an
-  open-output into `fn-delete-all` — `set fn-delete-all to true` at L316 — and
-  `[common/acas008.cbl:L571-L574]`, inside `ba015-Test-Ends.` L566, forces the same substitution again.
-  This is how the transfer-file clear of §11.5 is implemented.
+- **Opening for output means a delete-all — bounded, not a truncate.** `[common/acas008.cbl:L313-L319]`
+  converts an open-output into `fn-delete-all` — `set fn-delete-all to true` at L316 — and
+  `[common/acas008.cbl:L571-L574]`, inside `ba015-Test-Ends.` L566, would force the same substitution
+  again on any path that still carried `fn-Open`. This is how the transfer-file clear of §11.5 is
+  implemented. What it REMOVES is bounded: the bridge deletes only keys strictly below the
+  ten-character key text `9999999999` `[common/slpostingMT.cbl:L850-L891]`, while every key it stores
+  is a group-move image near 4.7e17 `[common/slpostingMT.cbl:L1001]` — so the clear is a MEASURED
+  NO-OP for any row the bridge wrote. The measured table for all three sibling handlers is the
+  key-bound note under **A-NEW-8** in [`anomaly-log.md`](anomaly-log.md), whose §15.3 records the
+  correction of the earlier "deletes every row" reading.
 - **The handler labels itself as the IRS sub system**, not as Sales or Purchase:
   `move 1 to WS-Log-System.` at `[common/acas008.cbl:L293]`, whose inline comment gives the encoding
   `1 = IRS, 2=GL, 3=SL, 4=PL, 5=Stock`, and `move 15 to WS-Log-File-No.` at
@@ -2441,7 +2468,14 @@ planned set:
 | §20 | **A-6**, locked at the handler where it lives: the migrated `acas008` is called once per refused verb and must return the measured `WE-Error 988` / `FS-Reply 99` pair |
 | §21 | the **tier-import contract** — that the arithmetic tier imports only the semantics and records tiers, bounded so the assertion cannot pass vacuously |
 | §22 | the **`POST-KEY` round trip**, measured and pinned — the byte-level half of `A-NEW-18`/`N-KEY` |
+| §22B | the **comparison** half of `A-NEW-18`/`N-KEY`, added after a QA arbitration found the migration deleting rows the compiled `gl080` leaves alone. A lettered suffix rather than §24 so it sits beside the round trip it depends on, and so §23 keeps the number every reference to it already uses. Eight tests pin `Q-NKEY-CMP`: that the unload carries the measured bytes beside the value; that a fetched key rewritten puts **its own** column value back; that the corrupt `Batch` matches **no** batch number in the whole `0..99999` domain; that the algebraic reading which used to be the gate is no longer it; that all **four** frozen gates discard every posting the bridge returns, each driven through the migrated program's **own** predicate; that a **clean** key still passes, so the gates are not simply always closed; that a **group** compared with `ZERO` is byte-wise while an **elementary** item is not; and that the primitive **refuses** every operand shape the probe did not measure |
 | §23 | the **citation contract**: every `[path:Lnnn]` in this migration's own files must resolve to a line that exists |
+
+**§22B is the one lettered section in the suite, and the choice is deliberate.** Renumbering is what
+`ambiguity-resolutions.md` §15 and `anomaly-log.md` §5 both forbid for cited identifiers, and §23 is cited
+from this table, from the citation test's own name and from both sibling registers. A new section between
+§22 and §23 therefore either displaces a cited number or appends out of order; a suffix does neither, and
+it records that the new section extends §22's measurement rather than opening an unrelated one.
 
 **§23 bounds what it can prove, and the bound matters when reading any locator in
 these documents.** It checks that a cited path exists and that the cited line is

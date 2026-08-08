@@ -362,13 +362,19 @@ ANOMALIES: Final[tuple[_Note, ...]] = (
         "N18b",
         "One Open-plus-Output request calls the bridge twice: first fn-Open "
         "with fn-Output, then fn-Delete-All, because ba015-Test-Ends performs "
-        "ba020-Process-Dal and then falls through into it again.",
+        "ba020-Process-Dal and then falls through into it again. MEASURED "
+        "consequence: the second call empties GLBATCH-REC of every key strictly "
+        "below the 999999 sentinel, so this handler's Open-Output DOES delete "
+        "despite its own substitution being commented out. Registered under "
+        "A-NEW-8 in docs/migration/anomaly-log.md.",
         (
             "[common/acas007.cbl:L305-L312]",
             "[common/acas007.cbl:L622-L631]",
             "[common/acas007.cbl:L640-L645]",
             "[common/acas005.cbl:L307]",
             "[common/acas008.cbl:L313-L319]",
+            "[common/glbatchMT.cbl:L922]",
+            "[common/glbatchMT.cbl:L933]",
         ),
     ),
     _Note(
@@ -3504,8 +3510,12 @@ def ba015_test_ends(
         # fn-Open and fn-Output, so the bridge opens the connection.
         #  NO RECORD. The double call of anomaly N18b is reproduced by making the
         #  call twice, which is the behaviour; announcing it is a diagnostic the
-        #  frozen source does not have (rule R-4). N18b is documented in
-        #  `docs/migration/anomaly-log.md`.
+        #  frozen source does not have (rule R-4). N18b is registered by name under
+        #  A-NEW-8 in `docs/migration/anomaly-log.md`, whose key-bound note carries the
+        #  MEASURED consequence: the second call deletes every `GLBATCH-REC` key
+        #  strictly below the 999999 sentinel [common/glbatchMT.cbl:L922,L933], so this
+        #  handler's `Open-Output` empties the table even though its own substitution
+        #  at [common/acas007.cbl:L308] is commented out.
         ba020_process_dal(system, batch, file_access, file_defs, dal_common)
         # `set fn-Delete-All to true` [:L630] - writes 6 into the CALLER's `File-
         # Function` AFTER the open has already happened.

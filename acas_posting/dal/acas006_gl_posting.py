@@ -64,7 +64,11 @@ from acas_posting.dal.status import (
 from acas_posting.dictionary import loader
 from acas_posting.records.file_access import FileAccess
 from acas_posting.records.file_defs import FileDefs
-from acas_posting.records.gl_posting import WsPostingRecord, WsPostKey
+from acas_posting.records.gl_posting import (
+    WsPostingRecord,
+    WsPostKey,
+    ZonedDisplayInt,
+)
 from acas_posting.records.system_record import SystemRecord
 from acas_posting.records.test_data_flags import AcasDalCommonData
 
@@ -931,10 +935,35 @@ def _join_post_key(key: WsPostKey) -> Decimal:
         :class:`~decimal.Decimal`; the bridge renderer applies the declared 18-digit
         host-variable edit.
     """
-    batch = abs(int(key.batch)) % 100000
-    post_number = abs(int(key.post_number)) % 100000
-    group_image = f"{batch:05d}{post_number:05d}".encode("latin-1")
+    #  A CARRIED IMAGE IS THE GROUP'S ACTUAL BYTES AND OUTRANKS THE DIGITS. `move
+    # WS-Post-Key to HV-POST-KEY` moves the group's STORAGE, so when a fetched row put
+    # bytes in the group that its picture cannot produce - which every fetched row does,
+    # ANOMALY N-KEY - re-writing that row must move those same bytes back rather than the
+    # decimal re-encode of their tolerant reading. Measured: the round trip is exact.
+    group_image = _post_key_group_image(key)
     return Decimal(int.from_bytes(group_image[:8], byteorder="big", signed=True))
+
+
+def _post_key_group_image(key: WsPostKey) -> bytes:
+    """The ten bytes ``WS-Post-Key`` holds, measured ones before derived ones.
+
+    Args:
+        key: The record's ``ws_post_key`` group.
+
+    Returns:
+        Ten bytes: each item's carried storage image when a fetch supplied one, and
+            otherwise the five zoned digits the item's value implies.
+    """
+    halves: list[bytes] = []
+    for value in (key.batch, key.post_number):
+        carried = getattr(value, "zoned_image", None)
+        if isinstance(carried, bytes) and len(carried) == _POST_KEY_ITEM_BYTES:
+            halves.append(carried)
+            continue
+        halves.append(
+            f"{abs(int(value)) % 100000:0{_POST_KEY_ITEM_BYTES}d}".encode("latin-1")
+        )
+    return b"".join(halves)
 
 
 #: The two spaces the group receiver is padded with, MEASURED.
@@ -948,8 +977,14 @@ _POST_KEY_GROUP_PAD: Final[bytes] = b"\x20\x20"
 #: The eight bytes an eight-byte ``COMP`` item occupies.
 _POST_KEY_HOST_BYTES: Final[int] = 8
 
+#: The five bytes each ``pic 9(5)`` DISPLAY half of the group occupies
+#: [copybooks/wspost.cob:L15-L16].
+_POST_KEY_ITEM_BYTES: Final[int] = 5
 
-def _split_post_key(hv_post_key: Decimal) -> tuple[int, int]:
+
+def _split_post_key(
+    hv_post_key: Decimal,
+) -> tuple[ZonedDisplayInt, ZonedDisplayInt]:
     """Reproduce the raw binary-to-group ``MOVE`` out of ``HV-POST-KEY``.
 
     ``move HV-POST-KEY to WS-Post-Key.`` [common/glpostingMT.cbl:L1085]. The receiver is
@@ -989,9 +1024,23 @@ def _split_post_key(hv_post_key: Decimal) -> tuple[int, int]:
     have to be read as COBOL reads them. COBOL's zoned read is tolerant: the digit of
     each byte is its LOW NIBBLE, accumulated base ten, with no validity check. Applied
     to ``Batch`` that gives ``6, 14, 12, 5, 11`` and therefore ``75261`` - and the
-    compiled program agrees: an exhaustive comparison of ``Batch`` against every value
-    in ``0..99999`` matched ``75261`` and nothing else, while ``= 1``, ``= 62444`` and
-    ``= ZERO`` were all false. No check is added and no error is raised (R-3).
+    compiled program agrees where that reading is the one it uses: ``if batch = 75261``,
+    against a numeric LITERAL, is EQUAL in the compiled probe, while ``= 1``,
+    ``= 62444`` and ``= ZERO`` are all false. No check is added and no error is raised
+    (R-3).
+
+    AND WHY THE VALUE ALONE IS NOT ENOUGH. Re-measured against the compiled oracle
+    because a QA arbitration found the migration deleting rows the compiled ``gl080``
+    leaves alone: a relation between ``Batch`` and a SAME-PICTURE FIELD is not the
+    numeric reading at all but a comparison of the two items' BYTES, so
+    ``if batch not = WS-Batch-Nos`` [general/gl080.cbl:L617] is true for EVERY batch
+    number - a sweep of the whole ``pic 9(5)`` domain inside the probe matched none of
+    ``0..99999``. The two readings cannot both live in one ``int``, so the bytes travel
+    with the value in a ``ZonedDisplayInt`` and
+    ``arithmetic.compare_zoned_display_fields`` uses them at the FOUR frozen gates a
+    bridge-unloaded key reaches: ``gl080``'s deletion pass and archive pass,
+    ``gl070``'s phase-2 loop and ``gl051``'s proof-total gate.
+    Recorded as ``Q-NKEY-CMP`` in ``docs/migration/ambiguity-resolutions.md``.
 
     The rule is stated here rather than imported because
     ``acas_posting.cobol`` is outside this module's dependency set (section 0.4.3);
@@ -1005,7 +1054,9 @@ def _split_post_key(hv_post_key: Decimal) -> tuple[int, int]:
 
     Returns:
         The ``Batch`` and ``Post-Number`` values the group holds after the move, read
-        with COBOL's own tolerant zoned semantics.
+        with COBOL's own tolerant zoned semantics, each carrying the five storage bytes
+        it was read out of so that a field-to-field relation can compare the storage the
+        compiled program compares.
     """
     # The COMP item's storage image. `signed=True` mirrors `_join_post_key`, which built
     # the same eight bytes with the same signedness, so a load and an unload of one
@@ -1016,14 +1067,21 @@ def _split_post_key(hv_post_key: Decimal) -> tuple[int, int]:
     )
     group_image = image + _POST_KEY_GROUP_PAD
 
-    def zoned(chunk: bytes) -> int:
-        """Read one ``pic 9(5)`` DISPLAY field, tolerantly, as COBOL does."""
+    def zoned(chunk: bytes) -> ZonedDisplayInt:
+        """Read one ``pic 9(5)`` DISPLAY field, tolerantly, as COBOL does.
+
+        The bytes are kept beside the value rather than discarded: they are what a
+        field-to-field relation compares, and they cannot be recovered from the value.
+        """
         magnitude = 0
         for byte in chunk:
             magnitude = magnitude * 10 + (byte & 0x0F)
-        return magnitude
+        return ZonedDisplayInt(magnitude, zoned_image=chunk)
 
-    return zoned(group_image[:5]), zoned(group_image[5:10])
+    return (
+        zoned(group_image[:_POST_KEY_ITEM_BYTES]),
+        zoned(group_image[_POST_KEY_ITEM_BYTES : 2 * _POST_KEY_ITEM_BYTES]),
+    )
 
 
 def bb000_hv_load(posting: WsPostingRecord) -> TdGlpostingRec:
@@ -2878,6 +2936,14 @@ def ba015_test_ends(
     """``ba015-Test-Ends.`` [common/acas006.cbl:L635] - ANOMALY N18b, stage 2.
 
     first with ``fn-Open`` / ``fn-Output``, then with ``fn-Delete-All``.
+
+    N18b is registered by name under A-NEW-8 in ``docs/migration/anomaly-log.md``. Its
+    key-bound note carries the MEASURED consequence for this table: the delete-all runs,
+    but the bound `glpostingMT` composes is the key text ``9999999999``
+    [common/glpostingMT.cbl:L907], while every key this bridge stores is a group-move
+    image near 4.7e17 [common/glpostingMT.cbl:L1054] - so a bridge-written
+    ``GLPOSTING-REC`` row SURVIVES an ``Open-Output``, where the sibling
+    ``GLBATCH-REC`` row does not.
     """
     if (
         int(file_access.file_function) == FileFunction.OPEN

@@ -1234,6 +1234,29 @@ seed_records:
   # against and the walk has more than one row to order. Note the Purchase open-item
   # record carries an order and a reference where the Sales one carries a
   # description [copybooks/plwsoi.cob].
+  #
+  #   WHAT THIS FIXTURE DOES NOT LET YOU OBSERVE, RECORDED RATHER THAN LEFT TO BE
+  # REDISCOVERED. These two rows reuse the invoice numbers 1 and 2 that pinvoice.dat
+  # carries, and `OI5-KEY` is supplier plus invoice only -- `05 oi5-supplier pic x(7)`
+  # with `05 oi5-invoice PIC 9(8)` [copybooks/plwsoi5B.cob:L13-L15], `char(15)` at
+  # [mysql/ACASDB.sql PUITM5-REC.OI5-KEY] -- so batch and item do not separate them.
+  # pl060's PHASE 1 writes an open item for each posted invoice, `perform OTM5-Write`
+  # at [purchase/pl060.cbl:L522], and for supplier S00100 with invoices 1 and 2 those
+  # writes land on the keys these rows already occupy: the write returns fs-reply 22
+  # and the program displays `PL130 Error writing Open Item 5 Record`
+  # [purchase/pl060.cbl:L253,L527]. THE PARITY CLAIM IS UNAFFECTED, because both sides
+  # seed identically and both take the identical duplicate-key path -- but the phase-1
+  # OTM5 build itself goes UNWITNESSED on this scenario, and anything that needs to
+  # see it must not rely on this fixture.
+  #   The Sales sibling avoids the collision deliberately: its open items use invoice
+  # numbers 10 and 11, outside its own 1..3 invoice.dat range, and
+  # [harness/scenarios/clean_batch_sl.yaml] says so in place. Moving these two rows to
+  # the same convention is the obvious repair and is NOT applied here, because the
+  # seeded keys are part of what the committed evidence for this scenario was measured
+  # against: [docs/migration/scenario-diff-evidence.md] section 10.3 attests an
+  # observed empty diff of 10 tables and 17 rows a side, with manifest digests. Changing
+  # a seeded key changes those dumps, so the change belongs with a fresh ten-stage
+  # protocol run that can attest new digests -- never with an edit to the fixture alone.
   openitm5.dat:
     - OI-Nos: "S00100"
       OI-Check: "1"

@@ -312,8 +312,8 @@ linker resolves the copybook's full verb set [general/gl072.cbl:L135-L155], whos
 records that the whole block maps to nothing in Python, as a
 representation-only omission rather than a loss.
 
-`common/acas007.cbl`'s `Open-Output` DOES NOT TRUNCATE `GLBATCH-REC`, and the
-divergence from its sibling is preserved rather than harmonised (R-4):
+`common/acas007.cbl`'s FIRST `Open-Output` BLOCK carries its substitution commented
+out, and the divergence from its sibling is preserved rather than harmonised (R-4):
 
     305       if       fn-Open and
     306                fn-output
@@ -325,9 +325,15 @@ divergence from its sibling is preserved rather than harmonised (R-4):
     312       end-if.
 
 whereas the equivalent line IS ACTIVE at [common/acas008.cbl:L316] inside
-[common/acas008.cbl:L313-L319], where `set fn-delete-all to true` makes an
-open-for-output delete every row. Directly relevant here: the seeded batch row
-cannot be silently wiped by an open.
+[common/acas008.cbl:L313-L319]. THAT DOES NOT MEAN GL-BATCH IS SAFE FROM AN
+`Open-Output`: the commented-out lines leave `fn-Open` with `fn-Output` intact as far
+as `ba015-Test-Ends` [common/acas007.cbl:L622-L631], whose `[ Backup code ]` forces
+the delete-all anyway, and it is MEASURED to empty `GLBATCH-REC` of every key strictly
+below its 999999 bound. What makes the seeded batch row safe HERE is that no verb on
+this route opens GL-Batch for output at all - the eight verbs `gl072` issues and the
+read-only set `gl070` issues are listed above, and none is an `Open-Output`. See the
+key-bound note under A-NEW-8 in [docs/migration/anomaly-log.md], and §15.3 there for
+the correction of the earlier reading.
 
 [general/gl072.cbl:L443] `call "SYSTEM" using Print-Report.` is a spool-out,
 excluded by Agent Action Plan section 0.2.2. It has no database effect and must

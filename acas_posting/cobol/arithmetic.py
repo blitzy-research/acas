@@ -52,6 +52,7 @@ __all__: Final[tuple[str, ...]] = (
     "add_giving",
     "add_to",
     "compare",
+    "compare_zoned_display_fields",
     "compute",
     "divide_by_giving",
     "divide_into_giving",
@@ -817,3 +818,83 @@ def compare(
     with decimal.localcontext(INTERMEDIATE_CONTEXT):
         # `compare_signal` rather than `compare`.
         return int(_exact(left).compare_signal(_exact(right)))
+
+
+def compare_zoned_display_fields(
+    left: decimal.Decimal | int | str,
+    right: decimal.Decimal | int | str,
+    *,
+    left_field: FieldDescriptor,
+    right_field: FieldDescriptor,
+) -> int:
+    """Compare two same-picture unsigned DISPLAY items the way the compiler does.
+
+    GnuCOBOL DOES NOT COMPARE TWO SUCH ITEMS ALGEBRAICALLY, and the difference is only
+    visible when one of them holds bytes its picture cannot produce - which the frozen
+    bridge's `POST-KEY` group move guarantees it does (ANOMALY N-KEY,
+    docs/migration/anomaly-log.md). Measured on the compiled oracle, GnuCOBOL 3.2.0,
+    with both operands declared exactly as `Batch` [copybooks/wspost.cob:L15] and
+    `WS-Batch-Nos` [copybooks/wsbatch.cob:L19] declare them, `Batch` holding the five
+    bytes `06 8E 0C 15 3B` the frozen unload leaves in it:
+
+    ==================================================  ==========================
+    `if batch = 75261` - a numeric LITERAL              EQUAL      - see `compare`
+    `if batch = WS-Batch-Nos` - a same-picture FIELD    NOT EQUAL - this function
+    `if batch = ws-save5`, that field holding `75261`   NOT EQUAL - this function
+    a FIELD sweep of the whole `pic 9(5)` domain        0 matches in 0..99999
+    ==================================================  ==========================
+
+    A field-to-field relation is therefore a comparison of the two items' STORAGE, and a
+    field-to-literal relation is a comparison of their numeric readings. The frozen
+    programs rely on the first at FOUR gates - [general/gl070.cbl:L492-L493],
+    [general/gl080.cbl:L460], [general/gl080.cbl:L617] and, inside the in-scope part of
+    gl051, [general/gl051.cbl:L1029] - each of which discards a posting whose key does
+    not match the batch being processed, and each of which therefore discards EVERY
+    posting read back through the bridge. Reproducing that with
+    an algebraic comparison would post, archive or delete on any run whose batch number
+    happened to equal the corrupt key's tolerant reading, which the compiled program
+    never does.
+
+    THE ELEMENTARY-vs-ZERO CASE IS NOT THIS FUNCTION. `if batch = zero` on an elementary
+    item was measured NUMERIC (a `Batch` of spaces IS zero), so it stays with `compare`;
+    a GROUP compared with `ZERO` was measured BYTE-WISE (a group of spaces is NOT zero),
+    which is this function applied to each of the group's items in turn.
+
+    Args:
+        left: The operand written on the left of the relational operator.
+        right: The operand written on the right.
+        left_field: The left operand's descriptor.
+        right_field: The right operand's descriptor.
+
+    Returns:
+        -1 when `left`'s storage sorts before `right`'s, 0 when the two images are
+            identical, and 1 when `left`'s sorts after.
+
+    Raises:
+        TypeError: Either operand is an inexact carrier (rule R-2).
+        ValueError: A descriptor is not an unsigned zoned DISPLAY item of scale zero, or
+            the two declared widths differ. Those are the shapes the byte comparison was
+            measured for; anything else is a programmer error at the call site rather
+            than a data condition, so it is refused rather than guessed at.
+    """
+    for role, field in (("left", left_field), ("right", right_field)):
+        if not field.is_zoned_display or field.signed or (field.scale or 0) != 0:
+            raise ValueError(
+                f"{role} operand {field.name!r} is not an unsigned zoned DISPLAY item "
+                f"of scale zero ({field.cite()}); the byte comparison this function "
+                f"reproduces was measured only for that shape"
+            )
+    if left_field.byte_length != right_field.byte_length:
+        raise ValueError(
+            f"{left_field.name!r} is {left_field.byte_length} byte(s) and "
+            f"{right_field.name!r} is {right_field.byte_length}; the compiled byte "
+            f"comparison was measured on operands of EQUAL declared width"
+        )
+
+    left_image = cobol_usage.zoned_image_of(
+        left, digits=left_field.digits or 0, signed=False
+    )
+    right_image = cobol_usage.zoned_image_of(
+        right, digits=right_field.digits or 0, signed=False
+    )
+    return (left_image > right_image) - (left_image < right_image)

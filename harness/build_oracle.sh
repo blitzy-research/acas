@@ -3234,26 +3234,83 @@ acas_prepare_build_tree() {
       -- find "$ACAS_BUILD" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + \
       || acas_die "$EX_BUILDTREE" "could not clear $ACAS_BUILD."
 
-    acas_log "copying $ACAS_REPO into $ACAS_BUILD (whole tree, layout preserved)"
-    acas_run_deadline "$ACAS_TIMEOUT_BUILD" ACAS_TIMEOUT_BUILD \
-      "copying $ACAS_REPO into $ACAS_BUILD" "$EX_BUILDTREE" - \
-      -- cp -a "$ACAS_REPO/." "$ACAS_BUILD/" \
-      || acas_die "$EX_BUILDTREE" \
-        "copying $ACAS_REPO into $ACAS_BUILD failed." \
-        'The build must run in a copy: [common/comp-common.sh:L25] regenerates' \
-        'every common/*MT.cbl, and those files are the frozen data dictionary.'
-
-    # CLAIM THE TREE, and only now: the marker means "this harness built
-    # here and a subsequent run may clear it", so writing it before the copy had
-    # succeeded would licence clearing a directory that was never a build tree.
-    # A failure to write it is not fatal - the next run simply refuses to clear a
-    # tree it cannot recognise, which is the safe direction - but it is reported.
+    # CLAIM THE TREE BEFORE THE COPY, NOT AFTER IT.
+    #
+    # The marker means "this harness owns this directory and a later run may clear
+    # it". It used to be written only once the copy had SUCCEEDED, on the reasoning
+    # that a marker on a tree that was never a build tree would licence clearing
+    # someone's data. That reasoning is sound about a directory this run did not
+    # clear -- and this run has just cleared it, under
+    # `acas_assert_clearable_build_tree', so ownership is already established at
+    # this point and the copy cannot change who owns it.
+    #
+    # WRITING IT AFTERWARDS MADE A FAILED COPY UNRECOVERABLE IN PLACE, measured:
+    # a copy that stopped part-way left $ACAS_BUILD POPULATED and UNMARKED, so the
+    # next run refused to clear it and exited 67 -- a second failure with a
+    # different cause, which the operator could only escape with a
+    # `docker volume rm' or by creating the marker by hand. The marker now goes
+    # down immediately after the clear, so a retry recognises its own tree and
+    # clears it again. A tree this harness cleared is a tree it may clear.
     if : > "$ACAS_BUILD/$ACAS_BUILD_MARKER" 2>/dev/null; then
       acas_log "marked $ACAS_BUILD as this harness's build tree ($ACAS_BUILD_MARKER)"
     else
       acas_warn "could not write $ACAS_BUILD/$ACAS_BUILD_MARKER;" \
         'a later run will refuse to clear this tree and will need --no-refresh.'
     fi
+
+    # THE COPY SKIPS SCRATCH, and that is a correctness measure rather than a
+    # speed one.
+    #
+    # `cp -a "$ACAS_REPO/."' copied EVERY top-level entry, including whatever a
+    # developer's tooling had left in the checkout. `pytest' creates
+    # `.pytest_cache' mode 0700 owned by whoever ran it, this service runs as an
+    # unprivileged account (harness/Dockerfile.gnucobol `USER'), and `/repo' is
+    # mounted read-only -- so the documented order "run the tests, then build the
+    # oracle" ended in `cp: cannot access '/repo/./.pytest_cache': Permission
+    # denied' and exit 67. Measured, twice: the copy failed, and then the next
+    # attempt failed differently for the reason recorded above the marker.
+    #
+    # None of the skipped names is a specification source. `.git' is history,
+    # `.venv'/`venv' are host-built environments whose binaries are wrong for this
+    # image anyway, and the rest are caches and build outputs. `.dockerignore'
+    # excludes the same set from IMAGE builds; this list is its counterpart for the
+    # runtime bind mount, which `.dockerignore' does not reach. Everything the
+    # frozen build needs -- `common/', `copybooks/', the six compile directories,
+    # `comp-all.sh', `mysql/' and the vendored archives -- is outside it, and the
+    # structural checks below fail loudly if that ever stops being true.
+    #
+    # Filtered at the TOP LEVEL, by name, because that is where the offending
+    # entries are and a top-level list is auditable at a glance. A nested cache is
+    # created 0755 by the same tooling and copies harmlessly.
+    local -a sources=()
+    local entry name
+    for entry in "$ACAS_REPO"/* "$ACAS_REPO"/.[!.]*; do
+      [[ -e "$entry" ]] || continue
+      name="${entry##*/}"
+      case "$name" in
+        .git|.pytest_cache|.mypy_cache|.ruff_cache|.venv|venv|__pycache__|htmlcov|build|dist|*.egg-info|.coverage|.coverage.*)
+          acas_log "skipping $name (scratch; not a specification source)"
+          continue
+          ;;
+      esac
+      sources+=("$entry")
+    done
+    (( ${#sources[@]} )) || acas_die "$EX_BUILDTREE" \
+      "$ACAS_REPO holds nothing to copy." \
+      'The read-only checkout is the specification; an empty one means the mount' \
+      'is wrong, not that the build has nothing to do.'
+
+    acas_log "copying $ACAS_REPO into $ACAS_BUILD (${#sources[@]} top-level entries, layout preserved)"
+    acas_run_deadline "$ACAS_TIMEOUT_BUILD" ACAS_TIMEOUT_BUILD \
+      "copying $ACAS_REPO into $ACAS_BUILD" "$EX_BUILDTREE" - \
+      -- cp -a "${sources[@]}" "$ACAS_BUILD/" \
+      || acas_die "$EX_BUILDTREE" \
+        "copying $ACAS_REPO into $ACAS_BUILD failed." \
+        'The build must run in a copy: [common/comp-common.sh:L25] regenerates' \
+        'every common/*MT.cbl, and those files are the frozen data dictionary.' \
+        'If the failure names a path this account cannot read, that path is in the' \
+        'checkout and not in the skip list above; $ACAS_BUILD carries its marker,' \
+        'so re-running after removing the path clears and re-copies in place.'
   else
     acas_log "reusing the existing build tree in $ACAS_BUILD (refresh disabled)"
   fi
@@ -4489,6 +4546,25 @@ acas_publish_attestation() {
   local source_is_frozen='yes' transform_digest
   (( ${#ACAS_SOURCE_TRANSFORMS_APPLIED[@]} == 0 )) || source_is_frozen='no'
   transform_digest="$(acas_source_transform_set_digest)"
+
+  #  THE PREVIOUS RUN'S ATTESTATION IS REMOVED BEFORE THIS ONE IS WRITTEN, and that is
+  #  not tidiness -- it is what makes `--no-refresh' work at all. This function ends by
+  #  `chmod 0444', and `harness/Dockerfile.gnucobol' runs the container as a NON-ROOT
+  #  user [harness/Dockerfile.gnucobol USER ${ACAS_UID}:${ACAS_GID}], so a read-only
+  #  file cannot be truncated by the redirection below. `--no-refresh' deliberately
+  #  PRESERVES the build tree, so the file is still there from the previous build and
+  #  the redirection failed with "Permission denied" -- exit 77, in precisely the use
+  #  case the option exists for. Worse than the error: steps 1 to 5 had already
+  #  recompiled every module, so the surviving attestation then described a module set
+  #  that no longer existed and `harness/reset_db.sh' refused the oracle on its
+  #  module-set digest, with the documented in-place rebuild unable to recover it.
+  #  Only THIS function's own artifact is removed, only after a full five-step
+  #  sequence has succeeded, and the write below is still asserted -- so a genuine
+  #  failure (a full volume, a read-only mount) is still fatal rather than silent.
+  if [[ -e "$target" ]]; then
+    chmod u+w "$target" 2>/dev/null || true
+    rm -f "$target" 2>/dev/null || true
+  fi
 
   {
     printf 'attestation-version	%s

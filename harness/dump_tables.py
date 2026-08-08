@@ -3816,6 +3816,11 @@ DIGEST_PROG: Final[str] = "harness/dump_tables.py --table-digest"
 #: how both runners have always passed one.
 DIGEST_MODE_FLAG: Final[str] = "--table-digest"
 
+#: "Everything worked", which is also what `--help` reports: printing the usage text is
+#: this mode answering the question it was asked, not failing to. Named rather than
+#: written as a bare 0 so the help path cannot be confused with a refusal again.
+DIGEST_EX_OK: Final[int] = 0
+
 #: The three fingerprint statuses that are not "everything worked". Small integers on
 #: purpose: both runners test for exactly 1 and treat anything else as fatal.
 DIGEST_EX_UNREADABLE: Final[int] = 1
@@ -4011,16 +4016,34 @@ def table_digest_main(argv: Sequence[str] | None = None) -> int:
     try:
         namespace = parser.parse_args(list(argv) if argv is not None else None)
     except SystemExit as exit_request:
-        # argparse's own usage failure is DIGEST_EX_USAGE by construction; returned rather
-        # than allowed to escape, so this function keeps its no-`sys.exit` contract.
-        return int(exit_request.code or DIGEST_EX_USAGE)
+        # THE SUCCESS EXITS ARGPARSE MAKES ARE NOT USAGE FAILURES, and they have to be
+        # told apart EXPLICITLY. `--help` raises SystemExit(0) and a bare `raise
+        # SystemExit` carries None, while a genuine usage error raises SystemExit(2).
+        # Written as `exit_request.code or DIGEST_EX_USAGE` the zero is FALSY, so
+        # `0 or 2` evaluated to 2 and this mode reported a usage failure after printing
+        # its own help correctly - the one path where the code is legitimately zero was
+        # the one path that could not return zero. So the code is inspected rather than
+        # coerced, which is what the three surfaces beside this one already do (`main`
+        # below, harness/normalize.py and harness/diff_states.py). Returned rather than
+        # allowed to escape, so this function keeps its no-`sys.exit` contract.
+        code = exit_request.code
+        if code is None or code == 0:
+            return DIGEST_EX_OK
+        return DIGEST_EX_USAGE
 
     try:
         tables = _resolve_digest_tables(
             namespace.tables, namespace.scenario_file
         )
     except SystemExit as exit_request:
-        return int(exit_request.code or DIGEST_EX_USAGE)
+        #  Same discipline on the second path. `_resolve_digest_tables` raises
+        #  `SystemExit(_digest_fail(...))` and so never carries zero today, but the
+        #  falsy-zero idiom was latent here too and is not left in place to be
+        #  inherited by a future refusal that does.
+        code = exit_request.code
+        if code is None or code == 0:
+            return DIGEST_EX_OK
+        return DIGEST_EX_USAGE
     except ScenarioFileError as exc:
         return _digest_fail(str(exc), DIGEST_EX_USAGE)
 
@@ -4029,7 +4052,7 @@ def table_digest_main(argv: Sequence[str] | None = None) -> int:
     except ConnectionConfigError as exc:
         return _digest_fail(str(exc), DIGEST_EX_ENVIRONMENT)
 
-    status = 0
+    status = DIGEST_EX_OK
     lines: list[str] = []
     try:
         with connect(settings) as connection:
@@ -6487,7 +6510,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             return make_fixtures_main(remaining)
         except SystemExit as request:
-            return int(request.code or FIXTURE_EX_OK_FALLBACK)
+            #  INSPECTED, NOT COERCED - the same discipline as `table_digest_main` and
+            #  as the dump parser below. `request.code or FIXTURE_EX_OK_FALLBACK` gave
+            #  the right answer only because the fallback happens to be zero: the
+            #  `--help` and `--version` exits argparse makes carry 0 or None, both
+            #  FALSY, so the fallback silently became the answer for them. It is
+            #  written out so that changing the fallback cannot turn the help path
+            #  into a failure, which is exactly how that defect reached this tree.
+            code = request.code
+            if code is None or code == 0:
+                return FIXTURE_EX_OK_FALLBACK
+            return int(code)
 
     parser = build_parser()
     try:
