@@ -123,10 +123,12 @@ if _missing_landmarks:
 del _missing_landmarks
 
 # The oracle harness. A SIBLING of acas_posting/, never a sub-package: that is
-# where R-1 stops being a promise and becomes a fact, and pyproject.toml constrains
-# discovery to `include = ["acas_posting*"]` against an explicit
-# `exclude = ["harness*", "tests*", "docs*", "data_dictionary*"]`, so harness/ and
-# tests/ cannot reach a distribution at all.
+# where R-1 stops being a promise and becomes a fact, and pyproject.toml turns
+# package discovery OFF, listing the eight packages that ship one line each -
+# the seven code packages plus the data-only `acas_posting.data_dictionary` that
+# carries the generated dictionary into the wheel. `harness*`, `tests*` and
+# `docs*` are absent because they are not listed, so they cannot reach a
+# distribution at all.
 HARNESS_DIR: Final[Path] = REPO_ROOT / "harness"
 
 # The scenario definitions - the eight Agent Action Plan section 0.4.1.7 mandates, and
@@ -441,10 +443,12 @@ def assert_exact_numeric(value: object, *, where: str) -> None:
 #
 #  THE SINGLE MOST IMPORTANT MECHANICAL FACT IN THIS FILE: nothing the SHIPPED
 #  package imports can reach harness/. That is enforced by pyproject.toml's
-#  [tool.setuptools.packages.find] configuration, which admits only
-#  `acas_posting*` and NAMES `harness*`, `tests*`, `docs*` and `data_dictionary*`
-#  in its exclusion list, with include-package-data = false; harness is absent by
-#  construction rather than filtered out. There is therefore DELIBERATELY no import path from the shipped
+#  `[tool.setuptools] packages = [...]` list, which enumerates the eight packages
+#  that ship - the seven code packages and the data-only
+#  `acas_posting.data_dictionary` - with include-package-data = false and no
+#  discovery scan at all; `harness*`, `tests*` and `docs*` are absent because
+#  nothing names them, so harness is absent by construction rather than filtered
+#  out. There is therefore DELIBERATELY no import path from the shipped
 #  package to the compiled oracle (R-1).
 #
 #  ONE ARGUMENT IS DELIBERATELY NOT MADE HERE, BECAUSE IT IS FALSE. An earlier

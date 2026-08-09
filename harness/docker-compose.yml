@@ -408,7 +408,7 @@ services:
       - no-new-privileges:true
 
     networks:
-      - acas_oracle
+      - net
 
     # The gate the whole protocol depends on. The argument vector is byte-for-byte
     # the probe the image itself declares, restated here so a reader of the stack
@@ -426,7 +426,7 @@ services:
       retries: 24
 
     volumes:
-      - acas_mariadb_data:/var/lib/mysql
+      - mariadb-data:/var/lib/mysql
 
     # Quoted, because a bare `no` is a YAML boolean. A fixture must not restart:
     # a silent restart mid-protocol would reseed nothing and hide the failure.
@@ -452,9 +452,9 @@ services:
     # /out are named volumes, which is where every product of a run lands.
     volumes:
       - ../:/repo:ro
-      - acas_build:/build
-      - acas_data:/data
-      - acas_out:/out
+      - build:/build
+      - data:/data
+      - out:/out
 
     #  ENVIRONMENT -- the canonical ACAS_* contract
     #  Every harness script reads this one contract. What compose declares is
@@ -795,7 +795,7 @@ services:
       - no-new-privileges:true
 
     networks:
-      - acas_oracle
+      - net
 
     working_dir: /build
 
@@ -814,20 +814,47 @@ services:
     mem_reservation: 1g
     pids_limit: 1024
 
-# Named per clone so a sibling clone cannot attach to this oracle's state.
-# acas_mariadb_data holds the server's data directory; acas_build is the writable
-# copy of the tree that is compiled; acas_data holds the Cobol flat files a
-# scenario is seeded from; acas_out holds the dumps that are diffed.
+# NAMED PER CLONE, AND THE NAME IS DERIVED RATHER THAN INTERPOLATED.
+#
+# Every volume and the network below carry NO explicit `name:`. Compose therefore
+# names each one `<project>_<key>` -- `acas-harness-001_mariadb-data`,
+# `_build`, `_data`, `_out` and `_net` for CLONE_INDEX=001 -- so each is still
+# scoped to exactly this clone, through the ONE name Compose validates.
+#
+# WHY THE EXPLICIT NAMES WERE REMOVED, MEASURED. They interpolated CLONE_INDEX
+# straight into daemon-visible resource names, and Compose has no way to validate
+# an interpolated value: it supports `${VAR:?err}` for unset-or-empty and nothing
+# else, and a nested or pattern form -- `${CLONE_INDEX##*[!0-9]*:?...}` -- is
+# rejected outright as "invalid interpolation format". So with
+# CLONE_INDEX='bad/../name', `docker compose config` exited 0 and printed
+# `acas-harness-bad/../name-net`; `up` then CREATED a network under that name
+# before failing on the first volume, leaving a malformed resource behind for
+# someone else to collide with or clean up.
+#
+# With no explicit names there is nothing left to malform. Compose SANITISES the
+# project name (`bad/../name` becomes `acas-harness-badname`, measured), and every
+# resource name is derived from that sanitised value, so no interpolated value ever
+# reaches the daemon as a name. `CLONE_INDEX` is still REQUIRED -- see the project
+# `name:` above -- so nothing can silently default into a sibling's namespace.
+#
+# REJECTION BEFORE CREATION comes from the project name, which Compose validates
+# strictly: `--project-name "acas-harness-$CLONE_INDEX"` (or COMPOSE_PROJECT_NAME,
+# which overrides the `name:` above) refuses `must consist only of lowercase
+# alphanumeric characters, hyphens, and underscores as well as start with a letter
+# or number` and creates NOTHING. That is the invocation README-python-migration.md
+# section 8.1 documents, and it is the layer that turns an invalid clone identifier
+# into a refusal rather than a sanitisation.
+#
+# mariadb-data holds the server's data directory; build is the writable
+# copy of the tree that is compiled; data holds the Cobol flat files a
+# scenario is seeded from; out holds the dumps that are diffed.
 volumes:
 
-  acas_mariadb_data:
-    name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so this volume cannot be shared with a sibling clone}-mariadb-data
+  mariadb-data:
 
-  acas_build:
-    name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so this volume cannot be shared with a sibling clone}-build
+  build:
 
-  acas_data:
-    name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so this volume cannot be shared with a sibling clone}-data
+  data:
 
   #  EVIDENCE VOLUME -- RETENTION AND DISPOSAL ARE A STATED CONTRACT, NOT A HABIT.
   #
@@ -853,26 +880,30 @@ volumes:
   #  the new digests, the superseded tree has no citation and may be disposed of.
   #
   #  DISPOSAL IS TARGET-SCOPED, AND THAT IS THE WHOLE POINT. Sibling clones each own
-  #  their own `acas-harness-<CLONE_INDEX>-out`, so a broad command destroys another
+  #  their own `acas-harness-${CLONE_INDEX}_out`, so a broad command destroys another
   #  run's evidence. Use the clone-namespaced name and nothing wider:
   #
   #      docker compose -f harness/docker-compose.yml down                  # release it
-  #      docker volume rm "acas-harness-${CLONE_INDEX}-out"                 # dispose
+  #      docker volume rm "acas-harness-${CLONE_INDEX}_out"                 # dispose
+  #
+  #  The `_out` suffix is Compose's own `<project>_<key>` derivation, not a spelling
+  #  choice: the volume carries no explicit `name:` precisely so that no interpolated
+  #  value can reach the daemon as a resource name (see the note above `volumes:`).
   #
   #  NEVER `docker volume prune`, never `docker volume rm $(docker volume ls -q)`,
   #  and never `rm -rf` a host path: all three reach volumes and working trees this
-  #  clone does not own. `CLONE_INDEX` is required below precisely so the name cannot
-  #  silently widen to a sibling's.
+  #  clone does not own. `CLONE_INDEX` is required by the project `name:` above
+  #  precisely so this name cannot silently widen to a sibling's.
   #
   #  See README-python-migration.md section 11.1c for the full contract.
-  acas_out:
-    name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so this volume cannot be shared with a sibling clone}-out
+  out:
 
 # `internal: true` and no published port: the oracle is reachable only from
 # inside the stack, so the credentials above are never exposed to the host.
+# Named `acas-harness-${CLONE_INDEX}_net` by Compose's own project derivation; it
+# carries no explicit `name:` for the reason recorded above `volumes:`.
 networks:
 
-  acas_oracle:
-    name: acas-harness-${CLONE_INDEX:?set CLONE_INDEX to this clone's index (e.g. 002) so this network cannot be shared with a sibling clone}-net
+  net:
     driver: bridge
     internal: true

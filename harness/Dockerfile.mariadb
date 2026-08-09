@@ -68,14 +68,32 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
 #       SAME serial `harness/Dockerfile.gnucobol` pins, so this layer resolves to
 #       one fixed package set rather than to "whatever is current today". A build
 #       from this file a year from now installs the same bytes.
-#    2. THE SERVER VERSION. `--only-upgrade` with an explicit package list can add
-#       nothing and can upgrade nothing outside the list, and `mariadb-server` is
-#       not in it. The assertion after the install re-reads the installed version
-#       and fails the build if it has moved off 10.11.7 -- so a future edit to this
-#       list cannot silently upgrade the oracle's server out from under the frozen
+#    2. THE SERVER VERSION. The MariaDB vendor packages -- `mariadb-*`, `galera-*`,
+#       `libmariadb*` and `mysql-common` -- are `apt-mark hold`ed BEFORE the
+#       upgrade, so no upgrade can reach them; `apt-get upgrade` installs no new
+#       package either. The assertion after the upgrade re-reads the installed
+#       version and fails the build if it has moved off 10.11.7 -- so a future edit
+#       here cannot silently upgrade the oracle's server out from under the frozen
 #       schema. (Measured: the vendor repository still offers exactly
 #       `1:10.11.7+maria~ubu2204`, so even a careless upgrade would not have moved
-#       it. The assertion does not depend on that remaining true.)
+#       it. Neither the hold nor the assertion depends on that remaining true.)
+#
+#  THE UPGRADE IS COMPLETE, AND THAT IS ASSERTED RATHER THAN INTENDED.
+#  This layer used to name an explicit package list and upgrade only those. The list
+#  was incomplete, and the gap was invisible because nothing measured it: 21 packages
+#  remained upgradable INSIDE the built image AT THIS PINNED SERIAL -- ten of them
+#  carrying a `jammy-security` origin, among them `ca-certificates`, `tzdata`,
+#  `libkmod2`, `iproute2`, `apt` and the whole `util-linux`/`libmount1`/`libblkid1`/
+#  `libuuid1`/`libsmartcols1`/`bsdutils`/`mount` family. An image that claims to be
+#  patched while `apt-get -s upgrade` inside it lists ten security updates is worse
+#  than one that claims nothing.
+#
+#  So the selection is inverted, exactly as `harness/build_oracle.sh`'s build-tree
+#  copy was: the holds name what must NOT move, the upgrade takes everything else,
+#  and the build then RE-READS `apt-get -s upgrade` and FAILS if a single `Inst`
+#  line remains. "Fully patched against its own pinned serial" is therefore a
+#  build-enforced property that an operator can re-measure in one command, rather
+#  than a claim that decays silently as the archive moves on.
 #
 #  MEASURED OUTCOME of this layer plus the Go-binary replacement below, same Trivy
 #  invocation against the built image: 381 findings with 351 fixable becomes 30
@@ -132,16 +150,23 @@ RUN set -eu; \
       || { echo 'FATAL: apt did not fetch from the snapshot endpoint; the pin was not honoured.' >&2; exit 1; }; \
     rm -f /tmp/apt-snapshot-update.log; \
     \
-    echo '--- applying the available fixes, and NOTHING ELSE: --only-upgrade cannot install a new package ---'; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade --no-install-recommends \
-        dpkg gawk gcc-12-base gpg gpgconf gpgv gzip \
-        libc-bin libc6 libcap2 libcap2-bin libconfig-inifiles-perl libdbi-perl \
-        libelf1 libgcc-s1 libgcrypt20 libgnutls30 libgssapi-krb5-2 libk5crypto3 \
-        libkrb5-3 libkrb5support0 liblzma5 libncurses6 libncursesw6 \
-        libpam-modules libpam-modules-bin libpam-runtime libpam0g \
-        libperl5.34 libsqlite3-0 libssl3 libstdc++6 libsystemd0 libtasn1-6 \
-        libtinfo6 libudev1 ncurses-base ncurses-bin openssl perl perl-base \
-        perl-modules-5.34 rsync sed tar xz-utils; \
+    echo '--- HOLDING the MariaDB vendor packages: the frozen schema names the server version ---'; \
+    apt-mark hold $(dpkg-query -W -f='${Package} ${Status}\n' 'mariadb-*' 'galera-*' 'libmariadb*' 'mysql-common' 2>/dev/null \
+        | awk '$4 == "installed" { print $1 }'); \
+    \
+    echo '--- applying EVERY available fix at the pinned serial: `upgrade` installs no new package ---'; \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends; \
+    \
+    echo '--- AND THE IMAGE MUST NOW BE FULLY PATCHED AGAINST ITS OWN PINNED SNAPSHOT ---'; \
+    apt-get -s upgrade > /tmp/apt-pending.log 2>&1; \
+    if grep -q '^Inst ' /tmp/apt-pending.log; then \
+        echo 'FATAL: packages remain upgradable at the pinned snapshot, so this image is not fully patched against the serial it resolves against.' >&2; \
+        grep '^Inst ' /tmp/apt-pending.log >&2; \
+        echo 'Every one of them is a fix that exists and was not applied. If a package genuinely must be held back, hold it explicitly above and say why.' >&2; \
+        exit 1; \
+    fi; \
+    echo '    apt-get -s upgrade reports NOTHING to install: zero pending upgrades.'; \
+    rm -f /tmp/apt-pending.log; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*; \
     \
@@ -1308,6 +1333,71 @@ RUN set -eu; \
       || { echo 'FATAL: gosu can no longer switch to the mysql account; the privilege drop is broken.' >&2; exit 1; }; \
     \
     echo "OK: unprivileged account mysql (uid ${mysql_uid}) present, gosu intact, set-*-ID helpers cleared."
+
+
+# -----------------------------------------------------------------------------
+#  THE SOFTWARE BILL OF MATERIALS -- SHIPPED IN THE IMAGE, PRODUCED BY dpkg
+#
+#  WHY IT IS HERE. Advisory closure was previously unverifiable without a
+#  third-party scanner: a reviewer with no `trivy`, `grype` or `syft` on the host
+#  could not establish WHAT this image contains, let alone whether it is patched.
+#  That made the posture recorded in README-python-migration.md section 7.2 a claim
+#  rather than a finding, which is exactly the failure mode this project refuses
+#  everywhere else.
+#
+#  So the image carries its own inventory, produced by the package manager that
+#  installed everything in it. `dpkg-query` needs no network, no database and no
+#  tool that is not already present, so the evidence exists on every host and
+#  cannot go stale relative to the image: it is generated from the final layer's
+#  package state, in the image it describes.
+#
+#  WHAT IT IS NOT. It is not a CVE verdict and does not claim to be one -- mapping
+#  versions to advisories needs a vulnerability database, which a fixture image has
+#  no business carrying. It is the INPUT a scanner needs and the record a human
+#  needs: exact binary and source versions, the apt serial they were resolved at,
+#  and the proof that nothing further was on offer at that serial.
+# -----------------------------------------------------------------------------
+ARG ACAS_SBOM_DIR=/usr/local/share/acas-harness
+
+RUN set -eu; \
+    mkdir -p "${ACAS_SBOM_DIR}"; \
+    \
+    echo '--- the package inventory: one TAB-separated row per installed package ---'; \
+    { \
+      printf '# ACAS harness image inventory -- MariaDB oracle service\n'; \
+      printf '# image\tdocker.io/library/mariadb:10.11.7 (digest-pinned; see LABEL org.opencontainers.image.base.digest)\n'; \
+      printf '# apt-snapshot\t%s\n' "${APT_SNAPSHOT}"; \
+      printf '# columns\tpackage\tversion\tarchitecture\tsource-package\tsource-version\n'; \
+      dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\t${source:Package}\t${source:Version}\n' \
+        | LC_ALL=C sort; \
+    } > "${ACAS_SBOM_DIR}/sbom-dpkg.tsv"; \
+    packages="$(grep -vc '^#' "${ACAS_SBOM_DIR}/sbom-dpkg.tsv")"; \
+    [ "${packages}" -gt 0 ] \
+      || { echo 'FATAL: the package inventory is empty, so the image describes nothing.' >&2; exit 1; }; \
+    \
+    echo '--- the advisory posture: what was applied, what is held, and what remains on offer ---'; \
+    { \
+      printf 'artifact\tacas-harness image advisory posture\n'; \
+      printf 'service\toracle-database\n'; \
+      printf 'apt-snapshot-serial\t%s\n' "${APT_SNAPSHOT}"; \
+      printf 'apt-sources\t%s\n' "$(tr '\n' ';' < /etc/apt/sources.list)"; \
+      printf 'installed-packages\t%s\n' "${packages}"; \
+      printf 'distribution-upgrades-applied\tevery upgrade offered at the pinned serial, asserted by re-reading apt-get -s upgrade during the build\n'; \
+      printf 'pending-upgrades-at-pinned-serial\t0 (build fails otherwise)\n'; \
+      printf 'held-packages\t%s\n' "$(apt-mark showhold | LC_ALL=C sort | tr '\n' ' ')"; \
+      printf 'held-because\tthe frozen schema header names the server version [mysql/ACASDB.sql:L1]\n'; \
+      printf 'mariadb-server\t%s\n' "$(dpkg-query -W -f='${Version}' mariadb-server)"; \
+      printf 'go-binaries\t0 (the vendor gosu helper is replaced by a setpriv shim; see its own layer)\n'; \
+      printf 'unfixable-residue\trecorded in README-python-migration.md section 7.2; no distribution fix exists for any of it\n'; \
+      printf 'verify-command\tapt-get update && apt-get -s upgrade   (expects: no Inst lines)\n'; \
+      printf 'inventory\t%s/sbom-dpkg.tsv\n' "${ACAS_SBOM_DIR}"; \
+    } > "${ACAS_SBOM_DIR}/advisory-posture.tsv"; \
+    \
+    echo '--- both records must be world-readable: the service runs as mysql, not root ---'; \
+    chmod 0644 "${ACAS_SBOM_DIR}/sbom-dpkg.tsv" "${ACAS_SBOM_DIR}/advisory-posture.tsv"; \
+    \
+    echo "OK: inventory of ${packages} packages and the advisory posture written to ${ACAS_SBOM_DIR}"; \
+    head -4 "${ACAS_SBOM_DIR}/sbom-dpkg.tsv"
 
 #  Declared for the internal project network only; harness/docker-compose.yml
 #  publishes no port, so the credentials never reach the host.

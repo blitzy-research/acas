@@ -47,6 +47,21 @@ determinism tier, the traceability and dictionary deliverables — plus agreemen
 with a **disclosed-transformed diagnostic** oracle; what is *not* established is
 frozen parity, per §8.7.
 
+### The three unwaived open items, in one place
+
+Everything below is stated in full where it belongs — §8.7, §8.10, §9.4 — and
+collected here because a reader is entitled to find the whole of it without
+assembling it. **None of the three is waived, none is a task this migration may
+close by itself, and each names who must act.** They are open items against the
+*frozen system and the project agreement*, not defects in the Python cycle, which
+passes its own suites in full (§12).
+
+| # | Open item | Measured status | Why the migration cannot close it | What a human must do |
+| --- | --- | --- | --- | --- |
+| 1 | `copybooks/ACAS-SQLstate-error-list.cob` is absent while 22 of the 28 generated `common/*MT.cbl` bridges (and their 22 `*MT.scb` sources — 44 frozen files) `COPY` it | A build of the frozen sources exactly as committed exits **74** with **22** compile errors, one per affected bridge, and writes no attestation. Re-measured after the build-input change of this checkpoint: 22 fatal diagnostics, **zero** permission failures, straight from the documented read-only `/repo` mount | Writing the member would add a frozen file: AAP §0.8.1 makes any diff under `copybooks/` a defect "regardless of how harmless it appears", §0.2.2 lists the tree under "zero modifications of any kind", and the member carries the SQLSTATE-to-`FS-Reply` mapping that **defines** the oracle's rejection behaviour, so inventing it breaches R-3 (no new validations) and R-4 (a defect fixed is a failure) | **The ACAS maintainer supplies the authentic member.** It is in no tracked file, nowhere in the working tree, and in none of the three vendored archives — `presql2-latest.zip` and `mysql-connector-c-6.1.11-src.tar.gz` contain no member matching `sqlstate`, and the only two in `mariadb-connector-c-3.3.4-src.zip` are the unrelated C API man pages. `harness/build_oracle.sh` prints the four-step remediation on the failure itself |
+| 2 | No trusted frozen-parity evidence exists, so the AAP §0.8.5 acceptance criterion is **not met** | All eight scenario protocols reach an empty ordering-normalised diff over their affected tables, and every one of those verdicts is stamped `oracle_source_is_frozen = no` with `source_transform_set_sha256 = 1352755276e5fca45bb74cc0441dbd777ce6b4dc3cd2634305582eb6b75ca998` over **41** transformed paths | Strictly downstream of item 1: the only oracle that builds is the disclosed-transformed one, and **40** of its 41 transforms change executable handler logic. `harness/reset_db.sh` refuses to set up a comparison against it (exit **77**) unless the deviation is requested explicitly, and every verdict drawn from it is marked **NO PARITY CLAIM** | Nothing, until item 1 is closed. Then re-run the eight protocols against the frozen build; the diffs either stay empty, or the differences they show are the migration's real work list |
+| 3 | The AAP-mandated seeding window (autocommit **OFF**) cannot leave a durable seed | A default seed exits **76**: seven loaders run, all return success, all seven target tables read **zero** rows. The `on` deviation is the only mode measured to persist (8 rows across 7 tables for `clean_batch_gl`), and the loader return codes are identical under both | Three frozen facts compose into an impossibility the migration may change none of: the AAP mandates OFF for seeding (§0.2.1.1, §0.4.1.7, §0.5.2); **no** frozen loader reaches a live `COMMIT` (77 dead references across the 28 `common/*LD.cbl`, the sole `perform aa030-Commit` commented out at `[common/irsdfltLD.cbl:L437]`); MariaDB discards an uncommitted session at disconnect. Issuing the missing `COMMIT` is exactly what R-4 forbids | **Exactly one of two decisions, by the maintainer or the project owner:** supply loaders that commit, or amend AAP §0.5.2's premise in writing to authorise the deviation. The harness will not decide it silently — `ACAS_SEED_AUTOCOMMIT` defaults to `off`, `on` must be requested per invocation, and the window a fixture was seeded under is recorded in the fixture marker and carried into `seed-identity` by digest (§9.4, §11.1) |
+
 There is **no user rules document for this project**. `review_rules` reports,
 in full, `No user rules provided.` The six binding rules R-1 … R-6 come from
 the Agent Action Plan (AAP) §0.7.2 and are restated in §2 below; where they are
@@ -538,24 +553,32 @@ there are fewer paths to keep in step.
 
 **The artifact boundary, measured rather than asserted.** Building the wheel and
 listing it shows the boundary holds: the distribution contains **only**
-`acas_posting/` and its `dist-info`. No `harness/`, no `tests/`, no `.cbl`,
-`.cob` or `.scb`, no `.sql`, and **no JSON** either. `pyproject.toml` constrains
-discovery with `[tool.setuptools.packages.find]` — `include = ["acas_posting*"]`
-against an explicit `exclude = ["harness*", "tests*", "docs*",
-"data_dictionary*"]` — and sets `include-package-data = false`, so what ships is
-the seven code packages and nothing that happens to be lying in the checkout.
-**The generated dictionary is a top-level sibling and stays one:** Agent Action
-Plan §0.3.1 fixes it at `data_dictionary/`, so it is neither relocated into the
-package by a `package-dir` mapping nor carried as `package-data`, and
-`acas_posting/dictionary/loader.py` resolves exactly that committed path. One
-artifact, one location, no possibility of two copies disagreeing.
+`acas_posting/` and its `dist-info` — 95 entries, of which exactly two are not
+Python source, and those two are the generated dictionary and its JSON Schema. No
+`harness/`, no `tests/`, no `docs/`, no `.cbl`, `.cob` or `.scb`, and no `.sql`.
+`pyproject.toml` turns discovery **off** and enumerates the packages that ship:
+the seven code packages plus the data-only `acas_posting.data_dictionary`, with
+`include-package-data = false` so nothing else in the checkout can travel. A tree
+that is not on that list cannot ship by being added, which is a stronger guarantee
+than excluding it from a scan.
+
+**The generated dictionary is committed once and shipped from there.** Agent
+Action Plan §0.3.1 fixes the committed artifact at `data_dictionary/` and that is
+where it stays — the generator writes that path and this repository holds no
+second copy. A `package-dir` mapping points the data-only package at that same
+directory, so the **build** copies the committed bytes into
+`acas_posting/data_dictionary/` in the wheel. That is not optional: rule R-5 has
+every record module read the dictionary while it is being imported, and a
+dictionary-less wheel was measured failing all seven CLI routes with
+`DictionaryNotFoundError` before they parsed an argument. §7 covers the install
+route and the two search candidates; one artifact per tree, never two answers.
 
 **The sdist carries two `README` files, and that is left alone deliberately.** `python -m
 build` produces a source distribution as well as a wheel, and setuptools' default rule
 sweeps every top-level `README*` into it — so the sdist holds the migration's own
 `README-python-migration.md` **and** the maintainer's `README`, the COBOL system's
 readme. R-1 governs what the *shipped package* may contain, and the wheel is clean
-(93 entries, `acas_posting/` plus `dist-info`, zero `README*`); the sdist additionally
+(95 entries, `acas_posting/` plus `dist-info`, zero `README*`); the sdist additionally
 carries no `.cbl`, `.cob`, `.scb` or `.sql` member at all, and `readme =
 "README-python-migration.md"` means `PKG-INFO`'s long description is the migration's
 document rather than the maintainer's. Excluding the file would take a `MANIFEST.in`,
@@ -676,6 +699,54 @@ same pins through the manifest and lets you take one set at a time:
 python -m pip install --no-build-isolation -e '.[test]'      # runtime + test
 python -m pip install --no-build-isolation -e '.[harness]'   # runtime + harness
 ```
+
+**Installing as a built distribution, and what the wheel carries.** The two
+routes above run the cycle *from this checkout*. To install it as a package —
+which is the plan's deliverable, a shipped native Python package (§0.1.2) — build
+a wheel and install that:
+
+```bash
+python -m pip wheel . --no-deps --no-build-isolation -w dist   # build
+python -m pip install dist/acas_posting-0.1.0-py3-none-any.whl # install it
+```
+
+**The wheel carries the generated data dictionary, and it has to.** Rule R-5
+binds every field of every record module to a dictionary entry, and those modules
+read the dictionary **while they are being imported** — so a distribution without
+it fails every CLI route before parsing an argument, which is exactly what a
+dictionary-less wheel was measured doing. `pyproject.toml` therefore maps the
+package name `acas_posting.data_dictionary` onto the committed top-level
+`data_dictionary/` directory and names its two JSON files as package data, so the
+build copies the **committed bytes** to `acas_posting/data_dictionary/` inside the
+wheel.
+
+There is still exactly one artifact in this repository, at exactly the path
+§0.3.1 fixes: the packaged copy is a build product, not a second committed tree,
+and `python -m acas_posting.dictionary.generate` keeps writing the one committed
+path. `acas_posting.DATA_DICTIONARY_SEARCH_PATH` publishes the two candidates in
+order — the committed sibling first, the packaged copy second — and only one of
+them can exist in a given tree, because the packaged directory is created by the
+build and a checkout has none while an installed tree has no
+`site-packages/data_dictionary/`. So a checkout reads what the generator wrote and
+an installed distribution reads what was shipped, with no possibility of two
+answers.
+
+Verify an install without a database, from a directory that is not the checkout:
+
+```bash
+cd /tmp && python -c 'from acas_posting.dictionary import loader; print(len(loader.entries()), "entries")'
+cd /tmp && python -m acas_posting general post-cycle --help
+```
+
+`1067 entries` and a usage block mean the packaged artifact resolved. A route run
+without the six `ACAS_DB_*` variables then exits **8** — the deployment-contract
+refusal of §10.2a, which is the *correct* failure off-stack — and never
+`DictionaryNotFoundError`.
+
+**What the wheel does NOT carry**, asserted rather than intended: `harness*`,
+`tests*` and `docs*`. Discovery is off entirely and `packages` enumerates the
+eight that ship, so nothing new can travel by being added to the tree — which is
+where R-1 stops being a promise (§2, R-1).
 
 **Why one lock file rather than three.** Agent Action Plan §0.2.1.2 names exactly
 two dependency artifacts — `pyproject.toml` and `requirements.txt` — and §0.5.1
@@ -887,15 +958,70 @@ carry a whole Ubuntu package set that this project does **not** pin one name at 
 time, and that set has its own posture. It is recorded here for the same reason:
 "do not upgrade the pins" is not a licence to leave the base image unexamined.
 
-**Both images now apply every distribution fix that exists for them, from the
-same frozen apt snapshot serial the rest of the build resolves against.** That
-matters more than "they are patched": repointing at
-`snapshot.ubuntu.com/ubuntu/<serial>` keeps the reproducibility property — a
+**Both images are fully patched against their own pinned apt serial, and each
+image now ASSERTS that during its build rather than claiming it here.** Repointing
+at `snapshot.ubuntu.com/ubuntu/<serial>` keeps the reproducibility property — a
 build from this file next year installs the same bytes — where an unpinned
 `apt-get upgrade` would make the image a function of its build date.
 
-**Measured before and after, `trivy image --scanners vuln` against each built
-image:**
+#### Verifying it yourself, with no scanner installed
+
+This was the gap that mattered: the posture below could not be checked without a
+third-party scanner, and on a host with no `trivy`, `grype` or `syft` a reviewer
+could not even establish what the images contain. Both images therefore **carry
+their own inventory**, generated at build time by the package manager that
+installed everything in them:
+
+```bash
+C=acas-harness-001            # or your CLONE_INDEX's project prefix
+for image in "$C-mariadb" "$C-gnucobol"; do
+  docker run --rm --user root --entrypoint sh "$image" -c \
+    'cat /usr/local/share/acas-harness/advisory-posture.tsv'
+done
+```
+
+| File, in both images | Carries |
+| --- | --- |
+| `/usr/local/share/acas-harness/sbom-dpkg.tsv` | every installed package with its exact version, architecture, source package and source version — 153 rows in the MariaDB image, 228 in the GnuCOBOL one |
+| `/usr/local/share/acas-harness/sbom-python.tsv` | the GnuCOBOL image only: the 13 pinned Python distributions and the interpreter version, read from installed metadata (`pip` is purged, so `pip list` is not available) |
+| `/usr/local/share/acas-harness/advisory-posture.tsv` | the apt serial, the apt sources, the package count, what was upgraded, what is **held** and why, the resolved `mariadb-server` version, and the one-line verification command |
+
+The **verification** itself needs nothing but the image:
+
+```bash
+docker run --rm --user root --entrypoint sh acas-harness-001-mariadb -c \
+  'apt-get update -qq && apt-get -s upgrade | grep -E "^Inst|upgraded,"'
+```
+
+`0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded` — with no `Inst`
+lines — is the pass condition, and it is the *same* assertion the build makes: a
+build that leaves one `Inst` line **fails**, printing every package it would have
+installed. So "fully patched against its pinned serial" cannot decay into a stale
+claim. Note the `apt-get update` in that command: without it the image's package
+lists are empty (the build deletes them), and `apt-get -s upgrade` then reports
+nothing because it knows of nothing — a false pass that is easy to record by
+accident.
+
+**This is what the MariaDB image was measured getting wrong.** Its upgrade layer
+named an explicit package list, the list was incomplete, and nothing measured the
+gap: **21 packages remained upgradable inside the built image at the pinned
+serial, 10 of them carrying a `jammy-security` origin** — `ca-certificates`,
+`tzdata`, `libkmod2`, `iproute2`, `apt`/`libapt-pkg6.0`, `base-files`,
+`coreutils`, `e2fsprogs` and the whole
+`util-linux`/`libmount1`/`libblkid1`/`libuuid1`/`libsmartcols1`/`bsdutils`/`mount`
+family. The layer now **holds** the nine MariaDB vendor packages — `mariadb-*`,
+`galera-4`, `libmariadb3`, `mysql-common` — and upgrades everything else, so the
+frozen server version still cannot move (`1:10.11.7+maria~ubu2204`, asserted
+twice) while nothing else is left behind.
+
+**Two measurements, and they do not say the same thing.** The apt backlog above
+was real and is now zero. Trivy's verdict, by contrast, did **not** change:
+30 findings, **0 fixable**, before and after, because its database attributes no
+fix to the versions those 21 upgrades replaced. Both facts are recorded because
+each answers a different question — "is every published fix applied?" is apt's
+question, and "is any known vulnerability fixable?" is the scanner's.
+
+**Measured with `trivy image --scanners vuln` against each built image:**
 
 | Image | Findings before | Fixable before | Findings after | Fixable after |
 |---|---|---|---|---|
@@ -923,13 +1049,15 @@ and it is enumerated rather than waved at:
 **Three specific changes were made, and each is worth knowing about because each
 alters something an operator can observe.**
 
-1. **The MariaDB image applies 46 package upgrades and the server version does
-   not move.** `--only-upgrade` with an explicit list can install nothing new and
-   can touch nothing outside the list, `mariadb-server` is not in the list, and
-   the build then *re-reads* the installed version and fails if it has left
-   `1:10.11.7+maria~ubu2204`. The frozen schema header names 10.11.7, so a future
-   edit to that list cannot silently upgrade the oracle's server out from under
-   it.
+1. **The MariaDB image applies 67 package upgrades and the server version does
+   not move.** The nine MariaDB vendor packages are `apt-mark hold`ed first, so no
+   upgrade can reach them; `apt-get upgrade` installs no new package; and the build
+   then *re-reads* the installed version and fails if it has left
+   `1:10.11.7+maria~ubu2204`. The frozen schema header names 10.11.7, so no edit
+   here can silently upgrade the oracle's server out from under it. The build
+   finally re-reads `apt-get -s upgrade` and fails on a single remaining `Inst`
+   line, which is what makes "67" the *complete* set at this serial rather than
+   whichever 46 somebody once listed.
 2. **`/usr/local/bin/gosu` is no longer a Go binary.** The vendor image ships a
    statically linked Go helper whose embedded Go 1.18 standard library carries
    103 advisories, four of them critical, and there is no distribution fix
@@ -963,19 +1091,27 @@ alters something an operator can observe.**
    `pytest` still runs, and that `importlib.metadata` still sees the full set,
    because the coverage report reads it.
 
-**Re-running the scan.** Point any image scanner at the two built images; nothing
-in the repository depends on a particular tool. With Trivy:
+**Re-running the scan — OPTIONAL, and it needs a tool this repository does not
+ship.** The two checks above (the in-image inventory and the apt simulation) need
+nothing but Docker and are the ones to run first. A CVE verdict additionally needs
+a vulnerability database, so it needs a scanner: point **any** at the two built
+images, since nothing in the repository depends on a particular one. With Trivy —
+**only if `command -v trivy` finds it**, as it is not a dependency of this project
+and is absent from the harness images by design:
 
 ```bash
-trivy image --scanners vuln acas-harness-001-mariadb
-trivy image --scanners vuln acas-harness-001-gnucobol
+command -v trivy && trivy image --scanners vuln acas-harness-001-mariadb
+command -v trivy && trivy image --scanners vuln acas-harness-001-gnucobol
 ```
 
 A finding with a `FixedVersion` is a regression in this posture and should be
-applied — in `harness/Dockerfile.mariadb`'s upgrade list, or as an exact pin in
-`harness/Dockerfile.gnucobol`'s install list, at the snapshot serial both files
-already resolve against. A finding without one is residue, and belongs in the
-enumeration above rather than in a silent carry.
+applied — the MariaDB image upgrades everything at its pinned serial already, so a
+fixable finding there means the serial itself needs moving forward; in the
+GnuCOBOL image it means an exact pin in its install list needs raising, at the
+snapshot serial both files resolve against. A finding without one is residue, and
+belongs in the enumeration above rather than in a silent carry. The two tool-free
+checks remain the ones that must pass on every rebuild; the scan is the one that
+tells you whether the serial is old.
 
 ---
 
@@ -991,11 +1127,31 @@ No build and no run can therefore modify the frozen COBOL, bridges or schema.
 Credentials have **no committed defaults** — every credential variable is
 written `${VAR:?message}`, so an unset value makes Compose refuse to render
 rather than provisioning a predictable account. `CLONE_INDEX` namespaces the
-project, network and volumes so sibling checkouts cannot share one oracle's
-state.
+project, and Compose derives every network and volume name from the project as
+`<project>_<key>`, so sibling checkouts cannot share one oracle's state.
+
+**Pass the project name explicitly, and `CLONE_INDEX` gets validated.** Compose
+has no way to validate an interpolated value — it offers `${VAR:?err}` for
+unset-or-empty and nothing else — but it validates a *project name* strictly. So
+naming the project on the command line converts a bad clone identifier into a
+refusal that creates nothing:
 
 ```bash
-export CLONE_INDEX=001
+export CLONE_INDEX=001                       # digits; this clone's index
+export COMPOSE_PROJECT_NAME="acas-harness-${CLONE_INDEX}"
+```
+
+With `CLONE_INDEX=bad/../name`, that export makes every subsequent Compose command
+fail with `invalid project name … must consist only of lowercase alphanumeric
+characters, hyphens, and underscores as well as start with a letter or number`
+**before a network, volume, image or container exists** — measured. Without it,
+Compose falls back to the file's own `name:`, which it *sanitises* rather than
+rejects (`bad/../name` becomes project `acas-harness-badname`): still safe, because
+no resource name interpolates `CLONE_INDEX` any more, but silent. Two clones with
+different invalid identifiers could sanitise to the same project, which is exactly
+what the explicit project name refuses.
+
+```bash
 export MARIADB_ROOT_PASSWORD="$(openssl rand -base64 24)"
 export ACAS_DB_USER=acas
 export ACAS_DB_PASSWORD="$(openssl rand -base64 9)"
@@ -1055,12 +1211,12 @@ database volume instead and let the entrypoint re-initialise:
 
 ```bash
 docker compose -f harness/docker-compose.yml down
-docker volume rm "acas-harness-${CLONE_INDEX}-mariadb-data"
+docker volume rm "acas-harness-${CLONE_INDEX}_mariadb-data"
 docker compose -f harness/docker-compose.yml up -d
 ```
 
 That re-applies the frozen schema and re-provisions all four accounts, and it
-leaves the `-build`, `-data` and `-out` volumes — the compiled oracle, the
+leaves the `_build`, `_data` and `_out` volumes — the compiled oracle, the
 fixtures and the evidence — untouched.
 
 **`ACAS_DB_ADMIN_USER` and `ACAS_DB_ADMIN_PASSWORD` are declared on the `mariadb`
@@ -1234,6 +1390,30 @@ with `THE COMPILED MODULES DO NOT MATCH THE ATTESTATION`, quoting both digests.
 `build_oracle.sh --no-refresh` if you want to keep the tree; either republishes
 the attestation and stage 1 then exits `0`. So use `--from`/`--only` to debug a
 step, never as the last build before a comparison.
+
+**What the build copies out of the checkout, and why it names it.** The build runs
+in a writable copy because `[common/comp-common.sh:L25]` regenerates every
+`common/*MT.cbl`, and `/repo` is mounted read-only. That copy takes **eight named
+entries and nothing else** — `comp-all.sh`, `copybooks/` and the six compile
+directories `common general irs purchase sales stock` — which is exactly what
+`[comp-all.sh:L15-L32]` walks and what every compile resolves `-I ../copybooks`
+against. Everything else the bootstrap reads (`presql2-latest.zip`,
+`etc/ld.so.conf.d/gnucobol.conf`, `mysql/ACASDB.sql`, the frozen digests) is read
+from `/repo` directly, so it is not copied at all; the build logs the top-level
+entries it did not take, by name, so the omission is visible rather than inferred.
+
+This used to be the other way round — copy everything, skip a list of scratch
+names — and it failed **twice** for one reason. First on `.pytest_cache`, which
+`pytest` creates mode 0700 owned by whoever ran the tests, so the documented order
+"run the tests, then build the oracle" exited **67**. Then on a root-owned QA tree
+under `tmp/`, which `.gitignore` ignores — so `git status --porcelain` was empty,
+the worktree was clean by every tracked measure, and the build still exited 67
+before compiling anything. A deny list can only name what somebody has already
+been bitten by. Naming the inputs instead makes arbitrary ignored or root-owned
+workspace state **unreachable** rather than newly hazardous: measured on this
+checkout with an unreadable root-owned `tmp/` tree present, the build exits `0`
+and the frozen build reaches its real blocker in §8.7 rather than a copy failure.
+A missing input is still fatal — a partial specification must not compile.
 
 ### 8.3 What the five steps are
 
@@ -1781,6 +1961,34 @@ capture reach a comparison whose pass condition is an empty diff.
   `harness/seed.sh` warns to that effect rather than describing it as though
   it were. The measurements are written up in full at
   `docs/migration/ambiguity-resolutions.md`.
+
+  **The window is recorded in the evidence, not only in the log.** Everything above
+  reaches the console; what reaches a later reader is the evidence tree, and until
+  this checkpoint none of it said which window a seed ran under — so a reader
+  holding only the artifacts could reasonably assume the mandated configuration,
+  the one thing measured to be unachievable. So `harness/seed.sh` appends
+  `seed_window` and `seed_window_standing` to the scenario fixture marker
+  **after** its durability gate has accepted the seed, which is what makes the rows
+  a statement about the window the loaders *ran under* rather than the one an
+  environment variable asked for; a refused seed leaves no row at all (measured: the
+  marker after a refused `off` seed carries none). `harness/reset_db.sh` reads them
+  back out of the marker — never out of `ACAS_SEED_AUTOCOMMIT`, which says only what
+  that process was told — logs them, warns when the standing is a deviation, and
+  republishes both rows in `run-logs/<scenario>/seed-identity` (§11.1). Because the
+  marker's own SHA-256 is the seed identity both runners bind into their run-status
+  records, and `harness/diff_states.py` requires the two sides to carry the same
+  one, a fixture seeded under the deviation and one seeded under the mandated window
+  are **different bytes** and cannot silently compare equal. Measured on
+  `clean_batch_gl`: marker digest
+  `4bcb22660ce76d1b1f9e56384a04764c4c49cba27e5c450a2fab365c77991855`, identical
+  across two separate `on` seeds, carrying `seed_window on` and
+  `seed_window_standing declared-deviation-from-aap`.
+
+  The verdict manifest's own key set is deliberately **not** widened for this.
+  `VERDICT_KEYS` and the run-status key set in `harness/dump_tables.py` are exact —
+  an unrecognised key is a refusal, by design — so a new key is a protocol change
+  across four files and their tests, and it would carry a second copy of a fact the
+  seed identity already binds by digest.
 
   **This is a determinate impossibility, not an outstanding task, and it is worth
   saying which.** The AAP mandates OFF for seeding; **no** frozen loader reaches a
@@ -2628,7 +2836,7 @@ sets to `/out`, backed by a named volume, so the artifacts outlive the container
 | `run-logs/<scenario>/<side>.run-status` | wrapper health, distinct from disposition, plus a per-operation status row for each declared operation |
 | `run-logs/<scenario>/<side>.operation-status` | each operation's OWN observed disposition, in declared order |
 | `run-logs/<scenario>/<side>.seed-fingerprint` | one row count per affected table, in the scenario's declared order, taken immediately before the drive |
-| `run-logs/<scenario>/seed-identity` | the staged fixture marker digest both reset stages are required to agree on |
+| `run-logs/<scenario>/seed-identity` | the staged fixture marker digest both reset stages are required to agree on, **and the seeding window that produced it** — `seed_window` (`on`/`off`/`unrecorded`) with `seed_window_standing` (`declared-deviation-from-aap`/`aap-mandated`/`unrecorded`), copied out of the fixture marker rather than out of the environment, so it names the window the frozen loaders actually ran under. `unrecorded` is written for a fixture staged before the rows existed; it is never defaulted to `off`, because an unknown window printed as the mandated one would assert a conformance nothing measured (§9.4) |
 | `run-logs/<scenario>/cobol.log`, `cobol.plan` | the pty transcript and the resolved keystroke plan |
 
 None of them lives inside a compared tree, so none can perturb a diff. The
@@ -2694,7 +2902,7 @@ merely intended:
 | --- | --- |
 | Every artifact is mode `600` | Written that way, atomically, by the producing script (§11.1b) |
 | The volume is not reachable from the host filesystem | It is a Docker named volume, not a bind mount of a repository path, so nothing in the checkout can be made to contain it and no `git add` can capture it |
-| It cannot be shared with, or destroyed by, a sibling clone | The name is `acas-harness-${CLONE_INDEX}-out`, and `CLONE_INDEX` is a **required** variable — Compose refuses to start without it rather than defaulting to a name another run owns |
+| It cannot be shared with, or destroyed by, a sibling clone | Compose derives the name from the project as `acas-harness-${CLONE_INDEX}_out`, and `CLONE_INDEX` is a **required** variable — Compose refuses to render without it rather than defaulting to a name another run owns. No resource interpolates `CLONE_INDEX` into its own name, so an invalid identifier cannot be materialised as a malformed one either (§8.1) |
 | Nothing rotates, prunes or expires it | Deliberate. A verdict cannot be re-derived by re-reading the tree; it can only be re-produced by re-running the protocol against the same seed and the same oracle. Automatic deletion would therefore destroy evidence, not tidy it |
 
 **A tree is keyed by SCENARIO, not by run id, so re-running a scenario OVERWRITES it.**
@@ -2730,10 +2938,10 @@ docker compose -f harness/docker-compose.yml down
 
 # Dispose of THIS clone's evidence, named exactly. CLONE_INDEX is required, so the
 # name cannot silently widen to a sibling's.
-docker volume rm "acas-harness-${CLONE_INDEX}-out"
+docker volume rm "acas-harness-${CLONE_INDEX}_out"
 
 # Verify: the target is gone and every sibling is untouched.
-docker volume ls --format '{{.Name}}' | grep -- '-out$'
+docker volume ls --format '{{.Name}}' | grep -- '_out$'
 ```
 
 **Never `docker volume prune`, never `docker volume rm $(docker volume ls -q)`,

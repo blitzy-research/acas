@@ -1403,9 +1403,9 @@ def determinism_pair(
             guard itself, so a bare host SKIPS with a precise reason and never errors.
         harness: The three harness modules, loaded by explicit file path - never
             `import harness`. The structural enforcement of R-1 is `pyproject.toml`'s
-            `[tool.setuptools.packages.find]` configuration, which admits only
-            `acas_posting*`, NAMES `harness*`, `tests*`, `docs*` and
-            `data_dictionary*` in its exclusion list and sets
+            explicit `[tool.setuptools] packages` list, which enumerates the eight
+            packages that ship - the seven code packages and the data-only
+            `acas_posting.data_dictionary` - with no discovery scan and
             `include-package-data = false`, so `harness` is absent by construction.
             The absence of `harness/__init__.py` is NOT the enforcement: PEP 420 would
             make a namespace import resolve anyway. Explicit-path loading is used

@@ -345,6 +345,14 @@ ACAS_RESET_SCHEMA_LITERAL=''     # the schema as a safe SQL literal, incl. quote
 ACAS_RESET_ACKNOWLEDGE=''        # --acknowledge-destructive: the named target
 ACAS_RESET_ACK_USED=0            # 1 once an acknowledgement has been honoured
 ACAS_RESET_FIXTURE_DIGEST=''     # sha256 of the staged fixture marker
+# The autocommit window the frozen loaders actually ran under, read out of the
+# fixture marker harness/seed.sh writes AFTER its durability gate -- never from
+# ACAS_SEED_AUTOCOMMIT, which says only what this process was told. Empty means the
+# fixture recorded none, and an empty value is reported as unrecorded rather than
+# defaulted, because printing `off' for an unknown window would assert an AAP
+# conformance nothing measured.
+ACAS_RESET_SEED_WINDOW=''        # 'on' | 'off' | '' (unrecorded)
+ACAS_RESET_SEED_WINDOW_STANDING='' # 'declared-deviation-from-aap' | 'aap-mandated' | ''
 # The parity attempt this reset belongs to, so the two reset stages of ONE attempt can
 # be required to have seeded identical bytes while a LATER attempt is free to seed
 # something else. Empty for a hand invocation, which is not part of an
@@ -2709,9 +2717,16 @@ acas_wait_for_database() {
 # seeding stage), all from the loader banner at [common/glbatchLD.cbl:L9-L13].
 # harness/seed.sh owns that window, sets it around the frozen load programs, and
 # restores this runtime mode when it closes. WHICH mode the window runs is that
-# script's own R-6 arbitration and was measured: ON by default, because it is the
-# only mode in which the frozen loaders leave a durable row, with the AAP-literal
-# OFF selectable through ACAS_SEED_AUTOCOMMIT=off. Nothing here depends on the
+# script's own R-6 arbitration and was measured. IT DEFAULTS TO THE AAP-MANDATED
+# OFF, and an unset ACAS_SEED_AUTOCOMMIT means OFF: under it the frozen loaders
+# leave no durable row and the seed is REFUSED with exit 76, which is the
+# no-COMMIT defect reproduced rather than configured away (R-4).
+# ACAS_SEED_AUTOCOMMIT=on requests the only mode measured to leave a durable row
+# and is an explicitly DECLARED DEVIATION, so it appears in the command that ran.
+# (An earlier revision of this comment said ON was the default. That described the
+# superseded arrangement and is corrected here, because a comment claiming a
+# silent ON default is exactly the impression the disclosure exists to prevent.)
+# Nothing here depends on the
 # choice -- this precondition is about the mode OUTSIDE the window.
 #
 # ASSERTED, NEVER SET. See the header for the frozen-source proof: the loaders'
@@ -3630,6 +3645,41 @@ acas_assert_reseed_used_fixture() {
   acas_log "fixture marker = $marker"
   acas_log "fixture marker sha256 = ${ACAS_RESET_FIXTURE_DIGEST:-<unavailable>}"
 
+  # THE SEEDING WINDOW, READ FROM THE MARKER RATHER THAN FROM THE ENVIRONMENT.
+  # harness/seed.sh appends it after its durability gate accepts the seed, so the
+  # rows name the window the frozen loaders ACTUALLY ran under. Reading
+  # ACAS_SEED_AUTOCOMMIT here instead would describe what this process was told,
+  # which is not the same claim and would be a lie whenever the two differ.
+  #
+  # ABSENT IS TOLERATED, NOT INVENTED. A fixture staged by an older revision of
+  # seed.sh carries no such row; that is reported as unrecorded and the reset
+  # proceeds, because the seed is bound by digest either way. What is never done is
+  # defaulting the value: an unrecorded window printed as `off' would assert AAP
+  # conformance that nothing measured.
+  ACAS_RESET_SEED_WINDOW="$(awk -F'\t' '$1 == "seed_window" { print $2; exit }' < "$marker" 2>/dev/null || true)"
+  ACAS_RESET_SEED_WINDOW_STANDING="$(awk -F'\t' '$1 == "seed_window_standing" { print $2; exit }' < "$marker" 2>/dev/null || true)"
+  if [[ -z "$ACAS_RESET_SEED_WINDOW" ]]; then
+    acas_log 'seeding window = <unrecorded> (this fixture was staged without one; the seed is still bound by digest)'
+  else
+    acas_log "seeding window = $ACAS_RESET_SEED_WINDOW  (${ACAS_RESET_SEED_WINDOW_STANDING:-standing unrecorded})"
+    if [[ "$ACAS_RESET_SEED_WINDOW" == 'on' ]]; then
+      # A WARNING AND NOT A REFUSAL, deliberately. The deviation is what makes a
+      # fixture possible at all on this checkout -- the mandated window is measured
+      # to leave nothing -- so refusing it here would refuse every scenario the
+      # committed test tiers run. What must not happen is the deviation passing
+      # unmentioned into the evidence, so it is stated at every stage that touches
+      # it and it travels into verdict.json by way of the marker digest.
+      acas_warn 'this scenario was seeded under the DECLARED DEVIATION (autocommit ON), not the window the Agent Action Plan mandates (sections 0.2.1.1, 0.4.1.7, 0.5.2).' \
+        'The mandated OFF window is MEASURED not to leave a durable row on this' \
+        'checkout -- the frozen loaders reach no live COMMIT -- so a fixture cannot be' \
+        'produced under it and harness/seed.sh refuses that seed with exit 76 (R-4).' \
+        'Everything downstream of this reset is therefore a working measurement and' \
+        'NOT AAP-conformant parity evidence, independently of the oracle disposition.' \
+        'Recorded in the fixture marker, so the capture manifests and verdict.json are' \
+        'bound to it by digest. Written up in docs/migration/ambiguity-resolutions.md.'
+    fi
+  fi
+
   acas_publish_seed_identity "$stem" "$recorded_count"
 }
 
@@ -3693,11 +3743,20 @@ acas_publish_seed_identity() {
     fi
   fi
 
+  # THE WINDOW ROWS ARE LEGIBILITY, NOT BINDING. The binding is
+  # fixture_marker_sha256, which already covers the window rows inside the marker,
+  # so these two say in plain text what that digest says in hex -- for an operator
+  # who opens the evidence tree rather than recomputing a hash. Both runners parse
+  # this file with a `case' over the keys they know and ignore the rest, so adding
+  # them changes no runner behaviour; `unrecorded' is written rather than a guess
+  # whenever the fixture carried no row.
   {
     printf 'scenario\t%s\n' "$stem"
     printf 'run_id\t%s\n' "$ACAS_RESET_RUN_ID"
     printf 'fixture_marker_sha256\t%s\n' "$ACAS_RESET_FIXTURE_DIGEST"
     printf 'files\t%s\n' "$files"
+    printf 'seed_window\t%s\n' "${ACAS_RESET_SEED_WINDOW:-unrecorded}"
+    printf 'seed_window_standing\t%s\n' "${ACAS_RESET_SEED_WINDOW_STANDING:-unrecorded}"
   } | acas_publish_atomic "$target" 'the seed identity' || {
     acas_warn 'the seed identity could not be published; the capture stage will report the run as unattested.'
     return 0

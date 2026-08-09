@@ -82,11 +82,12 @@ oracle is mentioned it is located in `harness/` and characterised as **out of pr
 Two structural proofs, each verified in this checkout rather than assumed, and one argument that is
 explicitly withdrawn:
 
-- `pyproject.toml` constrains discovery to the shipped tree — `[tool.setuptools.packages.find]`
-  admits `include = ["acas_posting*"]`, which resolves to exactly the seven code packages, and
-  NAMES `exclude = ["harness*", "tests*", "docs*", "data_dictionary*"]` — together with
-  `include-package-data = false`. `harness` is excluded by name rather than by setuptools' automatic
-  behaviour, and the generated dictionary remains a top-level sibling rather than package data. Belt
+- `pyproject.toml` enumerates the shipped tree — `[tool.setuptools] packages` lists the seven code
+  packages plus the data-only `acas_posting.data_dictionary`, with discovery off and
+  `include-package-data = false`. `harness`, `tests` and `docs` are absent because nothing names them,
+  so no directory added to the checkout can ship. The generated dictionary stays committed once at the
+  top-level `data_dictionary/`, and a `package-dir` mapping has the build copy those committed bytes
+  into the wheel so an installed distribution can satisfy R-5 at import time. Belt
   and braces: `harness` also appears in pytest's `norecursedirs` and `harness/*` in the coverage
   `omit` list.
 - A search of `harness/*.py` for `import acas_posting` or `from acas_posting` returns **zero** hits, so
@@ -205,6 +206,26 @@ is that either reproduces the frozen specification. Every anomaly whose status r
 one of those runs is therefore **reproduced against the diagnostic oracle**, and
 [`scenario-diff-evidence.md`](scenario-diff-evidence.md) §0 states the position in
 full, verdict by verdict.
+
+**AND THE SEED THOSE RUNS STARTED FROM CAME FROM A DECLARED DEVIATION, WHICH IS A
+THIRD UNWAIVED ITEM AND DELIBERATELY CARRIES NO `A-NEW-` NUMBER.** The frozen load
+programs never reach a live `COMMIT` — 77 dead references to `aa030-Commit` and
+`aa020-Rollback` across all 28 `common/*LD.cbl`, the sole `perform aa030-Commit`
+commented out at `[common/irsdfltLD.cbl:L437]` — so in the autocommit-OFF window AAP
+§0.2.1.1, §0.4.1.7 and §0.5.2 mandate, a seed persists nothing and
+`harness/seed.sh` refuses it with exit **76** rather than certifying a comparison of
+two empty databases. Every journey in this register was therefore seeded under the
+explicitly requested `ACAS_SEED_AUTOCOMMIT=on` deviation, which fails AAP §0.8.5 on
+its own terms independently of the oracle disposition. **No identifier is allocated
+for it**, and that is a considered choice rather than an omission: this register's
+entries each name the Python module that reproduces the defect, and nothing reproduces
+these loaders — they are not migrated, they are seeding infrastructure the harness
+drives as-is. It is recorded where it can be stated in full instead:
+[`ambiguity-resolutions.md`](ambiguity-resolutions.md) `Q-10` (f),
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md) §0.1 Obstacle 3 and §4.3, and
+README §9.4 — and the window a fixture was seeded under is now written into the
+fixture marker and carried into `run-logs/<scenario>/seed-identity` by digest, so an
+artefact set can no longer be mistaken for a conformant one.
 Both dates are stated rather than the later one silently replacing the earlier,
 because an entry that cites 2026-08-04 evidence was resolved against an
 eight-journey sweep and saying otherwise would backdate a run that had not
@@ -2173,13 +2194,40 @@ named by a `COPY` statement in 44 frozen files, most of them `common/*MT.cbl`
 bridges. The initial consequence was direct: 22 of 28 required `*MT` bridge
 builds failed.
 
-**Compiled resolution, observed 2026-08-04.** The include is semantically
-inert. `harness/build_oracle.sh` now materialises a comment-only compatibility
+**THE ABSENCE IS NOT RESOLVED, AND THE WORD "RESOLUTION" BELOW MEANS ONLY THAT A
+DIAGNOSTIC BUILD IS POSSIBLE.** Stated first because the paragraphs that follow are
+easy to read as closure. A build of the frozen sources exactly as committed **fails**:
+re-measured 2026-08-09 with no flags, straight from the documented read-only `/repo`
+mount, `harness/build_oracle.sh` exits **74** with `comp-common.sh produced 22 fatal
+diagnostic line(s)`, one `ACAS-SQLstate-error-list.cob: No such file or directory` per
+affected bridge, and **no attestation**. The member may not be written here — AAP
+§0.8.1 makes any diff under `copybooks/` a defect in the migration "regardless of how
+harmless it appears", §0.2.2 lists the tree under "zero modifications of any kind",
+and the member carries the SQLSTATE-to-`FS-Reply` mapping that defines the oracle's
+rejection behaviour, so inventing it breaches R-3 and R-4 as well. It is an
+**unwaived open item awaiting the maintainer**, recorded as such in
+[`scenario-diff-evidence.md`](scenario-diff-evidence.md) §0 (Obstacle 1, Action 1) and
+in README §8.7; the script prints the four AAP provisions and a four-step remediation
+on the failure itself. Measured absence, re-proved the same day: no tracked file, no
+working-tree path, and no member matching `sqlstate` in `presql2-latest.zip` or
+`mysql-connector-c-6.1.11-src.tar.gz` — the only two in
+`mariadb-connector-c-3.3.4-src.zip` are the unrelated C API man pages
+`man/mysql_sqlstate.3` and `man/mysql_stmt_sqlstate.3`.
+
+**Diagnostic build, observed 2026-08-04 and re-measured since.** The include is
+semantically inert — measured, not assumed: compiling `glpostingMT.cbl` to C with the
+comment-only text, with a zero-byte member and with arbitrary different comment text
+yields a byte-identical translation, which follows from the `COPY` sitting inside the
+`IDENTIFICATION DIVISION` where only comments are legal. So an **explicitly
+requested** `--transformed-oracle` build materialises a comment-only compatibility
 file at `$ACAS_BUILD/copybooks/ACAS-SQLstate-error-list.cob` and adds that
 writable build directory to the compiler's copy path. It does not create or
-edit anything under frozen `copybooks/`. A strict rebuild completed with zero
-fatal diagnostics and produced all 29 expected `*MT` bridge artifacts and all
-28 loader programs.
+edit anything under frozen `copybooks/`. Such a build completes with zero
+fatal diagnostics and produces all 29 expected `*MT` bridge artifacts and all
+28 loader programs — and it is registered as **one of 41 source transforms**, of
+which the other 40 change executable handler logic, so the oracle it produces is
+stamped `oracle-source-is-frozen no` and every verdict drawn from it is **NO PARITY
+CLAIM**.
 
 **Durable evidence, in the repository rather than in a session log.**
 `[harness/build_oracle.sh acas_install_sqlstate_comment_shim]` is the generator: it emits the
@@ -2202,6 +2250,17 @@ on its own last lines — so the counts above come back from:
 # CLONE_INDEX and the credential variables, per README-python-migration.md section 8.1.
 # They have no committed defaults: Compose refuses to render if any is unset.
 export CLONE_INDEX=001
+
+# The DIAGNOSTIC build, which is the only one that reaches those counts. Both the flag
+# and the environment acknowledgement are required, and deliberately so: without them
+# this exits 74 at the absent copybook above, which is the frozen measurement and not a
+# misconfiguration.
+docker compose -f harness/docker-compose.yml run --rm -T \
+    -e ACAS_ACCEPT_TRANSFORMED_ORACLE=1 gnucobol \
+    /repo/harness/build_oracle.sh --transformed-oracle < /dev/null
+
+# The FROZEN build, for a reader who wants to see the blocker rather than read about it.
+# Expect exit 74 and 22 fatal diagnostics until the maintainer supplies the member.
 docker compose -f harness/docker-compose.yml run --rm -T gnucobol \
     /repo/harness/build_oracle.sh < /dev/null
 ```

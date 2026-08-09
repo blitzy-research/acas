@@ -175,12 +175,15 @@ three and conclude the separation is not real:
   loads `dump_tables`, `normalize` and `diff_states` **by explicit file path** through
   `importlib.util.spec_from_file_location`, registering each under a namespaced `sys.modules` key, so no
   repository-root entry is added to `sys.path` and no harness name can shadow a stdlib one.)
-- **Packaging admits `acas_posting*` and names every excluded tree.** `pyproject.toml`'s
-  `[tool.setuptools.packages.find]` sets `include = ["acas_posting*"]` — which resolves to exactly the
-  seven code packages — against an explicit `exclude = ["harness*", "tests*", "docs*",
-  "data_dictionary*"]`, with `include-package-data = false`. `harness` is therefore excluded by name
-  rather than left to setuptools' automatic exclusions, and the generated dictionary stays the
-  top-level sibling AAP §0.3.1 fixes it as rather than becoming package data.
+- **Packaging enumerates what ships and names nothing else.** `pyproject.toml`'s
+  `[tool.setuptools] packages` lists eight entries — the seven code packages plus the data-only
+  `acas_posting.data_dictionary` — with discovery off entirely and `include-package-data = false`.
+  `harness`, `tests` and `docs` are therefore absent because nothing names them, which is stronger
+  than excluding them from a scan: a tree added to the checkout cannot ship. The generated dictionary
+  is still COMMITTED once, at the top-level `data_dictionary/` AAP §0.3.1 fixes; a `package-dir`
+  mapping points the data-only package at that same directory so the BUILD copies the committed bytes
+  into the wheel, which rule R-5 requires because every record module reads the dictionary while it is
+  being imported.
   Belt and braces: `harness` sits in pytest's `[tool.pytest.ini_options] norecursedirs` and `harness/*`
   in the `[tool.coverage.run] omit` list, the latter annotated in the file itself as
   "Belt and braces for R-1".
@@ -2164,7 +2167,7 @@ route asymmetry is therefore observably a no-op under the mandated seed.
 `verdict.json` of the `clean_batch_sl` and `period_end_totals` runs — plus, for runs taken before finding
 a driver-composed run, the `parity-result` record that driver also wrote — the two normalised
 trees, and the post-run assertion lines in the stage log under `$ACAS_OUT/run-logs/<scenario>/cobol.log`,
-inside this clone's `acas-harness-<CLONE_INDEX>-out` volume — together with
+inside this clone's `acas-harness-<CLONE_INDEX>_out` volume — together with
 [`scenario-diff-evidence.md`](scenario-diff-evidence.md), whose §10.2 (`clean_batch_sl`) and §10.6
 (`period_end_totals`) carry each run's affected-table list, manifest fingerprint and diff outcome. Regenerate
 the whole sweep rather than trusting any path:
@@ -2337,7 +2340,7 @@ run produced an empty diff.
 `verdict.json` of the `period_end_totals` run — plus, for a driver-composed run, the
 `parity-result` record the then-current driver also wrote — the two normalised trees, and the
 `SL-PAYMENTS` before-and-after values in the stage log under
-`$ACAS_OUT/run-logs/period_end_totals/cobol.log`, inside this clone's `acas-harness-<CLONE_INDEX>-out`
+`$ACAS_OUT/run-logs/period_end_totals/cobol.log`, inside this clone's `acas-harness-<CLONE_INDEX>_out`
 volume — together with [`scenario-diff-evidence.md`](scenario-diff-evidence.md) §10.6, which carries
 `period_end_totals`' four operations, its affected-table list including `SYSTOT-REC`, its manifest fingerprint
 and its empty diff. The build-copy shim relied on above is durable and readable in committed code: it lives in
@@ -2624,7 +2627,7 @@ non-degenerate experiment described above and remain open.
 
 **Evidence, and what survives of it.** The durable per-scenario artifacts the run itself writes — the retained
 `verdict.json` of every scenario, the two normalised trees and the stage log under
-`$ACAS_OUT/run-logs/<scenario>/`, inside this clone's `acas-harness-<CLONE_INDEX>-out` volume — together with
+`$ACAS_OUT/run-logs/<scenario>/`, inside this clone's `acas-harness-<CLONE_INDEX>_out` volume — together with
 [`scenario-diff-evidence.md`](scenario-diff-evidence.md), whose §10.1 (`clean_batch_gl`) and §10.5
 (`mixed_accepted_rejected`) carry the affected-table list, manifest fingerprint and diff outcome that bear
 directly on this entry. Regenerate the whole sweep rather than trusting any path:
@@ -2866,10 +2869,44 @@ trust a path, run the ten stages of §10 for that scenario: they write the verdi
 **report of an observed run rather than a retained artefact**, and
 is labelled as such wherever this register quotes one.
 
-**(e) Consuming modules.** `harness/seed.sh` (the window and the durability gate),
-`harness/Dockerfile.mariadb` (the runtime mode), `harness/reset_db.sh` and
-`harness/run_cobol_scenario.sh` (both assert the runtime mode), and `harness/diff_states.py`, which refuses an
+**(e) Consuming modules.** `harness/seed.sh` (the window, the durability gate, and the marker annotation),
+`harness/Dockerfile.mariadb` (the runtime mode), `harness/reset_db.sh` (asserts the runtime mode, reads the
+recorded window back and republishes it) and
+`harness/run_cobol_scenario.sh` (asserts the runtime mode), and `harness/diff_states.py`, which refuses an
 all-empty comparison so that the same failure cannot arrive by another route.
+
+**(f) THE DEVIATION IS A DEVIATION FROM THE ACCEPTANCE CRITERION, AND IT IS RECORDED IN THE EVIDENCE RATHER
+THAN ONLY IN A LOG (2026-08-09).** Stating it exactly: AAP §0.8.5 accepts an empty ordering-normalised diff
+produced from an *identical seed* through the maintainer's loaders in the window §0.2.1.1, §0.4.1.7 and §0.5.2
+mandate. A journey seeded under `ACAS_SEED_AUTOCOMMIT=on` satisfies every part of that sentence except the
+window, so it **fails the acceptance criterion on its own terms**, independently of the oracle disposition — a
+run could have a frozen oracle and still not be conformant evidence if it were seeded this way. That is not a
+severity judgement, it is a reading of the criterion, and it is **unwaived**: it stands open until one of the
+two decisions in (e) above is taken by the party named there.
+
+The consequence for artefacts is what changed. Every disclosure in this entry reaches the **console**; what
+reaches a later reader is the artefact tree, and until now none of it named the window — so an artefact set
+could be read as having come from the mandated configuration, which is the one configuration measured to be
+unachievable here. An omission that reads downstream as conformance is the same overstatement as a false
+claim. So `harness/seed.sh` appends two rows, `seed_window` and `seed_window_standing`
+(`declared-deviation-from-aap` or `aap-mandated`), to the scenario fixture marker **after** its durability
+gate has accepted the seed — the ordering is the point: the rows then describe the window the frozen loaders
+*ran under*, not the one an environment variable asked for, and a refused seed leaves no row at all.
+`harness/reset_db.sh` reads them back out of the marker rather than out of its own environment, warns when the
+standing is a deviation, and republishes both rows in `run-logs/<scenario>/seed-identity`. Because the marker's
+SHA-256 **is** the seed identity both runners bind into their run-status records, and `harness/diff_states.py`
+requires the two sides to carry the same one before comparing a row, a fixture seeded under the deviation and
+one seeded under the mandated window are different bytes and cannot silently compare equal.
+
+Measured the same day on `clean_batch_gl`: two separate `on` seeds each produced marker digest
+`4bcb22660ce76d1b1f9e56384a04764c4c49cba27e5c450a2fab365c77991855` with `seed_window on` /
+`seed_window_standing declared-deviation-from-aap`; the marker left by a **refused** `off` seed (exit 76, seven
+loaders returning success, zero rows in all seven tables) carried no window row; and an unrecorded window is
+published as `unrecorded`, never defaulted to the mandated value, because printing `off` for an unknown window
+would assert a conformance nothing measured. The verdict manifest's key set was deliberately left unwidened:
+`VERDICT_KEYS` and the run-status key set in `harness/dump_tables.py` are exact — an unrecognised key is a
+refusal, by design — so a new key would be a protocol change across four files and their tests carrying a
+second copy of a fact the seed identity already binds.
 
 ---
 

@@ -238,13 +238,13 @@ def _default_document_candidates() -> tuple[Path, ...]:
     """The absolute paths the DEFAULT document may occupy, in the order to try.
 
     The order comes from `acas_posting.DATA_DICTIONARY_SEARCH_PATH` and is not re-
-    decided here. That tuple holds exactly ONE entry - the committed repository sibling
-    `data_dictionary/`, fixed there by Agent Action Plan section 0.3.1 - because the
-    artifact is never relocated into this package and never shipped as package data:
-    `pyproject.toml` names `data_dictionary*` in its packaging exclusion list, so no
-    second copy exists to be preferred over the committed one. This function is
-    nonetheless written over the whole tuple rather than over that single path, so that
-    the failure message can report every candidate it tried.
+    decided here. That tuple holds two entries: the committed repository sibling
+    `data_dictionary/`, fixed there by Agent Action Plan section 0.3.1, and then the
+    copy `pyproject.toml` ships inside this package as package data, which is the only
+    one that exists in an installed distribution. They never coexist in one tree - the
+    packaged directory is created by the BUILD and a checkout has none, while an
+    installed distribution has no `site-packages/data_dictionary/` - so the ordering
+    settles a precedence that cannot arise, and settles it towards the committed file.
 
     Returns:
         One entry per legitimate location, each absolute and symlink-free. Never empty.
@@ -260,9 +260,9 @@ def _default_document_candidates() -> tuple[Path, ...]:
 def _absolute_document_path(path: Path | None) -> Path:
     """Return the absolute path of the document to read, LINKS LEFT INTACT.
 
-    One candidate when nothing is asked for: the committed repository sibling, which is
-    the only location this migration publishes - `pyproject.toml` excludes
-    `data_dictionary*` from packaging, so there is no second copy anywhere.
+    Two candidates when nothing is asked for, tried in the published order: the
+    committed repository sibling, then the copy shipped inside this package. The first
+    that exists is used, and only one of them can exist in a given tree.
 
     AN EXPLICIT PATH IS **NOT** RESOLVED, and that is the whole point of this
     function. Returning `Path(path).resolve()` would follow every symbolic link in
@@ -277,8 +277,8 @@ def _absolute_document_path(path: Path | None) -> Path:
     directory and touches nothing else, leaving every `..` and every link in place for
     `_open_without_following_links` to walk and refuse component by component.
 
-    The DEFAULT candidate IS resolved, and the difference is deliberate: it is derived
-    from `DATA_DICTIONARY_SEARCH_PATH` rather than from a caller, and a checkout
+    The DEFAULT candidates ARE resolved, and the difference is deliberate: they are
+    derived from `DATA_DICTIONARY_SEARCH_PATH` rather than from a caller, and a checkout
     legitimately sits behind a linked directory - a linked build tree, a working copy
     reached through a symlinked parent. Resolving it is what keeps the ordinary default
     working; refusing to resolve a caller's path is what keeps the guarantee.
@@ -721,16 +721,20 @@ def _absence_message(path: Path) -> str:
     if path in candidates:
         looked_in = "\n".join(f"    {candidate}" for candidate in candidates)
         preamble = (
-            "The legitimate location was looked at and the artifact is not "
-            "there:\n"
+            "Every legitimate location was looked at and the artifact is not "
+            "in any of them:\n"
             f"{looked_in}\n"
             "\n"
-            "There is exactly one such location - the committed repository "
-            "sibling, where Agent Action Plan sections 0.3.1 and 0.4.1.6 "
-            "place it. It is deliberately NOT relocated into this package and "
-            "NOT shipped as package data: pyproject.toml names "
-            "data_dictionary* in its packaging exclusion list, so no second "
-            "copy exists that could be read instead of the committed one.\n"
+            "There are two, and each belongs to a different kind of tree. The "
+            "FIRST is the committed repository sibling, where Agent Action "
+            "Plan sections 0.3.1 and 0.4.1.6 place it and where the generator "
+            "writes it; a source checkout uses that one. The SECOND is the "
+            "copy pyproject.toml ships inside this package as package data, "
+            "which is the only one an installed distribution has, because a "
+            "wheel installs acas_posting/ into site-packages with no sibling "
+            "beside it. Exactly one of the two can exist in a given tree, so "
+            "there is one artifact to read wherever this package is running "
+            "from - and both being absent means the tree is neither.\n"
         )
     else:
         # An explicit path= was given. It is honoured exactly as passed and no search
@@ -738,9 +742,10 @@ def _absence_message(path: Path) -> str:
         preamble = (
             "That path was given explicitly, through the path= argument, so "
             "it was used exactly as passed and no default location was "
-            "consulted. Omitting path= uses the one location this "
-            "distribution considers legitimate: the repository's own "
-            "data_dictionary/acas_posting_dictionary.json.\n"
+            "consulted. Omitting path= uses the locations this distribution "
+            "considers legitimate: the repository's own "
+            "data_dictionary/acas_posting_dictionary.json, then the copy "
+            "shipped inside this package.\n"
         )
     return (
         f"The ACAS posting data dictionary was not found at {path}\n"
@@ -753,15 +758,19 @@ def _absence_message(path: Path) -> str:
         "checkout the generator has never been run in, or a path= override "
         "naming somewhere wrong.\n"
         "\n"
-        "Three remedies, and no fourth:\n"
+        "Four remedies, and no fifth:\n"
         "  1. run from a source checkout of the repository, where "
         "data_dictionary/acas_posting_dictionary.json sits beside the "
         "acas_posting package; or\n"
-        "  2. regenerate the artifact - python -m "
+        "  2. reinstall this distribution from a wheel BUILT FROM THAT "
+        "CHECKOUT - pyproject.toml ships the artifact as package data, so an "
+        "install whose acas_posting/data_dictionary/ is empty was built "
+        "without it or has been pruned after the fact; or\n"
+        "  3. regenerate the artifact - python -m "
         "acas_posting.dictionary.generate - which rebuilds it from the frozen "
         "bridge, the copybooks and the schema, and writes the repository "
         "location; or\n"
-        "  3. pass an explicit path - load_dictionary(Path(...)), or the "
+        "  4. pass an explicit path - load_dictionary(Path(...)), or the "
         "path= keyword of any accessor in this module - naming an intact "
         "copy of the artifact.\n"
         "\n"

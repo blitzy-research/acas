@@ -227,25 +227,80 @@ test = ["acas-posting[dev,harness]"]
 #  them matter for R-1 in particular: `harness*` carries the compiled COBOL
 #  oracle and its cobc toolchain, and `tests*` imports it.
 #
-#  THE GENERATED DATA DICTIONARY IS A TOP-LEVEL SIBLING AND STAYS ONE. Plan
-#  section 0.3.1 fixes its path at data_dictionary/ beside acas_posting/, so it
-#  is neither relocated into the package by a `package-dir` mapping nor shipped
-#  as `package-data`: `data_dictionary*` is named in the exclusion list below for
-#  exactly that reason. The runtime path constant is
-#  `acas_posting/__init__.py`'s job (plan section 0.4.1.1: "Package marker;
-#  exports the version and the dictionary path constant") and the reading is
-#  `acas_posting/dictionary/loader.py`'s, which resolves the committed sibling.
+#  THE GENERATED DATA DICTIONARY IS COMMITTED ONCE, AT THE PLAN'S PATH, AND IS
+#  SHIPPED AS PACKAGE DATA FROM THERE.
+#
+#  Plan section 0.3.1 fixes the COMMITTED artifact at data_dictionary/ beside
+#  acas_posting/, and that is where it stays: there is exactly one copy in this
+#  repository, at exactly that path, and `data_dictionary/` is NOT a second
+#  committed tree inside the package. What changed is the WHEEL, and it had to.
+#
+#  MEASURED DEFECT THAT FORCED IT. With the artifact excluded from packaging, a
+#  non-editable install put `acas_posting/` in site-packages with no dictionary
+#  anywhere beside it, and rule R-5 has every record module read the dictionary
+#  WHILE IT IS BEING IMPORTED -- so all seven CLI routes died with
+#  DictionaryNotFoundError before parsing an argument, naming
+#  `site-packages/data_dictionary/acas_posting_dictionary.json`, a path no install
+#  ever creates. An installed distribution that cannot import its own entry points
+#  is not a distribution, and "run it from a checkout instead" is not a remedy: the
+#  plan's own deliverable is a shipped native Python package (section 0.1.2).
+#
+#  THE MECHANISM. `[tool.setuptools.package-dir]` maps the package name
+#  `acas_posting.data_dictionary` onto the top-level `data_dictionary/` directory,
+#  and `[tool.setuptools.package-data]` names the two JSON files inside it. The
+#  build therefore COPIES the committed artifact to `acas_posting/data_dictionary/`
+#  in the wheel; the checkout keeps one file at one path, and the installed tree
+#  keeps one file at one path. No `__init__.py` is added there and none is needed:
+#  the directory carries data, is never imported, and `acas_posting/__init__.py`
+#  publishes it as the SECOND search candidate, after the committed sibling, so a
+#  source checkout still resolves the sibling exactly as before. Two locations,
+#  never two answers -- the packaged copy is the same bytes, and one of the two
+#  candidates cannot exist in a given tree.
+#
+#  R-1 IS STILL STRUCTURAL, AND IS NOW STRUCTURAL BY ENUMERATION. Discovery is off
+#  entirely: `packages` lists every package that ships, one line each. `harness*`,
+#  `tests*` and `docs*` are absent because they are not listed, which is a stronger
+#  guarantee than excluding them from a scan -- nothing new can be discovered into
+#  the wheel by adding a directory. The exclusions the plan names are kept in the
+#  comment below so a reader still sees the prohibition rather than inferring it.
 [tool.setuptools]
-# Automatic inclusion is off, so no non-Python file reaches the wheel and no
-# stray artifact in the checkout can travel with it.
+# Automatic inclusion is off, so no file reaches the wheel unless it is named
+# below, and no stray artifact in the checkout can travel with it.
 include-package-data = false
 
-# Discovery is constrained rather than automatic: `include` admits the seven code
-# packages (acas_posting and its six sub-packages, each with an __init__.py and
-# none a namespace package) and `exclude` names every sibling tree by hand.
-[tool.setuptools.packages.find]
-include = ["acas_posting*"]
-exclude = ["harness*", "tests*", "docs*", "data_dictionary*"]
+# The seven code packages, enumerated rather than discovered, plus the data-only
+# package that carries the generated dictionary into the wheel.
+#
+# NOT LISTED, AND THAT IS THE POINT (plan sections 0.3.1 and 0.7.2 R-1):
+#   harness*  the compiled COBOL oracle and its cobc toolchain
+#   tests*    the suites, which import the harness
+#   docs*     the migration documents
+# A `[tool.setuptools.packages.find]` scan with an `exclude` list would admit
+# anything not thought of; an explicit list admits nothing not written down.
+packages = [
+    "acas_posting",
+    "acas_posting.cli",
+    "acas_posting.cobol",
+    "acas_posting.dal",
+    "acas_posting.dictionary",
+    "acas_posting.programs",
+    "acas_posting.records",
+    "acas_posting.data_dictionary",
+]
+
+# The one mapping in this file: the data-only package's source is the committed
+# top-level artifact directory, so the wheel carries the same bytes the repository
+# carries and the generator keeps writing exactly one file.
+[tool.setuptools.package-dir]
+"acas_posting.data_dictionary" = "data_dictionary"
+
+# Named file by file rather than by glob, so a future artifact dropped into
+# data_dictionary/ does not travel silently.
+[tool.setuptools.package-data]
+"acas_posting.data_dictionary" = [
+    "acas_posting_dictionary.json",
+    "acas_posting_dictionary.schema.json",
+]
 
 #  Test runner. Selection idiom:
 #      pytest -m arithmetic                       infrastructure-free

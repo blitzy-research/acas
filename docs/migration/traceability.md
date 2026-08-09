@@ -83,11 +83,12 @@ and AAP §0.3.1 states the structural consequence: *"there is no import path fro
 `harness`."* Two proofs of that were verified in this checkout rather than assumed, and one earlier
 argument is withdrawn:
 
-- `pyproject.toml` declares packaging as `[tool.setuptools.packages.find]` with
-  `include = ["acas_posting*"]` — resolving to exactly the seven code packages — against an explicit
-  `exclude = ["harness*", "tests*", "docs*", "data_dictionary*"]`, and `include-package-data = false`.
-  `harness` is excluded BY NAME rather than by setuptools' automatic behaviour, and the generated
-  dictionary stays the top-level sibling AAP §0.3.1 fixes it as. Belt and braces:
+- `pyproject.toml` declares packaging as an explicit `[tool.setuptools] packages` list — the seven code
+  packages plus the data-only `acas_posting.data_dictionary` — with discovery off and
+  `include-package-data = false`.
+  `harness`, `tests` and `docs` are absent because nothing NAMES them, so nothing new can ship by being
+  added to the tree; the generated dictionary is committed once at the top-level `data_dictionary/` AAP
+  §0.3.1 fixes, and a `package-dir` mapping has the build copy it into the wheel. Belt and braces:
   `harness` is in pytest's `[tool.pytest.ini_options] norecursedirs` and `harness/*` in the coverage
   `[tool.coverage.run] omit` list.
 - A search of `harness/*.py` for `import acas_posting` or `from acas_posting` returns **zero** hits,
@@ -1185,10 +1186,13 @@ Both JSON artifacts exist in this checkout and are additionally planned at these
 §0.4.1.6. The record modules are not optional consumers of them: `acas_posting/records/gl_posting.py`,
 for example, imports `FieldDescriptor` from `acas_posting.cobol.field` and `loader` from
 `acas_posting.dictionary`, and builds its descriptors from the artifact during a normal import.
-`pyproject.toml` does **not** ship the dictionary as package data — `include-package-data = false`
-and `data_dictionary*` is in the discovery exclusion list — so the artifact is read from the
-committed repository sibling, the single entry in `DATA_DICTIONARY_SEARCH_PATH`. A record module
-therefore imports only inside a checkout that carries it.
+`pyproject.toml` **does** ship the dictionary, as named package data of the data-only package
+`acas_posting.data_dictionary`, whose `package-dir` source is the committed top-level
+`data_dictionary/` directory — because a record module reads the artifact *during import*, so a
+distribution without it cannot import at all. `DATA_DICTIONARY_SEARCH_PATH` therefore carries two
+candidates: the committed repository sibling, which a checkout resolves, and the packaged copy, which
+an installed distribution resolves. Exactly one of them exists in a given tree, so a record module
+imports from either shape and never chooses between two copies.
 
 **The run-time half of that claim is now a measured count rather than a description, and it was
 one attribute short when it was only a description.** `loader.trace_record` resolves an attribute to
@@ -1709,13 +1713,15 @@ one is. Four options were deliberately not carried forward — `--from`/`--to`, 
 | `harness/dump_tables.py --make-fixtures` | §0.2.1.2 *"Oracle harness: `harness/*`"* | Generates that writer from each scenario's `seed_records`, so **no record layout is restated by hand** | No |
 
 **Measured boundary.** Building the wheel and listing its entries shows only `acas_posting/` and its
-`dist-info`: no `harness/`, no `tests/`, no `.cbl`/`.cob`/`.scb`, no `.sql`. That is R-1 enforced
-structurally rather than by convention — there is no import path from the shipped package to the
-oracle. **No JSON appears in the wheel either:** `data_dictionary*` is named in the packaging exclusion
-list, so the generated dictionary stays the top-level sibling AAP §0.3.1 fixes it as, and
-`acas_posting/dictionary/loader.py` resolves that one committed path rather than choosing between two
-copies. With `include-package-data = false` and discovery constrained to `acas_posting*`, no stray file
-in the checkout can reach the distribution.
+`dist-info`: no `harness/`, no `tests/`, no `docs/`, no `.cbl`/`.cob`/`.scb`, no `.sql`. That is R-1
+enforced structurally rather than by convention — there is no import path from the shipped package to
+the oracle. **The only two non-Python members are the generated dictionary and its JSON Schema**, at
+`acas_posting/data_dictionary/`, copied by the build from the one committed top-level artifact AAP
+§0.3.1 fixes; they are there because rule R-5 has every record module read the dictionary while it is
+being imported, so a wheel without them fails every CLI route on import — measured. Discovery is off
+and `[tool.setuptools] packages` enumerates the eight that ship, with
+`include-package-data = false`, so no stray file in the checkout can reach the distribution and no
+directory can ship by being added.
 
 ## 11. Deliberate omissions, recorded **as** omissions
 

@@ -69,6 +69,25 @@ the maintainer. No attestation is written, and `harness/reset_db.sh` reports exi
 **77 — EVIDENCE UNAVAILABLE**, a status deliberately distinct from the ones meaning
 the two states differ. See README §8.7.
 
+**Re-measured 2026-08-09, after the build-input change of that checkpoint, and the
+result is the same blocker reached more cleanly.** `harness/build_oracle.sh` with no
+flags, run straight from the documented read-only `/repo` mount: the copy stage took
+**8 named frozen build inputs** and left 48 top-level entries untaken, **zero**
+permission failures anywhere in the run — previously an ignored root-owned tree in
+the checkout aborted the copy at exit 67 before compilation, so the real blocker
+could only be reached through a `git archive` mount — and the build then failed at
+its own genuine obstacle: **exit 74**, `comp-common.sh produced 22 fatal diagnostic
+line(s)`, one `ACAS-SQLstate-error-list.cob: No such file or directory` per affected
+bridge, no attestation. The failure now also prints, on the failure itself, the four
+specific AAP provisions that forbid writing the member (§0.8.1, §0.2.2, R-3, R-4)
+and a four-step operator remediation naming the maintainer as the only source — with
+the measured absence restated so the reader does not re-search: no tracked file, no
+working-tree path, and no member matching `sqlstate` in `presql2-latest.zip` or
+`mysql-connector-c-6.1.11-src.tar.gz`, the only two in
+`mariadb-connector-c-3.3.4-src.zip` being the unrelated C API man pages
+`man/mysql_sqlstate.3` and `man/mysql_stmt_sqlstate.3`. **The obstacle is unchanged
+and unwaived; what changed is that reaching it no longer requires a workaround.**
+
 **Re-measured 2026-08-07, independently of the run that first recorded it, and with
 the live diagnostic build left intact** — the four rows below are a **report of an
 observed run rather than a retained artefact**, in this register's own sense (see
@@ -596,6 +615,30 @@ questions together is the easy error, so each outcome is stated separately:
   evidence: it is a **declared divergence from the letter of the Agent Action
   Plan** (§0.2.1.1, §0.4.1.7, §0.5.2), logged on every run and written up in full
   in the arbitration.
+
+**The window a fixture was seeded under is now recorded in the evidence, and not
+only in the log.** Every disclosure above reaches the console; what reaches a reader
+of this register is the artifact tree, and until 2026-08-09 none of it named the
+window — so an artifact set could be read as having come from the mandated
+configuration, the one thing measured to be unachievable here. An omission that
+reads downstream as conformance is the same overstatement as a false claim, so:
+`harness/seed.sh` appends `seed_window` and `seed_window_standing` to the scenario
+fixture marker **after** its durability gate has accepted the seed — which is what
+makes the rows a statement about the window the loaders *ran under* rather than the
+one an environment variable requested — and `harness/reset_db.sh` reads them back out
+of the marker, warns when the standing is `declared-deviation-from-aap`, and
+republishes both rows in `run-logs/<scenario>/seed-identity` (§9.3). Because the
+marker's own SHA-256 **is** the seed identity that both runners bind into their
+run-status records, and `harness/diff_states.py` requires the two sides to carry the
+same one before it compares a row, a fixture seeded under the deviation and one
+seeded under the mandated window are different bytes and cannot silently compare
+equal. Measured 2026-08-09 on `clean_batch_gl`: two separate `on` seeds each produced
+marker digest
+`4bcb22660ce76d1b1f9e56384a04764c4c49cba27e5c450a2fab365c77991855` carrying
+`seed_window on` / `seed_window_standing declared-deviation-from-aap`, and the marker
+left by a **refused** `off` seed carried no window row at all — the annotation
+describes accepted seeds only, and an unrecorded window is published as `unrecorded`
+rather than defaulted to the mandated value.
 
 Runtime application access remains autocommit **on**, which both runners assert.
 No harness code issues the COMMIT the frozen loaders omit — the defect is
@@ -1210,13 +1253,28 @@ belonged under was the omission. Read them together with the paragraph in §1.
 **THE MODULE-SET DIGEST ABOVE IS A BUILD IDENTITY, NOT A BEHAVIOURAL FINGERPRINT,
 and it no longer names the build in the volume.** The oracle image has been rebuilt
 since those eight runs, so `d18b337f…` identifies the build that produced *those rows
-on that date* and nothing else. Measured from `/build/oracle-attestation.txt` as it
-stands now: `attestation-version 2`, `module-set-sha256`
-`c061de9c95561b945896865dc5086fe3aded7bfd3c1eb6789ac7fe681b1e6aef`, `module-count 179`
-— **the same 179 modules**, because the rebuild changed only the image's Python layer —
-with `overrides-used no` and `oracle-source-is-frozen no`. A reader who re-runs today
-should therefore expect the digest to differ from the one quoted above and should not
-read that difference as invalidating this table.
+on that date* and nothing else.
+
+**A DOCUMENTED DIGEST FOR THIS FIELD GOES STALE ON EVERY REBUILD, SO THE FIELD IS NO
+LONGER QUOTED AS A CURRENT VALUE — it is quoted as a series, which is the honest
+shape of it.** Successive measurements of `/build/oracle-attestation.txt`, each over
+**179** modules built from the same sources with `overrides-used no` and
+`oracle-source-is-frozen no`: `d18b337f…` (the eight runs below), `29fae9a6…` (the
+re-driven campaign), `c061de9c…`, `b2e75eb4…`, and `ebd07031…` as it stands after the
+rebuild of **2026-08-09**. Five different digests, one unchanged module set. So the
+module-set digest identifies a **build event** — the compiler and libraries of the
+image that produced it, and whatever else varies between two runs of `cobc` — and a
+reader who re-measures should expect a value not listed here and must not read that
+as invalidating this table. The field to compare instead is the **transform-set
+digest**, because it is a digest of the source transformations rather than of the
+objects: it is `1352755276e5fca45bb74cc0441dbd777ce6b4dc3cd2634305582eb6b75ca998`
+over **41** transformed paths and was unchanged across every rebuild measured on
+2026-08-08 and 2026-08-09, including the one that changed the module-set digest from
+`b2e75eb4…` to `ebd07031…`. It is **not** invariant for all time and is not claimed
+to be: an earlier campaign in this section records `88dcc5e9…` over the same count of
+41, so the field moves when the transform *set* moves and stays put when only the
+objects are rebuilt — which is exactly the property that makes it the one to cite.
+`oracle-source-is-frozen` has read **no** in every measurement without exception.
 
 **The empty diffs were re-observed on the rebuilt oracle rather than inherited.**
 `clean_batch_gl` was re-driven through all ten stages, every stage exit 0, verdict
@@ -1725,7 +1783,7 @@ rows were measured under.
 ### 9.3 Where the run artifacts were written — and why none of them is in this repository
 
 **Nothing in the table below is a committed artefact.** Every path is under
-`$ACAS_OUT`, which is the Docker named volume `acas-harness-<CLONE_INDEX>-out`,
+`$ACAS_OUT`, which is the Docker named volume `acas-harness-<CLONE_INDEX>_out`,
 mode 600, deliberately outside the checkout (§14.1). The volume belongs to one
 clone of one machine, so no `git add` can capture these files and a reader of this
 repository cannot open them. What this section documents is therefore the *shape*
@@ -1743,7 +1801,7 @@ is a report of an observed run, and §8's preamble says so in those terms.
 | `<scenario>/{cobol,python}.normalized/_manifest.json` | The normalise-stage manifest per side — the two whose digests §8.1 lists, and the two stage 10 actually compared |
 | `run-logs/<scenario>/{cobol,python}.run-status` | Wrapper status, behavioural status, seed digests and the ordered per-operation statuses |
 | `run-logs/<scenario>/{cobol,python}.operation-status` | The ordered operation list and each operation's observed status |
-| `run-logs/<scenario>/seed-identity` | The fixture marker digest the reset stage published, under this run id |
+| `run-logs/<scenario>/seed-identity` | The fixture marker digest the reset stage published, under this run id — and, from 2026-08-09, the seeding window that produced it: `seed_window` (`on`/`off`/`unrecorded`) with `seed_window_standing` (`declared-deviation-from-aap`/`aap-mandated`/`unrecorded`), copied out of the fixture marker rather than read from the environment (§4.3) |
 
 ### 9.4 Assertions the runners made on every run
 
@@ -2749,7 +2807,8 @@ not two halves of one attempt.
 `SELECT *` over the in-scope tables, so they hold monetary amounts and the primary
 keys identifying the accounts, customers and suppliers those amounts belong to.
 Every file is written mode `600`, and the tree lives in a Docker named volume —
-`acas-harness-<CLONE_INDEX>-out` — rather than under the checkout, so no `git add`
+`acas-harness-<CLONE_INDEX>_out`, derived by Compose from the clone-scoped project
+name — rather than under the checkout, so no `git add`
 can capture it and no sibling clone shares it.
 
 **Retain a scenario's tree for as long as this document cites it.** §8 and §10 cite
@@ -2764,7 +2823,7 @@ oracle, so automatic deletion would destroy evidence rather than tidy it.
 
 ```bash
 docker compose -f harness/docker-compose.yml down
-docker volume rm "acas-harness-${CLONE_INDEX}-out"
+docker volume rm "acas-harness-${CLONE_INDEX}_out"
 ```
 
 Never `docker volume prune`, never `docker volume rm $(docker volume ls -q)`, and

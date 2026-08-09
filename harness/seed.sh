@@ -1882,8 +1882,9 @@ acas_read_autocommit() {
 # the AAP says off, and a fixture seeded under a deviation is a fixture, not
 # evidence.
 #
-# ACAS_SEED_AUTOCOMMIT=off selects the AAP-LITERAL window instead. It remains
-# available deliberately, because the AAP is the frozen agreement and a reader
+# ACAS_SEED_AUTOCOMMIT=off, and equally an UNSET variable, selects the AAP-LITERAL
+# window -- it is the shipped default, not an alternative to one. It stays that way
+# deliberately, because the AAP is the frozen agreement and a reader
 # must be able to run exactly what it describes -- but the frozen loaders reach no
 # COMMIT under it, so MariaDB discards each session at disconnect and the tables
 # read EMPTY. That is refused rather than reported: acas_assert_seed_durability
@@ -2389,6 +2390,89 @@ acas_assert_seed_durability() {
     'it is not AAP-conformant evidence, and this harness will not describe it as' \
     'though it were. The measurements are written up in' \
     'docs/migration/ambiguity-resolutions.md.'
+}
+
+
+# =============================================================================
+# THE SEEDING WINDOW, RECORDED IN THE ARTIFACT RATHER THAN ONLY IN THE LOG
+#
+# WHY THIS EXISTS. Everything above discloses the window loudly -- the stage
+# line names it, an ON window prints a paragraph saying it is a declared
+# deviation, an OFF window prints the measured consequence, and exit 76 explains
+# the frozen no-COMMIT defect in full. All of that reaches the CONSOLE. What
+# reaches a later reader is the evidence tree: the fixture marker, the
+# seed-identity record harness/reset_db.sh publishes from it, the capture
+# manifests and finally verdict.json. Until now none of those said which window
+# the seed ran under, so a reader holding only the evidence could reasonably
+# assume the AAP-mandated configuration -- the one thing this repository has
+# MEASURED it cannot deliver. An omission that reads downstream as conformance is
+# the same overstatement as a false claim, so the window is written into the
+# marker.
+#
+# WHAT IT BUYS, CONCRETELY. The marker's own SHA-256 is what harness/reset_db.sh
+# publishes as the seed identity and what BOTH runners bind into their run-status
+# records, which harness/dump_tables.py carries into the capture manifests and
+# harness/diff_states.py requires the two sides to agree on before it compares a
+# row. So from here a fixture seeded under the declared deviation and one seeded
+# under the mandated window are DIFFERENT BYTES and cannot silently compare
+# equal, and the plain-text row is legible to an operator who opens the file.
+#
+# WHAT IT DELIBERATELY DOES NOT DO. It does not change the verdict manifest's key
+# set. VERDICT_KEYS and the run-status key set in harness/dump_tables.py are
+# EXACT -- an unrecognised key is a refusal, by design -- so widening them is a
+# protocol change across four files and their tests, and it would buy a second
+# copy of a fact the seed identity already binds. The window is recorded where
+# the seed knows it, and it travels by digest from there.
+#
+# NOT FATAL WHEN IT CANNOT BE WRITTEN. A seed driven without a scenario has no
+# fixture and no marker, and a marker that cannot be appended to is reported as a
+# warning: the seed itself succeeded, and turning an evidence-annotation failure
+# into a seeding failure would refuse work that was done correctly. The refusal
+# belongs downstream, where a capture must carry a seed identity before it can
+# support a verdict.
+# =============================================================================
+acas_record_seed_window_in_marker() {
+  [[ -n "$ACAS_SEED_FIXTURE_DIR" ]] || return 0
+
+  local marker="$ACAS_SEED_FIXTURE_DIR/$ACAS_FIXTURE_MARKER"
+  [[ -f "$marker" && ! -L "$marker" ]] || {
+    acas_note "no scenario fixture marker at $marker, so the seeding window is recorded in this log only"
+    return 0
+  }
+
+  # The two rows say the same thing twice on purpose: the MODE, for a reader who
+  # knows what it means, and its STANDING against the Agent Action Plan, for one
+  # who does not. `aap-mandated' is sections 0.2.1.1, 0.4.1.7 and 0.5.2 read
+  # literally; `declared-deviation-from-aap' is the ON window, which is the only
+  # mode measured to leave a durable row and is NOT parity evidence.
+  local window standing
+  if (( ACAS_SEED_WINDOW_TARGET == 1 )); then
+    window='on'
+    standing='declared-deviation-from-aap'
+  else
+    window='off'
+    standing='aap-mandated'
+  fi
+
+  # Appended rather than rewritten: the `files' count and the sorted `file' rows
+  # above are the fixture's identity and are left exactly as staged. Nothing reads
+  # the marker between the stage and here, and harness/reset_db.sh computes its
+  # digest afterwards, so the digest it publishes covers these rows.
+  {
+    printf 'seed_window\t%s\n' "$window"
+    printf 'seed_window_standing\t%s\n' "$standing"
+  } >>"$marker" || {
+    acas_warn "the seeding window could not be recorded in $marker; the seed itself is unaffected, but the evidence tree will not name the window." \
+      'A capture taken from this seed still carries the marker digest, so the two' \
+      'sides can still be proved to have started from the same bytes -- what is' \
+      'missing is the plain-text statement of which window produced them.'
+    return 0
+  }
+
+  acas_log "seeding window recorded in the fixture marker: seed_window=$window  seed_window_standing=$standing"
+  if [[ "$window" == 'on' ]]; then
+    acas_note 'the fixture marker now records that this seed came from the DECLARED DEVIATION, so any capture bound to it carries that fact by digest. A result obtained from this fixture is a working measurement and NOT AAP-conformant parity evidence.'
+  fi
 }
 
 
@@ -4454,6 +4538,11 @@ acas_main() {
   # application access reads it, which is the mode the next stage will use.
   acas_close_seed_autocommit_window
   acas_assert_seed_durability
+
+  # AFTER the gate, never before it: the marker then describes a seed that was
+  # ACCEPTED, and the window it names is the one the loaders actually ran under
+  # rather than the one an environment variable asked for.
+  acas_record_seed_window_in_marker
   acas_report_out_of_scope
 
   acas_stage 'Completion  [common/masterLD.sh:L119-L123]'

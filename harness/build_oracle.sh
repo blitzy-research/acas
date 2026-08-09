@@ -3258,49 +3258,81 @@ acas_prepare_build_tree() {
         'a later run will refuse to clear this tree and will need --no-refresh.'
     fi
 
-    # THE COPY SKIPS SCRATCH, and that is a correctness measure rather than a
-    # speed one.
+    # THE COPY NAMES WHAT IT COPIES. It is an ALLOW LIST of the frozen build's
+    # inputs, and that is a correctness measure rather than a speed one.
     #
-    # `cp -a "$ACAS_REPO/."' copied EVERY top-level entry, including whatever a
-    # developer's tooling had left in the checkout. `pytest' creates
-    # `.pytest_cache' mode 0700 owned by whoever ran it, this service runs as an
-    # unprivileged account (harness/Dockerfile.gnucobol `USER'), and `/repo' is
-    # mounted read-only -- so the documented order "run the tests, then build the
-    # oracle" ended in `cp: cannot access '/repo/./.pytest_cache': Permission
-    # denied' and exit 67. Measured, twice: the copy failed, and then the next
-    # attempt failed differently for the reason recorded above the marker.
+    # WHAT A DENY LIST COST, MEASURED TWICE. This copy used to enumerate
+    # `$ACAS_REPO/*' and skip a fixed list of scratch names. Two failures followed,
+    # and both were the same defect:
     #
-    # None of the skipped names is a specification source. `.git' is history,
-    # `.venv'/`venv' are host-built environments whose binaries are wrong for this
-    # image anyway, and the rest are caches and build outputs. `.dockerignore'
-    # excludes the same set from IMAGE builds; this list is its counterpart for the
-    # runtime bind mount, which `.dockerignore' does not reach. Everything the
-    # frozen build needs -- `common/', `copybooks/', the six compile directories,
-    # `comp-all.sh', `mysql/' and the vendored archives -- is outside it, and the
-    # structural checks below fail loudly if that ever stops being true.
+    #   * `cp: cannot access '/repo/./.pytest_cache': Permission denied' -- pytest
+    #     creates it mode 0700 owned by whoever ran the tests, this service runs as
+    #     an unprivileged account (harness/Dockerfile.gnucobol `USER') and `/repo'
+    #     is read-only, so the documented order "run the tests, then build the
+    #     oracle" ended in exit 67. `.pytest_cache' was then added to the deny list.
+    #   * `cp: cannot access '/repo/tmp/qa-.../evidence': Permission denied' -- a QA
+    #     run had left a root-owned tree under `tmp/', which `.gitignore' ignores, so
+    #     `git status' was EMPTY and the build failed anyway. Exit 67 again.
     #
-    # Filtered at the TOP LEVEL, by name, because that is where the offending
-    # entries are and a top-level list is auditable at a glance. A nested cache is
-    # created 0755 by the same tooling and copies harmlessly.
+    # A deny list can only ever name the trees somebody has already been bitten by,
+    # while the failure mode is "any unreadable path anywhere in the checkout" -- and
+    # every one of those paths is, by construction, something the frozen build does
+    # not need. So the selection is inverted: the copy takes the inputs the frozen
+    # compile scripts actually read and NOTHING else, and arbitrary ignored or
+    # runtime state in the checkout becomes unreachable rather than newly hazardous.
+    #
+    # WHY THIS LIST IS THE WHOLE LIST, from the frozen scripts themselves:
+    #   comp-all.sh   `cd's through the six compile directories in order and runs
+    #                 each one's own comp-*.sh [comp-all.sh:L15-L32].
+    #   copybooks/    every compile resolves copybooks through `-I ../copybooks'
+    #                 [common/comp-common.sh:L21-L57], and COBCPY/COB_COPY_DIR are
+    #                 set to `../copybooks' [comp-all.sh:L9-L10].
+    #   the six dirs  common general irs purchase sales stock -- ACAS_COMPILE_DIRS,
+    #                 which is what comp-all.sh walks.
+    # Nothing else in the checkout is read from the BUILD COPY. The vendored preSQL
+    # archive, `etc/ld.so.conf.d/gnucobol.conf', `mysql/ACASDB.sql' and the frozen
+    # digests are all read from $ACAS_REPO directly, so copying them would be dead
+    # weight rather than a requirement -- and the structural assertions below plus
+    # the per-step compile assertions fail loudly if that ever stops being true.
+    #
+    # Absence is FATAL rather than silently tolerated: a missing input means the
+    # mount is wrong, and a build that proceeded would compile a partial
+    # specification.
+    local -a wanted=(comp-all.sh copybooks "${ACAS_COMPILE_DIRS[@]}")
     local -a sources=()
-    local entry name
+    local entry name missing=''
+    for name in "${wanted[@]}"; do
+      entry="$ACAS_REPO/$name"
+      if [[ -e "$entry" ]]; then
+        sources+=("$entry")
+      else
+        missing+=" $name"
+      fi
+    done
+    [[ -z "$missing" ]] || acas_die "$EX_BUILDTREE" \
+      "the read-only checkout is missing frozen build input(s):${missing}." \
+      'The checkout IS the specification, so a build that continued would compile' \
+      'a partial one. Check that $ACAS_REPO is the repository root and that the' \
+      'bind mount in harness/docker-compose.yml resolves to it.'
+
+    #  What was NOT taken, recorded rather than left to be inferred: a reader of this
+    #  log can see that the omission was a decision. Names only, never contents, so
+    #  an unreadable directory is named without being entered.
+    local -a untaken=()
+    local keep candidate
     for entry in "$ACAS_REPO"/* "$ACAS_REPO"/.[!.]*; do
       [[ -e "$entry" ]] || continue
       name="${entry##*/}"
-      case "$name" in
-        .git|.pytest_cache|.mypy_cache|.ruff_cache|.venv|venv|__pycache__|htmlcov|build|dist|*.egg-info|.coverage|.coverage.*)
-          acas_log "skipping $name (scratch; not a specification source)"
-          continue
-          ;;
-      esac
-      sources+=("$entry")
+      keep=''
+      for candidate in "${wanted[@]}"; do
+        [[ "$name" == "$candidate" ]] && { keep=1; break; }
+      done
+      [[ -n "$keep" ]] || untaken+=("$name")
     done
-    (( ${#sources[@]} )) || acas_die "$EX_BUILDTREE" \
-      "$ACAS_REPO holds nothing to copy." \
-      'The read-only checkout is the specification; an empty one means the mount' \
-      'is wrong, not that the build has nothing to do.'
+    (( ${#untaken[@]} == 0 )) || acas_log \
+      "not copied (${#untaken[@]} top-level entries; no frozen compile reads any of them from the build copy): ${untaken[*]}"
 
-    acas_log "copying $ACAS_REPO into $ACAS_BUILD (${#sources[@]} top-level entries, layout preserved)"
+    acas_log "copying $ACAS_REPO into $ACAS_BUILD (${#sources[@]} named frozen build inputs, layout preserved)"
     acas_run_deadline "$ACAS_TIMEOUT_BUILD" ACAS_TIMEOUT_BUILD \
       "copying $ACAS_REPO into $ACAS_BUILD" "$EX_BUILDTREE" - \
       -- cp -a "${sources[@]}" "$ACAS_BUILD/" \
@@ -3308,9 +3340,11 @@ acas_prepare_build_tree() {
         "copying $ACAS_REPO into $ACAS_BUILD failed." \
         'The build must run in a copy: [common/comp-common.sh:L25] regenerates' \
         'every common/*MT.cbl, and those files are the frozen data dictionary.' \
-        'If the failure names a path this account cannot read, that path is in the' \
-        'checkout and not in the skip list above; $ACAS_BUILD carries its marker,' \
-        'so re-running after removing the path clears and re-copies in place.'
+        'Only the named frozen inputs above are copied, so a permission failure' \
+        'here names a path INSIDE comp-all.sh, copybooks/ or one of the six compile' \
+        'directories -- a specification source this account cannot read, which is a' \
+        'broken checkout rather than stray workspace state. $ACAS_BUILD carries its' \
+        'marker, so re-running after fixing the path clears and re-copies in place.'
   else
     acas_log "reusing the existing build tree in $ACAS_BUILD (refresh disabled)"
   fi
@@ -3491,6 +3525,44 @@ acas_explain_missing_sqlstate_copybook() {
 
          It must be supplied by the maintainer. Until it is, the oracle can be
          built only for the bridges that do not reference it.
+
+         THE AAP FORBIDS WRITING IT INTO THE REPOSITORY, AND NAMES THE RULES.
+         §0.8.1 places copybooks/*.cob among the frozen artifacts and states
+         that a diff touching them is a defect in the migration "regardless of
+         how harmless it appears". §0.2.2 lists copybooks/ under "Frozen
+         artifacts -- zero modifications of any kind". R-3 forbids adding
+         validation logic, and a SQLSTATE-to-FS-Reply table is validation logic.
+         R-4 makes a repaired defect a failure rather than an improvement. A
+         synthesised member breaches all four at once, so the absence is
+         reported and left in place deliberately -- it is not an oversight, and
+         it is not something this script will paper over.
+
+         OPERATOR REMEDIATION -- THE ONLY ROUTE TO A FROZEN ORACLE:
+           1. Obtain the authentic copybooks/ACAS-SQLstate-error-list.cob from
+              the ACAS maintainer. Measured: it is in no tracked file of this
+              repository, nowhere in the working tree, and in none of the three
+              vendored archives -- presql2-latest.zip and
+              mysql-connector-c-6.1.11-src.tar.gz contain no member matching
+              "sqlstate" at all, and the only two in
+              mariadb-connector-c-3.3.4-src.zip are the unrelated C API man
+              pages man/mysql_sqlstate.3 and man/mysql_stmt_sqlstate.3. Do not
+              try to reconstruct it from the *MT.scb sources: they COPY it, they
+              do not contain it.
+           2. Place it at copybooks/ACAS-SQLstate-error-list.cob in the
+              checkout, byte-for-byte as received, with no reformatting.
+           3. Re-run this script with NO transform flag and with
+              ACAS_ACCEPT_TRANSFORMED_ORACLE unset:
+                harness/build_oracle.sh
+              A frozen build then reports "verified: every COPY target of every
+              source the frozen scripts compile resolves", and the attestation
+              records "oracle-source-is-frozen yes" with "source-transforms 0".
+           4. From that point reset_db.sh needs no --accept-transformed-oracle,
+              and the eight scenario protocols yield the ordering-normalised
+              empty diffs that AAP §0.8.5 accepts as parity evidence.
+         Until step 1 is done by the maintainer, every verdict this harness can
+         produce carries NO PARITY CLAIM, and that is the honest ceiling of the
+         evidence -- not a defect in the Python implementation, which passes its
+         own suites in full.
 
          THEREFORE, ON THIS CHECKOUT, THE FROZEN ORACLE IS UNAVAILABLE. That is
          a measurement, not a prediction: a default (frozen, zero-transformation)

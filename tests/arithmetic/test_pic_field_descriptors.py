@@ -4787,8 +4787,8 @@ def test_the_dictionary_reader_follows_no_symbolic_link() -> None:
     artifact = root / "data_dictionary" / "acas_posting_dictionary.json"
     payload = artifact.read_bytes()
 
-    #  The default lookup is unaffected: it resolves the one candidate in
-    #  DATA_DICTIONARY_SEARCH_PATH, the committed repository sibling.
+    #  The default lookup is unaffected: from a checkout it resolves the FIRST candidate
+    #  in DATA_DICTIONARY_SEARCH_PATH, the committed repository sibling.
     assert loader.load_dictionary().entries, "the committed dictionary no longer loads"
 
     with tempfile.TemporaryDirectory() as directory:
@@ -5586,6 +5586,109 @@ def _imported_third_party_modules() -> dict[str, set[str]]:
                     continue
                 found.setdefault(top, set()).add(path.name)
     return found
+
+
+def test_an_installed_distribution_carries_its_own_data_dictionary() -> None:
+    """The wheel must ship the dictionary, and the loader must look inside itself for it.
+
+    THE DEFECT THIS LOCKS OUT WAS MEASURED, not imagined. With the artifact excluded from
+    packaging and `DATA_DICTIONARY_SEARCH_PATH` holding only the repository sibling, a
+    non-editable install resolved
+    `site-packages/data_dictionary/acas_posting_dictionary.json` - a path no install
+    creates - and because rule R-5 has every record module read the dictionary WHILE IT IS
+    BEING IMPORTED, all seven CLI routes died with `DictionaryNotFoundError` before
+    parsing an argument. An installed distribution that cannot import its own entry points
+    is not a distribution, and "run it from a checkout" is not a remedy: Agent Action Plan
+    section 0.1.2 makes a shipped native Python package the deliverable.
+
+    Four halves of one contract are asserted together, because any one of them alone
+    restores the defect:
+
+    1. `packages` names the data-only package, so the wheel HAS somewhere to put it.
+    2. `package-dir` maps that package onto the COMMITTED `data_dictionary/` directory,
+       so the shipped bytes are the committed bytes and the generator keeps writing
+       exactly one file at the path section 0.3.1 fixes.
+    3. `package-data` names both JSON files, since `include-package-data = false` means
+       nothing travels unless it is named.
+    4. `DATA_DICTIONARY_SEARCH_PATH` offers the committed sibling FIRST and the packaged
+       copy SECOND, so a checkout behaves exactly as it did and an installed tree has a
+       candidate that exists.
+
+    R-1 is re-asserted in the same breath: the shipped package list must not name
+    `harness`, `tests` or `docs` under any spelling.
+
+    Infrastructure-free: the manifest's text and the package's own constants.
+    """
+    parsed = _parsed_manifest()
+    setuptools_table = parsed["tool"]["setuptools"]
+
+    assert setuptools_table.get("include-package-data") is False, (
+        "include-package-data must stay false, so that no file reaches the wheel "
+        "unless package-data names it"
+    )
+
+    packages = setuptools_table["packages"]
+    assert "acas_posting.data_dictionary" in packages, (
+        "pyproject.toml does not ship acas_posting.data_dictionary, so a non-editable "
+        "install has no dictionary and every CLI route fails on import (R-5)"
+    )
+    for code_package in (
+        "acas_posting",
+        "acas_posting.cli",
+        "acas_posting.cobol",
+        "acas_posting.dal",
+        "acas_posting.dictionary",
+        "acas_posting.programs",
+        "acas_posting.records",
+    ):
+        assert code_package in packages, f"{code_package} is no longer shipped"
+    forbidden = [
+        name
+        for name in packages
+        if name.split(".")[0] in {"harness", "tests", "docs", "data_dictionary"}
+    ]
+    assert not forbidden, (
+        f"these packages must never ship - R-1 keeps the compiled oracle off the "
+        f"shipped package's graph entirely: {forbidden}"
+    )
+
+    package_dir = setuptools_table["package-dir"]
+    assert package_dir.get("acas_posting.data_dictionary") == "data_dictionary", (
+        "the shipped dictionary must be mapped from the COMMITTED top-level "
+        "data_dictionary/ directory, so there is one artifact and never two that "
+        "could disagree"
+    )
+
+    package_data = setuptools_table["package-data"]["acas_posting.data_dictionary"]
+    for artifact in (
+        "acas_posting_dictionary.json",
+        "acas_posting_dictionary.schema.json",
+    ):
+        assert artifact in package_data, (
+            f"{artifact} is not named as package data, and with "
+            f"include-package-data = false an unnamed file does not travel"
+        )
+
+    acas_posting = importlib.import_module("acas_posting")
+    search_path = acas_posting.DATA_DICTIONARY_SEARCH_PATH
+    assert search_path == (
+        acas_posting.DATA_DICTIONARY_DIR,
+        acas_posting.PACKAGED_DATA_DICTIONARY_DIR,
+    ), (
+        "the search path must be the committed sibling followed by the packaged copy: "
+        f"{[str(entry) for entry in search_path]}"
+    )
+    assert acas_posting.PACKAGED_DATA_DICTIONARY_DIR == (
+        acas_posting.PACKAGE_ROOT / "data_dictionary"
+    ), "the packaged candidate must sit inside the installed package, beside its modules"
+
+    #  And the committed artifact is still the one the checkout reads, first candidate
+    #  first: a packaged copy that shadowed a regenerated dictionary would make
+    #  `generate --write` a no-op from the reader's point of view.
+    loader = importlib.import_module("acas_posting.dictionary.loader")
+    assert loader._default_document_candidates()[0] == (
+        acas_posting.DATA_DICTIONARY_PATH.resolve()
+    ), "a checkout must still resolve the committed repository sibling first"
 
 
 def test_the_declared_runtime_closure_is_exactly_the_plans_closure() -> None:
@@ -6561,6 +6664,100 @@ def test_the_administrative_credential_is_not_in_the_runner_service_environment(
         f"declared by `mariadb` exactly once. Without it the vendor entrypoint defaults "
         f"to `%` and provisions a network-reachable superuser, which makes every "
         f"privilege narrowing in this stack decorative."
+    )
+
+
+def test_both_images_apply_every_available_fix_and_ship_their_own_inventory() -> None:
+    """The images patch completely at their pinned serial, and prove it in themselves.
+
+    TWO DEFECTS, ONE SHAPE. The MariaDB image upgraded an EXPLICIT package list at the
+    pinned apt serial, and the list was incomplete: 21 packages remained upgradable
+    inside the built image at that same serial, ten of them carrying a `jammy-security`
+    origin. Nothing measured the gap, so the posture written up in
+    README-python-migration.md section 7.2 was a claim rather than a finding. Separately,
+    advisory closure could not be verified at all on a host with no scanner installed --
+    which is the host this project is reviewed on.
+
+    Both are closed the same way and this test locks both:
+
+    1. THE UPGRADE IS COMPLETE. What must not move is HELD by name (the MariaDB vendor
+       packages, because the frozen schema header names the server version), everything
+       else is upgraded, and the build then RE-READS `apt-get -s upgrade` and FAILS on a
+       single remaining `Inst` line. "Fully patched at its pinned serial" is therefore
+       build-enforced rather than asserted in prose.
+    2. THE EVIDENCE IS IN THE IMAGE. Each image writes an inventory and an advisory
+       posture from `dpkg-query` -- and, in the builder image, the Python set from
+       installed metadata -- so a reviewer with no `trivy`, `grype` or `syft` can still
+       establish what the image contains and re-run the one-line check.
+
+    Asserted on the Dockerfile text: this tier runs on a bare host with no Docker, and
+    the generated content is what a reviewer reads.
+    """
+    for name, expectations in (
+        (
+            "Dockerfile.mariadb",
+            (
+                ("apt-mark hold", "the frozen server version could be upgraded away"),
+                (
+                    "apt-get upgrade -y --no-install-recommends",
+                    "only a hand-written subset of the available fixes would be applied",
+                ),
+            ),
+        ),
+        ("Dockerfile.gnucobol", ()),
+    ):
+        dockerfile = _harness_dir() / name
+        assert dockerfile.is_file(), f"{dockerfile} is absent"
+        text = dockerfile.read_text(encoding="utf-8")
+
+        for fragment, why in expectations:
+            assert fragment in text, f"{name} no longer carries `{fragment}`: {why}"
+
+        #  The zero-pending assertion, in both images: the simulation is read back and a
+        #  single remaining Inst line fails the build.
+        assert "apt-get -s upgrade > /tmp/apt-pending.log" in text, (
+            f"{name} does not re-read the upgrade simulation, so an incomplete upgrade "
+            f"would pass unnoticed exactly as the measured one did"
+        )
+        assert "if grep -q '^Inst ' /tmp/apt-pending.log; then" in text, (
+            f"{name} does not test the simulation for remaining upgrades"
+        )
+        assert "packages remain upgradable at the pinned snapshot" in text, (
+            f"{name}'s pending-upgrade check does not fail with a diagnostic"
+        )
+
+        #  The shipped evidence, and the path a reader is pointed at.
+        assert "/usr/local/share/acas-harness" in text, (
+            f"{name} does not publish an inventory directory"
+        )
+        for artifact in ("sbom-dpkg.tsv", "advisory-posture.tsv"):
+            assert artifact in text, f"{name} does not write {artifact}"
+        assert "dpkg-query -W -f='${Package}\\t${Version}" in text, (
+            f"{name}'s inventory is not generated from the package manager that "
+            f"installed the packages"
+        )
+
+    #  The builder image additionally inventories the pinned Python set, because `pip` is
+    #  purged from it and `pip list` is therefore unavailable to a reviewer.
+    builder = (_harness_dir() / "Dockerfile.gnucobol").read_text(encoding="utf-8")
+    assert "sbom-python.tsv" in builder, (
+        "the builder image does not inventory its Python distributions, and pip is "
+        "purged from it, so the pinned set would be unverifiable from inside the image"
+    )
+    assert "importlib.metadata" in builder, (
+        "the Python inventory is not read from installed metadata"
+    )
+
+    #  And the documentation must point at the tool-free route rather than at a scanner
+    #  the project does not ship.
+    readme = (_repo_root() / "README-python-migration.md").read_text(encoding="utf-8")
+    assert "advisory-posture.tsv" in readme, (
+        "section 7.2 does not tell a reader where the in-image advisory record is, so "
+        "closure still depends on a scanner nobody has"
+    )
+    assert "command -v trivy" in readme, (
+        "the scanner command is presented unconditionally, though the tool is not a "
+        "dependency of this project and is absent from both images"
     )
 
 
@@ -7665,6 +7862,54 @@ def _tests_dir() -> Path:
 # ---------------------------------------------------------------------------
 
 
+def test_the_build_copies_named_frozen_inputs_rather_than_the_whole_checkout() -> None:
+    """The build tree is composed from an ALLOW list, so ignored state cannot break it.
+
+    MEASURED DEFECT, TWICE. The copy used to enumerate the checkout and skip a fixed
+    list of scratch names. It failed on `.pytest_cache`, mode 0700 and owned by whoever
+    ran the tests, so the documented order "run the tests, then build the oracle" exited
+    67; that name was added to the deny list. It then failed on a root-owned QA tree
+    under `tmp/`, which `.gitignore` ignores - so `git status --porcelain` was EMPTY, the
+    worktree was clean by every tracked measure, and the build still exited 67 before
+    compiling anything.
+
+    A deny list can only name what somebody has already been bitten by, while the failure
+    mode is "any unreadable path anywhere in the checkout". The selection is therefore
+    inverted, and this test locks the inversion: what the copy takes is the frozen
+    build's inputs, named, and nothing else - `comp-all.sh`, `copybooks/` and the six
+    compile directories, which is exactly what [comp-all.sh:L15-L32] walks and what
+    [common/comp-common.sh:L21-L57] resolves `-I ../copybooks` against.
+
+    Read as TEXT because the subject is a shell script; asserted on the selection
+    ITSELF rather than on a comment about it.
+    """
+    build = (_harness_dir() / "build_oracle.sh").read_text(encoding="utf-8")
+
+    assert 'local -a wanted=(comp-all.sh copybooks "${ACAS_COMPILE_DIRS[@]}")' in build, (
+        "the build no longer composes its tree from the named frozen inputs; an "
+        "unreadable ignored directory anywhere in the checkout can break the build again"
+    )
+    assert 'cp -a "${sources[@]}" "$ACAS_BUILD/"' in build, (
+        "the copy no longer copies the selected sources"
+    )
+    #  The whole-tree copy is the shape that reintroduces the defect, in either spelling.
+    for whole_tree in ('cp -a "$ACAS_REPO/."', "cp -a \"$ACAS_REPO\"/*"):
+        assert whole_tree not in build, (
+            f"build_oracle.sh copies the whole checkout again ({whole_tree}), so any "
+            f"unreadable ignored path in it fails the build with exit 67"
+        )
+    #  Absence of an input is fatal rather than tolerated: a partial specification must
+    #  not compile.
+    assert "missing frozen build input(s)" in build, (
+        "a missing frozen input is no longer reported, so a wrong mount would compile "
+        "a partial specification"
+    )
+    #  And the six compile directories are still the frozen set the copy is defined over.
+    assert (
+        "readonly -a ACAS_COMPILE_DIRS=(common general irs purchase sales stock)" in build
+    ), "the compile-directory set has changed; the allow list is defined over it"
+
+
 def test_the_frozen_oracle_is_the_default_and_transformation_is_opt_in() -> None:
     """A build with no flags applies no source transformation.
 
@@ -7946,7 +8191,7 @@ def test_the_missing_member_is_never_written_into_the_frozen_tree() -> None:
 #  these assertions are what keep the documented one honest.
 #
 #  WHY THE DISPOSAL COMMAND'S SHAPE IS ASSERTED, NOT JUST ITS PRESENCE. Sibling
-#  clones each own an `acas-harness-<CLONE_INDEX>-out` volume in the same daemon, so
+#  clones each own an `acas-harness-<CLONE_INDEX>_out` volume in the same daemon, so
 #  `docker volume prune` -- the command an operator reaches for by reflex -- destroys
 #  other runs' evidence. Documenting a guarded command and leaving an unguarded one
 #  in the same file would defeat the point, so the unguarded forms are asserted
@@ -7989,7 +8234,7 @@ def test_the_evidence_retention_and_disposal_contract_is_stated(
         f"{relative_path} says nothing about how evidence is disposed of"
     )
     # The guarded, clone-scoped command, which is the whole mechanism.
-    assert "acas-harness-${CLONE_INDEX}-out" in text, (
+    assert "acas-harness-${CLONE_INDEX}_out" in text, (
         f"{relative_path} does not name the clone-scoped volume, so a reader has no "
         f"target-guarded command to copy"
     )
@@ -8023,20 +8268,51 @@ def test_the_evidence_volume_cannot_default_to_a_sibling_clone() -> None:
 
     This is what makes the documented disposal command safe: the volume cannot
     silently resolve to a name another run owns, so `docker volume rm
-    "acas-harness-${CLONE_INDEX}-out"` either names this clone's volume or fails.
+    "acas-harness-${CLONE_INDEX}_out"` either names this clone's volume or fails.
     A `${CLONE_INDEX:-000}` style default would reintroduce the hazard.
     """
     compose = (_harness_dir() / "docker-compose.yml").read_text(encoding="utf-8")
-    out_declaration = [
-        line for line in compose.splitlines() if "-out" in line and "name:" in line
+    #  The clone scope now comes from the PROJECT name, which Compose derives every
+    #  resource name from as `<project>_<key>`, and CLONE_INDEX is REQUIRED there. That
+    #  is what makes `docker volume rm "acas-harness-${CLONE_INDEX}_out"` name this
+    #  clone's volume or nothing at all.
+    project = [
+        line
+        for line in compose.splitlines()
+        if line.startswith("name:") and "acas-harness-" in line
     ]
-    assert out_declaration, "the evidence volume declares no name"
-    for line in out_declaration:
+    assert project, "the compose project declares no clone-scoped name"
+    for line in project:
         assert "${CLONE_INDEX:?" in line, (
-            f"the evidence volume's name does not REQUIRE CLONE_INDEX, so it can "
-            f"resolve to a sibling clone's volume: {line.strip()!r}"
+            f"the project name does not REQUIRE CLONE_INDEX, so every derived volume "
+            f"and network name can resolve into a sibling clone's namespace: "
+            f"{line.strip()!r}"
         )
         assert "${CLONE_INDEX:-" not in line, (
-            f"the evidence volume's name DEFAULTS CLONE_INDEX, which is the hazard "
-            f"the required form exists to prevent: {line.strip()!r}"
+            f"the project name DEFAULTS CLONE_INDEX, which is the hazard the required "
+            f"form exists to prevent: {line.strip()!r}"
         )
+
+    #  AND NO RESOURCE INTERPOLATES IT INTO A DAEMON-VISIBLE NAME. Compose cannot
+    #  validate an interpolated value - it offers `${VAR:?err}` and nothing else, and a
+    #  pattern form is rejected as "invalid interpolation format" - so a path-like
+    #  CLONE_INDEX used to render `acas-harness-bad/../name-out` and `up` CREATED a
+    #  malformed network before failing. With no explicit `name:`, every resource name is
+    #  derived from the project name, which Compose SANITISES, so nothing malformed can
+    #  reach the daemon.
+    #  INDENTED `name:` keys only: the top-level project `name:` at column 0 is the ONE
+    #  place CLONE_INDEX belongs, because that is the name Compose validates and
+    #  sanitises. A `name:` nested under `volumes:` or `networks:` is a daemon-visible
+    #  resource name and goes straight through unchecked.
+    interpolated_names = [
+        line
+        for line in compose.splitlines()
+        if line != line.lstrip()
+        and line.lstrip().startswith("name:")
+        and "${CLONE_INDEX" in line
+    ]
+    assert not interpolated_names, (
+        "a volume or network interpolates CLONE_INDEX into its own name again, so an "
+        "invalid clone identifier can be materialised as a malformed resource name: "
+        f"{[line.strip() for line in interpolated_names]}"
+    )
