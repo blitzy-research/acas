@@ -4271,6 +4271,78 @@ def test_the_three_stages_agree_on_the_attestation_key_order() -> None:
     )
 
 
+def test_the_checkout_write_guard_does_not_depend_on_the_environment() -> None:
+    """All three artifact writers protect their own checkout with `$ACAS_REPO` unset.
+
+    THE POLARITY IS WHAT IS ASSERTED, and it is asserted because the fail-open form
+    of this guard destroyed a deliverable. Each of the three tools purges its
+    destination before it publishes - `dump_tables.py` and `normalize.py` remove
+    every `*.json` and `*.json.tmp` from the directory they are about to publish
+    into, `diff_states.py` deletes any report already at its target before it
+    compares a row - so a guard that returned early on an unset variable meant
+    `--out <checkout>/data_dictionary` deleted `acas_posting_dictionary.json` AND
+    `acas_posting_dictionary.schema.json`, the machine-readable data dictionary
+    Agent Action Plan sections 0.2.1.3 and 0.7.2 (rule R-5) make a deliverable.
+
+    `$ACAS_REPO` is exported in exactly ONE place - the `gnucobol` service of
+    `harness/docker-compose.yml` - so every bare-host invocation, every `docker run`
+    without Compose and every direct developer use arrived with the guard disabled.
+    The checkout is therefore DERIVED from the tool's own location when the variable
+    says nothing, which is the derivation `normalize.default_schema_path` already
+    used for the frozen schema, and setting the variable can only ADD a second tree
+    to protect - never switch the guard off.
+    """
+    directory = _harness_dir()
+    checkout = directory.parent
+
+    for name in ("dump_tables", "normalize", "diff_states"):
+        module = _load_harness_module(name)
+        resolve = getattr(module, "protected_checkout_roots", None)
+        assert resolve is not None, (
+            f"harness/{name}.py no longer publishes protected_checkout_roots, so its "
+            "write guard has no unconditional source for the checkout root."
+        )
+
+        #  UNSET is the case that failed. The answer must still name this checkout.
+        roots, provenance = resolve({})
+        assert roots, f"harness/{name}.py protects nothing when $ACAS_REPO is unset"
+        assert checkout in roots, (
+            f"harness/{name}.py does not protect its own checkout {checkout} when "
+            f"$ACAS_REPO is unset; it named {[str(item) for item in roots]}"
+        )
+        assert "ACAS_REPO" in provenance, (
+            "the provenance phrase must name the variable, so a refusal message "
+            f"says how the root was arrived at; got {provenance!r}"
+        )
+
+        #  SET to something else ADDS a tree; it never replaces the derived one.
+        roots, _ = resolve({"ACAS_REPO": "/nonexistent-other-checkout"})
+        assert checkout in roots and Path("/nonexistent-other-checkout") in roots, (
+            f"harness/{name}.py dropped one of the two protected trees: "
+            f"{[str(item) for item in roots]}"
+        )
+
+        #  SET to this checkout is the Compose case: one root, not a duplicate pair.
+        roots, _ = resolve({"ACAS_REPO": str(checkout)})
+        assert roots == (checkout,), (
+            f"harness/{name}.py did not de-duplicate the Compose case: "
+            f"{[str(item) for item in roots]}"
+        )
+
+        #  AND THE GUARD ITSELF REFUSES, not merely the helper that feeds it. The
+        #  source is read rather than the refusal driven, because driving
+        #  `dump_tables` needs a database and this tier reaches none.
+        source = (directory / f"{name}.py").read_text(encoding="utf-8")
+        assert "protected_checkout_roots(env)" in source, (
+            f"harness/{name}.py computes the roots but its guard does not consult "
+            "them."
+        )
+        assert "if not repository:\n        return" not in source, (
+            f"harness/{name}.py has regained an early return on an unset "
+            "$ACAS_REPO, which is the fail-open form this test exists to refuse."
+        )
+
+
 def test_both_sides_are_checked_against_every_declared_operation() -> None:
     """A parity verdict requires that the two sides did the same work.
 

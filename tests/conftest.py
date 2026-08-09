@@ -1536,12 +1536,24 @@ def _probe_stack() -> StackStatus:
     # 5. harness/reset_db.sh's three destructive gates. NOT FABRICATED HERE - see
     #  ENV_RESET_CONSENT. The expected token is quoted in the message so the
     #  operator can copy it, which is the whole point of a target-scoped gate.
+    #
+    #  THE PAIR IS NOT IN THE SERVICE ENVIRONMENT, BY DESIGN, so an absent value
+    #  here is the NORMAL state of any invocation that did not ask for it rather
+    #  than a misconfigured stack. It used to be declared on the `gnucobol`
+    #  service, where PID 1 and every `exec` session carried it; it is now passed
+    #  per invocation to the two stages that administer the schema. The message
+    #  therefore names the `-e` form to add rather than a variable to export,
+    #  because exporting it in the wrong place is exactly what was removed.
     for name in (ENV_DB_ADMIN_USER, ENV_DB_ADMIN_PASSWORD):
         if not (os.environ.get(name) or "").strip():
             missing.append(f"env:{name}")
             detail.append(
                 f"  {name} is unset; harness/reset_db.sh GATE 1 requires an "
-                f"administrative account distinct from {ENV_DB_USER}"
+                f"administrative account distinct from {ENV_DB_USER}. It is "
+                f"deliberately absent from the gnucobol service environment, so "
+                f"add `-e {ENV_DB_ADMIN_USER} -e {ENV_DB_ADMIN_PASSWORD}` to the "
+                f"`docker compose run` that carries this pytest invocation, with "
+                f"both exported in the invoking shell"
             )
 
     # 6. The database environment, resolved by the single authority.
@@ -6910,3 +6922,96 @@ def data_dictionary_path() -> Path:
         f"Regenerate it with `python -m acas_posting.dictionary.generate`."
     )
     return DATA_DICTIONARY_PATH
+
+
+# ---------------------------------------------------------------------------
+#  SESSION TEARDOWN -- THE PER-RUN CREDENTIAL CARRIER DOES NOT OUTLIVE THE SESSION
+#
+#  The compiled side reads its database account out of the SEEDED SYSTEM record
+#  [copybooks/wssystem.cob:L137-L139], so `harness/seed.sh` stages a `system.dat`
+#  that carries it and `harness/run_cobol_scenario.sh` check 7/8 REQUIRES that file
+#  to still be there when the compiled cycle runs. The carrier therefore cannot be
+#  destroyed when seeding ends - it is an input to a later stage - which is why it
+#  is destroyed HERE instead, once every stage that needs it has run.
+#
+#  ONLY THE PER-RUN COPY. The fixture under `$ACAS_FIXTURES` is a build product the
+#  next session's stage 1 re-stages from, and `_probe_built_fixtures` skips the whole
+#  oracle tier when it is incomplete - so removing it here would silently disarm 114
+#  tests. `harness/seed.sh --shred-credentials --include-fixtures` destroys those, as
+#  the deliberate "putting the harness away" step.
+#
+#  IT NEVER FAILS THE SESSION. A cleanup that turns a green run red - or worse, a red
+#  run into a differently-red one - hides the outcome the session was for. A failure
+#  is REPORTED, with the command to run by hand, and the exit status is left alone.
+# ---------------------------------------------------------------------------
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Shred the per-run credential carriers this session's seeds left staged.
+
+    Args:
+        session: The finished session, used only to reach the terminal reporter.
+        exitstatus: The session's status, neither read nor changed - the cleanup is
+            unconditional, because a failed run leaves the same carrier behind as a
+            successful one.
+    """
+    del exitstatus  # The carrier is shredded on both outcomes.
+
+    data_root = (os.environ.get(ENV_DATA) or "").strip()
+    if not data_root:
+        #  No data root configured means no stage-bound tier ran in this session -
+        #  the bare-host case - so there is nothing staged to destroy.
+        return
+    if not SEED_SCRIPT.is_file() or not Path(data_root).is_dir():
+        return
+
+    staged = [
+        entry
+        for entry in sorted(Path(data_root).iterdir())
+        if entry.is_dir() and entry.name != "fixtures"
+    ]
+    if not staged:
+        return
+
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+
+    def note(line: str) -> None:
+        """Put one line where the operator will see it, or on stderr if headless."""
+        if reporter is not None:
+            reporter.write_line(line)
+        else:  # pragma: no cover - only when the terminal plugin is disabled
+            print(line, file=sys.stderr)
+
+    try:
+        completed = subprocess.run(  # noqa: S603 - a fixed, repository-owned script
+            (str(SEED_SCRIPT), "--shred-credentials", "--data-dir", data_root),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+            stdin=subprocess.DEVNULL,
+            cwd=str(REPO_ROOT),
+            #  Least privilege on the way out as on the way in: this destroys files
+            #  and administers no schema.
+            env=without_admin_credentials(os.environ),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        note(
+            f"credential cleanup could not run: {exc}. Destroy the staged carriers "
+            f"by hand: harness/seed.sh --shred-credentials --data-dir {data_root}"
+        )
+        return
+
+    if completed.returncode != 0:
+        note(
+            f"credential cleanup exited {completed.returncode}; the staged "
+            f"system.dat files may still hold the database account. Run "
+            f"harness/seed.sh --shred-credentials --data-dir {data_root} by hand."
+        )
+        for line in (completed.stderr or "").splitlines()[:5]:
+            note(f"  {line}")
+        return
+
+    for line in (completed.stdout or "").splitlines():
+        if "shredded" in line or "destroyed" in line:
+            note(line)

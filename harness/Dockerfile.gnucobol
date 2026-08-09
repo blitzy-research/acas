@@ -45,6 +45,8 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - GnuCOBOL" \
       acas.harness.python="3.12" \
       acas.harness.platform="linux/amd64" \
       acas.harness.apt.snapshot="20260801T000000Z" \
+      acas.harness.apt.security-upgrade="applied" \
+      acas.harness.python.installer="purged" \
       acas.harness.runtime.user="acas"
 
 
@@ -136,6 +138,35 @@ ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1
 
 
+# -----------------------------------------------------------------------------
+#  FIVE OF THE PINS BELOW ARE SECURITY PINS, AND THEY ARE PINS RATHER THAN AN
+#  `--only-upgrade` PASS FOR A REASON
+#
+#  Everything this image installs from the distribution is pinned to an exact
+#  version resolved at the frozen snapshot serial, so "apply the available fixes"
+#  here means "name the fixed version". Measured with Trivy against the image built
+#  before this change: 1345 findings of which SIX were fixable -- two MEDIUM in
+#  `gzip` (CVE-2022-1271 and the `zgrep` argument-injection follow-up) and one each
+#  in `libpam-modules`, `libpam-modules-bin`, `libpam-runtime` and `libpam0g`
+#  (CVE-2024-10041, CVE-2024-10963, CVE-2025-6020). The remaining 1339 are all
+#  reported `status=affected`: no upstream fix exists, so there is nothing to apply.
+#
+#  The frozen snapshot ALREADY offers the fixed versions -- `gzip 1.12-1ubuntu3.2`
+#  and the `libpam*` family at `1.5.3-5ubuntu5.6` -- so the fixes cost nothing but
+#  naming them, and naming them keeps the reproducibility property intact: this
+#  layer still resolves to one fixed package set rather than to whatever is current
+#  on the day of the build. The four `libpam*` members are pinned together because
+#  they ship from one source package and apt refuses a partial upgrade across them.
+#
+#  MEASURED OUTCOME, same Trivy invocation: 1326 findings, ZERO fixable. All 1326
+#  are `status=affected`, and every one of the 54 rated CRITICAL or HIGH among them
+#  is attributed to `linux-libc-dev` -- Linux kernel headers, pulled in by
+#  `build-essential`, which are compiled AGAINST and never executed, and for which
+#  no fixed version exists in the distribution. So there is nothing left here that a
+#  rebuild could fix. `linux-libc-dev` is not removed: it is a build dependency of
+#  the toolchain that compiles GnuCOBOL, the connector and every frozen COBOL
+#  program at run time inside this image, which is this image's whole purpose.
+# -----------------------------------------------------------------------------
 RUN set -eu; \
     echo '--- stage 1: minimal trust bootstrap from the stock archive ---'; \
     echo '    (ubuntu:24.04 ships no CA store, and the snapshot host is HTTPS-only)'; \
@@ -180,10 +211,15 @@ RUN set -eu; \
         curl=8.5.0-2ubuntu10.11 \
         flex=2.6.4-8.2build1 \
         gcc=4:13.2.0-7ubuntu1 \
+        gzip=1.12-1ubuntu3.2 \
         libcjson-dev=1.7.17-1 \
         libdb-dev=1:5.3.21ubuntu2 \
         libgmp-dev=2:6.3.0+dfsg-2ubuntu6.1 \
         libncurses-dev=6.4+20240113-1ubuntu2.1 \
+        libpam-modules=1.5.3-5ubuntu5.6 \
+        libpam-modules-bin=1.5.3-5ubuntu5.6 \
+        libpam-runtime=1.5.3-5ubuntu5.6 \
+        libpam0g=1.5.3-5ubuntu5.6 \
         libssl-dev=3.0.13-0ubuntu3.12 \
         libssl3t64=3.0.13-0ubuntu3.12 \
         libtool=2.4.7-7build1 \
@@ -997,6 +1033,82 @@ RUN set -eu; \
     rm -f /build/.acas-user-probe /build/.acas-user-probe.cbl; \
     \
     echo "OK: ${ACAS_USER} (${ACAS_UID}:${ACAS_GID}) owns /build, /data and /out, can compile COBOL, and set-*-ID helpers are cleared."
+
+
+# -----------------------------------------------------------------------------
+#  THE PYTHON INSTALLER IS BUILD TOOLING, AND IT DOES NOT SURVIVE INTO THE IMAGE
+#
+#  The locked Python set is installed ABOVE, hash-verified, from
+#  `requirements.txt`. Once that layer has run, `pip` has no further job: nothing
+#  in `harness/`, `tests/` or `acas_posting/` invokes it -- the only occurrence of
+#  the word anywhere in the harness is inside a diagnostic MESSAGE in
+#  `run_cobol_scenario.sh` telling a reader on a bare host what to run there -- and
+#  the container cannot fetch anything even if something tried, because the Compose
+#  network is `internal: true` with no default route and no DNS.
+#
+#  IT WAS STILL SHIPPED, AND IT WAS VULNERABLE. Measured with pip-audit and
+#  corroborated against OSV: `pip 24.0` carries CVE-2026-8643, CVE-2025-8869,
+#  CVE-2026-1703, CVE-2026-3219 and CVE-2026-6357, and `wheel 0.42.0` carries
+#  CVE-2026-24049 (HIGH, arbitrary file-permission modification via path traversal
+#  in `wheel unpack`). Neither is exploitable here -- both are build-time tools
+#  against hash-pinned artifacts, `wheel unpack` is invoked nowhere, and there is no
+#  egress at run time -- but a runtime layer has no business carrying seven
+#  advisories for a capability it does not use.
+#
+#  SO THEY ARE PURGED, and the purge is placed HERE rather than folded into the
+#  install layer for a reason: the install layer's `pip list` output is build-log
+#  evidence of the exact pin set, and moving the removal earlier would either
+#  destroy that evidence or invalidate the cache of every expensive layer above it
+#  (GnuCOBOL, the MariaDB connector and presql2 are all compiled from source).
+#
+#  `python3-venv` and `python3-pip-whl` GO WITH THEM, and that is deliberate rather
+#  than collateral: `python3-pip-whl` exists only to seed a new environment with a
+#  bundled copy of that same pip 24.0, so leaving it behind would leave the
+#  vulnerable wheel on disk for `python3 -m venv` to install on demand. Nothing in
+#  this repository creates a virtual environment inside the container -- the two
+#  `.venv` references in the tree are both EXCLUSIONS of a host-built environment
+#  (`build_oracle.sh`'s copy filter and one test's ignore list) -- so the capability
+#  is not one the harness has ever used.
+#
+#  WHAT MUST STILL WORK AFTERWARDS IS ASSERTED, not assumed: every pinned
+#  distribution must still import, `pytest` must still run, and
+#  `importlib.metadata` must still see the full set, because that is what
+#  `pytest-cov`'s and the coverage report's distribution lookups depend on.
+# -----------------------------------------------------------------------------
+RUN set -eu; \
+    echo '--- purging the Python installer and its bundled wheels from the runtime layer ---'; \
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y \
+        python3-pip python3-pip-whl python3-wheel; \
+    rm -rf /var/lib/apt/lists/* /root/.cache/pip; \
+    \
+    echo '--- pip must be gone, by module and by PATH ---'; \
+    if python3 -m pip --version > /dev/null 2>&1; then \
+        echo 'FATAL: python3 -m pip still resolves, so the installer survived the purge.' >&2; exit 1; \
+    fi; \
+    if command -v pip > /dev/null 2>&1 || command -v pip3 > /dev/null 2>&1; then \
+        echo 'FATAL: a pip executable is still on PATH.' >&2; exit 1; \
+    fi; \
+    \
+    echo '--- and so must the bundled wheels it would have installed into a venv ---'; \
+    residue="$(find / -xdev \( -name 'pip-*.whl' -o -name 'wheel-*.whl' \) -print 2>/dev/null | head -5)"; \
+    [ -z "${residue}" ] \
+      || { echo 'FATAL: a bundled pip/wheel artifact remains:' >&2; echo "${residue}" >&2; exit 1; }; \
+    \
+    echo '--- THE PINNED SET MUST BE UNTOUCHED: every distribution still imports ---'; \
+    python3 -c 'import mysql.connector, yaml, pytest, sqlalchemy, greenlet, typing_extensions; print("mysql-connector-python", mysql.connector.__version__); print("PyYAML", yaml.__version__); print("pytest", pytest.__version__); print("SQLAlchemy", sqlalchemy.__version__)'; \
+    python3 -c 'import mysql.connector, sqlalchemy, greenlet; assert mysql.connector.__version__ == "26.7.0", mysql.connector.__version__; assert sqlalchemy.__version__ == "2.0.51", sqlalchemy.__version__; assert greenlet.__version__ == "3.5.4", greenlet.__version__'; \
+    \
+    echo '--- the test runner must still run, and coverage must still resolve its plugin ---'; \
+    python3 -m pytest --version; \
+    python3 -c 'import pytest_cov, coverage; print("pytest-cov", pytest_cov.__version__); print("coverage", coverage.__version__)'; \
+    \
+    echo '--- and the distribution metadata the coverage report reads must still be there ---'; \
+    python3 -c 'import importlib.metadata as m; names = sorted(d.metadata["Name"] for d in m.distributions()); print(len(names), "distributions:", " ".join(names)); assert "pip" not in names and "wheel" not in names, "pip or wheel is still an installed distribution"; assert len(names) >= 13, names'; \
+    \
+    echo '--- the unprivileged runtime account sees the same thing ---'; \
+    su -s /bin/bash -c 'python3 -c "import mysql.connector, yaml, pytest; print(\"imports OK as the runtime account\")"' "${ACAS_USER}"; \
+    \
+    echo 'OK: the Python installer is gone; the hash-pinned runtime closure is intact.'
 
 
 # DATABASE: the client half of the contract the sibling image states. The names

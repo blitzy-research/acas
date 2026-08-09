@@ -641,7 +641,92 @@ acas_create_private_file() {
     "could not restrict $what to mode 600: $path"
 }
 
-# TRAPS There is no credential FILE to shred.
+# =============================================================================
+#  THE CREDENTIAL-BEARING ARTIFACTS, NAMED -- AND WHAT DESTROYS EACH ONE
+#
+#  This script holds no credential file of its own, and an earlier revision said so
+#  and stopped there. That was FALSE by omission: it PRODUCES one, per scenario,
+#  and it produced sixteen of them across the eight committed scenarios without ever
+#  destroying any.
+#
+#  WHY THE VALUE HAS TO BE IN A FILE AT ALL, which is the part that is not a defect:
+#  the compiled side takes its database credentials out of the SEEDED SYSTEM RECORD
+#  [copybooks/wssystem.cob:L137-L139], not out of its environment. `general.cbl`
+#  opens the system parameter file as a Cobol INDEXED file before it connects
+#  [general/general.cbl:L385-L396], so `system.dat` must carry `RDBMS-DB-Name`,
+#  `RDBMS-User` and `RDBMS-Passwd` or the compiled cycle cannot reach the database
+#  at all. `--build-fixtures` therefore fills those three fields FROM THE
+#  ENVIRONMENT and REFUSES a scenario that declares them, which is what keeps every
+#  credential out of the repository. None of that may change.
+#
+#  WHAT WAS ACTUALLY WRONG IS THE LIFETIME, so the lifetime is now stated per
+#  artifact and enforced:
+#
+#    1. $ACAS_DATA/<scenario>/system.dat  -- THE PER-RUN CARRIER.
+#       Staged by `acas_stage_scenario_seed` from the fixture, read by the frozen
+#       loaders, and then read AGAIN in a later stage by the compiled cycle
+#       (`run_cobol_scenario.sh` check 7/8 requires it present and non-empty). So it
+#       cannot be shredded when seeding ends -- it is still an input. It IS shredded
+#       when it is superseded, by the re-stage below, and by
+#       `--shred-credentials` once the protocol run that needs it is over.
+#       `tests/conftest.py` runs that at the end of every session.
+#
+#    2. $ACAS_FIXTURES/<scenario>/system.dat  -- THE BUILD PRODUCT.
+#       Written once per change to a scenario's `seed_records` and consumed by every
+#       later seed, whose manifest records its SHA-256. Destroying it makes the
+#       fixture incomplete rather than clean, so it is NOT removed by default: the
+#       re-publish shreds the copy it supersedes, and
+#       `--shred-credentials --include-fixtures` destroys it outright together with
+#       the manifest that claims it, which is the "putting the harness away" step.
+#
+#    3. The database row itself. `SYSTEM-REC.RDBMS-PASSWD` genuinely holds the value
+#       -- that is the point of seeding it -- and `harness/dump_tables.py` redacts
+#       that column and `PASS-WORD` at its one rendering funnel, so no capture,
+#       normalisation or diff ever carries it. Nothing here changes that.
+#
+#  Both files are mode 600, owned by the one unprivileged account in the container,
+#  on a clone-namespaced Docker volume under a root-only-traversable host path. The
+#  shred is defence in depth on top of that, not instead of it.
+# =============================================================================
+
+#: The basenames a seed or a fixture build may leave carrying a credential. Spelled
+#: as a list because the shred paths iterate it: a future flat file that carries an
+#: account is added here and is then covered everywhere at once.
+readonly ACAS_SEED_CREDENTIAL_FILES=("$ACAS_SEED_SYSTEM_FLAT_FILE")
+
+# acas_shred_credential_file <path>
+#
+# Overwrite, then unlink. `shred` when the image has it -- it does, GNU coreutils --
+# and a plain truncate otherwise, so this never becomes the reason a stage fails.
+# Silent on a path that is not there: every caller is a cleanup path, and a cleanup
+# that insists a file existed is a cleanup that fails after the first success.
+acas_shred_credential_file() {
+  local path="$1"
+  [[ -n "$path" && -f "$path" ]] || return 0
+  if command -v shred >/dev/null 2>&1; then
+    shred --remove=unlink --zero -- "$path" 2>/dev/null && return 0
+  fi
+  : > "$path" 2>/dev/null || true
+  rm -f -- "$path" 2>/dev/null || true
+  return 0
+}
+
+# acas_shred_credential_files_in <directory>
+#
+# Shred every credential-bearing basename in one directory. Returns the number
+# shredded on stdout, so a caller can report what it destroyed.
+acas_shred_credential_files_in() {
+  local directory="$1" name shredded=0
+  [[ -n "$directory" && -d "$directory" ]] || { printf '0'; return 0; }
+  for name in "${ACAS_SEED_CREDENTIAL_FILES[@]}"; do
+    if [[ -f "$directory/$name" ]]; then
+      acas_shred_credential_file "$directory/$name"
+      [[ -e "$directory/$name" ]] || shredded=$((shredded + 1))
+    fi
+  done
+  printf '%s' "$shredded"
+}
+
 ACAS_SEED_CURRENT_LOADER=''
 
 # shellcheck disable=SC2317  # reached only through the ERR trap installed below,
@@ -742,6 +827,15 @@ Options:
                       after it on the command line belongs to that mode --
                       \`harness/seed.sh --build-fixtures --help' prints its options and
                       its own exit codes.
+  --shred-credentials DESTROY the credential-bearing files a run leaves behind
+                      instead of seeding, then stop. The compiled side reads its
+                      database account out of the seeded SYSTEM record
+                      [copybooks/wssystem.cob:L137-L139], so a staged
+                      \`system.dat' has to carry it while the run needs it; this mode
+                      is what ends that lifetime, and \`tests/conftest.py' runs it at
+                      the end of every session. Reaches no database.
+                      \`harness/seed.sh --shred-credentials --help' prints its
+                      options.
   --seed-dir PATH     Read the scenario's declared flat files from PATH instead of
                       from the directory its own `seed_dir' resolves to. Requires a
                       scenario, since without one there is nothing to relocate.
@@ -1922,7 +2016,9 @@ acas_open_seed_autocommit_window() {
         "could not set the seeding window's autocommit mode to $ACAS_SEED_WINDOW_TARGET." \
         "$(acas_diag_summary "$ACAS_SQL_DIAG")" \
         'The administrative account must hold SUPER (or SET USER privileges) on' \
-        'this server. harness/docker-compose.yml supplies root for the purpose.'
+        'this server. The 20- init script in harness/Dockerfile.mariadb grants it' \
+        'SUPER for exactly this statement -- MariaDB has no finer-grained' \
+        'system-variable privilege -- and verifies the grant at container start.'
     fi
     # The window is claimed only AFTER the SET has succeeded, so the exit trap
     # never restores a mode this script did not change.
@@ -3301,6 +3397,18 @@ PY
   acas_claim_staging_root
   acas_assert_staged_removable "$staging"
 
+  #  SHREDDED, NOT MERELY UNLINKED. The directory being cleared is the previous
+  #  run's, and its `system.dat` carries the database account - see the
+  #  credential-artifact block near the top of this script. `rm -rf` alone leaves the
+  #  bytes recoverable in free blocks; this overwrites them first. It runs before the
+  #  removal rather than after, because after the removal there is nothing to
+  #  overwrite.
+  local acas_superseded
+  acas_superseded="$(acas_shred_credential_files_in "$staging")"
+  if [[ "$acas_superseded" != '0' ]]; then
+    acas_log "shredded $acas_superseded superseded credential-bearing file(s) in $staging"
+  fi
+
   rm -rf -- "$staging" || acas_die "$EX_FIXTURE" \
     "could not clear the scenario fixture directory $staging."
   mkdir -p "$staging" || acas_die "$EX_FIXTURE" \
@@ -3960,9 +4068,161 @@ acas_bf_publish() {
     "$stem: the staged fixture could not be published to $target"
   if [[ -e "$retired" ]]; then
     acas_bf_assert_removable "$retired"
+    #  The retired fixture's `system.dat` carries the database account, so it is
+    #  overwritten before the tree goes. Only the superseded copy is touched: the
+    #  one just published IS the fixture and every later seed reads it.
+    local retired_shredded
+    retired_shredded="$(acas_shred_credential_files_in "$retired")"
+    if [[ "$retired_shredded" != '0' ]]; then
+      acas_bf_log "$stem: shredded $retired_shredded credential-bearing file(s) from the superseded fixture"
+    fi
     rm -rf -- "$retired" || acas_bf_warn \
       "$stem: the previous fixture could not be removed: $retired"
   fi
+}
+
+# =============================================================================
+#  THE `--shred-credentials' MODE  -  DESTROY THE CARRIERS A RUN LEAVES BEHIND
+#
+#  A MODE, not a stage: it runs when a protocol run is over, whereas seeding runs at
+#  the start of one. It reaches no database, issues no SQL, needs no server and needs
+#  no scenario file - it works from the directories that exist, so it can be run
+#  after a failure just as well as after a success.
+#
+#  WHAT IT DESTROYS, and the asymmetry is deliberate:
+#    * by default, only the PER-RUN carrier, $ACAS_DATA/<scenario>/system.dat. The
+#      next seed re-stages it from the fixture, so nothing is lost and no later stage
+#      is disarmed.
+#    * with --include-fixtures, the BUILD PRODUCT as well, together with the
+#      completion manifest that claims it - because a fixture whose declared file is
+#      gone is INCOMPLETE, and a fixture that still advertises completeness would
+#      fail inside a later seed instead of saying "rebuild me". After this,
+#      `harness/seed.sh --build-fixtures' is required before the oracle tiers can run
+#      again; `tests/conftest.py' reports exactly that.
+#
+#  It drops the administrative pair at entry: it administers no schema.
+# =============================================================================
+readonly ACAS_SC_SELF='harness/seed.sh --shred-credentials'
+
+acas_sc_usage() {
+  cat <<USAGE
+$ACAS_SC_SELF -- destroy the credential-bearing files a run leaves behind.
+
+The compiled side reads its database account out of the SEEDED SYSTEM RECORD
+[copybooks/wssystem.cob:L137-L139], so a staged \`$ACAS_SEED_SYSTEM_FLAT_FILE' has to
+carry it while the run needs it. This mode is what ends that lifetime.
+
+Usage:
+  $ACAS_SC_SELF [options] [<scenario-name> ...]
+
+Arguments:
+  <scenario-name>     Only the named scenarios, by file stem -- for example
+                      clean_batch_gl. Default: every staged scenario directory
+                      present under the data root.
+
+Options:
+  --data-dir PATH     The data root holding <scenario>/ directories. Default
+                      \$ACAS_DATA, or /data.
+  --fixtures PATH     The fixture root. Default \$ACAS_FIXTURES, or
+                      \$ACAS_DATA/fixtures, or /data/fixtures.
+  --include-fixtures  Also destroy the fixture copies AND the completion manifest
+                      that declares them. The fixtures must then be rebuilt with
+                      \`harness/seed.sh --build-fixtures' before any scenario can be
+                      seeded again.
+  -h, --help          This text.
+
+Exit codes:
+  $EX_OK   completed; the report says how many files were destroyed.
+  $EX_USAGE  bad command line.
+  $EX_PRECONDITION  a root that was named does not exist, or a file could not be
+      destroyed.
+USAGE
+}
+
+acas_sc_main() {
+  #  FIRST, and before any child exists: this mode administers nothing.
+  unset ACAS_DB_ADMIN_USER ACAS_DB_ADMIN_PASSWORD
+
+  local data_dir="${ACAS_DATA:-/data}"
+  local fixtures="${ACAS_FIXTURES:-}"
+  local include_fixtures=0
+  local -a wanted=()
+
+  while (( $# > 0 )); do
+    case "$1" in
+      --data-dir)        [[ $# -ge 2 ]] || { acas_sc_usage >&2; return "$EX_USAGE"; }
+                         data_dir="$2"; shift 2 ;;
+      --fixtures)        [[ $# -ge 2 ]] || { acas_sc_usage >&2; return "$EX_USAGE"; }
+                         fixtures="$2"; shift 2 ;;
+      --include-fixtures) include_fixtures=1; shift ;;
+      -h|--help)         acas_sc_usage; return "$EX_OK" ;;
+      --)                shift; while (( $# > 0 )); do wanted+=("$1"); shift; done ;;
+      -*)                printf '%s: unrecognised option: %s\n' "$ACAS_SC_SELF" "$1" >&2
+                         acas_sc_usage >&2; return "$EX_USAGE" ;;
+      *)                 wanted+=("$1"); shift ;;
+    esac
+  done
+
+  [[ -n "$fixtures" ]] || fixtures="$data_dir/fixtures"
+
+  local name
+  for name in ${wanted[@]+"${wanted[@]}"}; do
+    #  A stem, never a path: this mode deletes, so it takes no traversal.
+    case "$name" in
+      */*|.|..|'') printf '%s: %s is not a scenario stem; pass a plain name such as clean_batch_gl.\n' \
+                     "$ACAS_SC_SELF" "$name" >&2
+                   return "$EX_USAGE" ;;
+    esac
+  done
+
+  local -a scenarios=()
+  if (( ${#wanted[@]} > 0 )); then
+    scenarios=("${wanted[@]}")
+  else
+    local entry
+    for entry in "$data_dir"/*; do
+      [[ -d "$entry" ]] || continue
+      [[ "$(basename -- "$entry")" != 'fixtures' ]] || continue
+      scenarios+=("$(basename -- "$entry")")
+    done
+  fi
+
+  if (( ${#scenarios[@]} == 0 )); then
+    printf '%s: no staged scenario directory under %s; nothing to destroy.\n' \
+      "$ACAS_SC_SELF" "$data_dir"
+    return "$EX_OK"
+  fi
+
+  local staged_total=0 fixture_total=0 destroyed
+  local stem
+  for stem in "${scenarios[@]}"; do
+    destroyed="$(acas_shred_credential_files_in "$data_dir/$stem")"
+    if [[ "$destroyed" != '0' ]]; then
+      staged_total=$((staged_total + destroyed))
+      printf '%s: shredded %s file(s) in %s\n' "$ACAS_SC_SELF" "$destroyed" "$data_dir/$stem"
+    fi
+
+    (( include_fixtures )) || continue
+    destroyed="$(acas_shred_credential_files_in "$fixtures/$stem")"
+    if [[ "$destroyed" != '0' ]]; then
+      fixture_total=$((fixture_total + destroyed))
+      printf '%s: shredded %s file(s) in %s\n' "$ACAS_SC_SELF" "$destroyed" "$fixtures/$stem"
+      #  The manifest declares a file that is now gone, so the fixture must stop
+      #  claiming it is complete. Removed rather than edited: a fixture is either
+      #  published whole or not published.
+      rm -f -- "$fixtures/$stem/$ACAS_BF_MANIFEST" || acas_bf_die "$EX_PRECONDITION" \
+        "could not remove the completion manifest of the emptied fixture $fixtures/$stem"
+      printf '%s: %s no longer declares itself complete; rebuild it with harness/seed.sh --build-fixtures %s\n' \
+        "$ACAS_SC_SELF" "$fixtures/$stem" "$stem"
+    fi
+  done
+
+  printf '%s: destroyed %s staged and %s fixture credential carrier(s) across %s scenario(s).\n' \
+    "$ACAS_SC_SELF" "$staged_total" "$fixture_total" "${#scenarios[@]}"
+  if (( fixture_total > 0 )); then
+    printf '%s: run harness/seed.sh --build-fixtures before seeding again.\n' "$ACAS_SC_SELF"
+  fi
+  return "$EX_OK"
 }
 
 acas_bf_main() {
@@ -4095,7 +4355,7 @@ acas_main() {
   #  removed wherever it appears BEFORE a bare `--'; after one, every word is an
   #  argument by definition and is left alone.
   local -a acas_argv=()
-  local acas_token acas_build_fixtures=0 acas_after_ddash=0
+  local acas_token acas_build_fixtures=0 acas_shred_credentials=0 acas_after_ddash=0
   for acas_token in "$@"; do
     if (( acas_after_ddash )); then
       acas_argv+=("$acas_token"); continue
@@ -4107,10 +4367,26 @@ acas_main() {
                         else
                           acas_build_fixtures=1
                         fi ;;
+      --shred-credentials) if (( acas_shred_credentials )); then
+                          acas_argv+=("$acas_token")
+                        else
+                          acas_shred_credentials=1
+                        fi ;;
       *)                acas_argv+=("$acas_token") ;;
     esac
   done
   set -- ${acas_argv[@]+"${acas_argv[@]}"}
+
+  if (( acas_build_fixtures && acas_shred_credentials )); then
+    printf 'harness/seed.sh: --build-fixtures and --shred-credentials are opposite modes; pass one.\n' >&2
+    exit "$EX_USAGE"
+  fi
+
+  if (( acas_shred_credentials )); then
+    local acas_sc_status=0
+    acas_sc_main "$@" || acas_sc_status=$?
+    exit "$acas_sc_status"
+  fi
 
   if (( acas_build_fixtures )); then
     local acas_bf_status=0

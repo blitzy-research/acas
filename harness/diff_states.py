@@ -2913,32 +2913,77 @@ def _make_output_directory(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True, mode=_OUTPUT_DIR_MODE)
 
 
+def protected_checkout_roots(env: Mapping[str, str]) -> tuple[tuple[Path, ...], str]:
+    """Return every checkout this process must never write into, and how it knows.
+
+    THE GUARD MAY NOT DEPEND ON A VARIABLE BEING SET. `$ACAS_REPO` is exported in
+    exactly ONE place - the `gnucobol` service of `harness/docker-compose.yml` - so
+    a bare-host invocation, a `docker run` without Compose and any direct developer
+    use arrive with it unset, and a guard that returned early on an unset variable
+    was disabled in precisely the situations nobody had configured. This tool
+    removes any report already at its target before it compares a single row
+    (:func:`invalidate_report`), so a fail-open guard here deletes a file out of
+    the frozen checkout.
+
+    The derivation is the one the harness already uses for the frozen schema -
+    `harness/normalize.py::default_schema_path` reads the environment when it says
+    something and resolves against its own location otherwise. `harness/` sits
+    directly under the checkout root, so `parents[1]` IS that root whenever this
+    file is read from a checkout.
+
+    BOTH SOURCES ARE RETURNED rather than one in preference to the other. They
+    normally name the same directory; when they differ - a tool copied out of one
+    checkout and run against another, or `$ACAS_REPO` naming a second worktree -
+    both are frozen trees and neither may be written into.
+
+    Args:
+        env: The environment to read `$ACAS_REPO` from.
+
+    Returns:
+        A pair: the resolved roots, in the order (`$ACAS_REPO`, this file's own
+            checkout), de-duplicated and never empty; and a short phrase naming
+            where they came from, for the refusal messages.
+    """
+    own = Path(__file__).resolve().parents[1]
+    configured = env.get(_ENV_REPO, "").strip()
+    if not configured:
+        return (own,), f"this tool's own checkout; ${_ENV_REPO} is unset"
+
+    declared = Path(configured).resolve()
+    if declared == own:
+        return (declared,), f"${_ENV_REPO}, which is this tool's own checkout"
+    return (declared, own), (
+        f"${_ENV_REPO} and this tool's own checkout, which differ"
+    )
+
+
 def _assert_writable(target: Path, env: Mapping[str, str]) -> None:
     """Assert the report may be written where it was asked to go.
+
+    UNCONDITIONAL. See :func:`protected_checkout_roots` for why the checkout is
+    derived rather than read out of the environment.
 
     Args:
         target: The report path.
         env: The environment, for `$ACAS_REPO`.
 
     Raises:
-        ReportPathError: It would land inside the read-only checkout.
+        ReportPathError: It would land inside a read-only checkout.
     """
-    repository = env.get(_ENV_REPO)
-    if not repository:
-        return
-    root = Path(repository).resolve()
+    roots, provenance = protected_checkout_roots(env)
     resolved = target.resolve()
-    if resolved == root or root in resolved.parents:
-        raise ReportPathError(
-            f"the report {target} would be written inside the checkout "
-            f"{root} (${_ENV_REPO}). Nothing may be written there: it "
-            f"holds the frozen COBOL, the bridges and mysql/ACASDB.sql, it "
-            f"is mounted read-only, and Agent Action Plan section 0.8.1 "
-            f"calls any diff touching those paths \"a defect in the "
-            f"migration, regardless of how harmless it appears\". Write it "
-            f"under ${_ENV_OUT} instead, for example "
-            f"${_ENV_OUT}/<scenario>/{DIFF_FILENAME}."
-        )
+    for root in roots:
+        if resolved == root or root in resolved.parents:
+            raise ReportPathError(
+                f"the report {target} would be written inside the checkout "
+                f"{root} ({provenance}). Nothing may be written there: it "
+                f"holds the frozen COBOL, the bridges and mysql/ACASDB.sql, it "
+                f"is mounted read-only, and Agent Action Plan section 0.8.1 "
+                f"calls any diff touching those paths \"a defect in the "
+                f"migration, regardless of how harmless it appears\". Write it "
+                f"under ${_ENV_OUT} instead, for example "
+                f"${_ENV_OUT}/<scenario>/{DIFF_FILENAME}."
+            )
 
 
 def invalidate_report(target: Path) -> None:
@@ -3563,6 +3608,13 @@ zero-byte file from an earlier passing run cannot survive an error path
 and be read as proof that this run passed. Afterwards: empty means
 compared and identical, non-empty means differences, ABSENT means no
 comparison was completed.
+
+the report may not land inside the frozen checkout, and THAT REFUSAL IS
+UNCONDITIONAL: because the report is deleted before anything is compared,
+a skipped check would delete a file out of the read-only tree. ACAS_REPO
+names the checkout when it is set; unset, the checkout is taken to be the
+one this tool was run out of (harness/ sits directly under it). Set
+ACAS_REPO only to name a DIFFERENT checkout to protect as well.
 
 the comparison is EXACT: no tolerance, no epsilon, no case- or
 whitespace-insensitive compare, no numeric coercion, and no ignore-list.

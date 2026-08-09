@@ -3604,6 +3604,95 @@ def test_the_contract_alone_installs_the_same_transport_declaration() -> None:
         connection.reset_connection_policy()
 
 
+def test_requiring_encryption_outranks_declaring_plaintext() -> None:
+    """Set both and the connection is REFUSED. Set either alone and nothing changes.
+
+    THE CONTRADICTION HAS ONE ANSWER AND THIS IS IT.
+    ``ACAS_DB_ALLOW_PLAINTEXT`` declares an unencrypted hop intended;
+    ``ACAS_DB_REQUIRE_TLS`` says there may not be one. A deployment that has set
+    both has contradicted itself, and the resolution must be the refusal: the
+    declaration is what a shell that has previously driven the harness leaves
+    behind, so letting it win means a deployment which asked for no unencrypted
+    path is silently granted one. Three specifications in this repository already
+    said so - the comment on ``resolve_transport_policy``, README-python-migration
+    section 8.1a's hardened-mode table, and now ``connection.py``'s own docstrings -
+    while the implementation evaluated the declaration first and did the opposite.
+
+    THE PARITY DEFAULTS ARE ASSERTED IN THE SAME TEST, because the value of the
+    rule depends on the branch being unreachable unless it is asked for: with
+    nothing set, and with the plaintext declaration alone (which is the harness's
+    own configuration and therefore every scenario run), the connection is
+    permitted exactly as the compiled ``Mysql-1000-Open`` permits it (rule R-3).
+    """
+    connection = importlib.import_module("acas_posting.dal.connection")
+    system_module = importlib.import_module("acas_posting.records.system_record")
+
+    #  A non-local target, which is what the harness's `mariadb` host is.
+    remote = {"host": "mariadb", "port": 3306, "database": "ACASDB"}
+    row = system_module.SystemRecord()
+
+    def attempt(*, declared: bool, required: bool) -> str:
+        """Return "permitted" or "refused" for one combination of the two switches."""
+        policy = connection.ConnectionPolicy(
+            transport=connection.TransportSecurity(isolated_oracle=declared),
+            require_encrypted_transport=required,
+        )
+        try:
+            connection._require_permitted_connection(
+                row,
+                remote,
+                policy.transport,
+                allow_frozen_placeholder_credentials=True,
+                policy=policy,
+            )
+        except connection.InsecureTransportError:
+            return "refused"
+        return "permitted"
+
+    #  EXACT-PARITY DEFAULT: nothing asked for, so the exposure is reported and the
+    #  connection is made - the compiled program inspects neither address nor account.
+    assert attempt(declared=False, required=False) == "permitted"
+
+    #  The declaration alone: unchanged, and this is the harness's configuration.
+    assert attempt(declared=True, required=False) == "permitted"
+
+    #  The requirement alone: refused, which is what hardened mode is for.
+    assert attempt(declared=False, required=True) == "refused"
+
+    #  BOTH: refused. This is the combination the finding was about.
+    assert attempt(declared=True, required=True) == "refused", (
+        "a plaintext declaration defeated an explicit encryption requirement; "
+        "ACAS_DB_ALLOW_PLAINTEXT must not be able to undo ACAS_DB_REQUIRE_TLS"
+    )
+
+    #  A verified transport satisfies the requirement, which is the way out that
+    #  does not involve abandoning it.
+    verified = connection.ConnectionPolicy(
+        transport=connection.TransportSecurity(
+            ca_file="/etc/ssl/certs/ca-certificates.crt"
+        ),
+        require_encrypted_transport=True,
+    )
+    connection._require_permitted_connection(
+        row,
+        remote,
+        verified.transport,
+        allow_frozen_placeholder_credentials=True,
+        policy=verified,
+    )
+
+    #  AND THE REFUSAL IS EVALUATED FIRST IN THE SOURCE, not merely observed to win
+    #  for these inputs: the ordering IS the rule, so it is asserted as an ordering.
+    source = Path(connection.__file__).read_text(encoding="utf-8")
+    body = source.split("def _require_permitted_connection", 1)[1]
+    requirement = body.index("if policy.require_encrypted_transport:")
+    declaration = body.index("if transport.isolated_oracle:")
+    assert requirement < declaration, (
+        "the isolated_oracle early return precedes the require_encrypted_transport "
+        "refusal again, so a plaintext declaration wins by branch order"
+    )
+
+
 def test_bind_irs_route_publishes_the_snapshot_of_its_single_zz090_pass() -> None:
     """One bind, one key-1 load, one remap, and the snapshot comes back."""
     args = importlib.import_module("acas_posting.cli.args")
@@ -6123,18 +6212,32 @@ def test_no_module_allocates_a_bare_anomaly_identifier() -> None:
 
 
 # ---------------------------------------------------------------------------
-#  THE DATABASE SUPERUSER CREDENTIAL REACHES TWO STAGES OF TEN
+#  THE DATABASE ADMINISTRATIVE CREDENTIAL REACHES TWO STAGES OF TEN
 #
-#  `harness/docker-compose.yml` must declare ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD
-#  at service level, because all ten protocol stages run inside the one `gnucobol`
-#  service - `tests/conftest.py` drives them from a single pytest process and an operator
-#  drives the same ten by hand - and stages 1 and 5, both `reset_db.sh`, drop and
-#  re-apply the frozen schema. A service-level variable is inherited by every descendant,
-#  so that put the superuser password into the environment of the GnuCOBOL compiler, the
-#  preSQL translator, every bridge and menu binary, the migrated Python cycle and pytest.
+#  ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD name the account
+#  `harness/reset_db.sh` authenticates as to drop and re-apply the frozen schema,
+#  which the application account deliberately cannot do. Stages 1 and 5 of the ten
+#  are that reset; the other eight must not be able to reach the credential.
 #
-#  Three independent mechanisms now remove it everywhere it is not needed, and the
-#  tests below assert each one plus the CENSUS that makes all three safe.
+#  IT USED TO BE DECLARED AT SERVICE LEVEL IN `harness/docker-compose.yml`, on the
+#  reasoning that all ten stages run inside the one `gnucobol` service. That was the
+#  wrong conclusion from a true premise: a service-level variable is inherited by
+#  EVERY process in the service and readable from `/proc/1/environ` by the
+#  container's own unprivileged uid, so it sat in the environment of the GnuCOBOL
+#  compiler, the preSQL translator, every bridge and menu binary, the migrated
+#  Python cycle and pytest - and while it named the superuser, anything running
+#  there could undo the application-grant narrowing entirely.
+#
+#  IT IS NOW SUPPLIED PER INVOCATION, with `docker compose run -e …` on the two
+#  administrative stages, and the account it names is no longer the superuser: the
+#  `20-` init script in `harness/Dockerfile.mariadb` provisions a purpose-scoped
+#  account and `MARIADB_ROOT_HOST=localhost` leaves root socket-only.
+#
+#  The three mechanisms that scrub it from CHILDREN remain in force and still
+#  matter, because the ephemeral container that runs the protocol DOES carry it:
+#  the script classification, the `unset` at each non-administrative script's
+#  entry, and `tests/conftest.py`'s `_run_script` scrub. The tests below assert
+#  each one plus the CENSUS that makes all three safe.
 # ---------------------------------------------------------------------------
 
 #: The two names. Spelled here rather than imported, so the test would notice a rename
@@ -6332,11 +6435,12 @@ def test_every_harness_script_is_classified_for_the_credential() -> None:
     happened to wrap it.
 
     The mechanism therefore becomes the classification itself, and a classification is
-    only worth anything while it is EXHAUSTIVE: `harness/docker-compose.yml` declares
-    the pair at service level, so a harness script nobody classified inherits the
-    database superuser password silently. This test is how that surfaces - a new
-    `harness/*.sh` fails here until it is deliberately placed in one list or the other,
-    and the two lists are what mechanism 2 and the census then enforce.
+    only worth anything while it is EXHAUSTIVE: the ephemeral container that runs the
+    two administrative stages DOES carry the pair - it is passed to that invocation
+    with `docker compose run -e …` - so a harness script nobody classified inherits it
+    silently from whichever stage it is invoked beside. This test is how that surfaces
+    - a new `harness/*.sh` fails here until it is deliberately placed in one list or
+    the other, and the two lists are what mechanism 2 and the census then enforce.
     """
     root = Path(__file__).resolve().parents[2]
     present = sorted(f"harness/{path.name}" for path in (root / "harness").glob("*.sh"))
@@ -6355,8 +6459,8 @@ def test_every_harness_script_is_classified_for_the_credential() -> None:
     assert not unclassified, (
         "these harness scripts are in neither credential list:\n  "
         + "\n  ".join(unclassified)
-        + "\n  Each inherits ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD from the "
-        "service environment until it is classified. Add it to "
+        + "\n  Each inherits ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD from any "
+        "invocation that carries them until it is classified. Add it to "
         "_ADMINISTRATIVE_SCRIPTS if it performs schema administration, or to "
         "_NON_ADMINISTRATIVE_SCRIPTS - and drop the pair at its entry - if it does not."
     )
@@ -6367,6 +6471,180 @@ def test_every_harness_script_is_classified_for_the_credential() -> None:
         "makes the census pass over a file that is not there while saying nothing about "
         "whatever replaced it."
     )
+
+
+def test_the_administrative_credential_is_not_in_the_runner_service_environment() -> None:
+    """Mechanism 0, the one the other three could not provide: it is not there to read.
+
+    THE FINDING THIS LOCKS. `harness/docker-compose.yml` declared
+    ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD in the `gnucobol` service's
+    `environment:` block, and named `root` as the account. A service-level variable is
+    inherited by every process in the service, including PID 1 and every
+    `docker compose exec` session, and is readable from `/proc/1/environ` by the
+    container's own unprivileged uid. Measured before the fix: a plain `exec` session
+    connected as `root@%` with ALL PRIVILEGES and GRANT OPTION, read `mysql.user` and
+    created a database - which made the narrowing of the application account to four
+    DML verbs decorative for anything running in that container.
+
+    The three scrubbing mechanisms asserted elsewhere in this section remove the pair
+    from CHILDREN of the harness scripts. None of them could remove it from the BASE
+    environment those children inherit from, which is why its absence there has to be
+    asserted separately and directly.
+
+    WHAT REPLACES IT, also asserted here because the two halves only work together:
+    `MARIADB_ROOT_HOST: localhost`, so the vendor entrypoint creates no
+    network-reachable superuser at all (the vendor entrypoint, lines 377 to 390), and a
+    distinct
+    administrative account provisioned by the `20-` init script. The pair is passed to
+    the two administrative stages per invocation instead.
+
+    READ WITH A LINE SCAN rather than a YAML parser, and deliberately: the assertion is
+    about what a reader of the file sees declared, and this tier must import with
+    nothing installed but pytest. Values are never captured into a message.
+    """
+    if not _COMPOSE.is_file():  # pragma: no cover - the file is committed
+        pytest.skip(f"{_COMPOSE} is absent, so its declarations cannot be checked")
+
+    lines = _COMPOSE.read_text(encoding="utf-8").splitlines()
+
+    #  Which service a line belongs to, by the two-space service keys. Anything
+    #  indented deeper than a service key belongs to the service above it.
+    service = ""
+    offenders: list[tuple[int, str]] = []
+    root_host_in: list[str] = []
+    admin_declared_in: list[str] = []
+    for number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = re.match(r"^ {2}([A-Za-z0-9_-]+):\s*$", line)
+        if match:
+            service = match.group(1)
+            continue
+        assignment = re.match(r"^ {6}([A-Z][A-Z0-9_]*):", line)
+        if assignment is None:
+            continue
+        name = assignment.group(1)
+        if name in _ADMIN_CREDENTIAL_NAMES:
+            admin_declared_in.append(service)
+            if service == "gnucobol":
+                offenders.append((number, name))
+        elif name == "MARIADB_ROOT_HOST":
+            root_host_in.append(service)
+            assert stripped.split(":", 1)[1].strip() == "localhost", (
+                f"line {number} sets MARIADB_ROOT_HOST to something other than "
+                f"`localhost`, so the vendor entrypoint creates a second, "
+                f"network-reachable `root@<host>` account holding ALL PRIVILEGES ON "
+                f"*.* WITH GRANT OPTION and PROXY."
+            )
+
+    assert not offenders, (
+        "harness/docker-compose.yml declares the administrative credential in the "
+        "`gnucobol` service environment, where every process in that container - the "
+        "compiler, the translator, every compiled binary, pytest, and any `exec` "
+        "session - can read it from its own environment or from /proc/1/environ: "
+        + ", ".join(f"line {number} sets {name}" for number, name in offenders)
+        + ". Pass it per invocation with `docker compose run -e NAME ...` on the two "
+        "stages that administer the schema instead."
+    )
+
+    assert "mariadb" in admin_declared_in, (
+        "no service declares ACAS_DB_ADMIN_USER / ACAS_DB_ADMIN_PASSWORD, so the "
+        "administrative account the `20-` init script provisions would never be "
+        "created and harness/reset_db.sh GATE 1 would have nothing to authenticate as. "
+        "The SERVER is the one place the pair belongs: a database has to know its own "
+        "accounts' credentials."
+    )
+
+    assert root_host_in == ["mariadb"], (
+        f"MARIADB_ROOT_HOST is declared by {root_host_in or 'no service'}; it must be "
+        f"declared by `mariadb` exactly once. Without it the vendor entrypoint defaults "
+        f"to `%` and provisions a network-reachable superuser, which makes every "
+        f"privilege narrowing in this stack decorative."
+    )
+
+
+def test_the_database_image_provisions_the_narrow_account_topology() -> None:
+    """The server-side half: three controls in the `20-` init script, each verified there.
+
+    `harness/Dockerfile.mariadb` generates a script the vendor entrypoint SOURCES after
+    its own `GRANT ALL`. This asserts the script carries all three account-topology
+    controls, because each closes a distinct finding and each is easy to lose in an
+    edit:
+
+    1. `RENAME USER` narrows the application account from the vendor's `<user>@'%'` to
+       the harness network pattern. Rename rather than create-and-grant, so the
+       credential is never handled and the grants move with the account.
+    2. The administrative account is provisioned with ALL on the ACAS schema plus
+       SUPER - the latter only because MariaDB has no finer privilege for
+       `SET GLOBAL autocommit`, which is the seeding window - and then read back.
+    3. The superuser's host scope is asserted SERVER-SIDE. `MARIADB_ROOT_HOST` lives in
+       the compose file, which the init script cannot see, so the script proves the
+       outcome instead of trusting the setting.
+
+    Asserted on the Dockerfile text rather than on a built image: this tier runs on a
+    bare host with no Docker, and the generated content is what a reviewer reads.
+    """
+    dockerfile = _harness_dir() / "Dockerfile.mariadb"
+    assert dockerfile.is_file(), f"{dockerfile} is absent"
+    text = dockerfile.read_text(encoding="utf-8")
+
+    for fragment, why in (
+        (
+            "RENAME USER",
+            "the application account would keep the vendor's wildcard host scope",
+        ),
+        (
+            "GRANT SUPER ON *.*",
+            "no administrative account would be provisioned, leaving the superuser as "
+            "the only account able to reset the schema",
+        ),
+        (
+            "IS_GRANTABLE",
+            "the administrative account's GRANT OPTION absence would be unverified, so "
+            "it could widen itself or the application account",
+        ),
+        (
+            "superuser scope VERIFICATION FAILED",
+            "a network-reachable `root` would not be caught at initialisation",
+        ),
+        (
+            "information_schema.USER_PRIVILEGES",
+            "the administrative account's global privileges would be unverified",
+        ),
+    ):
+        assert fragment in text, (
+            f"harness/Dockerfile.mariadb no longer contains {fragment!r}, so {why}."
+        )
+
+    #  The narrowing must not have been widened back: the four DML verbs the cycle
+    #  issues are still the whole of the application grant.
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE" in text, (
+        "the application account's grant is no longer the four DML verbs the migrated "
+        "cycle issues"
+    )
+    assert "DELETE,INSERT,SELECT,UPDATE" in text, (
+        "the read-back that refuses to finish initialisation on a wider application "
+        "grant is gone"
+    )
+
+    #  And no credential value may be introduced by any of it. Only lines that are
+    #  ACTUALLY SQL are examined - one carrying `IDENTIFIED BY` or `SET PASSWORD`
+    #  alongside the statement that takes it - so that the build-time assertion which
+    #  enforces this same rule inside the image, and which necessarily quotes the
+    #  phrase in its own diagnostic, is not itself read as a credential.
+    for line in text.splitlines():
+        upper = line.upper()
+        if "IDENTIFIED BY" not in upper and "SET PASSWORD" not in upper:
+            continue
+        if "CREATE USER" not in upper and "SET PASSWORD" not in upper:
+            continue
+        assert "${" in line, (
+            f"a password-bearing SQL clause in harness/Dockerfile.mariadb does not "
+            f"expand a variable, so it carries a literal credential into the image: "
+            f"{line.strip()[:120]!r}"
+        )
+
 
 
 def test_the_test_protocol_scrubs_the_credential_by_default() -> None:
@@ -6413,6 +6691,91 @@ def test_the_test_protocol_scrubs_the_credential_by_default() -> None:
         f"{source.count('administrative=True')} call site(s) request the "
         "administrative credential; exactly three should - the seed and the two "
         "resets. A fourth means some other stage has been handed the superuser."
+    )
+
+
+def test_the_credential_carrier_a_seed_leaves_behind_has_an_end_to_its_life() -> None:
+    """`system.dat` carries the database account, so something must destroy it.
+
+    THE VALUE HAS TO BE IN THE FILE and that half is not a defect: the compiled side
+    reads its credentials out of the SEEDED SYSTEM record
+    [copybooks/wssystem.cob:L137-L139] rather than out of its environment, and
+    `general.cbl` opens the system parameter file as a Cobol INDEXED file before it
+    connects [general/general.cbl:L385-L396]. `harness/seed.sh --build-fixtures`
+    therefore fills those three fields from the environment and REFUSES a scenario
+    that declares them, which is what keeps every credential out of the repository.
+
+    WHAT WAS WRONG WAS THE LIFETIME. Sixteen of these files accumulated across the
+    eight committed scenarios and nothing ever destroyed one, while the script
+    asserted in a comment that there was no credential file to shred. It cannot be
+    shredded when seeding ends - `run_cobol_scenario.sh` check 7/8 requires it in a
+    LATER stage - so the end of its life is the end of the run, and this test asserts
+    that such an end exists, is reached automatically, and cannot report success while
+    doing nothing.
+    """
+    root = Path(__file__).resolve().parents[2]
+    seed = (root / "harness" / "seed.sh").read_text(encoding="utf-8")
+    conftest_source = (root / "tests" / "conftest.py").read_text(encoding="utf-8")
+
+    #  The false claim may not come back.
+    assert "There is no credential FILE to shred" not in seed, (
+        "harness/seed.sh again asserts that it has no credential file to shred, "
+        "while it stages one carrying RDBMS-Passwd for every scenario it seeds."
+    )
+
+    #  The destroyer exists, overwrites before unlinking, and is reachable as a mode.
+    assert "acas_shred_credential_file()" in seed
+    assert "acas_shred_credential_files_in()" in seed
+    assert "shred --remove=unlink --zero" in seed, (
+        "the carrier is unlinked without being overwritten first, which leaves the "
+        "account recoverable in free blocks."
+    )
+    assert "--shred-credentials)" in seed, (
+        "harness/seed.sh publishes no --shred-credentials mode, so the only way to "
+        "end the carrier's life is by hand."
+    )
+    assert "--include-fixtures" in seed, (
+        "there is no way to destroy the fixture copies, so putting the harness away "
+        "cannot be done without deleting the volume."
+    )
+
+    #  A SUPERSEDED carrier is overwritten rather than merely unlinked, at both of the
+    #  two places where one is superseded: the re-stage and the fixture re-publish.
+    stage_body = seed.split("acas_stage_scenario_seed()", 1)[1]
+    shred_at = stage_body.index('acas_shred_credential_files_in "$staging"')
+    remove_at = stage_body.index('rm -rf -- "$staging"')
+    assert shred_at < remove_at, (
+        "the staged directory is removed before its credential carrier is "
+        "overwritten, so there is nothing left to overwrite."
+    )
+    publish_body = seed.split("acas_bf_publish()", 1)[1].split("\nacas_", 1)[0]
+    assert 'acas_shred_credential_files_in "$retired"' in publish_body, (
+        "the superseded fixture is discarded without its credential carrier being "
+        "overwritten."
+    )
+
+    #  IT IS REACHED WITHOUT BEING ASKED FOR. A cleanup nobody runs is not a cleanup.
+    assert "def pytest_sessionfinish" in conftest_source, (
+        "tests/conftest.py runs no session teardown, so a session leaves its staged "
+        "credential carriers behind."
+    )
+    finish_body = conftest_source.split("def pytest_sessionfinish", 1)[1]
+    assert '"--shred-credentials"' in finish_body, (
+        "the session teardown does not invoke the shred mode."
+    )
+    #  AND IT CANNOT TURN A VERDICT INTO A CLEANUP FAILURE.
+    assert "del exitstatus" in finish_body, (
+        "the teardown reads the session status; the cleanup is unconditional, "
+        "because a failed run leaves the same carrier behind as a passing one."
+    )
+    assert "raise" not in finish_body, (
+        "the session teardown can raise, so a cleanup failure would replace the "
+        "outcome the session was run to establish."
+    )
+    #  ... and it does not hand the superuser to the child either.
+    assert "without_admin_credentials(os.environ)" in finish_body, (
+        "the teardown passes the administrative pair to a stage that administers "
+        "nothing."
     )
 
 

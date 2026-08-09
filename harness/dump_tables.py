@@ -3821,9 +3821,15 @@ what is written
 environment
   ACAS_DB_HOST  ACAS_DB_PORT  ACAS_DB_NAME  ACAS_DB_USER  ACAS_DB_PASSWORD
   must be set and non-empty; ACAS_DB_SOCKET may be empty, meaning TCP.
-  ACAS_OUT supplies the default for --out-dir. ACAS_REPO, when set, is the
+  ACAS_OUT supplies the default for --out-dir. ACAS_REPO names the
   read-only checkout: the dump tree may neither lie inside it nor contain
-  it. Credentials are never logged and never reach a dump file. The COBOL
+  it. THAT REFUSAL IS UNCONDITIONAL - with ACAS_REPO unset the checkout is
+  taken to be the one this tool was run out of (harness/ sits directly
+  under it), because publishing removes every *.json from its destination
+  first and a skipped check deleted data_dictionary/*.json, the R-5
+  deliverable. Set ACAS_REPO only to name a DIFFERENT checkout to protect
+  as well; it is never needed to switch the guard on.
+  Credentials are never logged and never reach a dump file. The COBOL
   side cannot carry a database name, user or password longer than 12
   characters, nor a host longer than 32 [copybooks/wsfnctn.cob:L56-L62].
 
@@ -6476,6 +6482,55 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def protected_checkout_roots(env: Mapping[str, str]) -> tuple[tuple[Path, ...], str]:
+    """Return every checkout this process must never write into, and how it knows.
+
+    THE GUARD MAY NOT DEPEND ON A VARIABLE BEING SET, which is the whole point of
+    this function existing rather than the caller reading `$ACAS_REPO` inline.
+    `$ACAS_REPO` is exported in exactly ONE place - the `gnucobol` service of
+    `harness/docker-compose.yml` - so a bare-host invocation, a `docker run`
+    without Compose and any direct developer use arrive with it unset. A guard
+    that returned early on an unset variable was therefore disabled precisely in
+    the situations nobody had configured, and publishing then removed every
+    `*.json` from the destination it was pointed at:
+    `data_dictionary/acas_posting_dictionary.json` and its schema are the
+    machine-readable data dictionary Agent Action Plan sections 0.2.1.3 and 0.7.2
+    (rule R-5) make a deliverable, and a fail-open guard deleted both.
+
+    So the answer is never empty. The derivation is the one this repository already
+    uses for the frozen schema - `harness/normalize.py::default_schema_path` reads
+    `$ACAS_REPO` when it is set and otherwise resolves the path against this
+    module's own parent directory - applied here to the checkout root itself:
+    `harness/` sits directly under it, so `parents[1]` IS the checkout whenever
+    this file is read from one.
+
+    BOTH SOURCES ARE RETURNED, not one in preference to the other. They normally
+    name the same directory; when they differ - a tool copied out of one checkout
+    and run against another, or `$ACAS_REPO` naming a second worktree - both are
+    frozen trees and neither may be written into, so protecting only the
+    configured one would leave the other exposed.
+
+    Args:
+        env: The environment to read `$ACAS_REPO` from.
+
+    Returns:
+        A pair: the resolved roots, in the order (`$ACAS_REPO`, this file's own
+            checkout), de-duplicated and never empty; and a short phrase naming
+            where they came from, for the refusal messages.
+    """
+    own = Path(__file__).resolve().parents[1]
+    configured = env.get(_ENV_REPO, "").strip()
+    if not configured:
+        return (own,), f"this tool's own checkout; ${_ENV_REPO} is unset"
+
+    declared = Path(configured).resolve()
+    if declared == own:
+        return (declared,), f"${_ENV_REPO}, which is this tool's own checkout"
+    return (declared, own), (
+        f"${_ENV_REPO} and this tool's own checkout, which differ"
+    )
+
+
 def _assert_output_writable(
     destination: Path, env: Mapping[str, str]
 ) -> None:
@@ -6483,41 +6538,44 @@ def _assert_output_writable(
 
     Inside-out - the destination lies at or under the checkout - is the obvious one.
 
+    UNCONDITIONAL. See :func:`protected_checkout_roots` for why the checkout is
+    derived rather than read out of the environment: with `$ACAS_REPO` unset this
+    check used to be skipped entirely, and the publish that follows removes every
+    `*.json` from its destination.
+
     Args:
         destination: The directory the `<TABLE>.json` files land in.
         env: The environment, for `$ACAS_REPO`.
 
     Raises:
-        DumpPathError: The destination overlaps the read-only checkout in either
+        DumpPathError: The destination overlaps a read-only checkout in either
             direction.
     """
-    repository = env.get(_ENV_REPO)
-    if not repository:
-        return
-    root = Path(repository).resolve()
+    roots, provenance = protected_checkout_roots(env)
     resolved = destination.resolve()
 
-    if resolved == root or root in resolved.parents:
-        raise DumpPathError(
-            f"the dump tree {destination} resolves to {resolved}, which is "
-            f"inside the read-only checkout {root} (${_ENV_REPO}). Nothing "
-            f"may be written there: it holds the frozen COBOL, the bridges "
-            f"and mysql/ACASDB.sql, and Agent Action Plan section 0.8.1 "
-            f"calls any diff touching those paths \"a defect in the "
-            f"migration, regardless of how harmless it appears\". Write "
-            f"under ${_ENV_OUT} instead."
-        )
+    for root in roots:
+        if resolved == root or root in resolved.parents:
+            raise DumpPathError(
+                f"the dump tree {destination} resolves to {resolved}, which is "
+                f"inside the read-only checkout {root} ({provenance}). Nothing "
+                f"may be written there: it holds the frozen COBOL, the bridges "
+                f"and mysql/ACASDB.sql, and Agent Action Plan section 0.8.1 "
+                f"calls any diff touching those paths \"a defect in the "
+                f"migration, regardless of how harmless it appears\". Write "
+                f"under ${_ENV_OUT} instead."
+            )
 
-    if resolved in root.parents:
-        raise DumpPathError(
-            f"the dump tree {destination} resolves to {resolved}, which "
-            f"CONTAINS the read-only checkout {root} (${_ENV_REPO}). "
-            f"Publishing a tree removes every stale *.json from its "
-            f"destination first, so a destination that contains the "
-            f"checkout would delete files out of it. Name the leaf "
-            f"directory the dumps belong in, for example "
-            f"${_ENV_OUT}/<scenario>/cobol."
-        )
+        if resolved in root.parents:
+            raise DumpPathError(
+                f"the dump tree {destination} resolves to {resolved}, which "
+                f"CONTAINS the read-only checkout {root} ({provenance}). "
+                f"Publishing a tree removes every stale *.json from its "
+                f"destination first, so a destination that contains the "
+                f"checkout would delete files out of it. Name the leaf "
+                f"directory the dumps belong in, for example "
+                f"${_ENV_OUT}/<scenario>/cobol."
+            )
 
 
 def _resolve_output(

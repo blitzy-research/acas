@@ -642,6 +642,18 @@ def _atoi(text: str) -> int:
 #  deployment choice - which is the only division that satisfies R-3 and CWE-319
 #  at the same time.
 #
+#  AND WHERE THE TWO OPT-INS CONTRADICT EACH OTHER, THE STRICT ONE WINS.
+#  `TransportSecurity(isolated_oracle=True)` declares an unencrypted hop
+#  intended; `require_encrypted_transport=True` says there may not be one. A
+#  deployment that sets both has contradicted itself, and
+#  `_require_permitted_connection` resolves it by REFUSING - it evaluates the
+#  requirement before the declaration - so a plaintext declaration left in an
+#  environment by an earlier harness run cannot quietly undo a deployment's demand
+#  for encryption. Only TLS verification, or a local target, satisfies the
+#  requirement. This costs the parity path nothing: `require_encrypted_transport`
+#  is off by default and the harness never sets it, so the branch is unreachable
+#  in every scenario run.
+#
 #  WHY THIS CHANGES NO BEHAVIOUR THAT IS COMPARED
 #  ---------------------------------------------
 #  The two refusals that remain reachable are opt-in, and one further refusal is
@@ -752,7 +764,10 @@ class TransportSecurity:
         isolated_oracle: Declares that the target is the comparison harness on a private
             network whose server has no TLS configured at all - the situation the
             harness genuinely runs in - and that a plaintext connection to it is
-            intended.
+            intended. IT SILENCES THE REPORT, IT DOES NOT OVERRIDE A REFUSAL:
+            ``ConnectionPolicy(require_encrypted_transport=True)`` still refuses,
+            because that switch says an unencrypted hop is not permitted at all
+            and this declaration only says one was expected.
     """
 
     ca_file: str | None = None
@@ -856,9 +871,15 @@ class ConnectionPolicy:
             the frozen C interface connects. Supply
             ``TransportSecurity(ca_file=...)`` to encrypt and verify.
         require_encrypted_transport: ``True`` refuses a non-local target that is
-            neither verified by a certificate authority nor declared an isolated
-            oracle, raising :class:`InsecureTransportError` (CWE-319). ``False``
-            - the default - reports the exposure as a warning and proceeds.
+            not verified by a certificate authority, raising
+            :class:`InsecureTransportError` (CWE-319). ``False`` - the default -
+            reports the exposure as a warning and proceeds. IT OUTRANKS
+            ``transport.isolated_oracle``: the declaration says an unencrypted
+            hop is intended and this switch says there may be none, so a
+            deployment that has set both is refused rather than permitted, and a
+            plaintext declaration left in an environment cannot quietly undo a
+            deployment's demand for encryption. Satisfy it with
+            ``TransportSecurity(ca_file=...)``, or stop requiring it.
         require_declared_placeholder_credentials: ``True`` refuses a
             ``SYSTEM-REC`` row still carrying the frozen shipped placeholder
             user and password [copybooks/wssystem.cob:L138-L139]
@@ -1185,9 +1206,13 @@ def _require_permitted_connection(
             ``require_declared_placeholder_credentials``.
         InsecureTransportError: A client certificate was supplied without its key
             or a key without its certificate, which cannot authenticate anything;
-            or the target is not local, is neither verified nor declared an
-            isolated oracle, AND the installed policy sets
-            ``require_encrypted_transport``.
+            or the target is not local, is not verified by a certificate
+            authority, AND the installed policy sets
+            ``require_encrypted_transport``. An ``isolated_oracle`` declaration
+            does NOT avert that second refusal: strictness outranks permission,
+            so a deployment that asked for no unencrypted path cannot have one
+            granted by a stale declaration in its environment. Only TLS
+            verification, or a local target, satisfies the requirement.
 
     Note:
         ONE RETURN CONTRACT, AND IT IS `None`. Returning a `concerns` list here
@@ -1238,6 +1263,41 @@ def _require_permitted_connection(
     if transport.verifies_the_server():
         return
 
+    #  STRICTNESS OUTRANKS PERMISSION, AND THE ORDER OF THESE TWO BRANCHES IS THE
+    #  WHOLE OF THAT RULE. Both settings are opt-in and they answer different
+    #  questions - `isolated_oracle` DECLARES that an unencrypted hop is intended,
+    #  `require_encrypted_transport` DEMANDS that there be none - so a deployment
+    #  that has set both has contradicted itself, and which one wins is a decision
+    #  this module must take rather than leave to whichever branch happens to come
+    #  first. It resolves in favour of the refusal: a deployment that asked for no
+    #  unencrypted path must not be granted one by a variable left behind in its
+    #  environment, which is exactly what `ACAS_DB_ALLOW_PLAINTEXT` is in a shell
+    #  that has previously driven the harness. Written the other way round the
+    #  declaration silently defeated the requirement, and `acas_posting/cli/args.py`
+    #  and README-python-migration.md section 8.1a both stated the opposite of what
+    #  the code did.
+    #
+    #  NEITHER DEFAULT MOVES, so no parity path is touched (rule R-3). With
+    #  `require_encrypted_transport` unset - which is the shipped default, the
+    #  harness's configuration and every scenario run - this branch is not reached
+    #  and the declaration is honoured exactly as before. Only the contradictory
+    #  combination behaves differently, and it cannot arise unless a deployment sets
+    #  `ACAS_DB_REQUIRE_TLS` by name, which the AAP's own hardened mode already
+    #  describes as not-parity-evidence.
+    if policy.require_encrypted_transport:
+        raise InsecureTransportError(
+            "the connect target is not a loopback address or a Unix socket and "
+            "the installed ConnectionPolicy requires an encrypted transport, so "
+            "the credentials from [copybooks/wssystem.cob:L138-L139] and every "
+            "posted figure would cross the network in the clear: supply "
+            "TransportSecurity(ca_file=...) to verify and encrypt. An "
+            "isolated_oracle declaration does NOT satisfy this requirement - it "
+            "declares the exposure intended, and require_encrypted_transport "
+            "says there may be none - so a deployment that means to permit the "
+            "harness's plaintext link must stop requiring encryption rather than "
+            "declare its way past it"
+        )
+
     if transport.isolated_oracle:
         # Logged without the host, the account or the schema.
         _LOG.warning(
@@ -1246,16 +1306,6 @@ def _require_permitted_connection(
             "credentials and posted figures are unprotected on this connection"
         )
         return
-
-    if policy.require_encrypted_transport:
-        raise InsecureTransportError(
-            "the connect target is not a loopback address or a Unix socket and "
-            "the installed ConnectionPolicy requires an encrypted transport, so "
-            "the credentials from [copybooks/wssystem.cob:L138-L139] and every "
-            "posted figure would cross the network in the clear: supply "
-            "TransportSecurity(ca_file=...) to verify and encrypt, or declare "
-            "TransportSecurity(isolated_oracle=True) for the parity harness"
-        )
 
     #  REPORTED AND PERMITTED, and the wording matters: the target is called
     #  UNPROTECTED, never "isolated". Nothing here infers that a remote host is

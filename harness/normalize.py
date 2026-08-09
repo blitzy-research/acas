@@ -699,6 +699,51 @@ def default_schema_path(env: Mapping[str, str] | None = None) -> Path:
     return Path(__file__).resolve().parent.parent / _SCHEMA_RELPATH
 
 
+def protected_checkout_roots(env: Mapping[str, str]) -> tuple[tuple[Path, ...], str]:
+    """Return every checkout this process must never write into, and how it knows.
+
+    THE GUARD MAY NOT DEPEND ON A VARIABLE BEING SET. `$ACAS_REPO` is exported in
+    exactly ONE place - the `gnucobol` service of `harness/docker-compose.yml` - so
+    a bare-host invocation, a `docker run` without Compose and any direct developer
+    use arrive with it unset. A guard that returned early on an unset variable was
+    therefore disabled in precisely the situations nobody had configured, and
+    publishing a normalised tree removes every `*.json` from its destination first:
+    pointed at `data_dictionary/`, that deleted
+    `acas_posting_dictionary.json` and its schema, which Agent Action Plan
+    sections 0.2.1.3 and 0.7.2 (rule R-5) make a deliverable.
+
+    So the answer is never empty, and the derivation is the one
+    :func:`default_schema_path` directly above already uses for the frozen schema -
+    the environment when it says something, this file's own location otherwise.
+    `harness/` sits directly under the checkout root, so `parents[1]` IS that root
+    whenever this file is read from a checkout.
+
+    BOTH SOURCES ARE RETURNED rather than one in preference to the other. They
+    normally name the same directory; when they differ - a tool copied out of one
+    checkout and run against another, or `$ACAS_REPO` naming a second worktree -
+    both are frozen trees and neither may be written into.
+
+    Args:
+        env: The environment to read `$ACAS_REPO` from.
+
+    Returns:
+        A pair: the resolved roots, in the order (`$ACAS_REPO`, this file's own
+            checkout), de-duplicated and never empty; and a short phrase naming
+            where they came from, for the refusal messages.
+    """
+    own = Path(__file__).resolve().parents[1]
+    configured = env.get(_ENV_REPO, "").strip()
+    if not configured:
+        return (own,), f"this tool's own checkout; ${_ENV_REPO} is unset"
+
+    declared = Path(configured).resolve()
+    if declared == own:
+        return (declared,), f"${_ENV_REPO}, which is this tool's own checkout"
+    return (declared, own), (
+        f"${_ENV_REPO} and this tool's own checkout, which differ"
+    )
+
+
 def _parse_declaration(
     name: str, declaration: str, line: int
 ) -> ColumnType:
@@ -3168,6 +3213,10 @@ environment
             It is also the tree the destination may neither lie inside
             nor contain: publishing purges its destination, so a
             destination containing the checkout would delete out of it.
+            THAT REFUSAL IS UNCONDITIONAL - unset, the checkout is taken
+            to be the one this tool was run out of (harness/ sits
+            directly under it). Set ACAS_REPO only to name a DIFFERENT
+            checkout to protect as well; it never switches the guard on.
   ACAS_OUT  supplies the default --out-dir and the default --report
             directory, $ACAS_OUT/normalize/. Nothing is ever written
             under ACAS_REPO: harness/docker-compose.yml mounts it
@@ -3525,25 +3574,45 @@ def _assert_output_writable(
 
     Inside-out - the destination lies at or under the checkout - is the obvious one.
 
+    UNCONDITIONAL. See :func:`protected_checkout_roots` for why the checkout is
+    derived rather than read out of the environment: with `$ACAS_REPO` unset this
+    check used to be skipped entirely, and publishing removes every `*.json` from
+    its destination first.
+
     Args:
         destination: The directory the normalised dumps land in.
         env: The environment, for `$ACAS_REPO`.
 
     Raises:
-        OutputPathError: The destination overlaps the read-only checkout in either
+        OutputPathError: The destination overlaps a read-only checkout in either
             direction.
     """
-    repository = env.get(_ENV_REPO)
-    if not repository:
-        return
-    root = Path(repository).resolve()
+    roots, provenance = protected_checkout_roots(env)
     resolved = destination.resolve()
 
+    for root in roots:
+        _refuse_overlap(destination, resolved, root, provenance)
+
+
+def _refuse_overlap(
+    destination: Path, resolved: Path, root: Path, provenance: str
+) -> None:
+    """Refuse a destination that overlaps one protected checkout, either way.
+
+    Args:
+        destination: The directory as the operator wrote it, for the message.
+        resolved: Its resolved form.
+        root: One protected checkout root.
+        provenance: How `root` was arrived at, for the message.
+
+    Raises:
+        OutputPathError: `resolved` is at, under or above `root`.
+    """
     if resolved == root or root in resolved.parents:
         raise OutputPathError(
             f"the normalised tree {destination} resolves to {resolved}, "
             f"which is inside the read-only checkout {root} "
-            f"(${_ENV_REPO}). Nothing may be written there: it holds the "
+            f"({provenance}). Nothing may be written there: it holds the "
             f"frozen COBOL, the bridges and mysql/ACASDB.sql - which this "
             f"tool READS from that tree - and Agent Action Plan section "
             f"0.8.1 calls any diff touching those paths \"a defect in the "
@@ -3554,7 +3623,7 @@ def _assert_output_writable(
     if resolved in root.parents:
         raise OutputPathError(
             f"the normalised tree {destination} resolves to {resolved}, "
-            f"which CONTAINS the read-only checkout {root} (${_ENV_REPO}). "
+            f"which CONTAINS the read-only checkout {root} ({provenance}). "
             f"Publishing a tree removes every stale *.json from its "
             f"destination first, so a destination that contains the "
             f"checkout would delete files out of it. Name the leaf "

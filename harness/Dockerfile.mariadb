@@ -38,7 +38,307 @@ LABEL org.opencontainers.image.title="ACAS posting-cycle oracle - MariaDB" \
       acas.harness.autocommit="1" \
       acas.harness.autocommit.seeding-window="0" \
       acas.harness.autocommit.window-authority="harness/seed.sh" \
-      acas.harness.cobol.toolchain="absent"
+      acas.harness.cobol.toolchain="absent" \
+      acas.harness.apt.snapshot="20260801T000000Z" \
+      acas.harness.apt.security-upgrade="applied"
+
+
+# -----------------------------------------------------------------------------
+#  DISTRIBUTION SECURITY UPDATES -- APPLIED, AND FROM A PINNED SNAPSHOT
+#
+#  The base image is digest-pinned to `mariadb:10.11.7`, which is the server
+#  version the frozen schema was produced by [mysql/ACASDB.sql:L1] and is therefore
+#  not negotiable. But pinning the IMAGE pinned its Ubuntu 22.04 package set to
+#  whatever was current when that image was published, and this Dockerfile
+#  performed no apt work at all -- so every distribution security update published
+#  since was simply never applied. Measured with Trivy against the built image:
+#  381 findings, 351 of them FIXABLE across 48 packages, including HIGH advisories
+#  in `openssl`/`libssl3`, `rsync` and the `gpg` family.
+#
+#  None of them was exploitable in this configuration and each was reasoned about
+#  individually -- TLS is disabled so no OpenSSL handshake ever occurs, wsrep is
+#  off so `rsync` is unreachable, apt cannot run at runtime because the container
+#  has no egress -- but "not exploitable in today's configuration" is a property of
+#  the configuration, not of the components, and an image whose posture can only
+#  degrade is not a posture. So the fixes are applied.
+#
+#  TWO PROPERTIES ARE PRESERVED WHILE APPLYING THEM, and both are asserted below:
+#
+#    1. REPRODUCIBILITY. The sources are repointed at snapshot.ubuntu.com at the
+#       SAME serial `harness/Dockerfile.gnucobol` pins, so this layer resolves to
+#       one fixed package set rather than to "whatever is current today". A build
+#       from this file a year from now installs the same bytes.
+#    2. THE SERVER VERSION. `--only-upgrade` with an explicit package list can add
+#       nothing and can upgrade nothing outside the list, and `mariadb-server` is
+#       not in it. The assertion after the install re-reads the installed version
+#       and fails the build if it has moved off 10.11.7 -- so a future edit to this
+#       list cannot silently upgrade the oracle's server out from under the frozen
+#       schema. (Measured: the vendor repository still offers exactly
+#       `1:10.11.7+maria~ubu2204`, so even a careless upgrade would not have moved
+#       it. The assertion does not depend on that remaining true.)
+#
+#  MEASURED OUTCOME of this layer plus the Go-binary replacement below, same Trivy
+#  invocation against the built image: 381 findings with 351 fixable becomes 30
+#  findings with ZERO fixable, zero CRITICAL and zero HIGH. Every one of the 30 that
+#  remains is reported `status=affected` -- no upstream fix exists to apply -- and
+#  they are 9 MEDIUM and 21 LOW in `util-linux`/`libmount`/`libblkid`/`libuuid`,
+#  `libp11-kit0`, `galera-4`, the `ncurses` family, `libsystemd0`/`libudev1`,
+#  `libgcrypt20`, `libelf1`, `libzstd1`, `libstdc++6`/`libgcc-s1`/`gcc-12-base`,
+#  `libpcre2-8-0`, `libbpf0` and `login`/`passwd`. So the image no longer carries a
+#  single finding that a rebuild could have fixed, which is the only claim worth
+#  making: unpatchable residue is a fact about the distribution, unapplied patches
+#  were a fact about this Dockerfile.
+#
+#  WHAT IS DELIBERATELY NOT PATCHED, per component, because no distribution fix
+#  exists for it:
+#
+#    * `/usr/lib/mysql/plugin/auth_pam_tool_dir/auth_pam_tool` -- the vendor's own
+#      set-user-ID PAM helper. PAM authentication is not configured and ACAS
+#      authenticates with native MariaDB accounts, but reaching into a vendor
+#      plugin directory is over-reach for a fixture image. Left exactly as shipped,
+#      as the OS privilege block further down already records.
+#    * MariaDB 10.11.7 itself, which carries a CVSS-10.0 Galera/wsrep advisory.
+#      The version is fixed by the frozen schema header and the exposure is
+#      contained rather than fixed: `wsrep_on=OFF`, `wsrep_provider=none`,
+#      `wsrep_notify_cmd` empty -- which is the upstream-prescribed workaround
+#      already in force -- a single node, and no Galera port reachable on an
+#      `internal: true` network with no published port.
+#    * The 30 `status=affected` findings enumerated above: apt has nothing newer to
+#      install for any of them, so there is no patch to apply and no version to
+#      pin. They are recorded rather than silently carried.
+# -----------------------------------------------------------------------------
+ARG APT_SNAPSHOT=20260801T000000Z
+
+RUN set -eu; \
+    echo "--- repointing apt at the frozen snapshot ${APT_SNAPSHOT} (reproducible security updates) ---"; \
+    cp /etc/apt/sources.list /etc/apt/sources.list.image-original; \
+    printf '%s\n' \
+      "deb https://snapshot.ubuntu.com/ubuntu/${APT_SNAPSHOT} jammy main restricted universe multiverse" \
+      "deb https://snapshot.ubuntu.com/ubuntu/${APT_SNAPSHOT} jammy-updates main restricted universe multiverse" \
+      "deb https://snapshot.ubuntu.com/ubuntu/${APT_SNAPSHOT} jammy-security main restricted universe multiverse" \
+      > /etc/apt/sources.list; \
+    \
+    echo '--- recording the server version BEFORE, so the assertion after has something to compare ---'; \
+    server_before="$(dpkg-query -W -f='${Version}' mariadb-server)"; \
+    echo "    mariadb-server = ${server_before}"; \
+    \
+    apt-get update 2>&1 | tee /tmp/apt-snapshot-update.log; \
+    if grep -q 'Failed to fetch' /tmp/apt-snapshot-update.log; then \
+        echo "FATAL: the apt snapshot ${APT_SNAPSHOT} could not be fetched, so the package set would not be reproducible." >&2; \
+        grep -m5 'Failed to fetch' /tmp/apt-snapshot-update.log >&2; \
+        exit 1; \
+    fi; \
+    grep -q "snapshot.ubuntu.com/ubuntu/${APT_SNAPSHOT}" /tmp/apt-snapshot-update.log \
+      || { echo 'FATAL: apt did not fetch from the snapshot endpoint; the pin was not honoured.' >&2; exit 1; }; \
+    rm -f /tmp/apt-snapshot-update.log; \
+    \
+    echo '--- applying the available fixes, and NOTHING ELSE: --only-upgrade cannot install a new package ---'; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade --no-install-recommends \
+        dpkg gawk gcc-12-base gpg gpgconf gpgv gzip \
+        libc-bin libc6 libcap2 libcap2-bin libconfig-inifiles-perl libdbi-perl \
+        libelf1 libgcc-s1 libgcrypt20 libgnutls30 libgssapi-krb5-2 libk5crypto3 \
+        libkrb5-3 libkrb5support0 liblzma5 libncurses6 libncursesw6 \
+        libpam-modules libpam-modules-bin libpam-runtime libpam0g \
+        libperl5.34 libsqlite3-0 libssl3 libstdc++6 libsystemd0 libtasn1-6 \
+        libtinfo6 libudev1 ncurses-base ncurses-bin openssl perl perl-base \
+        perl-modules-5.34 rsync sed tar xz-utils; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*; \
+    \
+    echo '--- THE SERVER VERSION MUST NOT HAVE MOVED (the frozen schema names it) ---'; \
+    server_after="$(dpkg-query -W -f='${Version}' mariadb-server)"; \
+    [ "${server_after}" = "${server_before}" ] \
+      || { echo "FATAL: mariadb-server moved from ${server_before} to ${server_after}. mysql/ACASDB.sql was produced by 10.11.7 and the oracle must serve that version." >&2; exit 1; }; \
+    case "${server_after}" in \
+      1:10.11.7+maria*) : ;; \
+      *) echo "FATAL: mariadb-server is ${server_after}, not 1:10.11.7+maria*. The frozen schema header [mysql/ACASDB.sql:L1] names 10.11.7-MariaDB." >&2; exit 1 ;; \
+    esac; \
+    echo "    mariadb-server = ${server_after}  (unchanged)"; \
+    \
+    echo '--- the server must still start and parse its option files ---'; \
+    mariadbd --verbose --help >/dev/null; \
+    mariadbd --version; \
+    \
+    echo '--- resolved versions of the security-relevant set (build-log evidence) ---'; \
+    dpkg-query -W -f='${Package}=${Version}\n' openssl libssl3 rsync gpg gzip libc6 libgnutls30 perl tar libpam0g; \
+    \
+    echo "OK: distribution security updates applied from snapshot ${APT_SNAPSHOT}; mariadb-server unchanged."
+
+
+# -----------------------------------------------------------------------------
+#  THE PRIVILEGE-DROP HELPER -- NO Go RUNTIME, AND WHY IT IS REPLACED
+#
+#  The vendor image ships `/usr/local/bin/gosu`, a statically linked Go binary
+#  built against Go 1.18's standard library. Trivy attributes 103 vulnerabilities
+#  to that embedded `stdlib`, four of them CRITICAL (CVE-2023-24538,
+#  CVE-2023-24540, CVE-2024-24790, CVE-2025-68121), and there is NO distribution
+#  fix: `gosu` is not a dpkg package here -- `dpkg -S /usr/local/bin/gosu` finds no
+#  owner -- so the only remedies are to rebuild it with a current Go toolchain or
+#  to stop shipping the Go binary at all.
+#
+#  None of the 103 was exploitable: the file is not set-user-ID, it is invoked
+#  exactly ONCE by the vendor entrypoint -- `exec gosu mysql "${BASH_SOURCE[0]}"
+#  "$@"` -- and then replaced by the process it execs, and it parses no HTML
+#  template, opens no TLS connection and resolves no attacker-supplied address.
+#  But 103 findings that cannot be fixed are 103 findings that stay, and the whole
+#  Go runtime is present to perform one setuid/setgid/initgroups call that
+#  util-linux already provides.
+#
+#  SO IT IS REPLACED BY A SHIM OVER `setpriv`, WHICH IS ALREADY IN THE IMAGE
+#  (util-linux). The shim reproduces the FOUR observable effects of `gosu
+#  user-spec command…` and nothing else:
+#
+#    1. the real and effective uid/gid become the target account's,
+#    2. the supplementary groups are initialised from /etc/group (`--init-groups`),
+#    3. `$HOME` is set to the target account's home directory, as gosu does,
+#    4. the command REPLACES the process, so the entrypoint's `exec` still means
+#       what it meant and PID 1 remains the server.
+#
+#  It accepts the `user`, `user:group`, `uid`, `uid:gid` and `:group` forms gosu
+#  accepts, and it REFUSES a user-spec with no command exactly as gosu does
+#  (measured: `gosu mysql` alone exits 1 with a usage message). Both call sites in
+#  this image always pass one -- the entrypoint's `exec gosu mysql
+#  "${BASH_SOURCE[0]}" "$@"` and the three in the vendor's `healthcheck.sh`, which
+#  `--su-mysql` reaches and which the Compose health probe therefore exercises on
+#  every interval. Anything the shim cannot resolve is a hard failure with a
+#  diagnostic, never a silent fallback to running as the invoking user: a privilege
+#  drop that quietly does not drop is the one outcome worse than a build failure.
+#
+#  THE VENDOR ENTRYPOINT IS NOT EDITED. It is frozen vendor code, and the shim
+#  keeps its call site working verbatim, which is why replacement is the smaller
+#  change than patching the entrypoint to call `setpriv` itself.
+# -----------------------------------------------------------------------------
+#  IT IS DONE IN TWO LAYERS, AND THE SPLIT IS NOT COSMETIC -- IT IS THE DIFFERENCE
+#  BETWEEN 104 REPORTED FINDINGS AND NONE. Removing the Go binary and writing the
+#  shim in ONE layer REPLACES the path rather than deleting it: that layer's diff
+#  carries a new regular file and no whiteout, so a scanner that merges layers by
+#  file path keeps the base layer's Go-binary result for a path whose final content
+#  is a shell script no analyzer claims. Measured on this image, one-layer form:
+#  `usr/local/bin/gosu` still reported 104 gobinary findings while `head -c 4` on
+#  the live file returned `#!/b`. Deleting it in ITS OWN layer records the whiteout,
+#  and the same scan then reports zero language-specific files -- the scan agrees
+#  with the filesystem. The vendor helper's observable behaviour is captured to two
+#  files BEFORE the deletion so the next layer can still be compared against it,
+#  and those files are removed once the comparison has been made.
+RUN set -eu; \
+    echo '--- the shim must have something to shim: setpriv and the target account ---'; \
+    command -v setpriv >/dev/null \
+      || { echo 'FATAL: setpriv is absent, so the Go privilege-drop helper cannot be replaced.' >&2; exit 1; }; \
+    id mysql >/dev/null; \
+    \
+    echo '--- recording what the vendor helper does, so the shim can be compared against it ---'; \
+    gosu mysql id > /tmp/.acas-gosu-reference-id; \
+    gosu mysql sh -c 'printf %s "$HOME"' > /tmp/.acas-gosu-reference-home; \
+    echo "    gosu mysql id   -> $(cat /tmp/.acas-gosu-reference-id)"; \
+    echo "    gosu mysql HOME -> $(cat /tmp/.acas-gosu-reference-home)"; \
+    \
+    echo '--- removing the Go binary, in its own layer so the deletion is recorded ---'; \
+    rm -f /usr/local/bin/gosu; \
+    [ ! -e /usr/local/bin/gosu ] \
+      || { echo 'FATAL: /usr/local/bin/gosu survived its removal.' >&2; exit 1; }; \
+    echo 'OK: the Go privilege-drop helper is deleted; the next layer installs its replacement.'
+
+RUN set -eu; \
+    echo '--- installing the shim ---'; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      '#  ACAS compiled-COBOL oracle -- privilege-drop helper.' \
+      '#  Generated by harness/Dockerfile.mariadb, which explains why. It replaces the' \
+      '#  vendor Go binary of the same name so that no Go runtime -- and none of the 103' \
+      '#  advisories attributed to its embedded stdlib -- is present in this image. It' \
+      '#  reproduces the four observable effects of `gosu user-spec [command...]`:' \
+      '#  real+effective uid/gid, supplementary groups from /etc/group, $HOME, and exec.' \
+      '#' \
+      '#  It NEVER falls back to running as the invoking user: an unresolvable account is' \
+      '#  a failure, because a privilege drop that silently does not drop leaves the' \
+      '#  database server running as root.' \
+      'set -eu' \
+      '' \
+      'if [ "$#" -eq 0 ]; then' \
+      '    printf "gosu: usage: gosu user-spec command [args]\\n" >&2' \
+      '    exit 1' \
+      'fi' \
+      '' \
+      'acas_spec="$1"' \
+      'shift' \
+      '' \
+      'acas_user="${acas_spec%%:*}"' \
+      'case "$acas_spec" in' \
+      '    *:*) acas_group="${acas_spec#*:}" ;;' \
+      '    *)   acas_group="" ;;' \
+      'esac' \
+      '' \
+      '#  A bare `:group` keeps the invoking user, exactly as gosu does.' \
+      'if [ -z "$acas_user" ]; then' \
+      '    acas_user="$(id -u)"' \
+      'fi' \
+      '' \
+      '#  Resolve through the passwd database so a name and a numeric id behave alike, and' \
+      '#  so $HOME is the account`s own rather than the caller`s.' \
+      'acas_entry="$(getent passwd "$acas_user" || true)"' \
+      'if [ -z "$acas_entry" ]; then' \
+      '    printf "gosu: unable to find user %s\\n" "$acas_user" >&2' \
+      '    exit 1' \
+      'fi' \
+      'acas_uid="$(printf %s "$acas_entry" | cut -d: -f3)"' \
+      'acas_home="$(printf %s "$acas_entry" | cut -d: -f6)"' \
+      'if [ -z "$acas_group" ]; then' \
+      '    acas_group="$(printf %s "$acas_entry" | cut -d: -f4)"' \
+      'fi' \
+      '' \
+      'HOME="$acas_home"' \
+      'export HOME' \
+      '' \
+      '#  No command means "print nothing and run a shell", which is not a form the' \
+      '#  entrypoint uses; gosu itself requires a command, and so does this.' \
+      'if [ "$#" -eq 0 ]; then' \
+      '    printf "gosu: no command given for user-spec %s\\n" "$acas_spec" >&2' \
+      '    exit 1' \
+      'fi' \
+      '' \
+      'exec setpriv --reuid "$acas_uid" --regid "$acas_group" --init-groups -- "$@"' \
+      > /usr/local/bin/gosu.acas-setpriv; \
+    chmod 0755 /usr/local/bin/gosu.acas-setpriv; \
+    \
+    echo '--- comparing the shim against what the vendor helper did, recorded above ---'; \
+    gosu_reference="$(cat /tmp/.acas-gosu-reference-id)"; \
+    gosu_home="$(cat /tmp/.acas-gosu-reference-home)"; \
+    shim_reference="$(/usr/local/bin/gosu.acas-setpriv mysql id)"; \
+    shim_home="$(/usr/local/bin/gosu.acas-setpriv mysql sh -c 'printf %s "$HOME"')"; \
+    echo "    gosu mysql id   -> ${gosu_reference}"; \
+    echo "    shim mysql id   -> ${shim_reference}"; \
+    echo "    gosu mysql HOME -> ${gosu_home}"; \
+    echo "    shim mysql HOME -> ${shim_home}"; \
+    [ "${shim_reference}" = "${gosu_reference}" ] \
+      || { echo "FATAL: the shim drops to a different identity than gosu did." >&2; \
+           echo "       gosu: ${gosu_reference}" >&2; \
+           echo "       shim: ${shim_reference}" >&2; exit 1; }; \
+    [ "${shim_home}" = "${gosu_home}" ] \
+      || { echo "FATAL: the shim sets HOME to '${shim_home}', gosu set '${gosu_home}'." >&2; exit 1; }; \
+    rm -f /tmp/.acas-gosu-reference-id /tmp/.acas-gosu-reference-home; \
+    \
+    echo '--- the uid:gid and numeric forms the vendor entrypoint may use ---'; \
+    /usr/local/bin/gosu.acas-setpriv mysql:mysql id >/dev/null; \
+    /usr/local/bin/gosu.acas-setpriv "$(id -u mysql)" id >/dev/null; \
+    \
+    echo '--- putting the shim in place, and proving no Go runtime is left behind ---'; \
+    mv /usr/local/bin/gosu.acas-setpriv /usr/local/bin/gosu; \
+    command -v gosu >/dev/null \
+      || { echo 'FATAL: gosu is absent; the vendor entrypoint cannot drop privileges and the server would run as root.' >&2; exit 1; }; \
+    gosu mysql id; \
+    case "$(head -c 4 /usr/local/bin/gosu | od -An -c | tr -d ' \n')" in \
+      *ELF*) echo 'FATAL: /usr/local/bin/gosu is still a compiled binary; the replacement did not take.' >&2; exit 1 ;; \
+    esac; \
+    if command -v go >/dev/null 2>&1; then \
+        echo 'FATAL: a Go toolchain is present in the runtime image.' >&2; exit 1; \
+    fi; \
+    \
+    echo '--- and the vendor healthcheck, which uses the same helper, must still work ---'; \
+    sh -n /usr/local/bin/gosu; \
+    grep -q 'gosu' /usr/local/bin/docker-entrypoint.sh \
+      || { echo 'FATAL: the vendor entrypoint no longer calls gosu, so this replacement is aimed at nothing. Re-read the entrypoint before changing this layer.' >&2; exit 1; }; \
+    \
+    echo 'OK: the privilege drop is performed by setpriv; no Go runtime remains in this image.'
 
 
 # -----------------------------------------------------------------------------
@@ -600,6 +900,35 @@ RUN set -eu; \
       '    acas_pat="${MARIADB_DATABASE//_/\\_}"' \
       '    acas_who="$(docker_sql_escape_string_literal "${MARIADB_USER}")"' \
       '' \
+      '    #  THE HOST SCOPE. The vendor created the account as <user>@% -- any' \
+      '    #  host anywhere. ACAS_DB_CLIENT_HOST_PATTERN narrows it to the network' \
+      '    #  this stack is actually reachable from; a value of % is an explicit' \
+      '    #  opt-out and is announced rather than silently doing nothing. UNSET' \
+      '    #  keeps the vendor default; SET BUT EMPTY is a mistake and is refused,' \
+      '    #  which is why the expansion uses ${VAR-default} and not ${VAR:-default}.' \
+      '    #  A single quote in the pattern is refused outright rather than escaped:' \
+      '    #  no legitimate host pattern contains one, and refusing keeps the' \
+      '    #  generated SQL free of a value that would have to be trusted.' \
+      '    acas_host="${ACAS_DB_CLIENT_HOST_PATTERN-%}"' \
+      '    case "${acas_host}" in' \
+      '        "") mysql_error "least privilege: ACAS_DB_CLIENT_HOST_PATTERN is set but empty. Unset it to keep the vendor default, or name a host pattern." ;;' \
+      '        *${acas_q}*) mysql_error "least privilege: ACAS_DB_CLIENT_HOST_PATTERN contains a single quote, which no host pattern needs. Refusing rather than escaping it." ;;' \
+      '    esac' \
+      '' \
+      '    if [ "${acas_host}" = "%" ]; then' \
+      '        mysql_note "least privilege: ACAS_DB_CLIENT_HOST_PATTERN is %, so the host scope of ${MARIADB_USER} is NOT narrowed. This is the opt-out; set it to the harness network pattern to narrow."' \
+      '    else' \
+      '        #  RENAME USER carries the password hash AND every grant with it, so' \
+      '        #  this narrows the scope without ever handling the credential and' \
+      '        #  without re-issuing a grant. Verified below by reading the grantee' \
+      '        #  back out of information_schema.' \
+      '        mysql_note "least privilege: narrowing the host scope of ${MARIADB_USER} from % to ${acas_host}"' \
+      '        printf "%s\n" \' \
+      '            "RENAME USER ${acas_q}${acas_who}${acas_q}@${acas_q}%${acas_q} TO ${acas_q}${acas_who}${acas_q}@${acas_q}${acas_host}${acas_q};" \' \
+      '            "FLUSH PRIVILEGES;" \' \
+      '          | docker_process_sql --database=mysql --binary-mode' \
+      '    fi' \
+      '' \
       '    #  TWO FORMS OF THE SAME GRANTEE, AND THEY ARE NOT INTERCHANGEABLE.' \
       '    #  GRANT and REVOKE want it as SYNTAX -- the bare quoted user@host.' \
       '    #  information_schema.SCHEMA_PRIVILEGES stores it as DATA, quotes' \
@@ -607,7 +936,7 @@ RUN set -eu; \
       '    #  string LITERAL, which means every embedded quote doubled and the' \
       '    #  whole thing wrapped. Passing the syntax form to the comparison' \
       '    #  yields a doubled-up quote run and a 1064.' \
-      '    acas_grantee="${acas_q}${acas_who}${acas_q}@${acas_q}%${acas_q}"' \
+      '    acas_grantee="${acas_q}${acas_who}${acas_q}@${acas_q}${acas_host}${acas_q}"' \
       '    acas_grantee_lit="${acas_q}${acas_grantee//${acas_q}/${acas_q}${acas_q}}${acas_q}"' \
       '' \
       '    mysql_note "least privilege: reducing ${MARIADB_USER} on ${MARIADB_DATABASE} from ALL to SELECT, INSERT, UPDATE, DELETE (harness/Dockerfile.mariadb)"' \
@@ -648,7 +977,182 @@ RUN set -eu; \
       '    fi' \
       '' \
       '    mysql_note "least privilege VERIFIED: ${MARIADB_USER} holds exactly ${acas_held} on ${MARIADB_DATABASE}; DROP, CREATE, ALTER, INDEX and LOCK TABLES are all absent."' \
-      '    unset acas_q acas_pat acas_who acas_grantee acas_grantee_lit acas_probe acas_held' \
+      '' \
+      '    #  Prove the host scope too, from the same authoritative table. The' \
+      '    #  grantee the four privileges were read back FOR already embeds the' \
+      '    #  narrowed host, so a non-empty result above is itself the proof that' \
+      '    #  the RENAME took -- but say it explicitly, because a reader checking' \
+      '    #  the posture should not have to infer it from a variable definition.' \
+      '    mysql_note "least privilege VERIFIED: the grantee holding them is ${acas_grantee}, so the host scope is ${acas_host}."' \
+      '' \
+      '    #  ------------------------------------------------------------------' \
+      '    #  THE ADMINISTRATIVE ACCOUNT -- PROVISIONED, SCOPED AND VERIFIED HERE' \
+      '    #' \
+      '    #  harness/reset_db.sh drops and re-applies the frozen schema, which the' \
+      '    #  application account deliberately cannot do, so it authenticates as a' \
+      '    #  DISTINCT account (its GATE 1 refuses one equal to the application' \
+      '    #  account by name). That account used to be the SUPERUSER, which meant' \
+      '    #  the harness carried a credential holding ALL PRIVILEGES ON *.* WITH' \
+      '    #  GRANT OPTION plus PROXY -- everything the narrowing above removes from' \
+      '    #  the application account, handed back in a second credential.' \
+      '    #' \
+      '    #  This account holds exactly what the two administrative stages need:' \
+      '    #    * ALL on the ACAS schema, which supplies the six privileges the' \
+      '    #      frozen file s own statements require -- DROP and CREATE for its 33' \
+      '    #      drop/create pairs, LOCK TABLES and INSERT for its data sections,' \
+      '    #      ALTER for the version-guarded key directives, SELECT to verify.' \
+      '    #    * SUPER, and ONLY because SET GLOBAL autocommit needs it in MariaDB' \
+      '    #      (there is no finer-grained system-variable privilege here). That is' \
+      '    #      the seeding window harness/seed.sh opens around the frozen loaders.' \
+      '    #' \
+      '    #  It does NOT hold GRANT OPTION, CREATE USER, PROXY, FILE, SELECT on' \
+      '    #  mysql.*, CREATE DATABASE, SHUTDOWN, or any privilege on any other' \
+      '    #  schema -- all of which the superuser held. Every one of those is' \
+      '    #  asserted below, and a failure aborts initialisation rather than' \
+      '    #  logging a warning.' \
+      '    #' \
+      '    #  ONE RESIDUAL CAPABILITY, DISCLOSED: ALL on a schema includes DROP, and' \
+      '    #  in MariaDB schema-level DROP permits DROP DATABASE as well as DROP' \
+      '    #  TABLE. So this account can destroy the ACAS schema itself. That is' \
+      '    #  kept rather than narrowed because ALL on the one schema is the' \
+      '    #  practical minimum for applying a 33-table dump, and table-level DROP' \
+      '    #  grants cannot be relied on to survive the drop half of a' \
+      '    #  drop-and-recreate. The exposure is bounded to the one disposable' \
+      '    #  schema this stack exists to destroy and rebuild twice per run.' \
+      '    #  Recovery, if it ever happens: recreate the database volume -- neither' \
+      '    #  this account nor reset_db.sh can CREATE DATABASE.' \
+      '    #  ------------------------------------------------------------------' \
+      '    if [ -z "${ACAS_DB_ADMIN_USER:-}" ] && [ -z "${ACAS_DB_ADMIN_PASSWORD:-}" ]; then' \
+      '        mysql_note "administrative account: ACAS_DB_ADMIN_USER and ACAS_DB_ADMIN_PASSWORD are both unset, so none is provisioned. harness/reset_db.sh GATE 1 will refuse to run until one exists."' \
+      '    elif [ -z "${ACAS_DB_ADMIN_USER:-}" ] || [ -z "${ACAS_DB_ADMIN_PASSWORD:-}" ]; then' \
+      '        mysql_error "administrative account: ACAS_DB_ADMIN_USER and ACAS_DB_ADMIN_PASSWORD must be set together. One without the other would provision either a passwordless administrative account or nothing at all, and neither is an acceptable outcome to reach silently."' \
+      '    elif [ "${ACAS_DB_ADMIN_USER}" = "${MARIADB_USER}" ]; then' \
+      '        mysql_error "administrative account: ACAS_DB_ADMIN_USER equals MARIADB_USER (${MARIADB_USER}). harness/reset_db.sh GATE 1 exists to keep the account that posts separate from the account that can destroy the schema, and provisioning them as one account would defeat it."' \
+      '    elif [ "${ACAS_DB_ADMIN_USER}" = "root" ]; then' \
+      '        mysql_error "administrative account: ACAS_DB_ADMIN_USER is root. The superuser is deliberately socket-only here (MARIADB_ROOT_HOST=localhost), and the point of this account is to be narrower than root. Name a separate account."' \
+      '    else' \
+      '        acas_adm="$(docker_sql_escape_string_literal "${ACAS_DB_ADMIN_USER}")"' \
+      '        acas_adm_pw="$(docker_sql_escape_string_literal "${ACAS_DB_ADMIN_PASSWORD}")"' \
+      '        acas_adm_grantee="${acas_q}${acas_adm}${acas_q}@${acas_q}${acas_host}${acas_q}"' \
+      '        acas_adm_grantee_lit="${acas_q}${acas_adm_grantee//${acas_q}/${acas_q}${acas_q}}${acas_q}"' \
+      '' \
+      '        mysql_note "administrative account: provisioning ${ACAS_DB_ADMIN_USER} at ${acas_host} with ALL on ${MARIADB_DATABASE} and SUPER, and nothing else"' \
+      '' \
+      '        #  The password is a SHELL VARIABLE expansion, never a literal in' \
+      '        #  this file: the image layer carries no credential, and the value' \
+      '        #  exists only in the running server process environment.' \
+      '        acas_adm_create="CREATE USER ${acas_adm_grantee} IDENTIFIED BY ${acas_q}${acas_adm_pw}${acas_q};"' \
+      '        printf "%s\n" \' \
+      '            "${acas_adm_create}" \' \
+      '            "GRANT ALL ON \`${acas_pat}\`.* TO ${acas_adm_grantee};" \' \
+      '            "GRANT SUPER ON *.* TO ${acas_adm_grantee};" \' \
+      '            "FLUSH PRIVILEGES;" \' \
+      '          | docker_process_sql --database=mysql --binary-mode' \
+      '        unset acas_adm_create acas_adm_pw' \
+      '' \
+      '        #  1. The GLOBAL set must be SUPER and nothing else. USAGE is the' \
+      '        #     implicit "may connect" row, and MEASURED on this server it' \
+      '        #     disappears from USER_PRIVILEGES as soon as a real global' \
+      '        #     privilege exists -- so it is tolerated in either direction' \
+      '        #     rather than expected, and SUPER is what is actually asserted.' \
+      '        #     Anything else here -- FILE, CREATE USER, SELECT, RELOAD -- is a' \
+      '        #     posture this file does not describe.' \
+      '        acas_probe="SELECT IFNULL(GROUP_CONCAT(DISTINCT PRIVILEGE_TYPE"' \
+      '        acas_probe="${acas_probe} ORDER BY PRIVILEGE_TYPE SEPARATOR ${acas_q},${acas_q})"' \
+      '        acas_probe="${acas_probe}, ${acas_q}${acas_q}) FROM"' \
+      '        acas_probe="${acas_probe} information_schema.USER_PRIVILEGES WHERE GRANTEE ="' \
+      '        acas_probe="${acas_probe} ${acas_adm_grantee_lit};"' \
+      '        acas_held="$(printf "%s\n" "${acas_probe}" \' \
+      '            | docker_process_sql --database=mysql --skip-column-names --batch)"' \
+      '        acas_held="$(printf %s "${acas_held}" | tr -d "[:space:]")"' \
+      '        acas_globals=",${acas_held},"' \
+      '        acas_globals="${acas_globals//,USAGE,/,}"' \
+      '        if [ "${acas_globals}" != ",SUPER," ]; then' \
+      '            mysql_error "administrative account VERIFICATION FAILED: expected the global privileges of ${ACAS_DB_ADMIN_USER} to be SUPER and nothing else, but they are ${acas_held:-<nothing>}. Refusing to finish initialisation: an administrative account wider than SUPER is the finding this provisioning exists to close."' \
+      '        fi' \
+      '        unset acas_globals' \
+      '        mysql_note "administrative account VERIFIED: global privileges are exactly ${acas_held} -- no FILE, no CREATE USER, no global SELECT, no RELOAD, no SHUTDOWN."' \
+      '' \
+      '        #  2. GRANT OPTION must be absent at EVERY level. This is what stops' \
+      '        #     the account re-widening itself or the application account.' \
+      '        acas_probe="SELECT IFNULL(GROUP_CONCAT(DISTINCT g SEPARATOR ${acas_q},${acas_q}), ${acas_q}${acas_q}) FROM ("' \
+      '        acas_probe="${acas_probe} SELECT IS_GRANTABLE AS g FROM information_schema.USER_PRIVILEGES"' \
+      '        acas_probe="${acas_probe} WHERE GRANTEE = ${acas_adm_grantee_lit}"' \
+      '        acas_probe="${acas_probe} UNION ALL"' \
+      '        acas_probe="${acas_probe} SELECT IS_GRANTABLE AS g FROM information_schema.SCHEMA_PRIVILEGES"' \
+      '        acas_probe="${acas_probe} WHERE GRANTEE = ${acas_adm_grantee_lit}"' \
+      '        acas_probe="${acas_probe} ) AS x;"' \
+      '        acas_held="$(printf "%s\n" "${acas_probe}" \' \
+      '            | docker_process_sql --database=mysql --skip-column-names --batch)"' \
+      '        acas_held="$(printf %s "${acas_held}" | tr -d "[:space:]")"' \
+      '        if [ "${acas_held}" != "NO" ]; then' \
+      '            mysql_error "administrative account VERIFICATION FAILED: the IS_GRANTABLE column reads ${acas_held:-<nothing>} rather than NO, so ${ACAS_DB_ADMIN_USER} holds GRANT OPTION somewhere and could widen itself or the application account. Refusing to finish initialisation."' \
+      '        fi' \
+      '        mysql_note "administrative account VERIFIED: GRANT OPTION absent at every level."' \
+      '' \
+      '        #  3. The SCHEMA set must contain the six privileges' \
+      '        #     harness/reset_db.sh asserts, and must be scoped to the ACAS' \
+      '        #     schema alone -- reading the schema NAMES back proves both that' \
+      '        #     the grant landed and that nothing else was granted.' \
+      '        acas_probe="SELECT IFNULL(GROUP_CONCAT(DISTINCT TABLE_SCHEMA"' \
+      '        acas_probe="${acas_probe} ORDER BY TABLE_SCHEMA SEPARATOR ${acas_q},${acas_q})"' \
+      '        acas_probe="${acas_probe}, ${acas_q}${acas_q}) FROM"' \
+      '        acas_probe="${acas_probe} information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE ="' \
+      '        acas_probe="${acas_probe} ${acas_adm_grantee_lit};"' \
+      '        acas_held="$(printf "%s\n" "${acas_probe}" \' \
+      '            | docker_process_sql --database=mysql --skip-column-names --batch)"' \
+      '        acas_held="$(printf %s "${acas_held}" | tr -d "[:space:]")"' \
+      '        if [ "${acas_held}" != "${MARIADB_DATABASE}" ]; then' \
+      '            mysql_error "administrative account VERIFICATION FAILED: ${ACAS_DB_ADMIN_USER} holds schema privileges on ${acas_held:-<nothing>} rather than on ${MARIADB_DATABASE} alone. Refusing to finish initialisation."' \
+      '        fi' \
+      '' \
+      '        acas_probe="SELECT IFNULL(GROUP_CONCAT(DISTINCT PRIVILEGE_TYPE"' \
+      '        acas_probe="${acas_probe} ORDER BY PRIVILEGE_TYPE SEPARATOR ${acas_q},${acas_q})"' \
+      '        acas_probe="${acas_probe}, ${acas_q}${acas_q}) FROM"' \
+      '        acas_probe="${acas_probe} information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE ="' \
+      '        acas_probe="${acas_probe} ${acas_adm_grantee_lit} AND TABLE_SCHEMA ="' \
+      '        acas_probe="${acas_probe} ${acas_q}${MARIADB_DATABASE}${acas_q};"' \
+      '        acas_held="$(printf "%s\n" "${acas_probe}" \' \
+      '            | docker_process_sql --database=mysql --skip-column-names --batch)"' \
+      '        acas_held="$(printf %s "${acas_held}" | tr -d "[:space:]")"' \
+      '        for acas_need in ALTER CREATE DROP INSERT SELECT; do' \
+      '            case ",${acas_held}," in' \
+      '                *",${acas_need},"*) : ;;' \
+      '                *) mysql_error "administrative account VERIFICATION FAILED: ${ACAS_DB_ADMIN_USER} is missing ${acas_need} on ${MARIADB_DATABASE}; harness/reset_db.sh precondition 9 requires DROP, CREATE, LOCK TABLES, ALTER, INSERT and SELECT to apply the frozen schema. Held: ${acas_held:-<nothing>}." ;;' \
+      '            esac' \
+      '        done' \
+      '        case ",${acas_held}," in' \
+      '            *",LOCKTABLES,"*) : ;;' \
+      '            *) mysql_error "administrative account VERIFICATION FAILED: ${ACAS_DB_ADMIN_USER} is missing LOCK TABLES on ${MARIADB_DATABASE}, which the frozen schema file s own data sections require. Held: ${acas_held:-<nothing>}." ;;' \
+      '        esac' \
+      '        mysql_note "administrative account VERIFIED: holds ${acas_held} on ${MARIADB_DATABASE} and on no other schema."' \
+      '' \
+      '        unset acas_adm acas_adm_grantee acas_adm_grantee_lit acas_need' \
+      '    fi' \
+      '' \
+      '    #  ------------------------------------------------------------------' \
+      '    #  AND THE SUPERUSER MUST NOT BE REACHABLE OVER THE NETWORK' \
+      '    #' \
+      '    #  MARIADB_ROOT_HOST=localhost is what achieves this, and it is set in' \
+      '    #  harness/docker-compose.yml -- a FILE THIS SCRIPT CANNOT SEE. So the' \
+      '    #  server asserts the outcome rather than trusting the setting: if any' \
+      '    #  root account exists at a host other than localhost, initialisation' \
+      '    #  fails here instead of the stack coming up healthy with a' \
+      '    #  network-reachable ALL PRIVILEGES + GRANT OPTION + PROXY account.' \
+      '    #  ------------------------------------------------------------------' \
+      '    acas_probe="SELECT IFNULL(GROUP_CONCAT(DISTINCT Host ORDER BY Host"' \
+      '    acas_probe="${acas_probe} SEPARATOR ${acas_q},${acas_q}), ${acas_q}${acas_q})"' \
+      '    acas_probe="${acas_probe} FROM mysql.user WHERE User = ${acas_q}root${acas_q};"' \
+      '    acas_held="$(printf "%s\n" "${acas_probe}" \' \
+      '        | docker_process_sql --database=mysql --skip-column-names --batch)"' \
+      '    acas_held="$(printf %s "${acas_held}" | tr -d "[:space:]")"' \
+      '    case "${acas_held}" in' \
+      '        localhost|::1,localhost|127.0.0.1,localhost|127.0.0.1,::1,localhost) : ;;' \
+      '        *) mysql_error "superuser scope VERIFICATION FAILED: root exists at host(s) ${acas_held:-<nothing>}, which includes a network-reachable one. Set MARIADB_ROOT_HOST=localhost so the vendor entrypoint creates no second superuser account (its own guard, entrypoint lines 377 to 390). Refusing to finish initialisation: a network-reachable superuser makes every narrowing above decorative." ;;' \
+      '    esac' \
+      '    mysql_note "superuser scope VERIFIED: root exists only at ${acas_held}, so it is reachable over this container s unix socket alone."' \
+      '' \
+      '    unset acas_q acas_pat acas_who acas_host acas_grantee acas_grantee_lit acas_probe acas_held' \
       'fi' \
       > /docker-entrypoint-initdb.d/20-acas-least-privilege.sh; \
     chmod 0644 /docker-entrypoint-initdb.d/20-acas-least-privilege.sh; \
@@ -658,6 +1162,18 @@ RUN set -eu; \
     grep -q 'REVOKE ALL PRIVILEGES' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh; \
     grep -q 'GRANT SELECT, INSERT, UPDATE, DELETE' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh; \
     grep -q 'DELETE,INSERT,SELECT,UPDATE' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh; \
+    \
+    echo '--- the three account-topology controls must each be present ---'; \
+    grep -q 'RENAME USER' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh \
+      || { echo 'FATAL: the host-scope narrowing is absent; the application account would stay at the vendor wildcard.' >&2; exit 1; }; \
+    grep -q 'GRANT SUPER ON \*\.\*' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh \
+      || { echo 'FATAL: the administrative account provisioning is absent; reset_db.sh GATE 1 would have nothing but the superuser to use.' >&2; exit 1; }; \
+    grep -q 'superuser scope VERIFICATION FAILED' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh \
+      || { echo 'FATAL: the socket-only superuser assertion is absent; MARIADB_ROOT_HOST lives in a file this script cannot see, so the outcome must be asserted server-side.' >&2; exit 1; }; \
+    grep -q 'information_schema.USER_PRIVILEGES' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh \
+      || { echo 'FATAL: the administrative account global-privilege read-back is absent.' >&2; exit 1; }; \
+    grep -q 'IS_GRANTABLE' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh \
+      || { echo 'FATAL: the GRANT OPTION absence check is missing; without it the administrative account could widen itself.' >&2; exit 1; }; \
     \
     echo '--- it must NOT be executable: the vendor SOURCES a non-executable .sh ---'; \
     [ ! -x /docker-entrypoint-initdb.d/20-acas-least-privilege.sh ] \
@@ -681,8 +1197,17 @@ RUN set -eu; \
     done; \
     \
     echo '--- no credential may appear in this image layer ---'; \
-    ! grep -qiE 'MARIADB_PASSWORD=|MYSQL_PWD=|IDENTIFIED BY' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh \
-      || { echo 'FATAL: the least-privilege script names a credential.' >&2; exit 1; }; \
+    ! grep -qiE 'MARIADB_PASSWORD=|MYSQL_PWD=' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh \
+      || { echo 'FATAL: the least-privilege script assigns a credential variable.' >&2; exit 1; }; \
+    \
+    echo '--- and every IDENTIFIED BY must EXPAND a variable, never carry a literal ---'; \
+    if grep -i 'IDENTIFIED BY' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh \
+         | grep -vq '\${'; then \
+        echo 'FATAL: an IDENTIFIED BY clause in the least-privilege script does not expand a shell variable, so it carries a literal credential into this image layer.' >&2; \
+        grep -in 'IDENTIFIED BY' /docker-entrypoint-initdb.d/20-acas-least-privilege.sh | grep -v '\${' >&2; \
+        exit 1; \
+    fi; \
+    echo '    (the administrative account needs IDENTIFIED BY; what it must never do is hold a value)'; \
     \
     echo "OK: initdb.d order $(ls /docker-entrypoint-initdb.d/ | sort | tr '\n' ' ')"
 

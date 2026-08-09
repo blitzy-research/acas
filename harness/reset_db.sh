@@ -1236,10 +1236,18 @@ Also required -- GATE 1, privilege separation, with NO fallback:
                           narrowed to SELECT, INSERT, UPDATE and DELETE by the
                           least-privilege init script in
                           harness/Dockerfile.mariadb, so it cannot DROP or CREATE
-                          at all. Compose supplies `root` here, which holds them
-                          globally. The 12-character limit does NOT apply: this
-                          is a harness credential and never enters the COBOL
-                          `RDB-Data` block.
+                          at all. The account named here is NOT the superuser:
+                          the same init script provisions a purpose-scoped
+                          administrative account holding ALL on this schema plus
+                          SUPER and nothing else, and MARIADB_ROOT_HOST=localhost
+                          leaves root reachable only over the server's own
+                          socket. The pair is passed PER INVOCATION -- `docker
+                          compose run -e ACAS_DB_ADMIN_USER -e
+                          ACAS_DB_ADMIN_PASSWORD ...` -- rather than declared in
+                          the runner service's environment, so the eight stages
+                          that do not administer the schema cannot read it. The
+                          12-character limit does NOT apply: this is a harness
+                          credential and never enters the COBOL `RDB-Data` block.
   ACAS_DB_WAIT_TIMEOUT=N  Seconds to wait for MariaDB (default 180).
   ACAS_DB_AUTH_GRACE=N    Seconds to tolerate "Access denied" before failing
                           fast, capped at ACAS_DB_WAIT_TIMEOUT (default 15).
@@ -2810,7 +2818,9 @@ acas_assert_privileges() {
     acas_die "$EX_PRIVILEGE" \
       "the account '${ACAS_RESET_DB_USER}' holds no recorded privileges on ${ACAS_DB_NAME}." \
       'Applying the frozen schema needs DROP, CREATE, LOCK TABLES, ALTER, INSERT' \
-      'and SELECT. Compose names root here, which holds them globally. If this' \
+      'and SELECT. The 20- init script in harness/Dockerfile.mariadb provisions' \
+      'the administrative account with ALL on this schema, which supplies all six,' \
+      'and verifies the read-back at container start. If this' \
       'account was created by hand, grant it those on this schema. Note that the' \
       'APPLICATION account is not a usable substitute: it is deliberately' \
       'narrowed to SELECT, INSERT, UPDATE and DELETE by the least-privilege init' \
