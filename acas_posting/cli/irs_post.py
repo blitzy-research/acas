@@ -98,9 +98,12 @@ hundred lines that must not be migrated." That boundary belongs to
 `acas_posting.programs.irs030_posting`; this module's whole job is to bind
 three records and one boolean and to make one call.
 
-*** ONE ANSWER TRUNCATES A TABLE, AND THERE IS NO DEFAULT - READ THIS ***
+*** ONE ANSWER ASKS FOR A TABLE TO BE EMPTIED, AND THERE IS NO DEFAULT ***
 `--clear-posting-file` / `--no-clear-posting-file` is REQUIRED, and the
-affirmative means DELETE EVERY ROW of the IRS transfer table `PSIRSPOST-REC`.
+affirmative is the answer that ASKS for every row of the IRS transfer table
+`PSIRSPOST-REC` to be deleted. What it actually removes is a different question,
+answered below, and the answer is measured rather than assumed: on this path,
+nothing.
 There is no default because the frozen program has none, and the appearance that
 it does is a trap worth spelling out: `EOJ-q1.` displays the question with a
 `[Y]` in the prompt LITERAL [irs/irs030.cbl:L1716], but the `accept` on the next
@@ -109,21 +112,30 @@ reaches the field; `WS-Reply pic x` [irs/irs030.cbl:L230] is never given the val
 "Y" anywhere in the program; and any reply that is neither `Y` nor `N` goes
 straight back to the prompt [irs/irs030.cbl:L1718-L1719]. A bare Enter therefore
 RE-PROMPTS - it does not clear. Reading the `[Y]` as a pre-filled default was
-and it would invent the destructive answer. `Y` performs
+tempting and is unsupported by the source, and it would invent the destructive
+answer on the operator's behalf. `Y` performs
 `acas008-Open-Output` [irs/irs030.cbl:L1723] followed by `acas008-Close`
 [irs/irs030.cbl:L1724]. For that handler an open-for-output is not a file
 operation at all - it is a delete-all: `if fn-Open and fn-output and not
 FS-Cobol-Files-Used / set fn-delete-all to true / perform ba-Process-RDBMS`
 [common/acas008.cbl:L313-L319], reinforced at [common/acas008.cbl:L571-L574].
 The handler's own inline comment at [irs/irs030.cbl:L1723] says so: "performs a
-acas008-Delete-All". WHAT THAT DELETE REACHES IS BOUNDED, and on this path it is a
-MEASURED NO-OP: the bridge deletes only keys strictly below the ten-character key
-text `9999999999` [common/slpostingMT.cbl:L850-L891] while every key it stores is a
-group-move image near 4.7e17 [common/slpostingMT.cbl:L1001], and `EOJ` has already
-closed the handler [irs/irs030.cbl:L1712] before the clear is attempted. See the
-key-bound note under A-NEW-8 in docs/migration/anomaly-log.md. Agent Action Plan
+acas008-Delete-All". THE CLEAR IS A MEASURED NO-OP, FOR TWO INDEPENDENT FROZEN
+REASONS, AND EITHER ONE ALONE IS ENOUGH. FIRST, NO STATEMENT IS ISSUED AT ALL:
+`EOJ` performs `acas008-Close` [irs/irs030.cbl:L1712] BEFORE `EOJ-q1` performs the
+open-output at [irs/irs030.cbl:L1723], so the delete-all arrives at a closed
+handler and is refused with `fs-reply=99 we-error=911` - measured, and logged by
+`ba085-Process-Delete-All`. SECOND, EVEN AGAINST AN OPEN HANDLER IT WOULD REMOVE
+NOTHING: the bridge deletes only keys strictly below the ten-character key text
+`9999999999` [common/slpostingMT.cbl:L850-L891] while every key it stores is a
+group-move image near 4.7e17 [common/slpostingMT.cbl:L1001]. So NEITHER answer can
+leave `PSIRSPOST-REC` empty, and a scenario's declared row count for that table is
+the same on both. See the key-bound note under A-NEW-8 in
+docs/migration/anomaly-log.md. Agent Action Plan
 section 0.3.4 still makes the answer a genuine input rather than decoration,
-because it decides whether the statement is issued at all. Pass
+because it decides whether the delete-all is ATTEMPTED - which is a control-flow
+and log difference the frozen program has, and which a future maintainer who
+re-ordered `EOJ` would turn back into a table difference. Pass
 `--clear-posting-file` to answer `Y` or `--no-clear-posting-file` to answer `N`;
 omitting both is a usage error, not an implied yes.
 
@@ -310,11 +322,16 @@ _DESCRIPTION: Final[str] = (
 )
 
 _EPILOG: Final[str] = (
-    "*** ONE ANSWER DELETES DATA, AND THERE IS NO DEFAULT. ***\n"
+    "*** ONE ANSWER ASKS FOR DATA TO BE DELETED, AND THERE IS NO DEFAULT. ***\n"
     "\n"
     "--clear-posting-file / --no-clear-posting-file is REQUIRED. Answering\n"
-    "--clear-posting-file deletes EVERY ROW of PSIRSPOST-REC\n"
-    "[irs/irs030.cbl:L1720-L1724] through [common/acas008.cbl:L313-L319].\n"
+    "--clear-posting-file requests a delete-all of PSIRSPOST-REC\n"
+    "[irs/irs030.cbl:L1720-L1724] through [common/acas008.cbl:L313-L319]. On this\n"
+    "path it is MEASURED to remove nothing, twice over: EOJ has already closed the\n"
+    "handler at [irs/irs030.cbl:L1712], so the delete-all is refused (99/911), and\n"
+    "the bridge's own predicate is bounded strictly below the key text 9999999999,\n"
+    "which no key it wrote falls below. Neither answer can empty the table. See\n"
+    "the --clear-posting-file help for both mechanisms.\n"
     "\n"
     "There is no default because the frozen program has none. The [Y] in the\n"
     "prompt at [irs/irs030.cbl:L1716] is DISPLAY TEXT: the accept at L1717\n"
@@ -378,25 +395,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "REQUIRED. Answer irs030's end-of-job question 'Can I clear the "
             "Ledgers Posting file? [Y]' (irs/irs030.cbl:L1716). *** ONE ANSWER "
-            "IS DESTRUCTIVE. *** --clear-posting-file performs "
+            "ASKS FOR A TABLE TO BE EMPTIED. *** --clear-posting-file performs "
             "acas008-Open-Output (irs/irs030.cbl:L1723), which for this handler "
             "is not a file open but a delete-all - it sets fn-delete-all and "
             "calls the DAL (common/acas008.cbl:L313-L319, reinforced at "
-            "L571-L574) - so a DELETE is issued against the IRS transfer table "
+            "L571-L574) - aimed at the IRS transfer table "
             "PSIRSPOST-REC (entity SPL-Posting, bridge slpostingMT, record "
-            "copybooks/wspost-irs.cob). The bridge BOUNDS that delete to keys "
+            "copybooks/wspost-irs.cob). IT IS MEASURED TO REMOVE NOTHING, FOR TWO "
+            "INDEPENDENT FROZEN REASONS, EITHER OF WHICH IS SUFFICIENT. (1) NO "
+            "DELETE IS ISSUED: EOJ performs acas008-Close at "
+            "irs/irs030.cbl:L1712, BEFORE EOJ-q1 opens output at L1723, so the "
+            "delete-all reaches a closed handler and is refused - "
+            "ba085-Process-Delete-All reports fs-reply=99 we-error=911 and no SQL "
+            "runs. (2) THE PREDICATE IS BOUNDED: the bridge deletes only keys "
             "strictly below 9999999999 (common/slpostingMT.cbl:L850-L891), which "
-            "no key the bridge itself wrote falls below, so it is measured to "
-            "remove nothing on this path - see A-NEW-8 in "
+            "no key the bridge itself wrote falls below - see A-NEW-8 in "
             "docs/migration/anomaly-log.md. --no-clear-posting-file "
-            "answers N and issues no delete at all. THERE IS NO "
+            "answers N and attempts no delete at all. THERE IS NO "
             "DEFAULT, because the frozen program has none: the [Y] at L1716 is "
             "display text, the accept at L1717 carries no WITH UPDATE, WS-Reply "
             "is never set to Y anywhere in the program, and L1718-L1719 re-prompt "
             "on any reply that is neither Y nor N - so a bare Enter cannot leave "
             "the loop. Omitting both switches is a usage error, not an implied "
-            "yes. The answer decides whether one of the compared tables ends the "
-            "run empty, so it must be pinned in every scenario."
+            "yes. NEITHER ANSWER CAN LEAVE PSIRSPOST-REC EMPTY, so the row count "
+            "a scenario declares for it is the same either way; the answer is "
+            "still pinned in every scenario because it decides whether the "
+            "delete-all is ATTEMPTED, which is a control-flow and log difference "
+            "the frozen program has."
         ),
     )
 

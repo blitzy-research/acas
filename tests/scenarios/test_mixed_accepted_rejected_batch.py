@@ -348,11 +348,20 @@ this description cannot drift away from the fixture:
     centres - 1000/0, 1000/1, 2000/0, 2200/0 and 3000/0.
 
 WHAT THIS FIXTURE REACHES, AND WHAT IT DOES NOT - AND THE ANSWER IS SMALLER THAN THE
-SEED SUGGESTS. Compiled measurement recorded as `Q-9` in
-docs/migration/ambiguity-resolutions.md established that the bridge's host-variable load
-NEVER LOADS `HV-POST-RRN`, THE TABLE'S PRIMARY KEY [mysql/ACASDB.sql:L169], so a seeded
-posting is persisted under key ZERO - and [general/gl070.cbl:L490-L491], `if WS-Post-Key = zero / go to loop.`, skips it
-before the explosion. THE WORK FILE IS THEREFORE EMPTY: the three-leg explosion is not
+SEED SUGGESTS. Two frozen facts do it, and it is the second that fires the gate.
+Compiled measurement recorded as `Q-9` in docs/migration/ambiguity-resolutions.md
+established that the bridge's host-variable load NEVER LOADS `HV-POST-RRN`, THE TABLE'S
+PRIMARY KEY [mysql/ACASDB.sql:L169], so that column is stored at zero. `A-NEW-18` in
+docs/migration/anomaly-log.md then established that `move WS-Post-Key to HV-POST-KEY`
+[common/glpostingMT.cbl:L1054] is a BYTE move from a group into `PIC 9(18) COMP`, so the
+read-back at [common/glpostingMT.cbl:L1085] returns the bytes `06 8E 0C 15 3B 04 30 30`
+and NOT the all-`0` image: the first disjunct `if WS-Post-Key = zero`
+[general/gl070.cbl:L490-L491] is therefore FALSE, a group compared with `ZERO` being
+byte-wise (`Q-NKEY-CMP` reading 7), and the gate that ACTUALLY skips the posting is
+`if batch not = WS-Batch-Nos` [general/gl070.cbl:L492-L493], byte-wise too and matching
+none of the 100,000 values a `pic 9(5)` batch number can hold (`Q-NKEY-CMP` reading 4).
+Either way the posting is discarded before the explosion.
+THE WORK FILE IS THEREFORE EMPTY: the three-leg explosion is not
 reached, gl072 reads nothing, `end-batch`'s stamp is not reached for either batch, no
 balance moves, and the run is a NO-OP over all three bounded tables. That is why the
 scenario declares `expected_table_effect: unchanged` and why
@@ -1170,8 +1179,9 @@ def test_scenario_definition_preconditions(
         f"at least one posting must carry BOTH a non-zero VAT account and a non-zero "
         f"VAT amount - the shape the OR-gate at [general/gl070.cbl:L521-L523] would "
         f"take to write gl070's third leg. It is not reached on this fixture, because "
-        f"the posting is persisted under key zero and skipped at "
-        f"[general/gl070.cbl:L490-L491] (`Q-9`); the shape is asserted so that the "
+        f"the round trip corrupts `POST-KEY` and the posting is skipped at "
+        f"[general/gl070.cbl:L492-L493] by `if batch not = WS-Batch-Nos` "
+        f"(`A-NEW-18`, `Q-NKEY-CMP`); the shape is asserted so that the "
         f"measured no-op is attributable to THAT and not to a posting that would have "
         f"been uninteresting anyway. Declared: "
         f"{[(row.get('Vat-AC'), row.get('Vat-Amount')) for row in postings]!r}."
@@ -1677,15 +1687,20 @@ def test_the_run_reproduced_the_measured_no_op_rather_than_posting(
     and a reader reasoning from the seed would expect `end-batch` to stamp it. THE
     COMPILED CYCLE DOES NOT. Compiled measurement recorded as `Q-9` in
     docs/migration/ambiguity-resolutions.md established that the bridge's host-variable
-    never loads `HV-POST-RRN`, the table's primary key [mysql/ACASDB.sql:L169], so the one
-    seeded posting is persisted under key ZERO - and [general/gl070.cbl:L490-L491],
-    `if WS-Post-Key = zero / go to loop.`, skips it. The work file is empty, gl072 reads
+    never loads `HV-POST-RRN`, the table's primary key [mysql/ACASDB.sql:L169], so that
+    column is stored at zero; and `A-NEW-18` records that the `POST-KEY` group move
+    [common/glpostingMT.cbl:L1054] corrupts the key on the way back out
+    [common/glpostingMT.cbl:L1085], leaving bytes that are not the all-`0` image. So
+    `if WS-Post-Key = zero` [general/gl070.cbl:L490-L491] is FALSE and the posting is
+    skipped by the SECOND disjunct, `if batch not = WS-Batch-Nos`
+    [general/gl070.cbl:L492-L493] - both comparisons byte-wise, `Q-NKEY-CMP` readings 7
+    and 4. The work file is empty, gl072 reads
     nothing, and the run is a no-op over all three bounded tables. The scenario declares
     `expected_table_effect: unchanged` for exactly that reason, and
     docs/migration/scenario-diff-evidence.md section 10.5 records the observed journey.
 
-    SO THE DISCRIMINATION IS AGAINST A CYCLE THAT "FIXED" Q-9. A migrated cycle that
-    loaded the RRN into the key, posted the batch and stamped it would produce a
+    SO THE DISCRIMINATION IS AGAINST A CYCLE THAT "FIXED" Q-9 OR `A-NEW-18`. A migrated
+    cycle that loaded the RRN into the key, posted the batch and stamped it would produce a
     perfectly self-consistent database and would satisfy every agreement assertion in
     this file - and it would be a FAILURE, because a defect fixed is a failure (R-4).
     This test fails for it, and for nothing else fails. It is deliberately NOT written
@@ -1803,18 +1818,24 @@ def test_the_run_reproduced_the_measured_no_op_rather_than_posting(
                     f"the {side} cycle changed `{BATCH_TABLE}`.`{column}` on the {role} "
                     f"batch {key}: the seed declares {seeded[field]!r} and the dump "
                     f"carries {withheld(observed[column], column=column)}.\n"
-                    f"  THE MEASURED BEHAVIOUR IS THAT NEITHER BATCH MOVES. The one "
-                    f"seeded posting is persisted under key ZERO because the bridge "
-                    f"never loads `HV-POST-RRN`, its primary key (ambiguity `Q-9`), "
-                    f"so [general/gl070.cbl:L490-L491] skips it, the work file is "
+                    f"  THE MEASURED BEHAVIOUR IS THAT NEITHER BATCH MOVES. The bridge "
+                    f"never loads `HV-POST-RRN`, the table's primary key (ambiguity "
+                    f"`Q-9`), and the `POST-KEY` group move corrupts the key on the way "
+                    f"back out (anomaly `A-NEW-18`), so the read returns bytes that are "
+                    f"NOT the all-`0` image: `if WS-Post-Key = zero` "
+                    f"[general/gl070.cbl:L490-L491] is FALSE and the posting is skipped "
+                    f"by `if batch not = WS-Batch-Nos` [general/gl070.cbl:L492-L493] "
+                    f"instead (`Q-NKEY-CMP` readings 7 and 4). The work file is "
                     f"empty and gl072's `end-batch` [general/gl072.cbl:L372-L377] is "
                     f"never reached for either batch.\n"
                     f"  IF `CLEARED-STATUS` IS NOW 1 AND `POSTED` NOW HOLDS THE PINNED "
-                    f"RUN DATE, THE MIGRATED CYCLE HAS FIXED `Q-9` - it loaded the RRN, "
+                    f"RUN DATE, THE MIGRATED CYCLE HAS FIXED `Q-9` OR `A-NEW-18` - it "
+                    f"loaded the RRN, or rejoined the key without the byte move, "
                     f"found the posting and posted the batch. That is a defect FIXED, "
                     f"and a defect fixed is a failure (R-4). Reproduce the frozen "
-                    f"host-variable load instead, and if the oracle's own behaviour has "
-                    f"changed, re-measure it and update `Q-9`, this scenario's "
+                    f"host-variable load and the frozen round trip instead, and if the "
+                    f"oracle's own behaviour has changed, re-measure it and update "
+                    f"`Q-9`, `A-NEW-18`, `Q-NKEY-CMP`, this scenario's "
                     f"`expected_table_effect` and "
                     f"docs/migration/scenario-diff-evidence.md together.\n"
                     f"{parity.diagnose()}"

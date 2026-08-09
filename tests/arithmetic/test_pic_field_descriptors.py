@@ -6834,6 +6834,15 @@ def _publish_normalized_pair(diff_states: Any, root: pathlib.Path) -> tuple[path
                 "scenario_file": "harness/scenarios/clean_batch_gl.yaml",
                 "scenario_file_sha256": hashlib.sha256(b"scenario").hexdigest(),
                 "frozen_schema_sha256": hashlib.sha256(b"schema").hexdigest(),
+                #  THE ORACLE DISPOSITION, present because manifest version 4 requires
+                #  it and absent from no capture. `no` is the truthful value for a tree
+                #  this fixture built in process without compiling anything, and it is
+                #  deliberately not `yes`: a probe must never be able to publish a tree
+                #  that claims the frozen specification produced it.
+                "oracle_source_is_frozen": "no",
+                "source_transform_set_sha256": hashlib.sha256(
+                    b"in-process probe, nothing compiled"
+                ).hexdigest(),
                 "producer_sha256": hashlib.sha256(b"producer").hexdigest(),
                 "python_version": sys.version.split()[0],
                 "command": "in-process",

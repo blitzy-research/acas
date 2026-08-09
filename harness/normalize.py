@@ -419,10 +419,11 @@ def _make_output_directory(directory: Path) -> None:
 
 MANIFEST_FILENAME: Final[str] = "_manifest.json"
 # Version 2 added `attestation`; version 3 added `provenance` and widened
-# `attestation`, in step with harness/dump_tables.py. An older tree is refused rather
+# `attestation`; version 4 added the oracle disposition to `provenance` - all in step
+# with harness/dump_tables.py. An older tree is refused rather
 # than read: the point of these keys is that their absence cannot be mistaken for a
 # claim, so silently tolerating a manifest that predates them would defeat them.
-MANIFEST_VERSION: Final[int] = 3
+MANIFEST_VERSION: Final[int] = 4
 MANIFEST_KEYS: Final[tuple[str, ...]] = (
     "manifest_version",
     "producer",
@@ -475,12 +476,22 @@ ATTESTATION_KEYS: Final[tuple[str, ...]] = (
 # So the digest of the source manifest is recorded here and REQUIRED downstream:
 # harness/diff_states.py refuses a normalised tree whose recorded lineage does not
 # match the raw manifest beside it.
+#
+# `oracle_source_is_frozen` and `source_transform_set_sha256` are carried like every
+# other field and are emphatically NOT re-read from the build tree here. Which
+# compiled program produced a capture is a fact about the RUN, established at the dump
+# stage; re-deriving it at this stage would let a normalisation performed after a
+# rebuild describe an oracle the capture was never taken against - the same failure
+# the paragraph above is about, in a form that would be far harder to notice because
+# the value would look plausible.
 # =============================================================================
 PROVENANCE_KEYS: Final[tuple[str, ...]] = (
     "run_id",
     "scenario_file",
     "scenario_file_sha256",
     "frozen_schema_sha256",
+    "oracle_source_is_frozen",
+    "source_transform_set_sha256",
     "producer_sha256",
     "python_version",
     "command",

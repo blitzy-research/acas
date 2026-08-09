@@ -89,7 +89,13 @@ THREE PROMPTS PROMOTED TO CLI PARAMETERS  (Agent Action Plan section 0.3.4)
         tests to skip the whole archiving walk and [general/gl080.cbl:L324-L326]
         tests to skip the whole of phase 5. One keystroke suppresses the batch
         stamping, every posting delete, the quarter rollover and the cycle
-        increment.
+        increment - ON AN ARCHIVING SYSTEM, AND ONLY THERE. `disk-change section.`
+        [general/gl080.cbl:L519] is performed from exactly one site, L406 inside
+        `gl080b`, which the test at [general/gl080.cbl:L315] reaches only when
+        `Archiving` is on; the other arm performs `gl080c`
+        [general/gl080.cbl:L318-L320] and never asks. So with archiving off the
+        answer is never read, `a` keeps whatever `gl080a` left in it, and 9 and 0
+        produce the SAME table state. Measured in both configurations.
     `archive_path_override`, default None - the archive path edit
         [general/gl080.cbl:L555]. Gates WHERE the flat archive file is written,
         so it has no table effect.

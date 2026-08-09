@@ -66,18 +66,34 @@ the answer that lets the program PROCEED.
 `--disk-change-option`   [general/gl080.cbl:L542-L557]
     THE ONLY VALUE THAT PROCEEDS IS 0. `9` transfers to `main-exit` (L546-L547)
     and anything else re-prompts for ever (L548-L549) - the program's own GL084
-    message says so at [general/gl080.cbl:L252]. So the default is 0 AND NOT 9,
-    which is the easy thing to get backwards. A 9 is read twice afterwards, at
-    [general/gl080.cbl:L408-L409] to skip the archiving walk and at
-    [general/gl080.cbl:L324-L326] to skip end-of-period processing, so one
-    keystroke suppresses every batch stamp, every posting delete, the ledger
-    quarter rollover and the cycle increment.
+    message says so at [general/gl080.cbl:L252]. So the answer that proceeds is 0
+    AND NOT 9, which is the easy thing to get backwards. A 9 is read twice
+    afterwards, at [general/gl080.cbl:L408-L409] to skip the archiving walk and at
+    [general/gl080.cbl:L324-L326] to skip end-of-period processing.
+    AND THE ABORT ONLY EXISTS WHEN ARCHIVING IS ON. The prompt that sets `a` lives
+    in `disk-change section.` [general/gl080.cbl:L519], which is performed from
+    exactly one place - `gl080b` [general/gl080.cbl:L406], the ARCHIVING arm of the
+    test at [general/gl080.cbl:L315]. With `88 Archiving value "Y"`
+    [copybooks/wssystem.cob] off - which is what the shipped fixtures carry - the
+    non-archiving arm performs `gl080c` [general/gl080.cbl:L318-L320], the prompt is
+    never reached, `a` still holds whatever `gl080a` left in it, and 9 and 0 are
+    INDISTINGUISHABLE: the postings are deleted, every batch is stamped, and at a
+    period boundary the quarters roll and the cycle advances either way. MEASURED,
+    both configurations, on the shipped `clean_batch_gl` fixture. So one keystroke
+    suppresses every batch stamp, every posting delete, the ledger quarter rollover
+    and the cycle increment ON AN ARCHIVING SYSTEM, and nothing at all on any other.
 
 `--archive-path-override`   [general/gl080.cbl:L553-L557]
     `accept file-2 ... with update` L555 presents the field ALREADY holding the
     path computed at L537, so the COBOL default is NO OVERRIDE. Its only guard is
     that a leading space re-prompts (L556-L557); nothing else is examined, here
     either (rule R-3). The archive is a flat file, so this has no table effect.
+    A LEADING-SPACE VALUE IS REJECTED AND THE RUN GOES ON. The re-prompt has no
+    parameter equivalent, so what survives is the REJECTION: the typed value is
+    discarded, the path computed at L537 stands, and `gl080` continues into the
+    archiving walk and phase 5 exactly as it would with no override at all. It does
+    not end the run unit - `gl080_end_of_cycle._disk_change` carries the measured
+    reading and the per-site equivalence proof.
 
 The maintainer's note between the two prompts [general/gl080.cbl:L551] -
 "Hopefully can remove these after testing", echoing the header at
@@ -118,9 +134,12 @@ R-1 No process is spawned, no foreign library loaded, nothing imported from
 R-2 `WS-Term-Code` is an `int` (`pic 99` [copybooks/wscall.cob:L10]), the
     disk-change option an `int` (`77 a pic 99` [general/gl080.cbl:L183]); the
     path and `to-day` are `str`. No binary-radix numeric anywhere.
-R-3 The disk-change option is NOT restricted to 0 and 9, because the COBOL
-    re-prompts on a third value rather than rejecting it; the archive path is not
-    examined, created or resolved; execution is strictly sequential.
+R-3 The disk-change option is restricted to 0 and 9 - and that restores the frozen
+    input domain rather than adding a check, because `accept-option.`
+    [general/gl080.cbl:L542-L549] is a loop no third value can leave, so no third
+    value ever reaches the code below the prompt. See the `choices` comment on the
+    option itself. The archive path is not examined, created or resolved; execution
+    is strictly sequential.
 R-4 Reproduced here: `load09` having no gate, 0 as the only proceeding
     disk-change value, the pre-flight aborting only on Escape/"A"/"a", and the
     leading-space test as the archive path's sole guard.
@@ -137,15 +156,21 @@ configuration, no file or connection, nothing read from its surroundings - a har
 requirement, because the scenario suites import this package.
 
 INVOCATION
-    Both confirmation options DEFAULT TO PROCEEDING, exactly as the frozen program
-    does, so a command line that names neither is a DESTRUCTIVE one. The safe form
-    is given first::
+    BOTH DESTRUCTIVE ANSWERS MUST BE NAMED. The parser still carries the frozen
+    program's own answers - proceed, and 0 - and `--help` still shows them, but
+    `args.require_stated` refuses a command line that omits either with argparse's
+    usage status 2, before anything is bound, connected or written. So a command
+    line that names neither does not proceed destructively: it does not run at all.
+    Naming either spelling of each is what satisfies it, and the answer named is
+    passed to `gl080` unaltered. The safe form is given first::
 
         # DECLINES. Reproduces Escape or A at the pre-flight
         # [general/gl080.cbl:L295-L302]: gl080 returns BEFORE ANY WRITE and the
-        # database is left untouched.
+        # database is left untouched. The disk-change answer is still NAMED, because
+        # both answers are required; this one never reads it, since the decline
+        # returns at L302 long before the prompt at L545.
         python -m acas_posting.cli.gl_end_of_cycle --run-date 21/09/2025 \
-            --no-run-confirmed
+            --no-run-confirmed --disk-change-option 0
 
         # PROCEEDS. WARNING - THIS ONE WRITES, AND MOST OF IT IS IRREVERSIBLE:
         # postings deleted or archived, batches stamped, and at a period boundary
@@ -303,13 +328,19 @@ def _build_parser() -> argparse.ArgumentParser:
         action=args.ExplicitBooleanOptionalAction,
         default=_RUN_CONFIRMED_DEFAULT,
         help=(
-            "Whether the backup pre-flight was satisfied "
-            "(general/gl080.cbl:L295-L302). --no-run-confirmed reproduces "
-            "pressing Escape or A: gl080 returns BEFORE ANY WRITE OF ANY KIND, "
-            "so the database is left completely untouched. In the frozen source "
-            "only those three answers abort - every other reply, including the "
-            "blank the field is pre-set to at L298, proceeds - so the default is "
-            f"{'--run-confirmed' if _RUN_CONFIRMED_DEFAULT else '--no-run-confirmed'}."
+            "REQUIRED - name one spelling. Whether the backup pre-flight was "
+            "satisfied (general/gl080.cbl:L295-L302). --no-run-confirmed "
+            "reproduces pressing Escape or A: gl080 returns BEFORE ANY WRITE OF "
+            "ANY KIND, so the database is left completely untouched. In the frozen "
+            "source only those three answers abort - every other reply, including "
+            "the blank the field is pre-set to at L298, proceeds - so the frozen "
+            "program's own answer is "
+            f"{'--run-confirmed' if _RUN_CONFIRMED_DEFAULT else '--no-run-confirmed'}"
+            ", which is the value stored and passed on when you name it. IT IS NOT "
+            "A CLI DEFAULT YOU CAN TAKE BY OMISSION: omitting both spellings is a "
+            "usage error (status 2) and no database contact is made, because "
+            "nobody was asked the question this option stands in for. The frozen "
+            "answer stays available by naming it."
         ),
     )
 
@@ -359,18 +390,31 @@ def _build_parser() -> argparse.ArgumentParser:
         #  has to be stated and there would be no way to state it.
         action=args.STATED_ACTION,
         help=(
-            "The disk-change option gl080 accepts at general/gl080.cbl:L545, "
-            "into `77 a pic 99`. 0 PROCEEDS and 9 ABORTS - the program's own "
-            "message reads 'Enter <0> to signify change made or <9> to abort "
-            "this run' (general/gl080.cbl:L252). 9 is read twice afterwards, at "
-            "L408-L409 to skip the whole archiving walk and at L324-L326 to skip "
-            "the whole of end-of-period processing, so it suppresses every batch "
-            "stamp, every posting delete, the ledger-quarter rollover and the "
-            "cycle increment. NO OTHER VALUE IS ACCEPTED, because no other value "
+            "REQUIRED - name a value. The disk-change option gl080 accepts at "
+            "general/gl080.cbl:L545, into `77 a pic 99`. 0 PROCEEDS and 9 ABORTS - "
+            "the program's own message reads 'Enter <0> to signify change made or "
+            "<9> to abort this run' (general/gl080.cbl:L252). 9 is read twice "
+            "afterwards, at L408-L409 to skip the whole archiving walk and at "
+            "L324-L326 to skip the whole of end-of-period processing. *** THAT "
+            "ABORT EXISTS ONLY WHEN ARCHIVING IS ON. *** The prompt sits in "
+            "`disk-change section.` (L519), which is performed from ONE place - "
+            "L406, inside the ARCHIVING arm of the test at L315. When SYSTEM-REC's "
+            "`88 Archiving value \"Y\"` is off, which is what the shipped fixtures "
+            "carry, the other arm runs (L318-L320), the prompt is never reached, "
+            "`a` never becomes 9, and 9 AND 0 DO THE SAME THING: postings deleted, "
+            "every batch stamped, and at a period boundary the ledger quarters "
+            "rolled and the accounting cycle advanced. Measured in both "
+            "configurations. So 9 leaves GLPOSTING-REC, GLBATCH-REC and "
+            "GLLEDGER-REC as the seed left them ON AN ARCHIVING SYSTEM ONLY; "
+            "elsewhere it protects nothing and this run is destructive whichever "
+            "value you name. NO OTHER VALUE IS ACCEPTED, because no other value "
             "can leave the frozen program's input loop: general/gl080.cbl:L548-L549 "
             "sends anything that is neither 0 nor 9 straight back to the prompt, "
             "so 0 and 9 are the only two values the program can proceed on. "
-            f"Default {_DISK_CHANGE_OPTION_DEFAULT} - the value that proceeds."
+            f"{_DISK_CHANGE_OPTION_DEFAULT} is the frozen program's proceeding "
+            "answer and the value stored when you name it - NOT a CLI default you "
+            "can take by omission: omitting this option is a usage error (status 2) "
+            "with no database contact."
         ),
     )
 
@@ -381,16 +425,21 @@ def _build_parser() -> argparse.ArgumentParser:
     #  is absolute - and nothing here does either (rule R-3). The value is a plain
     #  string all the way to the callee, which applies the leading-space test.
     #
-    #  A LEADING SPACE DOES NOT MEAN "KEEP THE COMPUTED PATH". The
-    #  transfer at L557 goes back to the OPTION prompt at L542, not on to
-    #  `main-exit`, so the answer leaves control inside `accept-option` exactly as
-    #  a third option value does. The archive file is a flat file and not a schema
-    #  table, so the PATH is not itself a table effect - but the TRANSFER is,
-    #  because it makes everything after `perform disk-change.`
-    #  [general/gl080.cbl:L406] unreachable. The callee therefore reports
-    #  UNRESOLVED and ends the run unit rather than silently archiving to the
-    #  computed path, which is a state the frozen program has no route to on this
-    #  answer.
+    #  A LEADING SPACE IS A REJECTION, AND THE RUN GOES ON. The transfer at L557
+    #  goes back to the OPTION prompt at L542, not on to `main-exit` - so in the
+    #  frozen program the operator is asked again, and from there BOTH exits remain
+    #  open: 0 falls through to the archiving walk and 9 leaves at L546-L547. The
+    #  re-prompt has no parameter equivalent (Agent Action Plan section 0.4.2 puts
+    #  interactive retry targets outside the migrated surface), so what is preserved
+    #  is the REJECTION of the typed value: the callee discards the override, the
+    #  path computed at L537 stands, `disk-change` returns normally and everything
+    #  after `perform disk-change.` [general/gl080.cbl:L406] RUNS - the archiving
+    #  walk, the batch stamping, and at a period boundary the quarter rollover and
+    #  the cycle increment. It does NOT end the run unit. The archive file is a flat
+    #  file and not a schema table, so no scenario diff can see the difference
+    #  either way, which is why the reading had to be measured rather than inferred:
+    #  `gl080_end_of_cycle._disk_change` carries the measurement and the per-site
+    #  equivalence proof.
     parser.add_argument(
         "--archive-path-override",
         default=_ARCHIVE_PATH_OVERRIDE_DEFAULT,
@@ -402,12 +451,15 @@ def _build_parser() -> argparse.ArgumentParser:
             "ALREADY HOLDING that computed path, so omitting this option is the "
             "COBOL default of no override and proceeds. The archive is a flat "
             "file and not a schema table, so the path itself has no effect on any "
-            "table dump. A value whose FIRST CHARACTER IS A SPACE returns the "
-            "frozen paragraph to its option prompt (L556-L557), from which its "
-            "exit is unreachable, so gl080 ends the run unit and performs no "
-            "archive, no posting delete, no batch stamp and no period rollover "
-            "rather than falling back to the computed path. Nothing else about "
-            "the path is checked."
+            "table dump. A value whose FIRST CHARACTER IS A SPACE IS REJECTED AND "
+            "THE RUN CONTINUES: the frozen paragraph returns to its option prompt "
+            "(L556-L557), the re-prompt has no parameter equivalent, so the typed "
+            "value is discarded and the path computed at L537 stands. gl080 does "
+            "NOT end the run unit on that answer - it goes on to archive, to "
+            "delete or stamp exactly as it would with no override, and at a period "
+            "boundary to roll the ledger quarters and advance the cycle. Use "
+            "--disk-change-option 9 on an archiving system if what you want is the "
+            "abort. Nothing else about the path is checked."
         ),
     )
 
@@ -709,9 +761,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             "the disk-change option (general/gl080.cbl:L542-L549). Pass "
             "--disk-change-option 0 to PROCEED, which DELETES POSTED "
             "TRANSACTIONS, STAMPS EVERY BATCH, ROLLS THE LEDGER QUARTERS OVER AND "
-            "INCREMENTS THE ACCOUNTING CYCLE, or --disk-change-option 9 to abort "
-            "the run and leave GLPOSTING-REC, GLBATCH-REC and GLLEDGER-REC as the "
-            "seed left them.",
+            "INCREMENTS THE ACCOUNTING CYCLE. --disk-change-option 9 aborts the "
+            "run and leaves GLPOSTING-REC, GLBATCH-REC and GLLEDGER-REC as the "
+            "seed left them ONLY WHEN SYSTEM-REC IS SET TO ARCHIVE: the prompt it "
+            "answers is reached from general/gl080.cbl:L406 alone, inside the "
+            "archiving arm of L315, so on a non-archiving system 9 is never read "
+            "and DOES EXACTLY WHAT 0 DOES. Both answers are destructive there, and "
+            "naming 9 protects nothing.",
         ),
     )
 
@@ -725,11 +781,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     #  and 9 aborts and every other value re-prompts, so a value the operator
     #  simply Returns past is NOT self-evidently zero on the screen; and
     #  [general/gl080.cbl:L555-L557] for the path edit, presented `with update`
-    #  and therefore pre-filled with the path computed at L537. The defaults
-    #  chosen here - proceed, 0 and no override - are the reading of the source
-    #  set out in this module's docstring; what the ORACLE must confirm is the
-    #  resulting table state for each, in particular that 9 leaves GLPOSTING-REC,
-    #  GLBATCH-REC and GLLEDGER-REC exactly as the seed left them.
+    #  and therefore pre-filled with the path computed at L537. The answers stored
+    #  here - proceed, 0 and no override - are the reading of the source set out in
+    #  this module's docstring; what the ORACLE must confirm is the resulting table
+    #  state for each, in particular that 9 leaves GLPOSTING-REC, GLBATCH-REC and
+    #  GLLEDGER-REC exactly as the seed left them ON AN ARCHIVING SYSTEM - which is
+    #  the only configuration whose control flow reaches the prompt at all
+    #  [general/gl080.cbl:L315], [general/gl080.cbl:L406]. On a NON-archiving system
+    #  the question does not arise and the answer has no effect; that half is
+    #  measured on this side and needs no oracle.
     #  THE MENU'S OWN WORKING-STORAGE. One block, shared by the load below and by
     #  the `overrewrite` inside `load00` - see `args.general_menu_state`, and see
     #  `args.MenuState` for why sharing it is what carries the open connection and
@@ -936,9 +996,13 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 #     --disk-change-option   general/gl080.cbl:L542-L557, inside
 #         `disk-change section.` L519, receiving field `77 a pic 99 value zero.`
 #         L183 -> `disk_change_option`. Read back at L408-L409 and L324-L326.
+#         REACHED ONLY FROM L406, the archiving arm of L315, so the answer decides
+#         nothing on a non-archiving system.
 #     --archive-path-override   general/gl080.cbl:L553-L557
-#         -> `archive_path_override`. The PATH has no table effect; the TRANSFER
-#         does, because it suppresses every write below L406.
+#         -> `archive_path_override`. NEITHER THE PATH NOR THE TRANSFER HAS A TABLE
+#         EFFECT: the archive is a flat file, and the leading-space transfer is a
+#         loop-back to the option prompt (L542) whose own exits both remain open, so
+#         dropping the retry leaves the rejection and the run proceeds.
 #     --log-level   NOT a promoted prompt and NOT a COBOL parameter: diagnostic
 #         verbosity for the log records standing in for gl080's screen output.
 #         Reaches no program, alters no control flow, appears in no table dump.
@@ -1006,4 +1070,7 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 #         pre-filled accept values, so each promoted parameter's observed DATABASE
 #         EFFECT is to be confirmed against the compiled oracle - in particular
 #         that `--disk-change-option 9` leaves GLPOSTING-REC, GLBATCH-REC and
-#         GLLEDGER-REC exactly as the seed left them.
+#         GLLEDGER-REC exactly as the seed left them ON AN ARCHIVING SYSTEM. The
+#         non-archiving half is NOT open and needs no oracle: L315 sends control to
+#         `gl080c` and the prompt at L545 is never reached, so 9 and 0 are measured
+#         to produce the same table state on this side.

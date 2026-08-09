@@ -1736,7 +1736,7 @@ is a report of an observed run, and §8's preamble says so in those terms.
 
 | Artifact | What it carries |
 | --- | --- |
-| `<scenario>/verdict.json` | The machine-readable verdict: outcome, exit code, tables compared, differing and total differences, run id, and the five digests of §8.1 |
+| `<scenario>/verdict.json` | The machine-readable verdict: outcome, exit code, tables compared, differing and total differences, run id, the five digests of §8.1, and — from `verdict_version` 2 — the **oracle disposition** `oracle_source_is_frozen` with `source_transform_set_sha256`, copied verbatim from the compiled side's manifest provenance, itself copied from `$ACAS_BUILD/oracle-attestation.txt`. On this checkout it reads `no`, so **every verdict in this document carries its own NO-PARITY-CLAIM statement** rather than relying on the reset stage's shared log to carry it. `None` there means no attestation was reachable and is deliberately distinguishable from `yes` |
 | `<scenario>/parity-result` | **Driver-composed runs only.** A `run_parity.sh` driver's retained claim, stages requested, first failing stage status, behavioural status and verdict path. No stage in this tree writes this file; `verdict.json` above is the published claim, and the trees recorded in §8 retain theirs because the runs really produced them |
 | `<scenario>/diff.txt` | The report. **0 bytes on all eight** |
 | `<scenario>/{cobol,python}/_manifest.json` | The dump-stage manifest per side |

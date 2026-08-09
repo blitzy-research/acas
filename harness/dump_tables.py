@@ -2351,10 +2351,15 @@ def write_dump(dump: Mapping[str, Any], path: Path | str) -> Path:
 MANIFEST_FILENAME: Final[str] = "_manifest.json"
 
 # Bumped only if the manifest's SHAPE changes. Version 2 added `attestation`; version
-# 3 added `provenance` and widened `attestation`. An older tree is
+# 3 added `provenance` and widened `attestation`; version 4 added the ORACLE
+# DISPOSITION to `provenance` -- `oracle_source_is_frozen` and
+# `source_transform_set_sha256`. An older tree is
 # refused rather than read, because the whole point of these keys is that their
-# ABSENCE cannot be mistaken for a pass.
-MANIFEST_VERSION: Final[int] = 3
+# ABSENCE cannot be mistaken for a pass. Refusing on the VERSION rather than on the
+# missing key is deliberate: a version-3 capture is not malformed, it is a capture
+# taken before the disposition was recorded, and it must not be silently read as one
+# whose oracle was never established.
+MANIFEST_VERSION: Final[int] = 4
 
 # The manifest's keys, in the order they are written. Fixed, like `DUMP_KEYS`, because
 # the order is part of the byte-identical guarantee.
@@ -2400,11 +2405,22 @@ MANIFEST_KEYS: Final[tuple[str, ...]] = (
 #
 # The keys are fixed and ordered for the same reason `MANIFEST_KEYS` is.
 # =============================================================================
+#
+#   * No ORACLE DISPOSITION, so a verdict could read `outcome: identical` with nothing
+#     beside it saying WHICH compiled program the identical side came from. On this
+#     checkout the only buildable oracle is a DISCLOSED-TRANSFORMED one, and the
+#     disclosure lived solely in the reset stage's shared log -- one file, overwritten
+#     by the next reset, not carried per scenario. A reader of a single verdict could
+#     not tell a parity claim from a diagnosis. The two fields below are copied
+#     VERBATIM from the build's own attestation, so `None` means "no attestation was
+#     reachable" and can never be mistaken for `yes`.
 PROVENANCE_KEYS: Final[tuple[str, ...]] = (
     "run_id",
     "scenario_file",
     "scenario_file_sha256",
     "frozen_schema_sha256",
+    "oracle_source_is_frozen",
+    "source_transform_set_sha256",
     "producer_sha256",
     "python_version",
     "command",
@@ -2420,6 +2436,35 @@ _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{64}")
 # change to it -- forbidden by Agent Action Plan section 0.8.1 -- cannot pass unnoticed
 # through a comparison.
 FROZEN_SCHEMA_RELPATH: Final[str] = "mysql/ACASDB.sql"
+
+# =============================================================================
+# THE ORACLE DISPOSITION -- WHICH COMPILED PROGRAM THE COMPARED SIDE CAME FROM
+#
+# `harness/build_oracle.sh` publishes this file UNCONDITIONALLY at the end of every
+# build, and its own comment says why: "a reader who finds no `source-transform'
+# record knows there were none, rather than not knowing whether the producer looked."
+# Two of its records answer the only question a parity verdict turns on --
+# `oracle-source-is-frozen`, the plain yes/no, and `source-transform-set-sha256`, the
+# digest of the transform set that made the answer `no`.
+#
+# They are READ AND COPIED, never judged. `harness/reset_db.sh` already refuses a
+# transformed oracle before it drops a table (77) and `tests/conftest.py` already
+# skips the stack-bound tiers on the same condition; a THIRD gate here would either
+# duplicate them or, worse, disagree with them. What was missing was not a gate but a
+# RECORD: the dump stage is the one stage that writes per-scenario provenance, so this
+# is where the disposition has to enter the evidence to reach `verdict.json`.
+#
+# TWO SPELLINGS, EACH IN ITS OWN PLACE. The constants below are the ATTESTATION's own
+# hyphenated record names, because that is what is being parsed; the provenance keys are
+# `oracle_source_is_frozen` and `source_transform_set_sha256`, because every other key
+# in that block is snake_case and a JSON object with one hyphenated member would be the
+# odd one out for a consumer. The VALUE is carried verbatim either way, and `main`'s
+# progress line prints the attestation's own spelling, so a reader grepping the build
+# tree and a reader grepping a published manifest each find what they searched for.
+ORACLE_ATTESTATION_BASENAME: Final[str] = "oracle-attestation.txt"
+_ORACLE_ATTESTATION_FROZEN_KEY: Final[str] = "oracle-source-is-frozen"
+_ORACLE_ATTESTATION_TRANSFORM_SET_KEY: Final[str] = "source-transform-set-sha256"
+_ENV_BUILD: Final[str] = "ACAS_BUILD"
 
 # =============================================================================
 # THE RUN ATTESTATION -- WHY A CAPTURE HAS TO CARRY ONE
@@ -3007,6 +3052,51 @@ def optional_file_digest(path: Path | str | None) -> str | None:
         return None
 
 
+def read_oracle_disposition(
+    build_root: Path | str | None,
+) -> tuple[str | None, str | None]:
+    """Return the build's own answer to "was this compiled from the frozen checkout?".
+
+    Reads `oracle-source-is-frozen` and `source-transform-set-sha256` from the
+    attestation `harness/build_oracle.sh` writes, and returns them VERBATIM. Nothing is
+    interpreted: `yes` and `no` are the build's words, and `None` means the attestation
+    was absent, unreadable or silent about that record - a state that must remain
+    distinguishable from `yes`, because an oracle of unrecorded provenance supports no
+    claim at all (rule R-6).
+
+    NEVER RAISES, for the same reason `optional_file_digest` never raises: provenance
+    must not be the reason a capture cannot be published. A dump taken on a host with
+    no build tree - the arithmetic tier's own habitat - records `None` and says so.
+
+    Args:
+        build_root: `$ACAS_BUILD`, the build tree, or None when it is undeclared.
+
+    Returns:
+        `(oracle_source_is_frozen, source_transform_set_sha256)`, either element None
+            when the attestation does not supply it.
+    """
+    if build_root is None:
+        return (None, None)
+    attestation = Path(build_root) / ORACLE_ATTESTATION_BASENAME
+    try:
+        text = attestation.read_text(encoding="utf-8")
+    except (OSError, ValueError, UnicodeDecodeError):
+        return (None, None)
+
+    frozen: str | None = None
+    transform_set: str | None = None
+    #  TAB-SEPARATED, one record per line, exactly as `build_oracle.sh` prints them
+    #  with `printf '%s\t%s\n'`. `partition` rather than `split` so a value that itself
+    #  contains a tab - a transform record's reason text - cannot shift a field.
+    for line in text.splitlines():
+        key, _, value = line.partition("\t")
+        if key == _ORACLE_ATTESTATION_FROZEN_KEY:
+            frozen = value.strip() or None
+        elif key == _ORACLE_ATTESTATION_TRANSFORM_SET_KEY:
+            transform_set = value.strip() or None
+    return (frozen, transform_set)
+
+
 def build_provenance(
     *,
     run_id: str | None,
@@ -3015,6 +3105,7 @@ def build_provenance(
     command: Sequence[str] | None,
     source_manifest_sha256: str | None = None,
     producer_path: Path | str | None = None,
+    build_root: Path | str | None = None,
 ) -> dict[str, Any]:
     """Assemble the provenance block: what this capture was taken FROM.
 
@@ -3033,6 +3124,9 @@ def build_provenance(
             another tree; `normalize.py` fills it in.
         producer_path: The tool's own file, hashed so that an EDITED tool is
             distinguishable from this one. Defaults to this module.
+        build_root: `$ACAS_BUILD`, read for the oracle disposition. None records the
+            disposition as unestablished, which is the honest answer for a dump taken
+            where no compiled oracle exists.
 
     Returns:
         The provenance object, keys in `PROVENANCE_KEYS` order.
@@ -3044,11 +3138,15 @@ def build_provenance(
     if producer_path is None:
         producer_path = Path(__file__).resolve()
 
+    oracle_is_frozen, transform_set_digest = read_oracle_disposition(build_root)
+
     return {
         "run_id": run_id or None,
         "scenario_file": str(scenario_file) if scenario_file is not None else None,
         "scenario_file_sha256": optional_file_digest(scenario_file),
         "frozen_schema_sha256": optional_file_digest(schema_path),
+        "oracle_source_is_frozen": oracle_is_frozen,
+        "source_transform_set_sha256": transform_set_digest,
         "producer_sha256": optional_file_digest(producer_path),
         "python_version": (
             f"{sys.version_info.major}.{sys.version_info.minor}."
@@ -6624,6 +6722,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario_file=arguments.scenario_file,
         repository=env.get(_ENV_REPO),
         command=list(argv if argv is not None else sys.argv[1:]),
+        build_root=env.get(_ENV_BUILD),
     )
     _progress(
         "harness/dump_tables.py: provenance - run id "
@@ -6631,6 +6730,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{(provenance['scenario_file_sha256'] or '<none>')[:16]}, frozen schema "
         f"digest {(provenance['frozen_schema_sha256'] or '<none>')[:16]}"
     )
+    #  THE DISPOSITION IS ANNOUNCED, NOT JUST FILED. An operator watching a stage run
+    #  should learn which oracle their evidence is about at the moment it is captured,
+    #  not by reading JSON afterwards - and `no` is the answer that needs saying out
+    #  loud, because it is the answer under which the resulting diff is a diagnosis
+    #  rather than a parity claim (rule R-6).
+    if provenance["oracle_source_is_frozen"] == "yes":
+        _progress(
+            "harness/dump_tables.py: oracle disposition - "
+            "oracle-source-is-frozen yes"
+        )
+    else:
+        _progress(
+            "harness/dump_tables.py: oracle disposition - "
+            f"oracle-source-is-frozen "
+            f"{provenance['oracle_source_is_frozen'] or '<unrecorded>'}"
+            f", source-transform-set-sha256 "
+            f"{(provenance['source_transform_set_sha256'] or '<none>')[:16]}"
+            ". NO VERDICT DRAWN FROM THIS CAPTURE IS A PARITY CLAIM: the compiled "
+            "side was not established to be the frozen specification (rule R-6). "
+            "The capture is still written and it now carries that fact."
+        )
     if attestation["attested"]:
         _progress(
             f"harness/dump_tables.py: run attestation OK - "

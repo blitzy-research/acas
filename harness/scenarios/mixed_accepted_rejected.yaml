@@ -913,13 +913,24 @@ operations:
 # reasoning from the seed alone would expect gl072's end-batch to stamp
 # Cleared-Status and Posted [general/gl072.cbl:L373-L377] and end-account to rewrite
 # the ledger balances [general/gl072.cbl:L379-L382]. THAT IS NOT WHAT THE COMPILED
-# CYCLE DOES. Compiled measurement recorded as `Q-9' in
-# docs/migration/ambiguity-resolutions.md established that the bridge's host-variable
-# load never loads HV-POST-RRN, the table's primary key, so the one seeded posting is
-# persisted under key ZERO -- and [general/gl070.cbl:L490-L491],
-# `if WS-Post-Key = zero / go to loop.', skips it. The work file is therefore empty,
-# gl072 reads nothing, the end-batch rewrite is unreachable, and the run is a no-op
-# over all three tables. That measured limit is also why this fixture carries TWO
+# CYCLE DOES, and the cause is the POST-KEY ROUND TRIP rather than the primary key
+# alone. Two frozen facts, both measured, and it is the second that fires the gate.
+# FIRST, `Q-9' in docs/migration/ambiguity-resolutions.md established that the
+# bridge's host-variable load never loads HV-POST-RRN, the table's primary key
+# [common/glpostingMT.cbl:L1053-L1066], so that column is stored at zero.
+# SECOND, `A-NEW-18' in docs/migration/anomaly-log.md established that `move
+# WS-Post-Key to HV-POST-KEY' [common/glpostingMT.cbl:L1054] is a BYTE move from a
+# group into `PIC 9(18) COMP': the nineteen-digit image truncates to
+# 472328296244457520, and the read-back at [common/glpostingMT.cbl:L1085] copies the
+# numerically-set bytes 06 8E 0C 15 3B 04 30 30 into WS-Post-Key -- NOT the all-`0'
+# image. So the FIRST disjunct of the frozen gate, `if WS-Post-Key = zero'
+# [general/gl070.cbl:L490-L491], is FALSE (a GROUP compared with ZERO is byte-wise,
+# `Q-NKEY-CMP' reading 7), and the gate that ACTUALLY fires is
+# `if batch not = WS-Batch-Nos' [general/gl070.cbl:L492-L493], which is byte-wise too
+# and matches none of the 100,000 values a `pic 9(5)' batch number can hold
+# (`Q-NKEY-CMP' reading 4). The one seeded posting is therefore discarded: the work
+# file is empty, gl072 reads nothing, the end-batch rewrite is unreachable, and the
+# run is a no-op over all three tables. That measured limit is also why this fixture carries TWO
 # batches and ONE posting rather than a three-batch, three-posting-kind fixture: the
 # store can address only one posting primary key, and a
 # fixture invented to exhibit a path the store cannot reach would be evidence of

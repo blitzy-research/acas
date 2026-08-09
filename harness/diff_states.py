@@ -144,11 +144,12 @@ NORMALIZED_SUFFIX: Final[str] = NORMALIZED_SUFFIXES[0]
 # imported, following the convention every constant this module already shares with its
 # siblings follows - `DUMP_KEYS`, `IN_SCOPE_TABLES`, `SIDES`, `TEMP_PREFIX`.
 MANIFEST_FILENAME: Final[str] = "_manifest.json"
-# Version 2 added `attestation`, in step with harness/dump_tables.py and
-# harness/normalize.py. A version-1 tree is REFUSED rather than read: the whole
-# point of that key is that its absence cannot be mistaken for a claim of success,
-# so tolerating a manifest written before it existed would defeat the check.
-MANIFEST_VERSION: Final[int] = 3
+# Version 2 added `attestation`, version 3 `provenance`, version 4 the ORACLE
+# DISPOSITION inside it - in step with harness/dump_tables.py and
+# harness/normalize.py. An older tree is REFUSED rather than read: the whole
+# point of those keys is that their absence cannot be mistaken for a claim of success,
+# so tolerating a manifest written before they existed would defeat the check.
+MANIFEST_VERSION: Final[int] = 4
 
 # THE EXACT MANIFEST SHAPE THIS TOOL REQUIRES
 #
@@ -180,6 +181,8 @@ PROVENANCE_KEYS: Final[tuple[str, ...]] = (
     "scenario_file",
     "scenario_file_sha256",
     "frozen_schema_sha256",
+    "oracle_source_is_frozen",
+    "source_transform_set_sha256",
     "producer_sha256",
     "python_version",
     "command",
@@ -201,6 +204,17 @@ PROVENANCE_KEYS: Final[tuple[str, ...]] = (
 # `--side`, and requiring the interpreter to match would refuse a legitimate comparison
 # of captures taken minutes apart on a host that was patched in between. They are
 # RECORDED so a reader can see them, which is what provenance is for.
+#
+# `oracle_source_is_frozen` and `source_transform_set_sha256` are NOT required to match
+# either, and the reason is specific rather than lenient. The disposition describes the
+# COMPILED side; the Python side is legitimately captured where no build tree exists at
+# all - a host-side dump records `None` for both - so requiring agreement would refuse
+# the very comparison the protocol is for. What matters is that the disposition REACHES
+# THE VERDICT, and `build_verdict` takes it from the compiled side, which is the side it
+# is about. Enforcement of the frozen-oracle condition itself belongs to
+# harness/reset_db.sh, which refuses before any table is dropped, and to
+# tests/conftest.py, which declines the stack-bound tiers; a third gate here would only
+# be able to disagree with them.
 PROVENANCE_MUST_MATCH: Final[tuple[str, ...]] = (
     "run_id",
     "scenario_file_sha256",
@@ -247,7 +261,14 @@ ATTESTATION_REQUIRED_KEYS: Final[tuple[str, ...]] = (
 
 # The verdict manifest's own name and keys.
 VERDICT_FILENAME: Final[str] = "verdict.json"
-VERDICT_VERSION: Final[int] = 1
+# Version 2 added the ORACLE DISPOSITION. Until it did, a per-scenario verdict could
+# read `outcome: identical` with nothing beside it naming the compiled program the
+# identical side came from, and on a checkout whose frozen sources do not compile that
+# is the difference between a parity claim and a diagnosis. The disclosure existed - in
+# the reset stage's single shared log, overwritten by the next reset - and was therefore
+# not discoverable from the evidence a reader actually cites. Bumped, not widened
+# silently, so a consumer pinned to version 1 is told the shape moved.
+VERDICT_VERSION: Final[int] = 2
 VERDICT_KEYS: Final[tuple[str, ...]] = (
     "verdict_version",
     "producer",
@@ -261,6 +282,8 @@ VERDICT_KEYS: Final[tuple[str, ...]] = (
     "seed_marker_sha256",
     "scenario_file_sha256",
     "frozen_schema_sha256",
+    "oracle_source_is_frozen",
+    "source_transform_set_sha256",
     "cobol_manifest_sha256",
     "python_manifest_sha256",
     "report",
@@ -3190,6 +3213,19 @@ def build_verdict(
         ),
         "frozen_schema_sha256": _provenance_field(
             cobol_manifest, "frozen_schema_sha256"
+        ),
+        #  TAKEN FROM THE COMPILED SIDE ON PURPOSE, and unlike the four fields above it
+        #  is not a value both sides were required to agree on - see
+        #  PROVENANCE_MUST_MATCH. The disposition describes the oracle, so the oracle's
+        #  own capture is the only side that can state it; the Python side records
+        #  `None` whenever it was captured where no build tree exists. A verdict that
+        #  reads anything other than `yes` here is a DIAGNOSIS and not a parity claim
+        #  (rule R-6), and a reader of this one file can now tell which it is holding.
+        "oracle_source_is_frozen": _provenance_field(
+            cobol_manifest, "oracle_source_is_frozen"
+        ),
+        "source_transform_set_sha256": _provenance_field(
+            cobol_manifest, "source_transform_set_sha256"
         ),
         "cobol_manifest_sha256": (
             _manifest_fingerprint(left) if cobol_manifest is not None else None
