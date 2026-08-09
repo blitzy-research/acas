@@ -1,0 +1,1892 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:acas:data-dictionary:acas_posting_dictionary:1",
+  "title": "ACAS posting-cycle data dictionary (copybook / preSQL bridge / MySQL column triple)",
+  "description": "Constrains data_dictionary/acas_posting_dictionary.json, the ACAS posting migration's data dictionary. Each entry is one field as three sibling views - copybook, bridge host variable, MySQL column - plus their drift. No view is required. A fourth view, program_source, carries the General Ledger work-file fields, which reach no table. Document-only: no DDL, no business validation, no JSON \"number\".",
+  "type": "object",
+  "required": [
+    "meta",
+    "sources",
+    "tables",
+    "entries",
+    "coverage"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "meta": {
+      "$ref": "#/$defs/meta",
+      "description": "Identity of the dictionary, the authority statement it is built on, the byte-for-byte determinism contract its serialisation must honour, the derivation rules the generator applied, and the binding rules that govern it."
+    },
+    "sources": {
+      "$ref": "#/$defs/sources",
+      "description": "The frozen inputs the dictionary was derived from: the MySQL schema dump, the preSQL bridge pairs, the COBOL copybooks, and the inline FILE SECTION record declarations of the General Ledger posting programs. Recorded so a reader can re-derive every entry from the repository without trusting this document."
+    },
+    "tables": {
+      "type": "array",
+      "description": "The in-scope MySQL tables, one object each, giving the bridge, handler and entity facade that reach the table and the copybooks whose records map onto it. Sorted by table name, ASCII ascending, per meta.determinism.array_order.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/tableRecord",
+        "description": "One in-scope MySQL table and the COBOL machinery that reaches it - see the tableRecord definition."
+      }
+    },
+    "entries": {
+      "type": "array",
+      "description": "Every field the migration catalogues, at least one, duplicates not permitted, in document order: tables by name ascending, within a table by the column ordinal the frozen dump fixes, then that table's copybook-only fields, then the fields corresponding to no table, and the program-source fields last, per meta.determinism.array_order.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/entry",
+        "description": "One authoritative triple: a single field seen from the copybook, the bridge and the database at once - see the entry definition."
+      }
+    },
+    "coverage": {
+      "$ref": "#/$defs/coverage",
+      "description": "Tallies that make the completeness claim auditable: how many tables, bridges, columns, host variables, copybook fields and program-source fields exist in scope, how many entries the document carries, and which entry keys are one-sided."
+    }
+  },
+  "$defs": {
+    "repoPath": {
+      "type": "string",
+      "description": "A path relative to the repository root, using forward slashes, and CONTAINED WITHIN IT. Always relative: an absolute path would encode the machine the dictionary was generated on and is forbidden by meta.determinism.forbidden_content. Contained: every segment must begin with a letter, a digit or an underscore, so no member can be .. or . and none can climb out of the repository.",
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$",
+      "minLength": 3,
+      "examples": [
+        "mysql/ACASDB.sql",
+        "common/glpostingMT.scb",
+        "copybooks/wsledger.cob"
+      ]
+    },
+    "sourceLocator": {
+      "type": "string",
+      "description": "A citation into a frozen source file: a repository-relative path, a colon, then either a single line as L<n> or an inclusive span as L<n>-L<m>. Every view of every entry carries one so a reader can jump straight from a dictionary member to the COBOL or SQL line that establishes it (R-5, full traceability). The path half is exactly repoPath and is contained the same way, for the same reason.",
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*:L[0-9]+(-L[0-9]+)?$",
+      "examples": [
+        "mysql/ACASDB.sql:L155",
+        "common/irspostingMT.cbl:L982-L987",
+        "copybooks/wsbatch.cob:L40"
+      ]
+    },
+    "sourceLocatorOrNull": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A citation into a frozen source as <repository-relative-path>:L<n> or <path>:L<n>-L<m>, or null where the member it belongs to is absent. Null is meaningful, not a placeholder: bridge_host_variable.load_source is null for HV-POST-RRN, which common/glpostingMT.cbl declares at L281-L295 but never loads. Never absolute, forward slashes only.",
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*:L[0-9]+(-L[0-9]+)?$"
+    },
+    "entryKey": {
+      "type": "string",
+      "description": "An entry's stable identifier, qualified so no two records can be conflated by field name: TABLE-NAME.COLUMN-NAME where a column backs the field, else COPYBOOK-RECORD.FIELD-NAME. Names appear exactly as the frozen sources spell them - hyphens kept, case not folded. Two optional tails disambiguate rather than describe: @<file stem> names the declaring copybook and appears only on the second and later physical declarations of one signature, which is how the variant pair copybooks/plwsoi5B.cob and copybooks/plwsoi5C.cob - identical apart from one commented-out COPY - each keep an entry per declaration as rule R-5 requires; and a trailing #<line> disambiguates a name that repeats inside one record, such as filler. Both may occur together, file stem first.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*\\.[A-Za-z0-9][A-Za-z0-9-]*(@[A-Za-z0-9][A-Za-z0-9-]*)?(#[0-9]+)?$",
+      "examples": [
+        "GLPOSTING-REC.POST-RRN",
+        "IRSPOSTING-REC.POST4-DAY",
+        "PSIRSPOST-REC.IRS-POST-AMOUNT",
+        "WS-Ledger-Record.filler#37",
+        "Open-Item-Record-5.oi5-supplier@plwsoi5C"
+      ]
+    },
+    "tableName": {
+      "type": "string",
+      "description": "The name of an in-scope MySQL table exactly as it is spelled in the CREATE TABLE statement of mysql/ACASDB.sql, upper case with hyphens. The dictionary covers 22 of the 33 tables in the frozen dump; the other 11 are outside the posting cycle and are recorded only as a count in coverage.out_of_scope_tables, never by name.",
+      "pattern": "^[A-Z][A-Z0-9-]*$",
+      "examples": [
+        "GLPOSTING-REC",
+        "IRSPOSTING-REC",
+        "SAINV-LINES-REC"
+      ]
+    },
+    "tableNameOrNull": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "An in-scope table name as in tableName, or null when the entry is a copybook-only field that maps to no column in any table - a filler, a redefines alternative, or a subordinate item that the bridge folds into a group. Null means \"deliberately unmapped and recorded anyway\", never \"not yet investigated\".",
+      "pattern": "^[A-Z][A-Z0-9-]*$"
+    },
+    "bridgeName": {
+      "type": "string",
+      "description": "The base name of one of the 20 in-scope preSQL bridge pairs, without directory or extension, so that common/<name>.scb and common/<name>.cbl are both implied. The eight bridges outside the posting cycle are recorded only as a count in coverage.out_of_scope_bridges, never by name.",
+      "pattern": "^[a-z][a-z0-9]*MT$",
+      "examples": [
+        "glpostingMT",
+        "irspostingMT",
+        "nominalMT"
+      ]
+    },
+    "bridgeNameOrNull": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A bridge base name as in bridgeName, or null when the entry belongs to no bridge because it is a copybook-only field.",
+      "pattern": "^[a-z][a-z0-9]*MT$"
+    },
+    "handlerName": {
+      "type": "string",
+      "description": "The numbered COBOL file-handler program that a posting program CALLs to reach the table, which in turn CALLs the bridge. Two families exist: acasNNN for the General, Sales and Purchase side and acasirsubN for the IRS side. acas000 is a five-way dispatcher keyed by file-key number rather than a single-table handler [common/acas000.cbl:L574-L600], so four different in-scope tables legitimately name it; its fifth key aliases the first.",
+      "pattern": "^(acas[0-9]{3}|acasirsub[0-9])$",
+      "examples": [
+        "acas006",
+        "acas000",
+        "acasirsub4"
+      ]
+    },
+    "handlerNameOrNull": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A handler program name as in handlerName, or null when the entry reaches no handler because it is a copybook-only field.",
+      "pattern": "^(acas[0-9]{3}|acasirsub[0-9])$"
+    },
+    "entityFacade": {
+      "type": "string",
+      "description": "The entity facade that owns the table, one of the twenty the frozen facade copybook declares. Required on a table record, so every table is reachable from the calling convention the COBOL programs use.",
+      "enum": [
+        "System",
+        "System defaults",
+        "System final",
+        "System totals",
+        "GL-Nominal",
+        "GL-Posting",
+        "GL-Batch",
+        "SPL-Posting",
+        "Sales",
+        "Value",
+        "Analysis",
+        "Invoice",
+        "OTM3",
+        "Purch",
+        "PInvoice",
+        "OTM5",
+        "IRS nominal",
+        "IRS defaults",
+        "IRS posting",
+        "IRS final"
+      ]
+    },
+    "entityFacadeOrNull": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "An entity facade as in entityFacade, or null when the entry belongs to no facade because it is a copybook-only field. The enumeration below repeats entityFacade deliberately: this keyword subset has no way to add null to a referenced enumeration, and duplicating the list is preferable to loosening either position.",
+      "enum": [
+        "System",
+        "System defaults",
+        "System final",
+        "System totals",
+        "GL-Nominal",
+        "GL-Posting",
+        "GL-Batch",
+        "SPL-Posting",
+        "Sales",
+        "Value",
+        "Analysis",
+        "Invoice",
+        "OTM3",
+        "Purch",
+        "PInvoice",
+        "OTM5",
+        "IRS nominal",
+        "IRS defaults",
+        "IRS posting",
+        "IRS final",
+        null
+      ]
+    },
+    "cobolUsage": {
+      "type": "string",
+      "description": "One of the ten COBOL storage classes the in-scope layouts declare. Required and never null on a copybook field, so a consumer selects its Python type from data alone. Whether the clause sat on the item or was inherited from a group is recorded separately in usageDeclaredAt.",
+      "enum": [
+        "DISPLAY",
+        "COMP",
+        "COMP-3",
+        "COMP-5",
+        "BINARY-CHAR",
+        "BINARY-SHORT",
+        "BINARY-LONG",
+        "POINTER",
+        "ALPHANUMERIC",
+        "GROUP"
+      ]
+    },
+    "signPosition": {
+      "type": "string",
+      "description": "Where a signed item's sign sits: NONE, the four DISPLAY forms, or IMPLICIT_BINARY where the sign is part of a packed or binary representation. Required on every field so no consumer has to infer it.",
+      "enum": [
+        "NONE",
+        "TRAILING_INCLUDED",
+        "LEADING_INCLUDED",
+        "LEADING_SEPARATE",
+        "TRAILING_SEPARATE",
+        "IMPLICIT_BINARY"
+      ]
+    },
+    "usageDeclaredAt": {
+      "type": "string",
+      "description": "Where the recorded usage was found: FIELD on the item's own declaration, GROUP inherited from an ancestor group, DEFAULT left to COBOL's default. Required, so an inherited storage class can never be mistaken for a declared one.",
+      "enum": [
+        "FIELD",
+        "GROUP",
+        "DEFAULT"
+      ]
+    },
+    "cobolPythonStorage": {
+      "type": "string",
+      "description": "The Python storage class the COBOL side alone implies: DECIMAL for a scaled item, INT for a whole-number or binary-family item, STR for character data, NONE for a group. Describes the COBOL view only and settles no disagreement between the three views.",
+      "enum": [
+        "DECIMAL",
+        "INT",
+        "STR",
+        "NONE"
+      ]
+    },
+    "conditionName": {
+      "type": "object",
+      "description": "One 88-level condition name the in-scope layouts declare, with its literal and a locator. All three members are required.",
+      "required": [
+        "name",
+        "value",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The condition name exactly as declared, preserving its case.",
+          "minLength": 1,
+          "examples": [
+            "Status-Open",
+            "Waiting",
+            "GL-Batch",
+            "IRS-Used",
+            "IRS-Both-Used"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "description": "The 88-level condition's literal exactly as the copybook writes it, at least one character. Kept as a string, never a number, so a value such as 01 cannot lose its leading zero in transport.",
+          "minLength": 1,
+          "examples": [
+            "0",
+            "1",
+            "2",
+            "zero",
+            "\"Y\"",
+            "\"B\""
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/sourceLocator",
+          "description": "The copybook line that declares this condition name."
+        }
+      }
+    },
+    "copybookField": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The copybook view: the field as the frozen COBOL record layout declares it. Null where no copybook declares it, which is the correct value for a bridge-derived column such as IRSPOSTING-REC.POST4-DAY. All twenty-two members are required when the object is present.",
+      "required": [
+        "file",
+        "source",
+        "name",
+        "level",
+        "picture",
+        "usage",
+        "usage_declared_at",
+        "usage_inherited_from",
+        "usage_group_source",
+        "signed",
+        "sign_position",
+        "sign_clause_text",
+        "digits",
+        "integer_digits",
+        "scale",
+        "character_length",
+        "redefines",
+        "occurs",
+        "is_filler",
+        "is_group",
+        "parent_group",
+        "condition_names"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/repoPath",
+          "description": "The copybook that declares this field, for example copybooks/wsledger.cob."
+        },
+        "source": {
+          "$ref": "#/$defs/sourceLocator",
+          "description": "The line or span in that copybook where the field is declared."
+        },
+        "name": {
+          "type": "string",
+          "description": "The data-name exactly as declared, preserving the copybook's own mixed case. filler is recorded under its own name with is_filler true rather than being dropped.",
+          "minLength": 1,
+          "examples": [
+            "Ledger-Name",
+            "WS-Post-rrn",
+            "Sales-Average",
+            "Input-Gross",
+            "filler"
+          ]
+        },
+        "level": {
+          "type": "string",
+          "description": "The level number as written, keeping its leading zero, because the level is a two-character token in COBOL and not an arithmetic quantity. All four levels the in-scope layouts use occur: 01 on the record, 03 and 05 on subordinate items, and 07 inside a nested redefines such as copybooks/wsledger.cob:L17-L18.",
+          "pattern": "^(0[1-9]|[1-4][0-9])$",
+          "examples": [
+            "01",
+            "03",
+            "05",
+            "07"
+          ]
+        },
+        "picture": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The picture clause exactly as written, lower case preserved, at least one character, or null where the item has none. Null is not an omission: a group item has no picture, and an item may declare a usage with no picture at all (copybooks/wssystem.cob:L63).",
+          "minLength": 1,
+          "examples": [
+            "pic 9(5)",
+            "pic s9(8)v99",
+            "pic x(24)",
+            "pic 99v99",
+            "pic s9(7)v99"
+          ]
+        },
+        "usage": {
+          "$ref": "#/$defs/cobolUsage",
+          "description": "The storage class in force for this item, whether declared on the item or inherited from a group. Required, and required to be one of the enumerated classes, so that acas_posting/cobol/field.py can select Decimal or int from data alone (R-2)."
+        },
+        "usage_declared_at": {
+          "$ref": "#/$defs/usageDeclaredAt",
+          "description": "Whether the usage above was declared on this item, inherited from an ancestor group, or left to COBOL's DISPLAY default."
+        },
+        "usage_inherited_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name of the ancestor group whose USAGE clause this item inherits, or null when usage_declared_at is FIELD or DEFAULT. For the four batch amount fields this is Amounts (copybooks/wsbatch.cob:L40); for the twenty period-total fields it is Sales-Ledger-Data or Purchase-Ledger-Data (copybooks/wssys4.cob:L9 and L20).",
+          "minLength": 1
+        },
+        "usage_group_source": {
+          "$ref": "#/$defs/sourceLocatorOrNull",
+          "description": "The line that declares the inherited USAGE clause, or null when nothing is inherited. Citing the group line separately from the field line is what lets a reader confirm the inheritance rather than take it on trust."
+        },
+        "signed": {
+          "type": "boolean",
+          "description": "Whether the copybook declares this item as signed - an S in the picture, or a BINARY-* item without UNSIGNED. Load-bearing: copybooks/wssl.cob:L49 declares Sales-Average binary-long, which is signed, while the bridge host variable that receives it is unsigned, so the sign is lost before any SQL runs. That divergence is only visible because signedness is recorded independently in all three views."
+        },
+        "sign_position": {
+          "$ref": "#/$defs/signPosition",
+          "description": "Where the sign sits for a signed item, or NONE for an unsigned one. Required for every field so that no consumer has to infer it from the picture."
+        },
+        "sign_clause_text": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The SIGN clause exactly as spelled in the copybook, or null when the item declares none. Recorded verbatim because the two in-scope copybooks that use the leading-sign form spell it differently - copybooks/wspost-irs.cob:L21 writes sign leading and copybooks/irswspost.cob:L14 writes sign is leading - and R-4 requires the difference be preserved rather than normalised away.",
+          "minLength": 1,
+          "examples": [
+            "sign leading",
+            "sign is leading"
+          ]
+        },
+        "digits": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Total number of decimal digit positions the picture declares, integer plus fractional, excluding any sign or implied decimal point. Null only for an item with no numeric picture, such as a group or an alphanumeric field. An integer count, never a JSON number, per R-2.",
+          "minimum": 0
+        },
+        "integer_digits": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Digit positions to the left of the implied decimal point, so that digits minus integer_digits equals scale for a numeric item. Recorded explicitly rather than computed, so that a widening such as the copybook's nine integer digits against the host variable's twelve (copybooks/wsbatch.cob:L41 versus common/glbatchMT.cbl:L291) is directly comparable across the three views.",
+          "minimum": 0
+        },
+        "scale": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Digit positions to the right of the implied decimal point - the V in the picture. Zero is a real and important value, not a missing one: the moving-average accumulators the Sales and Purchase programs maintain are declared with zero decimal places while the amounts added into them carry two, which is what makes the legacy double truncation reproducible. Null only where no numeric picture exists.",
+          "minimum": 0
+        },
+        "character_length": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Declared length in characters for an alphanumeric item, or the total byte length for a group whose length the copybook states; null for a numeric item. Compared across views to detect padding drift such as the twenty-four characters of copybooks/wsledger.cob:L27 against the thirty-two of common/nominalMT.cbl:L299.",
+          "minimum": 0
+        },
+        "redefines": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The data-name this item REDEFINES, or null when it redefines nothing. Never dropped: the redefinition is frequently how a record is actually addressed, as with WS-Ledger-Key9 redefining the WS-Ledger-Key group as a single eight-digit number (copybooks/wsledger.cob:L21-L22), which is the form the bridge and the column correspond to.",
+          "minLength": 1
+        },
+        "occurs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The OCCURS count for a table item, or null when the item is not a table. Recorded because the quarter arrays are addressed both by name and by subscript - copybooks/wsledger.cob:L36 and copybooks/wssl.cob:L62 both redefine four named quarters as a four-element table - and because one program indexes such an array with an unbounded subscript, a defect that must be reproduced rather than guarded.",
+          "minimum": 1
+        },
+        "is_filler": {
+          "type": "boolean",
+          "description": "True when the item is declared as filler. Filler entries are kept, not discarded: they consume record positions, they explain gaps between the copybook layout and the column list, and dropping them would break the byte accounting that the declared record lengths are checked against."
+        },
+        "is_group": {
+          "type": "boolean",
+          "description": "True when the item has subordinate items and therefore no picture of its own. A group can still map to a single column - the two five-digit children of WS-Post-Key (copybooks/wspost.cob:L14-L16) are moved as one ten-digit group into a single host variable - in which case the entry carries a derivation of kind GROUP_CONCATENATION."
+        },
+        "parent_group": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name of the immediately containing group item, or null for the 01-level record itself. Gives the reader the containment path without re-reading the copybook, and is what makes an inherited usage checkable against the group that declared it.",
+          "minLength": 1
+        },
+        "condition_names": {
+          "type": "array",
+          "description": "Every 88-level condition name declared on this field, in declaration order. Empty for the great majority of fields. Never summarised into a single flag: the IRS fan-out switch carries two condition names over a three-state field, and both, plus the unnamed space state, change which tables a run writes to.",
+          "items": {
+            "$ref": "#/$defs/conditionName",
+            "description": "One 88-level condition name declared on this field."
+          }
+        }
+      }
+    },
+    "bridgeHostVariable": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The bridge view: the host variable the generated preSQL bridge program declares, and the authoritative view for this migration. Null when the field has no host variable. All seventeen members are required when the object is present.",
+      "required": [
+        "file",
+        "source",
+        "hv_group_name",
+        "hv_group_suffix",
+        "name",
+        "picture",
+        "usage",
+        "signed",
+        "digits",
+        "integer_digits",
+        "scale",
+        "character_length",
+        "loaded_from_record",
+        "load_source",
+        "unloaded_to_record",
+        "unload_source",
+        "group_initialised_before_load"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/repoPath",
+          "description": "The generated bridge program that declares this host variable, for example common/glpostingMT.cbl. The generated .cbl is cited rather than the .scb because the host-variable group is materialised in the generated program; the .scb is cited separately in sources.bridges for the table directive and the key metadata."
+        },
+        "source": {
+          "$ref": "#/$defs/sourceLocator",
+          "description": "The line in that bridge program where the host variable is declared."
+        },
+        "hv_group_name": {
+          "type": "string",
+          "description": "The 01-level group that contains this host variable, as the generator emits it - TD- followed by the table name. The bridges declare a matching TP- pointer item beside it (common/glpostingMT.cbl:L280-L281).",
+          "pattern": "^TD-[A-Z][A-Z0-9-]*$",
+          "examples": [
+            "TD-GLPOSTING-REC",
+            "TD-IRSPOSTING-REC"
+          ]
+        },
+        "hv_group_suffix": {
+          "type": "string",
+          "description": "The host-variable group prefix this variable belongs to - HV, or HV followed by a digit for a second group in one bridge. A bridge owning a header table and a lines table declares two groups.",
+          "pattern": "^HV[0-9]?$",
+          "examples": [
+            "HV",
+            "HV1"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "description": "The host variable's data-name exactly as the bridge declares it, upper case. The pattern admits the optional group digit the bridges use to distinguish a second host-variable group in one bridge, as HV1- does for a lines table.",
+          "pattern": "^HV[0-9]?-[A-Z0-9][A-Z0-9-]*$",
+          "examples": [
+            "HV-POST-RRN",
+            "HV-SALES-AVERAGE",
+            "HV-POST4-DAY",
+            "HV1-IL-LINE-KEY"
+          ]
+        },
+        "picture": {
+          "type": "string",
+          "description": "The host variable's PICTURE and USAGE text exactly as the bridge declares it, upper case as generated. A string, never a JSON number (R-2).",
+          "minLength": 1,
+          "examples": [
+            "PIC  9(08) COMP",
+            "PIC S9(08)V9(02) COMP",
+            "PIC X(32)",
+            "PIC  9(18) COMP"
+          ]
+        },
+        "usage": {
+          "$ref": "#/$defs/cobolUsage",
+          "description": "The host variable's storage class. In practice the bridges declare numeric host variables as COMP and character host variables as PIC X(n), which the dictionary records as ALPHANUMERIC; a copybook item stored as COMP-3 or as a leading-sign DISPLAY therefore changes representation at this boundary, and entry.drift.usage records that."
+        },
+        "signed": {
+          "type": "boolean",
+          "description": "Whether the host variable itself is signed. Load-bearing where it differs from the copybook: Sales-Average is signed binary-long (copybooks/wssl.cob:L49) while HV-SALES-AVERAGE is unsigned (common/salesMT.cbl:L308), so the sign is lost at the bridge before any SQL runs."
+        },
+        "digits": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Total declared digit positions of the host variable, or null for a character host variable.",
+          "minimum": 0
+        },
+        "integer_digits": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Digit positions left of the implied decimal point, or null for a character host variable. Comparing this against the copybook view is how digit widening is detected.",
+          "minimum": 0
+        },
+        "scale": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Digit positions right of the implied decimal point, or null for a character host variable.",
+          "minimum": 0
+        },
+        "character_length": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Declared length in characters for a PIC X(n) host variable, or null for a numeric one.",
+          "minimum": 0
+        },
+        "loaded_from_record": {
+          "type": "boolean",
+          "description": "Whether the bridge's load paragraph actually moves the record field into this host variable. False is a recorded fact, not an omission: HV-POST-RRN is declared (common/glpostingMT.cbl:L282) and never loaded, and notes says why."
+        },
+        "load_source": {
+          "$ref": "#/$defs/sourceLocatorOrNull",
+          "description": "The line of the load paragraph that moves the record field into this host variable, or null when no such move exists. Null must agree with loaded_from_record being false."
+        },
+        "unloaded_to_record": {
+          "type": "boolean",
+          "description": "Whether the bridge's unload paragraph moves this host variable back into the record after a read. False for a bridge-derived column: the three IRS date components are loaded on write but never unloaded, because they exist only to be selected on rather than returned (common/irspostingMT.cbl:L1004-L1015)."
+        },
+        "unload_source": {
+          "$ref": "#/$defs/sourceLocatorOrNull",
+          "description": "The line of the unload paragraph that moves this host variable back into the record, or null when no such move exists."
+        },
+        "group_initialised_before_load": {
+          "type": "boolean",
+          "description": "Whether the bridge initialises the whole host-variable group before loading it. True everywhere in the in-scope bridges, which is why an unset field reaches the database as zero or space rather than as SQL NULL, and why every column can be declared NOT NULL."
+        }
+      }
+    },
+    "mysqlColumn": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The column view: the column as the frozen dump mysql/ACASDB.sql declares it. Null where no column backs the field. All thirteen members are required when the object is present. Describes the frozen schema; expresses no change to it.",
+      "required": [
+        "file",
+        "source",
+        "name",
+        "sql_type",
+        "base_type",
+        "display_width",
+        "scale",
+        "unsigned",
+        "nullable",
+        "column_default",
+        "is_primary_key",
+        "ordinal",
+        "comment"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/repoPath",
+          "description": "The frozen schema file that declares the column. In practice always mysql/ACASDB.sql, which is the only schema file the posting cycle touches."
+        },
+        "source": {
+          "$ref": "#/$defs/sourceLocator",
+          "description": "The line of the CREATE TABLE block where the column is declared."
+        },
+        "name": {
+          "type": "string",
+          "description": "The column name exactly as it appears between backticks in the DDL, upper case with hyphens. Because a hyphen is not a bare-identifier character in SQL, every reference to it must be quoted; the dictionary stores the bare name and leaves quoting to the data-access layer.",
+          "pattern": "^[A-Z0-9][A-Z0-9-]*$",
+          "examples": [
+            "POST-RRN",
+            "SALES-AVERAGE",
+            "LEDGER-NAME",
+            "POST4-DAY"
+          ]
+        },
+        "sql_type": {
+          "type": "string",
+          "description": "The column's type text copied verbatim from the DDL, including the display width and the unsigned suffix where present, and excluding the nullability, default and comment clauses which have their own members. Verbatim so that no re-rendering can silently change a width or a scale, and a string rather than a structured number because R-2 forbids a JSON number anywhere precision could be lost.",
+          "minLength": 3,
+          "examples": [
+            "mediumint(5) unsigned",
+            "decimal(10,2)",
+            "decimal(14,2) unsigned",
+            "char(32)",
+            "bigint(10) unsigned"
+          ]
+        },
+        "base_type": {
+          "type": "string",
+          "description": "The SQL base type with the width and the unsigned suffix removed. The vocabulary is exactly the seven base types the frozen dump uses and no others: adding FLOAT, DOUBLE or REAL would make a binary floating-point column expressible, which R-2 forbids outright, so they are omitted and the prohibition becomes structural rather than advisory.",
+          "enum": [
+            "DECIMAL",
+            "INT",
+            "TINYINT",
+            "SMALLINT",
+            "MEDIUMINT",
+            "BIGINT",
+            "CHAR"
+          ]
+        },
+        "display_width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The parenthesised width for an integer type, the precision for a DECIMAL, or the character count for a CHAR; null only if the DDL declares the type without a width. A display width is a rendering hint on MySQL integer types and not a range constraint, which is precisely why the dictionary records it as observed and derives nothing from it.",
+          "minimum": 0
+        },
+        "scale": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The second parenthesised argument of a DECIMAL - the number of digits kept to the right of the decimal point - or null for a non-DECIMAL type. Zero occurs and is meaningful: the frozen dump declares both decimal(2,0) and decimal(5,0) unsigned, so a null scale and a zero scale are different facts.",
+          "minimum": 0
+        },
+        "unsigned": {
+          "type": "boolean",
+          "description": "Whether the DDL carries the unsigned suffix. Compared against the copybook and bridge views to detect the signedness drift that costs a negative value its sign. Note that a signed BIGINT does occur - PSIRSPOST-REC declares its primary key as bigint(11) with no unsigned suffix - so this is genuinely per column and not a property of the base type."
+        },
+        "nullable": {
+          "type": "boolean",
+          "description": "Whether the column permits SQL NULL. All 720 columns of the frozen dump are declared NOT NULL, so a conforming document will normally carry false throughout; the member exists because the fact is an observation about the schema and not an assumption the dictionary is entitled to bake in."
+        },
+        "column_default": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The column's DEFAULT clause as the dump writes it, or null where it declares none. Null is the usual value: the frozen dump relies on the bridge initialising its host-variable group before each load rather than on column defaults.",
+          "examples": [
+            "''"
+          ]
+        },
+        "is_primary_key": {
+          "type": "boolean",
+          "description": "Whether the column is the table's PRIMARY KEY. Every one of the 22 in-scope tables has a single-column primary key and no secondary index at all, which is what makes an ordering-normalised table dump deterministic with a plain ORDER BY on this column and no tie-breaking."
+        },
+        "ordinal": {
+          "type": "integer",
+          "description": "The column's one-based position within its CREATE TABLE statement. This is the sort key that fixes entry order inside a table, so it is what makes the committed dictionary byte-for-byte reproducible; see meta.determinism.array_order.",
+          "minimum": 1
+        },
+        "comment": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The column's COMMENT text as the dump writes it, at least one character, or null where it declares none. Recorded verbatim, because a comment that disagrees with the declaration beside it is itself a fact about the frozen schema.",
+          "minLength": 1,
+          "examples": [
+            "Rel. replacement",
+            "Also called Approp"
+          ]
+        }
+      }
+    },
+    "presence": {
+      "type": "object",
+      "description": "Which of the four sources this field was found in at all. Absence from a source is a recorded fact, so nothing discovered in one source is dropped for want of a counterpart in another. one_sided is computed from the authoritative triple alone. Two agreements the generator enforces and the validation test asserts: each boolean equals whether its view is non-null, and at least one view is non-null.",
+      "required": [
+        "in_copybook",
+        "in_bridge",
+        "in_column",
+        "in_program_source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "in_copybook": {
+          "type": "boolean",
+          "description": "True when a COBOL copybook declares the field. False for a column the bridge derives with no copybook counterpart, of which IRSPOSTING-REC has three."
+        },
+        "in_bridge": {
+          "type": "boolean",
+          "description": "True when a bridge program declares a host variable for the field. False for a copybook-only field such as a filler, a redefines alternative, or a subordinate item that the bridge carries only as part of its parent group."
+        },
+        "in_column": {
+          "type": "boolean",
+          "description": "True when mysql/ACASDB.sql declares a column for the field."
+        },
+        "in_program_source": {
+          "type": "boolean",
+          "description": "True when a posting program's own FILE SECTION declares the field rather than a copybook - the General Ledger work files pretrans.tmp and postrans.tmp and the sort file between them, declared inline in general/gl070.cbl, gl071.cbl and gl072.cbl. Transient scratch: in_copybook, in_bridge and in_column are all false. Catalogued because their widths are load-bearing (A-14)."
+        }
+      }
+    },
+    "drift": {
+      "type": "object",
+      "description": "Where the three views disagree: seven required members flagging the kind of disagreement and describing it in details. Drift is recorded, never reconciled; no member here proposes a correction.",
+      "required": [
+        "signedness",
+        "usage",
+        "digits",
+        "scale",
+        "character_length",
+        "name",
+        "details"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "signedness": {
+          "type": "boolean",
+          "description": "True when the views do not agree on whether the value is signed. The consequence is real: a signed BINARY-LONG copybook field feeding an unsigned host variable and an unsigned column loses its sign at the bridge, before SQL runs, so the Python data-access layer must reproduce the bridge's conversion rather than write the computed value and let the database object."
+        },
+        "usage": {
+          "type": "boolean",
+          "description": "True when the storage class changes between views - for example a leading-sign zoned decimal in the copybook, a binary host variable in the bridge, and a DECIMAL column in the database, which is three representations of one value."
+        },
+        "digits": {
+          "type": "boolean",
+          "description": "True when the total or integer digit count differs between views, such as the batch amount fields declared with nine integer digits in the copybook and twelve in both the host variable and the column."
+        },
+        "scale": {
+          "type": "boolean",
+          "description": "True when the number of fractional digits differs between views. Distinct from digits because a scale difference changes rounding and truncation behaviour rather than range."
+        },
+        "character_length": {
+          "type": "boolean",
+          "description": "True when the declared character length differs between views, as with the ledger name declared twenty-four characters wide in the copybook and thirty-two in both the host variable and the column. The value is not corrupted but the padding is, and padding is visible in a table dump, which is why the dump normaliser canonicalises trailing spaces in fixed-character columns."
+        },
+        "name": {
+          "type": "boolean",
+          "description": "True when the copybook data-name, the host-variable name with its HV- prefix removed, and the column name are not all the same identifier. All three names are always recorded independently in their own views, so this flag is a convenience for readers and reports, never a substitute for them."
+        },
+        "details": {
+          "type": "array",
+          "description": "One short sentence per disagreement, naming the views involved and what each says, so the record is readable without cross-referencing three files. Empty when no flag is set. This is the place to state a divergence plainly; it is not a place to argue for a correction.",
+          "items": {
+            "type": "string",
+            "description": "One sentence describing a single disagreement, naming the views involved and what each of them says. A statement of fact about the frozen sources, never a proposal to change one of them.",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "derivation": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "How a value comes to exist when the mapping is not a plain field-for-field move, including any guard and what happens when the guard does not hold. Null for a plain move. Required whenever a column exists with no copybook view.",
+      "required": [
+        "kind",
+        "expression",
+        "guard",
+        "guard_failure_behaviour",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "Which derivation applies: BRIDGE_DERIVED where the bridge computes the value, GROUP_CONCATENATION where one column carries a whole COBOL group, REDEFINES_ALTERNATIVE where the field is one alternative over shared storage.",
+          "enum": [
+            "BRIDGE_DERIVED",
+            "GROUP_CONCATENATION",
+            "REDEFINES_ALTERNATIVE"
+          ]
+        },
+        "expression": {
+          "type": "string",
+          "description": "The COBOL text that performs the derivation, quoted closely enough that a reader can match it in the frozen source. A string, always - there is no executable content here and nothing in the Python implementation interprets it as code (R-1).",
+          "minLength": 1,
+          "examples": [
+            "move Post-Date (1:2) to HV-POST4-DAY",
+            "move WS-Post-Key to HV-POST-KEY"
+          ]
+        },
+        "guard": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The condition the derivation is performed under, verbatim, or null when it is unconditional. The three IRS date components are each guarded on the corresponding two characters of the date text being numeric (common/irspostingMT.cbl:L982-L987).",
+          "minLength": 1,
+          "examples": [
+            "Post-Date (1:2) numeric"
+          ]
+        },
+        "guard_failure_behaviour": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What the bridge leaves behind when the guard does not hold, or null where there is no guard. For the IRS date components the move is simply not made, so the column keeps the zero left by the group INITIALIZE while the raw date text is stored anyway (common/irspostingMT.cbl:L982-L987).",
+          "minLength": 1
+        },
+        "source": {
+          "$ref": "#/$defs/sourceLocator",
+          "description": "The line or span in the bridge program that performs the derivation."
+        }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "description": "One field seen from all three layers at once, with drift, presence, one_sided and derivation alongside. Every member is required; no additional member is permitted; and no member names a winning type across the views, which would erase the drift this dictionary records (R-4). A fourth view never coexists with the triple: program_source carries a field a program declares inline, reaching no table.",
+      "required": [
+        "key",
+        "table",
+        "bridge",
+        "handler",
+        "entity_facade",
+        "presence",
+        "one_sided",
+        "copybook",
+        "program_source",
+        "bridge_host_variable",
+        "column",
+        "drift",
+        "derivation",
+        "cobol_python_storage",
+        "notes",
+        "anomaly_refs",
+        "ambiguity_refs"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/entryKey",
+          "description": "The stable identifier this entry is cited by from acas_posting/records/*.py and acas_posting/cobol/field.py. Unique across entries; see the entryKey definition for the two naming forms, the reason the table or record name is always part of the key, and the disambiguation rule for a repeated field name."
+        },
+        "table": {
+          "$ref": "#/$defs/tableNameOrNull",
+          "description": "The in-scope MySQL table this entry belongs to, or null for a copybook-only field that maps to no table."
+        },
+        "bridge": {
+          "$ref": "#/$defs/bridgeNameOrNull",
+          "description": "The in-scope bridge pair that maps the field, or null for a copybook-only field that no bridge carries."
+        },
+        "handler": {
+          "$ref": "#/$defs/handlerNameOrNull",
+          "description": "The COBOL file handler the posting programs call to reach this table, or null when the entry reaches no handler. Recorded per entry as well as per table so that a field-level report is self-contained."
+        },
+        "entity_facade": {
+          "$ref": "#/$defs/entityFacadeOrNull",
+          "description": "The entity facade through which the posting programs address the table, or null when the entry belongs to none."
+        },
+        "presence": {
+          "$ref": "#/$defs/presence",
+          "description": "Which of the four sources declare this field. The generator sets every boolean from what it actually found, and a false here is what makes a one-sided field visible instead of absent."
+        },
+        "one_sided": {
+          "type": "boolean",
+          "description": "Whether the field is missing from at least one of the three views of the authoritative triple - the negation of in_copybook, in_bridge and in_column together. in_program_source is not a term of it: such a field has all three false and is one-sided by construction. Recorded so a partial field can be found without re-deriving it from the flags."
+        },
+        "copybook": {
+          "$ref": "#/$defs/copybookField",
+          "description": "THE COPYBOOK VIEW, or null when no copybook declares the field. Null is expected, not exceptional: the three IRS posting date components have no copybook counterpart anywhere, and requiring this view would make the correct dictionary unrepresentable."
+        },
+        "program_source": {
+          "$ref": "#/$defs/copybookField",
+          "description": "THE PROGRAM-SOURCE VIEW, or null - which it is for every entry but the General Ledger work-file fields. Deliberately the same definition as copybook, because a COBOL data declaration has one shape wherever it is written; this view's file member names a program. When it is present the entry's table, bridge, handler, entity_facade, copybook, bridge_host_variable, column and derivation are all null."
+        },
+        "bridge_host_variable": {
+          "$ref": "#/$defs/bridgeHostVariable",
+          "description": "THE BRIDGE VIEW - the authoritative one - or null when no bridge carries the field. This view is where a signedness or width conversion actually happens, so it must be read rather than inferred from either of the other two."
+        },
+        "column": {
+          "$ref": "#/$defs/mysqlColumn",
+          "description": "THE COLUMN VIEW, or null when the field reaches no column. Null for every copybook-only field: a filler, a redefines alternative, or a subordinate item folded into its parent group."
+        },
+        "drift": {
+          "$ref": "#/$defs/drift",
+          "description": "The disagreements between whichever of the three views are present, flagged by comparison and explained in drift.details. Always present, even when every flag is false, so that agreement is asserted rather than assumed."
+        },
+        "derivation": {
+          "$ref": "#/$defs/derivation",
+          "description": "How the value comes to exist when the mapping is not a plain field-for-field move, or null when it is. Must be present and non-null whenever a column exists with no copybook view; the generator enforces that and the dictionary validation test asserts it."
+        },
+        "cobol_python_storage": {
+          "$ref": "#/$defs/cobolPythonStorage",
+          "description": "The Python type for the COBOL-side value, derived only from the copybook view's usage and scale, so that the choice between decimal.Decimal and int is data-driven (R-2). NONE when there is no copybook view. Not a settlement of any drift - see the cobolPythonStorage definition."
+        },
+        "notes": {
+          "type": "array",
+          "description": "Observations about this entry, order significant, may be empty - and empty for most entries. A note is emitted ONLY where it carries a fact no structured member of the entry already carries, so no note restates presence, the copybook-only taxonomy (read is_filler, redefines - directly or through the parent_group chain - and is_group), inherited storage (read usage_declared_at, usage_inherited_from and usage_group_source) or the 88-level condition names (read condition_names, which carries a locator per name). Every general derivation rule is stated once in meta.derivation_rules and never once per entry. A note may state that a value is inconsistent; it never proposes correcting it.",
+          "items": {
+            "type": "string",
+            "description": "One observation about this field, stated as a fact about the frozen source and specific to this entry: its drift, its derivation, a load or unload the bridge omits, a DDL comment or column default, the maintainer's own words, or an anomaly this field carries. A note may record that a value is inconsistent; it never proposes correcting it.",
+            "minLength": 1
+          }
+        },
+        "anomaly_refs": {
+          "type": "array",
+          "description": "Identifiers of the migration's anomaly entries this field participates in, duplicates not permitted, may be empty. Those anomalies are legacy defects this migration reproduces rather than fixes.",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "description": "An anomaly identifier, A- followed by the register number, currently 1 through 22.",
+            "pattern": "^A-([1-9]|1[0-9]|2[0-2])$",
+            "examples": [
+              "A-7",
+              "A-11",
+              "A-12"
+            ]
+          }
+        },
+        "ambiguity_refs": {
+          "type": "array",
+          "description": "Identifiers of the migration's ambiguity entries that bear on this field, duplicates not permitted, may be empty. An ambiguity is a question reading the frozen source cannot settle and only running the compiled program can.",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "description": "An ambiguity identifier, Q- followed by the register number.",
+            "pattern": "^Q-[0-9]+$",
+            "examples": [
+              "Q-3",
+              "Q-4"
+            ]
+          }
+        }
+      }
+    },
+    "tableRecord": {
+      "type": "object",
+      "description": "One table of the entity-handler-bridge-table spine: its name, primary key, column count, owning handler, bridge and entity facade. All eight members are required.",
+      "required": [
+        "name",
+        "bridge",
+        "handler",
+        "entity_facade",
+        "copybooks",
+        "primary_key",
+        "column_count",
+        "ordinal_source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/tableName",
+          "description": "The table name as declared in mysql/ACASDB.sql."
+        },
+        "bridge": {
+          "$ref": "#/$defs/bridgeName",
+          "description": "The bridge pair that maps this table. Not one-to-one with tables in either direction: the sales and purchase invoice bridges each map a header table and a lines table, so two tables can name the same bridge."
+        },
+        "handler": {
+          "$ref": "#/$defs/handlerName",
+          "description": "The file handler the posting programs call to reach the table. Not one-to-one with tables either: acas000 dispatches to four different bridges by file-key number, so four tables name it. Mirroring the handler boundary rather than the table boundary is what keeps the Python data-access modules in exact correspondence with the COBOL programs."
+        },
+        "entity_facade": {
+          "$ref": "#/$defs/entityFacade",
+          "description": "The entity facade the posting programs use to address this table."
+        },
+        "copybooks": {
+          "type": "array",
+          "description": "The copybooks whose record layouts correspond to this table, in the order the dictionary reads them. Usually one; two where a single logical record is split across two copybooks.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/repoPath",
+            "description": "A copybook whose record layout corresponds to this table."
+          }
+        },
+        "primary_key": {
+          "type": "string",
+          "description": "The name of the single column that forms the table's PRIMARY KEY. Single by observation and not by assumption: all 22 in-scope tables have a one-column primary key and no secondary index, which is what lets a state dump be ordered deterministically with no tie-breaking, no timestamp masking and no surrogate-key remapping.",
+          "pattern": "^[A-Z0-9][A-Z0-9-]*$",
+          "examples": [
+            "POST-RRN",
+            "KEY-4",
+            "BATCH-KEY"
+          ]
+        },
+        "column_count": {
+          "type": "integer",
+          "description": "How many columns the CREATE TABLE statement declares. Recorded so that the count of column-mapped entries for the table can be checked against the schema without re-parsing the DDL.",
+          "minimum": 1
+        },
+        "ordinal_source": {
+          "$ref": "#/$defs/sourceLocator",
+          "description": "The span of the CREATE TABLE statement, which is the authority for every column ordinal in this table and therefore for the entry ordering within it."
+        }
+      }
+    },
+    "bridgeTableRef": {
+      "type": "object",
+      "description": "One table named by a bridge's own /MYSQL VAR directive, together with the host-variable group suffix the directive assigns it and the group name the generated program materialises. A bridge may name more than one table, which is why sources.bridges[].tables is an array rather than a single value.",
+      "required": [
+        "name",
+        "hv_group_suffix",
+        "hv_group_name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/tableName",
+          "description": "The table named in the directive."
+        },
+        "hv_group_suffix": {
+          "type": "string",
+          "description": "The suffix the directive assigns this table's host-variable group. HV for a single-table bridge or the header table of a two-table bridge, HV1 for the lines table of a two-table bridge; verified to be the only two values across all twenty in-scope .scb files.",
+          "pattern": "^HV[0-9]?$",
+          "examples": [
+            "HV",
+            "HV1"
+          ]
+        },
+        "hv_group_name": {
+          "type": "string",
+          "description": "The 01-level group the generated program emits for this table, TD- followed by the table name.",
+          "pattern": "^TD-[A-Z][A-Z0-9-]*$",
+          "examples": [
+            "TD-GLPOSTING-REC"
+          ]
+        }
+      }
+    },
+    "bridgeKey": {
+      "type": "object",
+      "description": "One key the bridge's key table declares: its RDB name, offset, length and three-letter type, with a locator. Offset and length come from a single eight-digit literal split four and four. All five members are required.",
+      "required": [
+        "name_in_rdb",
+        "offset",
+        "length",
+        "type",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name_in_rdb": {
+          "type": "string",
+          "description": "The key's column name in the database, as the bridge's key-name table spells it, with the declaration's trailing padding removed.",
+          "pattern": "^[A-Z0-9][A-Z0-9-]*$",
+          "examples": [
+            "POST-KEY",
+            "KEY-4",
+            "LEDGER-KEY"
+          ]
+        },
+        "offset": {
+          "type": "integer",
+          "description": "The key's one-based starting position within the working-storage record, taken from the first four digits of the eight-character offset-and-length literal in the bridge's key-name table. An integer position, not a measured quantity.",
+          "minimum": 1
+        },
+        "length": {
+          "type": "integer",
+          "description": "The key's length in record positions, taken from the last four digits of the same literal.",
+          "minimum": 1
+        },
+        "type": {
+          "type": "string",
+          "description": "The three-character key-type literal the bridge declares. Only two occur across the in-scope bridges: STR, annotated in the source as key is string, and BNT, annotated as key is bigint. Constrained by pattern rather than by an enumeration so that a faithful record of a further literal would not be rejected by this schema; the two observed values are named here instead.",
+          "pattern": "^[A-Z]{3}$",
+          "examples": [
+            "STR",
+            "BNT"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/sourceLocator",
+          "description": "The span of the bridge's key-name table that declares this key."
+        }
+      }
+    },
+    "bridgeRecord": {
+      "type": "object",
+      "description": "One bridge pair - the .scb source and the .cbl program generated from it - with its declared base, tables and key metadata. All eleven members are required.",
+      "required": [
+        "scb_path",
+        "cbl_path",
+        "base",
+        "directive_source",
+        "tables",
+        "keys",
+        "load_paragraph",
+        "load_paragraph_source",
+        "unload_paragraph",
+        "unload_paragraph_source",
+        "group_initialised_before_load"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scb_path": {
+          "$ref": "#/$defs/repoPath",
+          "description": "The bridge source that the vendored preSQL translator consumes, for example common/glpostingMT.scb."
+        },
+        "cbl_path": {
+          "$ref": "#/$defs/repoPath",
+          "description": "The generated bridge program that is actually compiled, for example common/glpostingMT.cbl."
+        },
+        "base": {
+          "const": "ACASDB",
+          "description": "The database named in the bridge's own BASE directive. Fixed by const because it is verified identical in all twenty in-scope .scb files: one schema, named the same way everywhere, so a document claiming otherwise would be describing a different codebase.",
+          "type": "string"
+        },
+        "directive_source": {
+          "$ref": "#/$defs/sourceLocator",
+          "description": "The span of the live /MYSQL VAR directive block in the .scb, which is the authority for the table-to-host-variable-group mapping."
+        },
+        "tables": {
+          "type": "array",
+          "description": "The tables this bridge maps, in directive order. One for eighteen of the twenty in-scope bridges; two for the sales and purchase invoice bridges, which each map a header table and a lines table.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/bridgeTableRef",
+            "description": "One table named by this bridge's own table directive, together with its host-variable group."
+          }
+        },
+        "keys": {
+          "type": "array",
+          "description": "The keys of reference the bridge declares, in subscript order, for indexed-read emulation. Never given a minimum count here: the array records what the bridge declares, and asserting a floor would be adding a validation the source does not perform.",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/bridgeKey",
+            "description": "One key of reference this bridge declares, used to emulate the indexed-file START and READ NEXT verbs."
+          }
+        },
+        "load_paragraph": {
+          "type": "string",
+          "description": "The name of the section that loads the host variables from the passed record before a write. Uniformly bb000-HV-Load across the in-scope bridges, recorded per bridge rather than assumed.",
+          "minLength": 1,
+          "examples": [
+            "bb000-HV-Load"
+          ]
+        },
+        "load_paragraph_source": {
+          "$ref": "#/$defs/sourceLocator",
+          "description": "The span of the load section in the generated program. Comparing the moves it contains against the declared host-variable group is how a host variable that is declared but never loaded is discovered."
+        },
+        "unload_paragraph": {
+          "type": "string",
+          "description": "The name of the section that unloads the host variables back into the record after a read. Uniformly bb100-UnloadHVs across the in-scope bridges.",
+          "minLength": 1,
+          "examples": [
+            "bb100-UnloadHVs"
+          ]
+        },
+        "unload_paragraph_source": {
+          "$ref": "#/$defs/sourceLocator",
+          "description": "The span of the unload section in the generated program."
+        },
+        "group_initialised_before_load": {
+          "type": "boolean",
+          "description": "Whether the load section issues INITIALIZE on the whole host-variable group before its first move, as every in-scope bridge does. This is the reason unset fields reach the database as zero or space rather than as SQL NULL, and therefore the reason the Python data-access layer must supply a default for every column instead of omitting it."
+        }
+      }
+    },
+    "copybookRecord": {
+      "type": "object",
+      "description": "One COBOL copybook and the record it declares. Recorded so the copybook side of every entry can be traced back to a file, and so that a copybook's own statements about its record length can be preserved even when they contradict each other.",
+      "required": [
+        "path",
+        "record_name",
+        "declared_lengths",
+        "notes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/repoPath",
+          "description": "The copybook path, for example copybooks/wsbatch.cob."
+        },
+        "record_name": {
+          "type": "string",
+          "description": "The 01-level record the copybook declares, preserving its case.",
+          "minLength": 1,
+          "examples": [
+            "WS-Batch-Record",
+            "WS-Posting-Record",
+            "Posting-Record",
+            "WS-IRS-Posting-Record"
+          ]
+        },
+        "declared_lengths": {
+          "type": "array",
+          "description": "Every record length the copybook states, each as a string, duplicates not permitted. More than one entry means the copybook contradicts itself - copybooks/wsbatch.cob:L7-L9 states both 96 and 98 - and every value is listed rather than one being chosen.",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "description": "One record length the copybook states about itself, as a digit string. More than one element means the copybook contradicts itself, which is recorded here rather than resolved.",
+            "pattern": "^[0-9]+$",
+            "examples": [
+              "96",
+              "98"
+            ]
+          }
+        },
+        "notes": {
+          "type": "array",
+          "description": "Observations about the copybook itself, one per element, may be empty. The place for a record-level fact that belongs to no single field: a declared length the copybook's own author disputes, a field carrying the wrong ledger's prefix inside a group, a redefinition commented out but left in place.",
+          "items": {
+            "type": "string",
+            "description": "One observation about the copybook or its record as a whole, rather than about any single field.",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "numericTypeCensus": {
+      "type": "object",
+      "description": "Counts of the dump's columns by numeric base type. All seven members are required. There is no member for a binary floating-point type, because the dump declares none across its 720 columns.",
+      "required": [
+        "DECIMAL",
+        "INT",
+        "TINYINT",
+        "SMALLINT",
+        "MEDIUMINT",
+        "BIGINT",
+        "CHAR"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "DECIMAL": {
+          "type": "integer",
+          "description": "Columns declared as DECIMAL. Exact-decimal storage, which is why every monetary column in the posting cycle is one of these and why the driver must materialise them as decimal.Decimal.",
+          "minimum": 0
+        },
+        "INT": {
+          "type": "integer",
+          "description": "Columns declared as INT.",
+          "minimum": 0
+        },
+        "TINYINT": {
+          "type": "integer",
+          "description": "Columns declared as TINYINT.",
+          "minimum": 0
+        },
+        "SMALLINT": {
+          "type": "integer",
+          "description": "Columns declared as SMALLINT.",
+          "minimum": 0
+        },
+        "MEDIUMINT": {
+          "type": "integer",
+          "description": "Columns declared as MEDIUMINT.",
+          "minimum": 0
+        },
+        "BIGINT": {
+          "type": "integer",
+          "description": "Columns declared as BIGINT.",
+          "minimum": 0
+        },
+        "CHAR": {
+          "type": "integer",
+          "description": "Columns declared as CHAR. Fixed-width, so trailing padding is significant when two table states are compared and must be canonicalised by the dump normaliser.",
+          "minimum": 0
+        }
+      }
+    },
+    "sourcesSchema": {
+      "type": "object",
+      "description": "The frozen schema dump as a source: its path, producing server, table and column censuses and notes. All ten members are required. Records what the dump declares; expresses no change to it.",
+      "required": [
+        "path",
+        "server_version",
+        "server_version_source",
+        "create_table_count",
+        "create_index_count",
+        "schema_evolution_alter_table_count",
+        "dump_key_management_comment_count",
+        "float_double_real_column_count",
+        "numeric_type_census",
+        "notes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/repoPath",
+          "description": "The frozen schema file, mysql/ACASDB.sql. Read only: the migration adds no table, column, index, constraint, view, trigger or DDL statement of any kind (R-3)."
+        },
+        "server_version": {
+          "type": "string",
+          "description": "The database server that produced the dump, verbatim from its header. The oracle harness stands up the same version, so that a behavioural difference can never be attributed to the server.",
+          "minLength": 1,
+          "examples": [
+            "10.11.7-MariaDB"
+          ]
+        },
+        "server_version_source": {
+          "$ref": "#/$defs/sourceLocator",
+          "description": "The header line that records the producing server version."
+        },
+        "create_table_count": {
+          "type": "integer",
+          "description": "How many CREATE TABLE statements the dump contains. Thirty-three, of which 22 are in scope for the posting cycle and 11 are not.",
+          "minimum": 0
+        },
+        "create_index_count": {
+          "type": "integer",
+          "description": "How many CREATE INDEX statements the dump contains. Zero. Recorded because it is what makes an ordering-normalised state dump deterministic: with no secondary index there is no alternative row order for a query to return.",
+          "minimum": 0
+        },
+        "schema_evolution_alter_table_count": {
+          "type": "integer",
+          "description": "How many ALTER TABLE statements actually change a table's structure. Zero. This is the figure that matters for the freeze, and it is reported separately from the raw text count for the reason given in this object's description.",
+          "minimum": 0
+        },
+        "dump_key_management_comment_count": {
+          "type": "integer",
+          "description": "How many version-guarded key-management comments the dump contains - the DISABLE KEYS and ENABLE KEYS pair that mysqldump wraps each table's data section in. Sixty-six: two per table across thirty-three tables. Recorded so that the difference between this number and schema_evolution_alter_table_count is explicit rather than something a reader has to rediscover.",
+          "minimum": 0
+        },
+        "float_double_real_column_count": {
+          "type": "integer",
+          "description": "How many columns are declared FLOAT, DOUBLE or REAL. Zero, verified across all 720 columns. Recorded because it is the schema-side half of R-2: the database cannot hand a binary floating-point value to the Python layer, and the Python layer computes only in decimal.Decimal and int, so no accounting value passes through binary floating point at any point.",
+          "minimum": 0
+        },
+        "numeric_type_census": {
+          "$ref": "#/$defs/numericTypeCensus",
+          "description": "Per-base-type column counts across the dump."
+        },
+        "notes": {
+          "type": "array",
+          "description": "Observations about the frozen dump, order significant, may be empty. Each states which population a census covers, since the type census counts every column the dump declares while the coverage figures count the in-scope columns only.",
+          "items": {
+            "type": "string",
+            "description": "One observation about the frozen schema dump. Tables outside the posting cycle may be referred to by count but never by name.",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "sha256Hex": {
+      "type": "string",
+      "description": "A SHA-256 digest as sixty-four lower-case hexadecimal characters. Lower case only, and deliberately so: a recorded digest and a recomputed one are compared by simple equality, by a reader with a shell as much as by the generator, and admitting two spellings of the same value would make that comparison unreliable rather than flexible.",
+      "pattern": "^[0-9a-f]{64}$",
+      "examples": [
+        "094e588226f650672c3781d1737d7bf8be30be048ce6a788df81800a19326ed0"
+      ]
+    },
+    "sourceDigest": {
+      "type": "object",
+      "description": "One frozen input file, bound to the exact bytes the generator read. The source sets name WHICH files each entry was derived from and say nothing about their CONTENT, so on their own a document could claim a derivation the file on disk does not support. This record closes that gap. A digest is not a signature: it binds the artifact to the repository it was generated from.",
+      "required": [
+        "path",
+        "sha256",
+        "byte_length"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/repoPath",
+          "description": "The input's path relative to the repository root, so the manifest is identical whichever checkout produced it."
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256Hex",
+          "description": "Digest of the file's bytes exactly as they sit on disk - computed over the raw bytes, not over decoded or line-normalised text, so a line-ending change is a change."
+        },
+        "byte_length": {
+          "type": "integer",
+          "description": "The file's size in bytes. Redundant against the digest and deliberately so: it makes an accidental truncation legible at a glance rather than only detectable by recomputation.",
+          "minimum": 0
+        }
+      }
+    },
+    "programSourceRecord": {
+      "type": "object",
+      "description": "One record a posting PROGRAM declares inline in its own FILE SECTION rather than by COPY: the General Ledger work files. copybooks/wsnames.cob:L15-L16 names pretrans.tmp and postrans.tmp; no copybook declares their LAYOUT. They reach no table, but their widths are load-bearing (A-14). gl071 and gl072 declare post-trans-record differently; neither is harmonised (R-4).",
+      "required": [
+        "path",
+        "record_name",
+        "section",
+        "declared_lengths",
+        "notes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/repoPath",
+          "description": "The program that declares the record, for example general/gl071.cbl."
+        },
+        "record_name": {
+          "type": "string",
+          "description": "The 01-level record the program declares, preserving its case - which for these records is lower case throughout, unlike most copybook records.",
+          "minLength": 1,
+          "examples": [
+            "pre-trans-record",
+            "post-trans-record",
+            "sort-trans-record"
+          ]
+        },
+        "section": {
+          "type": "string",
+          "description": "Which kind of declaration introduces the record: FD for a file description or SD for a sort description. Recorded because the distinction is real - sd sort-trans at general/gl071.cbl:L134 is the sort work file the SORT verb owns, while the two fd records are the sequential work files it reads and writes.",
+          "enum": [
+            "FD",
+            "SD"
+          ]
+        },
+        "declared_lengths": {
+          "type": "array",
+          "description": "Every record length the program states about the record, as digit strings, in the order it states them - empty for all of these records, because the programs state none. Kept as an array for the same reason copybookRecord.declared_lengths is one: so that a contradiction could be recorded rather than resolved (R-4).",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "description": "One record length the program states about the record, as a digit string.",
+            "pattern": "^[0-9]+$"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "description": "Observations about the record as a whole rather than about any single field, may be empty: that a second program declares the same record differently, that the record is transient scratch storage reaching no table, or that a downstream sequential read depends on the order its fields are sorted in.",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "description": "One observation about the record as a whole.",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "description": "The four frozen input sets the dictionary is derived from and the digests that bind them, recorded so that every entry can be re-derived from the repository rather than trusted. Field metadata in this dictionary is DERIVED and not transcribed, which removes an entire class of transcription error across several hundred fields - and makes recording the inputs a requirement.",
+      "required": [
+        "schema",
+        "bridges",
+        "copybooks",
+        "input_digests",
+        "program_sources"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "$ref": "#/$defs/sourcesSchema",
+          "description": "The frozen MySQL schema dump and its audit figures."
+        },
+        "bridges": {
+          "type": "array",
+          "description": "The twenty in-scope preSQL bridge pairs - the authoritative mapping layer. Sorted by .scb filename, per meta.determinism.array_order.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/bridgeRecord",
+            "description": "One of the twenty in-scope preSQL bridge pairs - the authoritative mapping layer."
+          }
+        },
+        "copybooks": {
+          "type": "array",
+          "description": "The COBOL copybooks whose record layouts the dictionary reads. Sorted by path, per meta.determinism.array_order.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/copybookRecord",
+            "description": "One COBOL copybook whose record layout the dictionary reads."
+          }
+        },
+        "input_digests": {
+          "type": "array",
+          "description": "Every frozen source the generator actually opened, with its digest and byte length, sorted by path so the manifest does not depend on the order the stages read them in (R-6). Complete by construction: the statement that caches a file's lines records its digest, and taking the manifest seals the run. generate.py --check confirms these against the files on disk.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/sourceDigest",
+            "description": "One frozen source file the dictionary was derived from, bound to its bytes."
+          }
+        },
+        "program_sources": {
+          "type": "array",
+          "description": "The records the posting programs declare inline in their own FILE SECTIONs, rather than by COPY - the General Ledger work files. Sorted by path then by the record's declaration line, per meta.determinism.array_order, because one program declares three of them. The smallest of the four families and the only one whose fields reach no table.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/programSourceRecord",
+            "description": "One record a posting program declares inline in its own FILE SECTION."
+          }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "description": "Tallies that make the document's completeness claim checkable by arithmetic: that in-scope and out-of-scope tables account for every table in the dump, that bridges account for every pair, and that every entry is reachable. All eleven members are required.",
+      "required": [
+        "schema_tables_total",
+        "in_scope_tables",
+        "out_of_scope_tables",
+        "in_scope_bridges",
+        "out_of_scope_bridges",
+        "in_scope_columns",
+        "entry_count",
+        "columns_covered",
+        "host_variables_covered",
+        "copybook_fields_covered",
+        "copybook_declarations_covered",
+        "program_source_fields_covered",
+        "one_sided_entry_keys"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_tables_total": {
+          "type": "integer",
+          "description": "CREATE TABLE statements in the frozen dump, in scope and out together.",
+          "minimum": 0
+        },
+        "in_scope_tables": {
+          "type": "integer",
+          "description": "Tables the posting cycle touches and this dictionary therefore describes. Must equal the length of the tables array.",
+          "minimum": 0
+        },
+        "out_of_scope_tables": {
+          "type": "integer",
+          "description": "Tables in the frozen dump that the posting cycle never touches. A count only - these tables are named nowhere in this dictionary, and no member of this schema can name one.",
+          "minimum": 0
+        },
+        "in_scope_bridges": {
+          "type": "integer",
+          "description": "Bridge pairs the posting cycle reaches. Must equal the length of sources.bridges.",
+          "minimum": 0
+        },
+        "out_of_scope_bridges": {
+          "type": "integer",
+          "description": "Bridge pairs present in the repository that the posting cycle never reaches. A count only, for the same reason as out_of_scope_tables.",
+          "minimum": 0
+        },
+        "in_scope_columns": {
+          "type": "integer",
+          "description": "Columns summed across the in-scope tables - the denominator the column coverage claim is measured against.",
+          "minimum": 0
+        },
+        "entry_count": {
+          "type": "integer",
+          "description": "How many entries the document carries. Required so that a consumer can verify it received the whole dictionary, and so that the validation test has a figure to check the entries array length and the uniqueness of key against.",
+          "minimum": 1
+        },
+        "columns_covered": {
+          "type": "integer",
+          "description": "Entries whose column view is present. Equality with in_scope_columns is the machine-checkable form of the completeness requirement for the database side.",
+          "minimum": 0
+        },
+        "host_variables_covered": {
+          "type": "integer",
+          "description": "Entries whose bridge host-variable view is present. Compared against the host variables the in-scope bridges declare, which is how a declared-but-never-loaded host variable stays counted rather than quietly vanishing.",
+          "minimum": 0
+        },
+        "copybook_fields_covered": {
+          "type": "integer",
+          "description": "Entries whose copybook view is present, including fillers, redefines alternatives and group items. Deliberately not equal to columns_covered: the copybooks declare items that reach no column, and the bridges derive columns that no copybook declares. Deliberately not equal to copybook_declarations_covered either, because an OCCURS declaration bound by several columns yields one entry per occurrence and all of them cite the one declaration.",
+          "minimum": 0
+        },
+        "copybook_declarations_covered": {
+          "type": "integer",
+          "description": "DISTINCT PHYSICAL DECLARATIONS in the frozen copybooks that at least one entry cites, counted by (source locator, name) pair so an OCCURS item bound by six columns counts once. This is the figure rule R-5's field-level closure is about, and it is published separately from copybook_fields_covered precisely because the two can disagree: an entry tally can look complete while two entries cite one declaration and another declaration has none, which is the defect this separate figure exists to expose. The generator refuses to emit a document in which any parsed declaration is uncited, so a reader comparing this figure against the declaration count of the copybook closure is checking a guarantee rather than a hope.",
+          "minimum": 0
+        },
+        "program_source_fields_covered": {
+          "type": "integer",
+          "description": "Entries whose program-source view is present - the fields of the General Ledger work-file records declared inline in general/gl070.cbl, general/gl071.cbl and general/gl072.cbl, including their group items. Counted separately from copybook_fields_covered rather than folded into it, because no copybook declares these fields and adding the two together would misreport both.",
+          "minimum": 0
+        },
+        "one_sided_entry_keys": {
+          "type": "array",
+          "description": "The key of every entry missing from at least one view, duplicates not permitted. Listing the keys rather than only counting them lets a reader check the tally by arithmetic.",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/entryKey",
+            "description": "The key of one entry whose one_sided flag is true, so the flagged fields can be reviewed in one place."
+          }
+        }
+      }
+    },
+    "determinism": {
+      "type": "object",
+      "description": "The document's own byte-for-byte reproducibility contract: array order, member order, encoding, indentation, newline handling and the content forbidden from appearing. All eight members are required.",
+      "required": [
+        "encoding",
+        "newline",
+        "indent",
+        "trailing_newline",
+        "byte_order_mark",
+        "member_order",
+        "array_order",
+        "forbidden_content"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "encoding": {
+          "const": "utf-8",
+          "description": "The character encoding the dictionary file is written in.",
+          "type": "string"
+        },
+        "newline": {
+          "const": "LF",
+          "description": "The line terminator. LF only: a CRLF terminator would make the file differ byte for byte between platforms while parsing identically, which is exactly the class of difference this contract exists to eliminate.",
+          "type": "string"
+        },
+        "indent": {
+          "const": 2,
+          "description": "Spaces per indentation level. Two, and spaces rather than tabs. An integer count, not a measured quantity (R-2).",
+          "type": "integer"
+        },
+        "trailing_newline": {
+          "const": true,
+          "description": "Whether the file ends with exactly one newline character. True.",
+          "type": "boolean"
+        },
+        "byte_order_mark": {
+          "const": false,
+          "description": "Whether a byte-order mark precedes the document. False - a BOM would change the bytes without changing the content.",
+          "type": "boolean"
+        },
+        "member_order": {
+          "type": "string",
+          "description": "How members are ordered within every object, at least one character. Serialisation follows model field declaration order, which follows this schema's own property order, so key sorting is neither needed nor permitted.",
+          "minLength": 1
+        },
+        "array_order": {
+          "type": "object",
+          "description": "The stable sort key for each array in the document, one member per array. Stated explicitly because a stable sort is the only thing standing between this dictionary and a spurious diff on every regeneration.",
+          "required": [
+            "tables",
+            "entries",
+            "bridges",
+            "copybooks",
+            "program_sources"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "tables": {
+              "type": "string",
+              "description": "How the tables array is ordered: by table name, ASCII ascending.",
+              "minLength": 1
+            },
+            "entries": {
+              "type": "string",
+              "description": "How the entries array is ordered: grouped by table name ASCII ascending, then by the column's ordinal within its CREATE TABLE statement, with copybook-only entries appended after the column-mapped entries of their record in copybook declaration order. Ordinal rather than column name, so that the dictionary reads in the same order as the DDL.",
+              "minLength": 1
+            },
+            "bridges": {
+              "type": "string",
+              "description": "How the sources.bridges array is ordered: by .scb filename, ASCII ascending.",
+              "minLength": 1
+            },
+            "copybooks": {
+              "type": "string",
+              "description": "How the sources.copybooks array is ordered: by path, ASCII ascending.",
+              "minLength": 1
+            },
+            "program_sources": {
+              "type": "string",
+              "description": "How the sources.program_sources array is ordered: by path ASCII ascending, then by the record's declaration line ascending. Two keys rather than one, because a single program declares three of these records.",
+              "minLength": 1
+            }
+          }
+        },
+        "forbidden_content": {
+          "type": "array",
+          "description": "The kinds of content that must never appear in the document, at least one, duplicates not permitted. Each names something that would vary between two regenerations of an unchanged repository - a timestamp, a host name, an absolute path, a revision identifier.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "description": "One kind of content that may never appear in the dictionary because it would differ between two otherwise identical regenerations.",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "derivationRules": {
+      "type": "object",
+      "description": "The rules the generator applied when deriving values, as a record of method rather than as instructions to a consumer. All eight members are required.",
+      "required": [
+        "entry_key",
+        "presence_and_one_sided",
+        "drift_detection",
+        "digits_and_scale_from_picture",
+        "sign_position_from_clause",
+        "usage_inheritance",
+        "bridge_derived_columns",
+        "cobol_python_storage",
+        "program_source_entries"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "entry_key": {
+          "type": "string",
+          "description": "How an entry key is formed and disambiguated, including the rule for a field name that repeats within one record.",
+          "minLength": 1
+        },
+        "presence_and_one_sided": {
+          "type": "string",
+          "description": "How the three presence booleans are established from the sources, and how one_sided follows from them.",
+          "minLength": 1
+        },
+        "drift_detection": {
+          "type": "string",
+          "description": "How each drift flag is computed by COMPARING whichever views are present - never by matching a field name against a list of known cases, since the same kind of drift occurs in more than one bridge and a hard-coded list would find one instance and miss the others.",
+          "minLength": 1
+        },
+        "digits_and_scale_from_picture": {
+          "type": "string",
+          "description": "How digits, integer_digits, scale and character_length are read off a PICTURE clause, including how a repeat count in parentheses is expanded and how the implied decimal point is located.",
+          "minLength": 1
+        },
+        "sign_position_from_clause": {
+          "type": "string",
+          "description": "How signed and sign_position are established from the picture and any SIGN clause, and why the clause text is additionally kept verbatim rather than only classified.",
+          "minLength": 1
+        },
+        "usage_inheritance": {
+          "type": "string",
+          "description": "How USAGE is resolved when a group declares it and subordinate items inherit it, and how usage_declared_at, usage_inherited_from and usage_group_source record where the answer came from. The highest-risk rule in the set: a generator that read usage only from the picture line would class four packed-decimal batch amount fields as zoned decimal and every stored value would be wrong.",
+          "minLength": 1
+        },
+        "bridge_derived_columns": {
+          "type": "string",
+          "description": "How a column with no copybook counterpart is detected and what its derivation record must contain, including the guard and the behaviour when the guard fails.",
+          "minLength": 1
+        },
+        "cobol_python_storage": {
+          "type": "string",
+          "description": "The exact rule that maps a declaring view's usage and scale to DECIMAL, INT, STR or NONE. This is the rule acas_posting/cobol/field.py depends on for choosing decimal.Decimal over int, so it is stated once here and applied nowhere else. It reads the copybook view, or the program-source view when there is no copybook view, and is not a reconciliation of the three views.",
+          "minLength": 1
+        },
+        "program_source_entries": {
+          "type": "string",
+          "description": "How a record declared inline in a program's FILE SECTION is located, which line span is read for it, and why its bridge and column views are recorded as absent rather than searched for.",
+          "minLength": 1
+        }
+      }
+    },
+    "bindingRule": {
+      "type": "object",
+      "description": "One binding rule this migration works under, with the text of the rule. All two members are required. Recorded so a consumer can cite the rule a member exists to serve.",
+      "required": [
+        "id",
+        "summary"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The rule identifier, R- followed by 1 through 6.",
+          "pattern": "^R-[1-6]$",
+          "examples": [
+            "R-1",
+            "R-4",
+            "R-5"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "description": "What the rule requires, in one or two sentences, in the dictionary's own words. A summary and not a transcription: the authoritative wording is in the plan.",
+          "minLength": 1
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "description": "The document's own eight required headers: what it describes, which sources it was built from, and its determinism contract. Deliberately carries no generation date, host name, user name, absolute path or revision identifier.",
+      "required": [
+        "dictionary_name",
+        "dictionary_version",
+        "schema_ref",
+        "generated_by",
+        "authority",
+        "determinism",
+        "derivation_rules",
+        "binding_rules",
+        "source_inputs_sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "dictionary_name": {
+          "const": "acas_posting_dictionary",
+          "description": "The dictionary's fixed name, matching the filename stem of both this schema and the document it constrains.",
+          "type": "string"
+        },
+        "dictionary_version": {
+          "type": "string",
+          "description": "The dictionary's own version, as a dotted numeric string. It advances when the dictionary's CONTENT changes because more of the frozen sources have been covered or a derivation rule has been corrected; it does not advance with time, and it carries no date, because a version that moved on its own would break the byte-for-byte guarantee.",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "examples": [
+            "1.0.0"
+          ]
+        },
+        "schema_ref": {
+          "type": "string",
+          "description": "The filename of the schema that constrains this document, as a bare relative name so the pairing survives being copied anywhere. Deliberately not a URL: nothing may attempt to fetch a schema over a network (R-1).",
+          "const": "acas_posting_dictionary.schema.json"
+        },
+        "generated_by": {
+          "const": "acas_posting/dictionary/generate.py",
+          "description": "The module that produced the document, as a repository-relative path. Fixed by const because a dictionary produced by anything else - by hand, or by a tool outside the repository - could not be reproduced from the frozen sources, and reproducibility is the whole point. This records provenance only; nothing in the dictionary is executable and nothing reads this member as a command (R-1).",
+          "type": "string"
+        },
+        "authority": {
+          "const": "The maintainer's one-way COBOL-to-MySQL bridge defines the authoritative record-layout ↔ table mapping - it is the data dictionary for this migration.",
+          "description": "The authority statement the whole dictionary rests on, carried verbatim from the user requirement and fixed by const so it cannot be paraphrased into something weaker. It is the reason the bridge view is the authoritative one, the reason an entry may have no copybook view, and the reason three columns of IRSPOSTING-REC exist in this dictionary at all when no copybook mentions them.",
+          "type": "string"
+        },
+        "determinism": {
+          "$ref": "#/$defs/determinism",
+          "description": "The serialisation contract that makes regeneration byte-for-byte reproducible."
+        },
+        "derivation_rules": {
+          "$ref": "#/$defs/derivationRules",
+          "description": "The rules the generator applied to derive each member from the frozen sources."
+        },
+        "binding_rules": {
+          "type": "array",
+          "description": "The six binding rules that govern the migration and therefore this dictionary, in identifier order. Recorded because an artifact that is required BY a rule should say which rule requires it: this dictionary and its schema exist because R-5 demands that every field map to a dictionary entry.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/bindingRule",
+            "description": "One of the six binding rules that govern this migration and therefore this dictionary."
+          }
+        },
+        "source_inputs_sha256": {
+          "$ref": "#/$defs/sha256Hex",
+          "description": "The digest of sources.input_digests taken as a whole: one SHA-256 over the canonical rendering \"<path>:<sha256>:<byte_length>\" of every manifest entry, each line-feed terminated, in the manifest's own order. The per-file digests bind each input to its bytes; this binds the list to itself. It summarises frozen CONTENT, not the generating machine."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,236 @@
+# ACAS -- COBOL to Python 3.12 migration of the batch posting cycle.
+# THE COMPLETE PINNED DEPENDENCY SET, in ONE manifest, hash-verified.
+#
+#     pip install --require-hashes -r requirements.txt
+#
+# WHY ONE FILE. Agent Action Plan section 0.2.1.2 names exactly two dependency
+# artifacts -- `pyproject.toml` and `requirements.txt` -- with no wildcard, and
+# section 0.5.1 states the dependency inventory as ONE table covering all five
+# named packages: mysql-connector-python, SQLAlchemy, pytest, pytest-cov and
+# PyYAML. Splitting it into three (`requirements.txt`, `requirements-harness.txt`,
+# `requirements-dev.txt`) would add two manifests the plan does not name, so the whole
+# inventory is consolidated here, byte-for-byte on every pin and every hash. The SECTIONS below
+# preserve what the split expressed -- which set a distribution belongs to -- as
+# structure inside one file rather than as three files, so `pyproject.toml`'s
+# optional-dependency groups still have a one-to-one reading here.
+#
+# Every requirement carries a --hash for every artifact of its pinned version
+# that CPython 3.12 can install, read from the package index metadata rather than
+# transcribed by hand, so a substituted index cannot serve different bytes under
+# the same version number. A version here that differs from `pyproject.toml` is a
+# defect.
+#
+# DO NOT UPGRADE, downgrade or "check for newer". A driver or runtime change can
+# move a stored penny, and the only acceptable proof of equivalence is an empty
+# scenario diff against the compiled COBOL oracle.
+#
+# WHAT MUST NEVER BE ADDED, and each exclusion is a rule rather than a taste:
+#   * pandas / numpy   -- they compute in binary floating point (R-2).
+#   * any ORM entity layer, Alembic or other migration tool -- the schema is
+#     frozen and no DDL is emitted (R-3). There is no declarative metadata of any
+#     kind: nothing in the package models the schema as objects, so nothing in it
+#     could generate schema even by accident.
+#   * pytest-xdist or any randomising plugin -- execution is strictly sequential
+#     and the scenario tier asserts on ordered state (R-3).
+#   * any COBOL runtime binding -- the shipped package contains none (R-1).
+
+# --------------------------------------------------------------------------
+# SECTION 1 -- THE SHIPPED RUNTIME SET
+# --------------------------------------------------------------------------
+# A flat mirror of `pyproject.toml`'s [project].dependencies, which is the
+# DECLARED runtime closure of the shipped `acas_posting` package. The build
+# backend is deliberately not here but in section 3, because it is a BUILD
+# requirement the cycle never imports.
+#
+# DECLARED is not the same as IMPORTED, and this section states both so neither
+# can be inferred wrongly from the other. Agent Action Plan section 0.5.1 fixes
+# the closure at four names -- mysql-connector-python, SQLAlchemy and, as
+# SQLAlchemy's own requirements, greenlet and typing_extensions -- and the plan is
+# frozen, so this manifest reproduces that closure exactly. An AST import census
+# over `acas_posting/` yields exactly ONE third-party top-level module, `mysql`;
+# the census is asserted in both directions by
+# `tests/arithmetic/test_deployment_contract_boundaries.py`, which also asserts
+# that this file and `pyproject.toml` declare the plan's closure and nothing more.
+# Each entry below records which of the two it is.
+
+# The ONLY third-party module acas_posting imports (in dal/connection.py). Ships
+# a compiled C extension for CPython 3.12 and materialises DECIMAL columns as
+# decimal.Decimal and integer columns as int, never as a binary float --
+# connection.py pins the converter explicitly and asserts it at connect time.
+
+mysql-connector-python==26.7.0 \
+    --hash=sha256:9b63672cc381f097966faecd6940beb2a91f9efdf674a5807dc45f4efdb42e62 \
+    --hash=sha256:375f9a042398e515a670003f26ab07e9b2ecaecba6eaf678f66fb5c2d36bd305 \
+    --hash=sha256:227063e73c3d7b0326bc6ce9af47b8aa081e53a4e97e8683bba658569cb57271 \
+    --hash=sha256:e118030bdd6a9882f5aa80a0c0c88d684d0e82d78747e5baf3c3e54a5a2d1348 \
+    --hash=sha256:43ee453b53556f690e4f4b795d3f17a1c6d4b45f729657bb0d999c8dfc9261d5 \
+    --hash=sha256:d8ff5ee236ea46661ee639336323e124ed868e37f3ea991bdc5de5a146f39fd5
+
+# DECLARED BY AAP SECTION 0.5.1, INSTALLED, AND NOT IMPORTED. The plan pins
+# SQLAlchemy at this exact version and describes it as used "at Core level only --
+# text() statements executed on an explicit Connection", with no ORM entity layer.
+# The shipped package does not take that path: `dal/connection.py` reaches MariaDB
+# through mysql-connector-python, which AAP section 0.5.1 itself calls "the primary
+# database path", and AAP section 0.8.2 preserves the user requirement as an
+# either/or. The reason the connector is the path taken is recorded in full beside
+# `pyproject.toml`'s dependency list -- in one sentence, the frozen bridges own
+# their connections in a way an Engine is built to own instead, and re-routing
+# would change which physical session a statement runs on, which rules R-4 and R-6
+# forbid.
+#
+# It is pinned here regardless, because the plan is FROZEN and a manifest that
+# silently narrows the plan's closure is a divergence from it. Declaring it while
+# not importing it is stated as such rather than implied: the entry is installed by
+# every hashed route, `harness/Dockerfile.gnucobol` asserts it is importable in the
+# image AND that no shipped module routes through it, and the deployment-contract
+# tests assert the same pair. Nothing here creates an Engine, a MetaData, a mapped
+# class or a session, so R-3's ban on an ORM entity layer and on schema-generating
+# metadata holds by construction and not by trust.
+
+SQLAlchemy==2.0.51 \
+    --hash=sha256:7d78702b26ba1c18b2d0fb2ea940ba7f17a9581b42e8361ff93920ebbee1235a \
+    --hash=sha256:581921d849d6e6f994d560389192955e80e2950e18fcdfe2ccea863e01158e6e \
+    --hash=sha256:1d21ce524ab86c23046e992a5b81cb54c21079c6df6e78b8fc77d77cac70a6b9 \
+    --hash=sha256:c5d98a2709840027f5a347c3af0a7c3d5f6c1ff93af2ca1c54494e23cba8f389 \
+    --hash=sha256:1181256e0f16479691b5616d36375dc2620ad8332b25978763c3d206ad3f3f1d \
+    --hash=sha256:9f380393be5abeb6815f68fd39271b95127173511b6706b0a630a9995d53f8f5 \
+    --hash=sha256:2cf39aabdf48e87c1c2c2ed6d20d33ffa0733b3071ce9c5f66357947dd009080 \
+    --hash=sha256:bb024d8b621d0be75f4f44ecc7c950450026e76d66dc8f791bb5331d7fed59d5 \
+    --hash=sha256:804dccd8a4a6242c4e30ad961e540e18a588f6527202f2d6791b01845d59fdc9
+
+# SQLAlchemy's own requirements, named as such by AAP section 0.5.1 ("Pulls
+# `greenlet` 3.5.4 as a transitive dependency") and pinned here so the closure is
+# reproducible rather than resolved. `pip show` records both as SQLAlchemy's
+# requirements and nothing else's; mysql-connector-python requires nothing at all.
+# Nothing in acas_posting/, tests/ or harness/ imports either, and nothing calls
+# create_async_engine: execution is strictly sequential (R-3).
+
+greenlet==3.5.4 \
+    --hash=sha256:3d66250e8b09f182ede05490998c818b5961f7a3640332d44c4927caec7bbfe4 \
+    --hash=sha256:c90e930c9c192e5b3ee9fb8bcd920ea3926155e2e3ded39fc697323addecee17 \
+    --hash=sha256:791fdfeeb9c6e0c7b10fa151bf110d2a6974866f13dcb5b1c7efae698245893a \
+    --hash=sha256:b7c895310363f310361e0fe2072af85269d2a2a285cd04c0c59e79a5e3670dcf \
+    --hash=sha256:f88193799d43dbf8c8a806d6405c9c52fe2af40bf75072a606357b33cc336c7f \
+    --hash=sha256:13b980043cb1b3134e81ea469da1250ddcc6bfe6d245bbaa59168d9cdc8f228f \
+    --hash=sha256:b7a5f095767c4493afcd06067f2bb3b8716e3f3f9e92b99c88e7e99f885b3d4d \
+    --hash=sha256:42afdc1ab5f66da8c586c32af9224a74a706b4f0ea0dc3a4188a0860a09c65c9 \
+    --hash=sha256:60149df8f462d1b230038e6590c23c3b4768bb5d6c022b3b6e82532b34b0b8a3 \
+    --hash=sha256:77d6ce04fed0d9aeed42e0f37923cc43eba9b027bdd9c34546bb4ccd143d0fe0 \
+    --hash=sha256:0232ae1de90a8e07867bb127d7a6ba2301e859145489f25cda8a6096dabe1d20
+
+typing_extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
+    --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5
+
+# --------------------------------------------------------------------------
+# SECTION 2 -- THE ORACLE HARNESS SET
+# --------------------------------------------------------------------------
+# Mirrors `pyproject.toml`'s [project.optional-dependencies].harness. Needed only
+# to drive the compiled COBOL oracle under `harness/`, which the shipped package
+# never imports (R-1) and `pyproject.toml` excludes from packaging.
+
+# Parses the eight scenario definitions under harness/scenarios/*.yaml,
+# which
+# carry the seed data, the inputs and the affected-table list for each
+# scenario.
+# Imported lazily by harness/dump_tables.py and harness/diff_states.py,
+# inside
+# the function that reads a scenario file, so both modules import cleanly
+# without it. Never imported by acas_posting/.
+
+PyYAML==6.0.3 \
+    --hash=sha256:7f047e29dcae44602496db43be01ad42fc6f1cc0d8cd6c83d342306c32270196 \
+    --hash=sha256:fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0 \
+    --hash=sha256:9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28 \
+    --hash=sha256:5fdec68f91a0c6739b380c83b951e2c72ac0197ace422360e6d5a959d8d97b2c \
+    --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc \
+    --hash=sha256:8dc52c23056b9ddd46818a57b78404882310fb473d63f17b07d5c40421e47f8e \
+    --hash=sha256:41715c910c881bc081f1e8872880d3c650acf13dfa8214bad49ed4cede7c34ea \
+    --hash=sha256:96b533f0e99f6579b3d4d4995707cf36df9100d67e0c8303a0c55b27b5f99bc5 \
+    --hash=sha256:5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b \
+    --hash=sha256:64386e5e707d03a7e172c0701abfb7e10f0fb753ee1d773128192742712a98fd \
+    --hash=sha256:d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f
+
+# --------------------------------------------------------------------------
+# SECTION 3 -- THE VERIFICATION AND BUILD SET
+# --------------------------------------------------------------------------
+# Mirrors `pyproject.toml`'s [project.optional-dependencies].dev. The test runner,
+# the coverage tool that evidences every traced module is exercised (R-5), their
+# transitive dependencies, and the build backend.
+
+# The test runner. Registered markers: arithmetic, scenario, determinism,
+# database, oracle.
+
+pytest==9.1.1 \
+    --hash=sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c \
+    --hash=sha256:1088fbde8f2b49d95a549a195707afa7a76a3ce9bcadc26b6d71f0ffda5fe313
+
+# Coverage measurement over the migrated modules, used as traceability
+# evidence.
+# Deliberately not added to pytest's addopts, so a run does not require the
+# plugin.
+
+pytest-cov==7.1.0 \
+    --hash=sha256:a0461110b7865f9a271aa1b51e516c9a95de9d696734a2f71e3e78f46e1d4678 \
+    --hash=sha256:30674f2b5f6351aa09702a9c8c364f6a01c27aae0c1366ae8016160d1efc56b2
+
+# pytest-cov's own requirement, pinned for reproducibility.
+
+coverage==7.15.2 \
+    --hash=sha256:1adac78e5abc7c5438f7a209c9ca69d06542f0bf481d728b6989ea80b813fdf9 \
+    --hash=sha256:b868acc62aa5de3be7a9d05c2333bf8359ca987e43f9cb30ff8fbda6a024ab73 \
+    --hash=sha256:6f6966fc30e6f06ca8f98fb0ce51eda6b111b3ee8d066a8b1ec9e77fa06ab55d \
+    --hash=sha256:68af907f595ab01a78f794932ff3bdf929c316d3000810d38dbc247129e26f8b \
+    --hash=sha256:afa29e2eff3d5729267e2cb2fd4ce9d61c952932fb2694e34ccb5d9540c6a296 \
+    --hash=sha256:bbf44513ceb1589e31948e20eafbde9deaface90e1a1afa5f5f77b4423d17ce6 \
+    --hash=sha256:9deddf09eecb717b7f980414b43d90a5b22ff3967d2949ab29cb0aa83d9e9098 \
+    --hash=sha256:ae901f7e55ba405c84ee1cab3d3e962e4e871e4a2bcb9c90911adbd69b42ac5a \
+    --hash=sha256:a0f47002c6eeb7c280228467a4cb0cc15ca2103a8421b986b2d3ec04a0f9bd8b \
+    --hash=sha256:1cd7a5beb7af3e864a13b1f0fb26efd3695da43ef0daf71e586adfffaf34d5b2 \
+    --hash=sha256:97a5c5457a9fb1d6c4e06cfb5dc835871fbfb6a6a51addc9e925bdeff5ef7440 \
+    --hash=sha256:0901cfe6c13bcd2302da4f83e884555d2a22bda6e4c476f09ef204ba20ca536e \
+    --hash=sha256:b171bdd71cb7ff792bf32e376173b0ace7e7963e7e57c58dfc42063a6a7174cd \
+    --hash=sha256:582edc45c2040543fef83341be23c43024a3ab3ae0c2d8bc498a06282905ad40 \
+    --hash=sha256:a638db90c61cd219aeee65e83a24fdaa57269a741ae0cf773309208ac862cee3 \
+    --hash=sha256:eb6bcae8d1a9d305351ecb108232441d11c5cfe9de840a04388ba5d2db8d735c \
+    --hash=sha256:3df60dc267f0a2ca23cb7a9ab1109c62b9335ffbf519fcfe167157c28c09b81d
+
+# pytest's own requirement, pinned for reproducibility.
+
+pluggy==1.6.0 \
+    --hash=sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746 \
+    --hash=sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3
+
+# pytest's own requirement, pinned for reproducibility.
+
+iniconfig==2.3.0 \
+    --hash=sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12 \
+    --hash=sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730
+
+# pytest's own requirement, pinned for reproducibility.
+
+packaging==26.2 \
+    --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e \
+    --hash=sha256:ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661
+
+# pytest's own requirement, pinned for reproducibility.
+
+Pygments==2.20.0 \
+    --hash=sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176 \
+    --hash=sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f
+
+# The PEP 517 build backend, pinned EXACTLY in [build-system].requires. It
+# is
+# listed here so the backend is installable under hash verification rather
+# than
+# being resolved from the network on every build - it is the one component
+# that
+# executes arbitrary code during a build, so leaving it unpinned would make
+# it
+# the single unverified link in an otherwise fully pinned graph. Install
+# this
+# file first, then build with `--no-build-isolation`.
+
+setuptools==83.0.0 \
+    --hash=sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3 \
+    --hash=sha256:025bccbbf0fa05b6192bc64ae1e7b16e001fd6d6d4d5de03c97b1c1ade523bef

@@ -1,0 +1,2010 @@
+# =============================================================================
+# ACAS -- COBOL to Python migration of the batch posting cycle.
+#
+# SCENARIO period_end_totals -- the period-total accumulation scenario, and the
+# ONLY multi-operation, multi-subsystem definition in this directory. Four
+# posting operations run back to back across both trading ledgers so that all
+# NINE period-total write sites fire in one seeded state, and the focal table
+# is SYSTOT-REC. The eight the protocol expects, per Agent Action Plan section
+# 0.8.5 and [harness/docker-compose.yml "STAGES."], are: clean_batch_gl,
+# clean_batch_sl, clean_batch_pl, clean_batch_irs, mixed_accepted_rejected,
+# period_end_totals, control_total_mismatch, empty_batch. This file replicates
+# the canonical shape of harness/scenarios/clean_batch_gl.yaml and is, in its
+# data, the union of clean_batch_sl.yaml and clean_batch_pl.yaml plus the two
+# cash and payment routes.
+#
+# NO USER RULES DOCUMENT EXISTS FOR THIS PROJECT. The rules facility reports
+# that none was provided, so there is no on-disk rules file to consult and no
+# reader of this file should go looking for one. The six binding rules R-1 to
+# R-6 are user-specified by content and intent and live in the Agent Action
+# Plan at section 0.7.2, whose own note is that their exact wording is
+# retrievable from the requirements rather than from the rules facility. Where
+# those rules are silent this file holds to enterprise-standard best practice,
+# and nothing here has been invented to fill a gap.
+#
+# THIS FILE IS INERT DATA (rule R-1, no COBOL at runtime). It carries no shell
+# command, no compiler invocation, no Python expression, no non-standard YAML
+# tag and no path into a build tree: both runners read it with yaml.safe_load
+# or with a plain top-level scalar reader, and the file only DESCRIBES the
+# inputs -- the runner scripts are the only things that act on them. Nothing
+# else belongs in this directory either: the harness tree is never on the
+# package import path (Agent Action Plan section 0.3.1), so there is no
+# __init__.py here.
+#
+# NO ACCOUNTING VALUE APPEARS AS A YAML SCALAR ANYWHERE IN THIS FILE (rule
+# R-2, zero binary floating point). YAML parses a bare decimal literal as a
+# binary float, so every money and quantity figure lives in the seeded flat
+# files as decimal text in the frozen record layout, never here. That matters
+# more in this file than in any of its siblings, because its focal table
+# accumulates money across nine write sites and the defects it exists to
+# reproduce are themselves truncation defects. Only these keys hold bare
+# integers, and each one is a whole-number COBOL field: run_date,
+# run_date_binary, cyclea, period, date_form, file_system_used, s_flag_p,
+# p_flag_p and term_code. There is no scientific notation and no infinity or
+# not-a-number token in this file.
+#
+# NOTHING HERE DEFINES OR ALTERS THE SCHEMA (rule R-3). affected_tables SELECTS
+# from the 33 frozen tables of mysql/ACASDB.sql; it never adds a table, a
+# column, an index or a constraint. operations is a strictly ordered list and
+# its steps run one at a time, matching the single-threaded COBOL -- and in
+# THIS file that ordering is load-bearing rather than decorative, for the
+# reasons set out under the heading on operation order below. NO KEY HERE ASKS
+# FOR SIMULTANEOUS EXECUTION OF ANY KIND, and no halt rule between steps is
+# relied on: an operation that must not run is simply not listed.
+#
+# KEYS APPEAR IN A FIXED ORDER, identically in all eight scenario files, and
+# the file is UTF-8, ASCII-only, LF-terminated, two-space indented and free of
+# tabs. It carries no wall-clock reading, no host identity, no process id, no
+# random value and no absolute host path, so two captures of one scenario are
+# byte-identical (rule R-6).
+# =============================================================================
+
+name: period_end_totals
+
+description: |
+  PURPOSE
+  Four posting operations run back to back across the Sales and Purchase
+  ledgers -- invoice post, cash post, order post, payment post, in that order
+  -- so that ALL NINE period-total write sites fire against one seeded state,
+  and the resulting SYSTOT-REC must match the compiled COBOL oracle byte for
+  byte after normalisation. Those nine sites are the sole writers of the
+  totals record, which is what makes this scenario verifiable by inspecting
+  one table. Nothing is expected to abort: every operation is declared to end
+  with term code zero, and the empty normalised diff is the only pass
+  condition.
+  This is the only definition in this directory that drives more than one
+  operation and the only one that spans more than one menu, so several
+  decisions below exist purely because of that and are stated rather than left
+  to be rediscovered.
+
+  PYTHON MODULES EXERCISED (rule R-5, full traceability)
+    acas_posting/programs/sl055_invoice_extract_analysis.py from sales/sl055.cbl
+    acas_posting/programs/sl060_invoice_posting.py          from sales/sl060.cbl
+    acas_posting/programs/sl100_cash_posting.py             from sales/sl100.cbl
+    acas_posting/programs/pl055_order_proof_extract.py   from purchase/pl055.cbl
+    acas_posting/programs/pl060_order_posting.py         from purchase/pl060.cbl
+    acas_posting/programs/pl100_payment_posting.py       from purchase/pl100.cbl
+  driven, in the declared order, by
+    acas_posting/cli/sl_invoice_post.py
+    acas_posting/cli/sl_cash_post.py
+    acas_posting/cli/pl_order_post.py
+    acas_posting/cli/pl_payment_post.py
+  each of whose process exit status IS WS-Term-Code [copybooks/wscall.cob:L10].
+
+  THE FOUR OPERATIONS AND THEIR FROZEN MENU PARAGRAPHS
+  Each name below resolves, on the oracle side, to one menu letter and one
+  dispatch paragraph, and on the Python side to the correspondingly named
+  entry point. The paragraph numbers were read out of this checkout.
+    1. sl_invoice_post -- Sales menu letter G, "(G)  Sales Transactions Post"
+       [sales/sales.cbl:L545], dispatched by load07 [sales/sales.cbl:L756],
+       which carries the maintainer's own comment "Sales trans posting". IT IS
+       load07 AND NOT load08: load08 [sales/sales.cbl:L770] dispatches sl080,
+       Payment Input, which is out of scope. The paragraph moves sl830
+       [sales/sales.cbl:L759], performs load00 [sales/sales.cbl:L760], gates on
+       the term code [sales/sales.cbl:L761-L762], moves sl055
+       [sales/sales.cbl:L763], performs load000 [sales/sales.cbl:L764], gates
+       again [sales/sales.cbl:L765-L766], moves sl060
+       [sales/sales.cbl:L767] and transfers to load000
+       [sales/sales.cbl:L768].
+    2. sl_cash_post -- Sales menu letter K, load11 [sales/sales.cbl:L792],
+       comment "Sales payments posting", moving sl100
+       [sales/sales.cbl:L795] and transferring to load000
+       [sales/sales.cbl:L796].
+    3. pl_order_post -- Purchase menu letter H, load08
+       [purchase/purchase.cbl:L752]. Two divergences from its Sales twin are
+       preserved here rather than harmonised: the pl830 dispatch is COMMENTED
+       OUT [purchase/purchase.cbl:L755-L758], and there is NO abort gate
+       between the two programs at all -- pl055
+       [purchase/purchase.cbl:L759], perform load000
+       [purchase/purchase.cbl:L760], pl060 [purchase/purchase.cbl:L761],
+       transfer to load000 [purchase/purchase.cbl:L762].
+    4. pl_payment_post -- Purchase menu letter L, load12
+       [purchase/purchase.cbl:L786], moving pl100
+       [purchase/purchase.cbl:L789] and transferring to load000
+       [purchase/purchase.cbl:L790].
+  All four routes go through a load000 variant, which issues a FIVE-parameter
+  call -- ws-calling-data, System-Record, WS-System-Record-4, to-day,
+  file-defs -- at [sales/sales.cbl:L702-L707] and
+  [purchase/purchase.cbl:L695-L699]. The third parameter is the totals record
+  this scenario is about. A fifth menu divergence sits immediately below each
+  call and is also preserved: Sales performs overrewrite and then gobacks on a
+  serious error [sales/sales.cbl:L710-L712], where Purchase transfers to
+  overrewrite instead [purchase/purchase.cbl:L703-L704].
+
+  WHY THE OPERATION ORDER IS LOAD-BEARING (rule R-3, strict sequentiality)
+  The list is ordered, the steps run one at a time, and the order is part of
+  the scenario rather than a presentation choice.
+    Operation 3 CONDITIONS STATE THAT OPERATION 4 READS. pl060 sets P-Flag-I
+    to two, P-Flag-A to one and Oi-5-Flag to "Y"
+    [purchase/pl060.cbl:L373-L375]. Oi-5-Flag is
+    [copybooks/wssystem.cob:L221]; its Sales sibling Oi-3-Flag
+    [copybooks/wssystem.cob:L219] carries the maintainer's own comment asking
+    why sl060 uses it.
+    OPERATIONS 1 AND 3 ESTABLISH THE LEDGER ROWS that operations 2 and 4 then
+    rewrite, so running a cash route before its invoice route would post
+    against a state that never existed in the oracle run.
+    ANOMALY A-17's READ-BACK CHAIN CROSSES OPERATIONS. The move at
+    [sales/sales.cbl:L756]'s route -- specifically [sales/sl060.cbl:L1173] --
+    writes RRN into the Postings field of the system record, and the next
+    route reads it straight back as the batch start
+    [purchase/pl100.cbl:L564]. Reordering the list changes what that read
+    returns.
+  Because they run in sequence and never together, this file declares no key
+  that would ask for them to run at the same time.
+
+  THIS IS THE ONLY TWO-MENU FILE, SO subsystem IS THE EMPTY SCALAR
+  Every sibling names one subsystem because every sibling drives one menu.
+  This file drives two, and the oracle-side runner cross-checks the file's
+  subsystem against the subsystem of the operation it was actually asked to
+  run, refusing the pair when they disagree
+  [harness/run_cobol_scenario.sh acas_select_operation]. Its own operation map sends
+  sl_invoice_post and sl_cash_post to the Sales menu and pl_order_post and
+  pl_payment_post to the Purchase menu, so NO SINGLE NAME IS TRUE FOR ALL FOUR
+  OPERATIONS: naming either menu would make two of the four invocations fail
+  on a cross-check rather than on anything behavioural. The empty scalar is
+  the only value that is true for a file spanning two menus, and the guard
+  reads it as "the file does not say", so the subsystem comes from the
+  operation being run -- which is exactly right, because the runner re-selects
+  the operation before each drive and every subsystem-dependent value follows
+  that selection: the menu executable, the pinned 24x80 geometry, the keystroke
+  plan and the date-entry program. The key is kept, rather than dropped, so that
+  the key set stays identical across all eight files. Nothing else reads it: the
+  Python runner derives the subsystem from its own operation map, and the
+  seeder, the reset step, the capture step, the normaliser and the diff step
+  never look at it.
+
+  THE PINNED CLOCK -- TWO OBSERVABLES, NEVER A HOST READING
+  The date is pinned to the same pair of values as all seven siblings, so a
+  cross-scenario reader sees one date and so two runs of this scenario are
+  byte-identical (rule R-6). The pair is the text form, to-day pic x(10) in
+  DD/MM/CCYY, and the binary form, Run-Date binary-long
+  [copybooks/wssystem.cob:L67]. Both are quoted or integral as their COBOL
+  field requires: the text is a quoted string because it is alphanumeric, the
+  binary is a bare integer because it is a whole-number field.
+  Pinning exactly these two is sufficient, and that is measured rather than
+  hoped for: none of the six programs on these routes reads a clock at all,
+  the date arriving purely through linkage from the menu, and the menus
+  themselves derive the text form from the binary one through the date module
+  [general/general.cbl:L465-L467]. There is no other time source on this path,
+  no random seed, and no ordering nondeterminism from a secondary index.
+
+  PURE GENERAL LEDGER MODE IS TWO SEEDED FIELDS, NOT ONE
+  This is the single most expensive thing to get wrong in this file, so it is
+  stated before anything else about the seed.
+  The FIRST field is the fan-out switch, verbatim at
+  [copybooks/wssystem.cob:L179-L181]:
+    05  IRS-Instead     pic x. / 88  IRS-Used  value "Y". /
+    88  IRS-Both-Used   value "B".
+  A space selects the General Ledger only, Y selects IRS instead of it, and B
+  selects IRS as well as it. Those two condition names are the field's ONLY
+  ones: there is no third value and in particular no N. A pic x cannot hold an
+  empty string, so a space is the more faithful spelling of the
+  General-Ledger-only state, and both runners accept either spelling and
+  converge them. sl060 tests the switch at [sales/sl060.cbl:L1039],
+  [sales/sl060.cbl:L1126] and [sales/sl060.cbl:L1175]; pl100 tests it at
+  [purchase/pl100.cbl:L566] and [purchase/pl100.cbl:L629].
+  THE SECOND FIELD IS NOT ON THAT SWITCH AT ALL, and reading only the fan-out
+  tests would miss it. G-L is a condition name on the installed-ledger level
+  byte: 88  G-L  value 1 at [copybooks/wssystem.cob:L85], inside the Level
+  group at [copybooks/wssystem.cob:L83-L96]. Pure General Ledger mode is
+  therefore IRS-Instead equal to a space AND Level-1 equal to one. With
+  Level-1 anything else, G-L is FALSE and the whole General Ledger side of
+  both posting programs disappears -- no batch, no posting record, and
+  anomaly A-17's move never executing [sales/sl060.cbl:L1172-L1173],
+  [purchase/pl060.cbl:L1027-L1028]. GLBATCH-REC and GLPOSTING-REC would then
+  be empty on BOTH sides and the diff would be empty for the wrong reason,
+  which is a silent false pass of the same class as the file_system_used trap
+  below. NEITHER RUNNER ASSERTS Level-1: the oracle-side runner checks the
+  flag, the cycle, the date form, the fan-out switch and the autogen switch,
+  and stops there. It is closed here, by the seed contract, and nowhere else.
+
+  ANOMALY A-PL100-A -- THE DECISIVE, INDEPENDENT REASON irs_instead IS A SPACE
+  The plan already requires the fan-out switch to be pinned explicitly so that
+  the affected-table list is unambiguous. On THIS scenario's routes there is a
+  second and stronger reason, and it is a defect: in pl100 the OPEN of the
+  posting file and the WRITES to it are guarded by DIFFERENT conditions.
+  The open, verbatim at [purchase/pl100.cbl:L566-L570], branches on irs-used
+  ALONE and the two arms are mutually exclusive -- SPL-Posting-Open-Extend
+  [purchase/pl100.cbl:L567] or GL-Posting-Open
+  [purchase/pl100.cbl:L569]. The writes do not agree with it: the transfer
+  write is guarded by irs-used OR IRS-Both-Used
+  [purchase/pl100.cbl:L629] and performed at [purchase/pl100.cbl:L644], and
+  the General Ledger write is guarded by IRS-Both-Used OR G-L
+  [purchase/pl100.cbl:L646-L647] and performed at
+  [purchase/pl100.cbl:L649]. Because 88 IRS-Used matches ONLY "Y":
+    in "B" mode the open takes the else arm, so the transfer file is NEVER
+      OPENED, and the write at [purchase/pl100.cbl:L644] still fires;
+    in "Y" mode the open takes the first arm, so the posting file is never
+      opened, and the write at [purchase/pl100.cbl:L649] still fires whenever
+      G-L is true -- which it independently can be, G-L being a different
+      field entirely;
+    ONLY the General-Ledger-only state, a space with Level-1 equal to one,
+      opens exactly what it writes.
+  So any value other than a space makes this scenario incoherent before it
+  reproduces anything, and the defect is REPRODUCED rather than repaired
+  (rule R-4). It is entry A-PL100-A of docs/migration/anomaly-log.md section
+  15, registered under that globally unique name because the register's own
+  A-NEW-5 is a different defect entirely -- "Purchase has no abort gate at
+  all" -- and the two used to share one number. The old-to-new map is in that
+  section. The same
+  paragraph also supplies the batch defaults "DR", "PL" and "I"
+  [purchase/pl100.cbl:L561-L563], the A-17 read-back
+  [purchase/pl100.cbl:L564], the record-number move
+  [purchase/pl100.cbl:L572] and the section exit
+  [purchase/pl100.cbl:L574].
+  THE SWITCH REACHES THE RUN TWICE AND BOTH ROUTES MUST AGREE. The Sales and
+  Purchase entry points take
+  the switch as an option whose blank state the harness spells as N, while the
+  seeded system row carries the literal space; the value below is the same
+  state expressed once, and the seeded row must carry it too.
+
+  THE SEEDED SYSTEM RECORD -- THE WAYS THIS SCENARIO CAN LIE
+  Every value in the system block below must ALSO be carried by the seeded
+  system flat file, because the COBOL reads it from there and not from argv.
+    1. file_system_used = 1 IS THE FALSE-PASS TRAP. A handler routes to the
+       MySQL bridge and returns only when the flag is non-zero: if not
+       FS-Cobol-Files-Used / move RDBMS-Flat-Statuses to FA-RDBMS-Flat-Statuses
+       / perform ba-Process-RDBMS / go to AA-Main-Exit
+       [common/acas007.cbl:L316-L320]. The field and its condition names are
+       [copybooks/wssystem.cob:L111-L114], with the valid range at
+       [copybooks/wssystem.cob:L122]. Seeded as zero, the compiled run writes
+       COBOL files and touches no table, BOTH captures come back empty, the
+       diff is empty and the scenario reports a pass having proved nothing.
+       IT ALSO MAKES THE DECLARED TERM CODE PROVABLE. The only term code
+       either sl055 or pl055 can raise is eight, and both wrap that block in
+       if FS-Cobol-Files-Used -- guard [sales/sl055.cbl:L326], raise
+       [sales/sl055.cbl:L344], close [sales/sl055.cbl:L347-L348]; guard
+       [purchase/pl055.cbl:L266], raise [purchase/pl055.cbl:L286], close
+       [purchase/pl055.cbl:L289-L290]. With the flag at one that block is
+       unreachable, so term code eight cannot occur. The only other code the
+       harness can observe anywhere is five, the General Ledger open-batch
+       abort [general/gl070.cbl:L289], and this file never runs that program.
+       Zero, four times, is therefore an assertion with a proof behind it.
+    2. cyclea must be NON-ZERO or the menu diverts to system setup instead of
+       running anything: if scycle = zero / go to call-system-setup
+       [general/general.cbl:L462-L463]. The field is
+       [copybooks/wssystem.cob:L62-L63], where Scycle is a redefinition of
+       Cyclea, which is why one seeded byte answers to both names.
+    3. period and date_form are [copybooks/wssystem.cob:L64] and
+       [copybooks/wssystem.cob:L128-L132]; one selects the UK ordering
+       DD/MM/YYYY. period is INERT in this file and in every other, for the
+       reason recorded under the end-of-cycle heading below.
+    4. sl_autogen must be a SPACE -- see the next heading, where it is the
+       whole mitigation for a program that runs on one side only.
+    5. s_flag_p and p_flag_p must both be TWO -- see the heading after that,
+       where they are hard preconditions without which more than half of this
+       scenario silently does nothing.
+  The RDBMS credential fields of the same record are a separate precondition
+  and are treated on their own below.
+
+  s_flag_p AND p_flag_p ARE HARD PRECONDITIONS, NOT DECORATION
+  Both cash programs open with a ONE-SHOT LATCH that abandons the run outright
+  unless the flag already equals two, and the abandonment is silent as far as
+  any table is concerned.
+    sl100: if S-Flag-P not = 2 / display SL137 / display SL002 / accept
+      ws-reply / go to menu-exit / end-if
+      [sales/sl100.cbl:L296-L301]. The paragraph the run would otherwise fall
+      into is menu-return [sales/sl100.cbl:L303]; the exit it takes instead is
+      menu-exit [sales/sl100.cbl:L476] and then exit program
+      [sales/sl100.cbl:L477].
+    pl100: the same structure at [purchase/pl100.cbl:L289-L294], with
+      menu-return at [purchase/pl100.cbl:L296] and the exit pair at
+      [purchase/pl100.cbl:L467-L468].
+  The fields are S-Flag-P [copybooks/wssystem.cob:L226] and P-Flag-P
+  [copybooks/wssystem.cob:L206], each sitting beside its own amend and invoice
+  siblings, S-Flag-A and S-Flag-I [copybooks/wssystem.cob:L224-L225] and
+  P-Flag-A and P-Flag-I [copybooks/wssystem.cob:L204-L205], all of which the
+  maintainer's own comments question the use of.
+  SO WITHOUT BOTH FLAGS SEEDED AS TWO, OPERATIONS 2 AND 4 DO NOTHING AND THIS
+  SCENARIO REACHES ONLY FOUR OF ITS NINE WRITE SITES -- sites five and nine
+  never fire, and the diff over SYSTOT-REC is still empty, so the failure is
+  invisible. That is why they are pinned here and restated in the seed
+  contract.
+  BOTH LATCHES ARE CLEARED BY THE RUN. sl100 moves "Y" into Oi-3-Flag and zero
+  into S-Flag-P on its way out [sales/sl100.cbl:L473-L474], and pl100 does the
+  same for Oi-5-Flag and P-Flag-P [purchase/pl100.cbl:L464-L465]. They are
+  one-shot by design, so a SECOND run of this scenario against the same
+  database posts nothing on operations 2 and 4: the protocol's reset and
+  re-seed stage is what makes the run repeatable, and it is load-bearing here
+  rather than hygienic.
+
+  ONE PROGRAM RUNS ON THE ORACLE SIDE AND NEVER ON THE PYTHON SIDE
+  The Sales invoice-post paragraph dispatches sl830 before sl055
+  [sales/sales.cbl:L759], with the comment "In case autogen is use",
+  corroborated in the program's own change log
+  [sales/sales.cbl:L121]. The sl800 to sl830 series is out of scope, so the
+  migrated entry point does not invoke it, while the oracle-side runner drives
+  the MENU and therefore does. That asymmetry is deviation D-5.
+  THE MITIGATION IS THE PINNED SWITCH, AND IT IS PROVABLE FROM THE SOURCE.
+  sl830 takes the four-parameter linkage [sales/sl830.cbl:L260-L263], enters
+  aa000-Main [sales/sl830.cbl:L266], and its FIRST TWO EXECUTABLE STATEMENTS
+  are if SL-Autogen not = "Y" / goback [sales/sl830.cbl:L269-L270]. With the
+  switch seeded as a space the program returns before touching anything, and
+  it never sets a term code -- load00 having zeroed it on entry
+  [sales/sales.cbl:L680]. The field is [copybooks/wssystem.cob:L274]; its
+  Purchase sibling PL-Autogen [copybooks/wssystem.cob:L209] carries the
+  maintainer's own note that it is not used yet.
+  CONSEQUENCES THAT ARE PART OF THIS FILE'S CONTRACT: THE TWO
+  AUTOMATIC-GENERATION FLAT FILES ARE NEVER SEEDED -- two of the eight
+  out-of-scope names of [common/masterLD.sh:L93-L116], the Sales one at
+  [common/masterLD.sh:L113] and the Purchase one at
+  [common/masterLD.sh:L108] -- the four automatic-generation tables their
+  loaders fill are NEVER listed among the affected tables, and both runners
+  assert after the run that all four still hold zero rows. The resolution is
+  assertion, not compensation: nothing is subtracted from either capture, which
+  is what makes the deviation safe to live with rather than merely stated in
+  prose.
+  THE PURCHASE SIDE HAS NO SUCH ASYMMETRY, because its pl830 dispatch is
+  commented out [purchase/purchase.cbl:L755-L758]. The two menus therefore
+  disagree with each other, and that divergence is PRESERVED rather than
+  harmonised (rule R-4); it is recorded in
+  docs/migration/ambiguity-resolutions.md.
+
+
+  ALL NINE PERIOD-TOTAL WRITE SITES, AND WHAT EACH ONE NEEDS FROM THE SEED
+  This is the reason the scenario exists, so every site is named with its
+  guard, its target field and the seeded row that reaches it. The document-type
+  codes are one Receipt, two Invoice, three Credit Note, four Proforma; the
+  open-item type codes used below are three Credit Note, five Payment, and six
+  for the else-branch case.
+    SITE 1  [sales/sl055.cbl:L675] adds the document total to
+      sl-invoices-this-month, guarded by if ih-type = 2
+      [sales/sl055.cbl:L674]. NEEDS at least one Sales invoice that survives
+      all four of sl055's filters.
+    SITE 2  [sales/sl055.cbl:L677] adds it to sl-credit-notes-this-month,
+      guarded by if ih-type = 3 [sales/sl055.cbl:L676]. NEEDS at least one
+      Sales credit note. The total itself is built by the nine addends at
+      [sales/sl055.cbl:L670-L673], guarded to exclude receipts.
+    SITE 3  [sales/sl060.cbl:L641] adds total-deduct to sl-credit-deductions
+      and is UNGUARDED -- it fires on every run of the section, adding zero
+      when there is nothing to add. NEEDS a seeded late deduction for the
+      figure to be non-zero; the apportionment that consumes it is guarded
+      separately at [sales/sl060.cbl:L643-L647].
+    SITE 4  [sales/sl060.cbl:L700] adds work-b to sl-cn-unappl-this-month and
+      is likewise UNCONDITIONAL -- it sits OUTSIDE the guard immediately above
+      it [sales/sl060.cbl:L695], which governs only the printed line. NEEDS an
+      OPEN Sales credit note, type three and not closed, so that
+      ba000-Cr-Swop fires [sales/sl060.cbl:L671-L672] and the figure is
+      non-zero; the closed-item test that would skip it is
+      [sales/sl060.cbl:L668-L669].
+    SITE 5  [sales/sl100.cbl:L404] is add oi-paid to t-paid sl-payments --
+      TWO RECEIVERS in one statement, one a run total and one the period
+      total. Guarded by if oi-type = 5 [sales/sl100.cbl:L402], with an
+      else-branch for type six that feeds different fields entirely
+      [sales/sl100.cbl:L407-L410]. NEEDS at least one Sales payment row, and
+      reaching it at all NEEDS s_flag_p seeded as two.
+    SITE 6  [purchase/pl055.cbl:L582] adds the document total to
+      pl-invoices-this-month, guarded by if ih-type = 2
+      [purchase/pl055.cbl:L581]. NEEDS at least one Purchase invoice.
+    SITE 7  [purchase/pl055.cbl:L584] adds it to pl-credit-notes-this-month,
+      guarded by if ih-type = 3 [purchase/pl055.cbl:L583]. NEEDS at least one
+      Purchase credit note. Its total is built from FOUR addends on ONE line
+      [purchase/pl055.cbl:L580] where the Sales twin uses nine over three
+      lines -- preserved, not harmonised.
+    SITE 8  [purchase/pl060.cbl:L628] adds work-b to pl-cn-unappl-this-month
+      and is UNCONDITIONAL, outside the guard above it
+      [purchase/pl060.cbl:L623]. NEEDS an open Purchase credit note.
+    SITE 9  [purchase/pl100.cbl:L396] is add oi-paid to t-paid pl-payments --
+      TWO RECEIVERS again. Guarded by if oi-type = 5
+      [purchase/pl100.cbl:L394] with the type-six else-branch at
+      [purchase/pl100.cbl:L399-L402]. NEEDS a Purchase payment row and
+      p_flag_p seeded as two.
+  THE RECORD ITSELF. SYSTOT-REC has 21 columns and its primary key is
+  LEDGER-TOTALS-REC-KEY; every one of the nine targets is a decimal column
+  scaled to two places, which is exactly why no figure for it may appear as a
+  YAML scalar (rule R-2). The copybook is copybooks/wssys4.cob: the Sales
+  group opens at [copybooks/wssys4.cob:L9] with the five Sales targets at
+  [copybooks/wssys4.cob:L12], [copybooks/wssys4.cob:L13],
+  [copybooks/wssys4.cob:L15], [copybooks/wssys4.cob:L16] and
+  [copybooks/wssys4.cob:L17]; the Purchase group opens at
+  [copybooks/wssys4.cob:L20] with the four Purchase targets at
+  [copybooks/wssys4.cob:L23], [copybooks/wssys4.cob:L24],
+  [copybooks/wssys4.cob:L27] and [copybooks/wssys4.cob:L28]. The record is
+  loaded by sys4LD, the second step of the system-file block.
+  ANOMALY A-20 LIVES IN THAT COPYBOOK: the last two fields of the PURCHASE
+  group are named with the SALES prefix, sl4-spare3 and sl4-spare4
+  [copybooks/wssys4.cob:L29-L30]. They are preserved with their misleading
+  names, they are dumped and compared like every other column, and they are
+  entry A-20 of docs/migration/anomaly-log.md.
+
+  ANOMALIES A-8, A-9 AND A-10 -- THE THREE DIVERGENT MOVING AVERAGES
+  All three are in docs/migration/anomaly-log.md, all three are reproduced
+  rather than repaired, and all five instances of the idiom are reachable on
+  this scenario's routes -- which is why the seed carries two invoices and a
+  credit note for the SAME customer and the SAME supplier. Normalising these
+  five blocks into one helper would be the single easiest way to fail this
+  migration.
+    A-8, THE DOUBLE TRUNCATION, in ba000-Sales-Comp
+    [sales/sl060.cbl:L816]: guard [sales/sl060.cbl:L819-L824], then add 1 to
+    sales-activety [sales/sl060.cbl:L825], then the FIRST truncation
+    [sales/sl060.cbl:L826], then the SECOND [sales/sl060.cbl:L827], then
+    main-exit [sales/sl060.cbl:L829]. The first truncation happens because the
+    accumulator is declared with ZERO decimal places, work-2 pic s9(14) comp-3
+    [sales/sl060.cbl:L206], while the value added into it carries TWO,
+    work-goods pic s9(7)v99 comp-3 [sales/sl060.cbl:L218] -- so pence are
+    discarded on every accumulation. The second happens because the average
+    field is a binary integer, Sales-Average binary-long
+    [copybooks/wssl.cob:L49], one of seven binary-long statistics fields
+    [copybooks/wssl.cob:L46-L52], so the divide discards its remainder too.
+    Modelling either field one digit wider would diverge from the oracle on
+    almost every invoice. The two money fields of the same record
+    [copybooks/wssl.cob:L54-L55] are exact decimals, and the statistics fields
+    are Python integers, never decimals -- which is precisely what keeps the
+    integer truncation reproducible.
+    A-9, THE MISSING COUNTER INCREMENT, in ba000-Credit-Comp
+    [sales/sl060.cbl:L832]: guard [sales/sl060.cbl:L835-L840], then an EXTRA
+    guard the sales path does not have, if work-2 not = zero
+    [sales/sl060.cbl:L841], then the add [sales/sl060.cbl:L842] and the divide
+    [sales/sl060.cbl:L843]. There is NO add 1 to sales-activety anywhere in
+    the section, so the FIRST credit note for a customer is silently dropped
+    from the average. Its Purchase mirror behaves identically: credit-comp
+    [purchase/pl060.cbl:L755], guard [purchase/pl060.cbl:L758-L763], extra
+    guard [purchase/pl060.cbl:L764], add [purchase/pl060.cbl:L765], divide
+    [purchase/pl060.cbl:L766], and again no increment -- where its own sibling
+    purch-comp [purchase/pl060.cbl:L740] does increment, at
+    [purchase/pl060.cbl:L749], before adding [purchase/pl060.cbl:L750] and
+    dividing [purchase/pl060.cbl:L751].
+    A-10 IS THE FACT THAT THE THREE GUARDS DISAGREE. That is the whole of it,
+    and it is worth being exact because the divide is easy to misread as a
+    second divergence and is not one. compute-sales-pay [sales/sl100.cbl:L497]
+    exits early on a cleared date of zero [sales/sl100.cbl:L500-L501], computes
+    an INTERVAL rather than a money amount [sales/sl100.cbl:L503-L504], and then
+    guards on a SINGLE condition, if sales-pay-activety not = zero
+    [sales/sl100.cbl:L506], where the other two guard on a PAIR -- activety and
+    average both non-zero -- with an explicit else move zero
+    [sales/sl060.cbl:L819-L824]. Here the else is instead expressed as a
+    preceding move zero to work-b [sales/sl100.cbl:L504]. The increment is at
+    [sales/sl100.cbl:L510], before the divide, as in ba000-Sales-Comp and unlike
+    ba000-Credit-Comp which never increments at all; the exit is at
+    [sales/sl100.cbl:L516].
+    THE DIVIDE IS SPELLED DIFFERENTLY AND COMPUTES THE SAME VALUE. divide work-b
+    by sales-pay-activety giving sales-pay-average [sales/sl100.cbl:L511] and
+    divide sales-activety into work-2 giving sales-average
+    [sales/sl060.cbl:L827] BOTH compute accumulator / counter: INTO names the
+    divisor first and BY names the dividend first, so the two forms are
+    equivalent and neither inverts the other. The difference is textual, it is
+    transcribed for traceability, and it carries NO arithmetic consequence --
+    calling it an inverted divide would assert a behavioural difference that
+    does not exist. What does differ, and what the parity claim rests on, is the
+    guard and the counter handling above.
+    Its Purchase mirror is the same shape: [purchase/pl100.cbl:L497-L498] and
+    [purchase/pl100.cbl:L500-L502].
+  So the seed must make all five reachable, and a run whose seed leaves any of
+  them latent has not tested the parity claim over it.
+
+  ANOMALY A-17 -- THE UNEXPLAINED MOVE, AT FOUR SITES
+  move RRN to postings, carrying the maintainer's own question mark, at
+  [sales/sl060.cbl:L1173] under the guard immediately above it
+  [sales/sl060.cbl:L1172], and mirrored at
+  [purchase/pl060.cbl:L1028] under [purchase/pl060.cbl:L1027]. It is read back
+  as the batch start in the same program family, add postings 1 giving
+  Batch-start [sales/sl060.cbl:L1037] and
+  [purchase/pl100.cbl:L564]. The field is 05 Postings binary-short
+  [copybooks/wssystem.cob:L184], part of the system record, which NO in-scope
+  program persists -- see the totals-record caveat below -- so its only
+  observable effect is on the batch start recorded in GLBATCH-REC. Because
+  this file runs four operations in sequence, the write and the read-back land
+  in DIFFERENT operations, which is the second reason the declared order is
+  part of the scenario. Entry A-17 of docs/migration/anomaly-log.md.
+
+  ANOMALY A-NEW-1 -- THE LOST invalid key CLAUSE IN pl060
+  The credit-note apportionment is written to make a second pass over the
+  open-item file, and it never does. After end-loop
+  [purchase/pl060.cbl:L809] the section tests whether a second pass is due
+  [purchase/pl060.cbl:L812-L814], clears the first-pass flag
+  [purchase/pl060.cbl:L815], sets the key [purchase/pl060.cbl:L816-L817] and
+  the access type [purchase/pl060.cbl:L818], and repositions the cursor
+  [purchase/pl060.cbl:L819] -- on a line whose trailing comment still carries
+  the original invalid key phrase. THE PHRASE IS ONLY A COMMENT NOW, so the
+  transfer that was meant to be conditional is UNCONDITIONAL
+  [purchase/pl060.cbl:L820] and the loop-back below it is DEAD CODE
+  [purchase/pl060.cbl:L821]. Control lands at main-end
+  [purchase/pl060.cbl:L823] and the section finishes
+  [purchase/pl060.cbl:L826]. The second pass therefore NEVER RUNS. It is
+  reproduced exactly, it is entry A-NEW-1 of docs/migration/anomaly-log.md,
+  and the seed carries a Purchase credit note that would have triggered it so
+  that the suppression is observable rather than assumed.
+
+  ANOMALY A-1 IS ALSO REACHABLE HERE, AND ITS CONTROL IS IN THIS FILE
+  A missing terminating period nests one conditional inside another. In sl060,
+  the transfer-file close [sales/sl060.cbl:L1176] does NOT end with a period,
+  so the test below it [sales/sl060.cbl:L1177] becomes a NESTED test inside
+  the one above [sales/sl060.cbl:L1175], and the General Ledger posting close
+  [sales/sl060.cbl:L1178] can only be reached when the outer test is also
+  true. In pure General Ledger mode the outer test is false, so THE CLOSE
+  NEVER EXECUTES. Its Purchase twin has the period
+  [purchase/pl060.cbl:L1031], which is what proves the omission is an accident
+  rather than an idiom -- and because THIS file runs both programs in one
+  scenario, the presence and the absence are captured side by side in a single
+  comparison. Reproduced, never repaired; entry A-1 of
+  docs/migration/anomaly-log.md.
+
+  THE OTHER PRESERVED DIVERGENCES BETWEEN THE SALES AND PURCHASE TWINS
+  Each of these was measured in this checkout, each is preserved under rule
+  R-4, and together they are why the two ledgers are exercised in one scenario
+  rather than assumed to mirror one another.
+    pl055 IS NOT A MIRROR OF sl055. It negates FOUR fields on a credit note
+    [purchase/pl055.cbl:L572-L575] where sl055 negates NINE
+    [sales/sl055.cbl:L658-L666]; it has NO proforma filter, where sl055 skips
+    type four [sales/sl055.cbl:L430-L431]; it has NO pending filter, where
+    sl055 skips pending or non-live headers with a flag raised
+    [sales/sl055.cbl:L433-L436]; it stamps a status byte whose comment records
+    a change of case [purchase/pl055.cbl:L586] and then writes natively
+    [purchase/pl055.cbl:L587] to a flat work file that has NO TABLE in the
+    frozen schema; and its read loop leaves on ANY non-zero reply
+    [purchase/pl055.cbl:L308]. Because pl055 has no proforma filter, a
+    Purchase proforma row would NOT be skipped there, which is why the seed
+    contract below treats the two sides differently.
+    pl060 ISSUES NO Value verb at all, so on the Purchase side VALUEANAL-REC
+    is written by pl055 only -- where sl060 rewrites it twice. pl055 also has
+    no Value-Open-Output where sl055 has one.
+    pl100 DIVERGES FROM sl100 IN FOUR VERBS: it has no GL-Posting-Open-Output,
+    no SPL-Posting-Open-Output, no Purch-Write at all -- only Purch-Rewrite --
+    and one GL-Posting-Close where sl100 has two. sl100 in turn has
+    Sales-Rewrite but no Sales-Write and no OTM3-Write.
+    THE BALANCE MOVES ARE ARRANGED DIFFERENTLY TOO: sl100 derives the new
+    balance and stamps the payment date at
+    [sales/sl100.cbl:L399-L400], pl100 at
+    [purchase/pl100.cbl:L391-L392] after its own negative-balance fold at
+    [purchase/pl100.cbl:L386-L389].
+    THE SIGN FLIPS ARE AT [sales/sl055.cbl:L446],
+    [sales/sl055.cbl:L457] and [sales/sl055.cbl:L463] on the Sales extract,
+    [purchase/pl055.cbl:L376] and [purchase/pl055.cbl:L387] on the Purchase
+    one, and [sales/sl100.cbl:L395] on the cash route.
+    AND THE BATCH IS CAPPED AT 99 ITEMS, closing and reopening when it fills
+    [sales/sl060.cbl:L1151-L1153], so the seed keeps every batch below that.
+
+
+  WHY EXACTLY THESE FOURTEEN TABLES -- A MEASURED VERB CENSUS
+  The list below is the UNION of the two clean-batch trading scenarios, and it
+  was arrived at by counting facade verbs across the six programs these four
+  operations run rather than by inference. Counting perform of an entity verb
+  in sl055, sl060, sl100, pl055, pl060 and pl100 gives: GL-Batch 14,
+  GL-Posting 18, SPL-Posting 18, Sales 9, Purch 9, Value 49, Analysis 14,
+  Invoice 7, PInvoice 6, OTM3 19, OTM5 18 -- and GL-Nominal ZERO, System ZERO.
+  Those counts map onto the tables one to one, with two handlers owning a
+  header table and a lines table each: Invoice covers SAINVOICE-REC and
+  SAINV-LINES-REC, PInvoice covers PUINVOICE-REC and PUINV-LINES-REC.
+  GLLEDGER-REC IS ABSENT, DELIBERATELY, because the census found no GL-Nominal
+  verb in any of the six programs: the nominal ledger is written by the
+  General Ledger cycle, which this scenario does not run. Listing it would add
+  a table that is identical on both sides for a reason that has nothing to do
+  with this scenario, and would dilute the bound the list exists to place on
+  the comparison.
+  PSIRSPOST-REC IS LISTED AS AN UNCHANGED WITNESS. In pure General Ledger mode
+  the transfer writes are guarded off -- [sales/sl060.cbl:L1039] and
+  [purchase/pl100.cbl:L629] both require the fan-out switch to be set -- so
+  the table should come back exactly as seeded. Comparing it is how the
+  scenario proves the fan-out switch really was a space on BOTH sides; a
+  difference here would mean one leg had fanned out and the other had not.
+  ANALYSIS-REC IS AN UNCHANGED WITNESS TOO, unless the seed is incomplete: the
+  extract paragraphs read analysis and value codes indexed, on both sides, and
+  a code the invoices reference but the seed omits turns into a read failure
+  rather than a difference. The Purchase side additionally selects its own
+  group by system byte [purchase/pl055.cbl:L403].
+  THE sl055-TO-sl060 AND pl055-TO-pl060 HANDOFFS ARE WORK FILES, NOT TABLES,
+  which is worth stating because a reader counting tables will look for them.
+  pl055 writes its extracted header natively [purchase/pl055.cbl:L587], and
+  the frozen schema has no table for that file. They are modelled in Python as
+  ordered in-process sequences and nothing about them appears in any dump;
+  their only consequence for the harness is that the COBOL side needs a
+  writable working directory.
+
+  SYSTOT-REC IS THE FOCAL TABLE, AND IT CARRIES A RECORDED CAVEAT (R-4, R-6)
+  On this route the totals record is as in-scope as a table can be: ALL NINE
+  period-total write sites fire, and those nine sites are its sole writers.
+  BUT THE WRITING IS TO THE LINKAGE COPY IN MEMORY, NOT TO THE DATABASE. A
+  census across all twelve in-scope programs finds NO System facade verb in
+  any of them -- searching each of gl051, gl070, gl071, gl072, gl080, sl055,
+  sl060, sl100, pl055, pl060, pl100 and irs030 for a performed System open,
+  close, read, write, rewrite, start or delete returns zero every time -- so no
+  in-scope program persists it.
+  WHAT PERSISTS IT IS THE OUT-OF-SCOPE MENU. On the two routes this file
+  drives, overrewrite at [sales/sales.cbl:L628] rewrites key one, the system
+  record [sales/sales.cbl:L631-L635], and key four, the totals record
+  [sales/sales.cbl:L636-L638], to the relational store, closes
+  [sales/sales.cbl:L639] and then repeats the pair against the COBOL file
+  [sales/sales.cbl:L645-L657]; the Purchase menu does the same at
+  [purchase/purchase.cbl:L621], keys one and four at
+  [purchase/purchase.cbl:L624-L628] and
+  [purchase/purchase.cbl:L629-L631]. BOTH TRADING MENUS WRITE ONLY THOSE TWO
+  KEYS, where the General menu writes THREE -- keys one, two and four at
+  [general/general.cbl:L657-L672], repeated against the COBOL file at
+  [general/general.cbl:L675-L691] -- a divergence between the menus that is
+  also preserved. And load000 reaches overrewrite on EVERY call, because its
+  two branches, term code below eight [sales/sales.cbl:L708-L709] and above
+  seven [sales/sales.cbl:L710-L712], are exhaustive over a two-digit field;
+  the Purchase equivalents are [purchase/purchase.cbl:L701-L702] and
+  [purchase/purchase.cbl:L703-L704]. AND THE MIGRATED ENTRY POINTS REPRODUCE THAT
+  PARAGRAPH rather than skipping it, WHICH IS WHY THIS SCENARIO CAN BE COMPARED AT
+  ALL. They have no menu, but the paragraph's RDB arm is not a menu concern -- it is
+  the only part of a menu with a database effect -- so it lives in
+  acas_posting/cli/args.py as overrewrite() and every one of the four routes this
+  file drives performs it. `slpl_menu_state' carries the totals record precisely so
+  that key 4 is rewritten, and key 1 is rewritten unconditionally, so both cycles
+  reach both writes. Keys one, two and four are rewritten in the frozen order and the
+  close is issued on key four, exactly as [general/general.cbl:L656-L672] does it;
+  the Sales and Purchase two-key set falls out of the same implementation because the
+  defaults record is simply absent from those menus' state. The two call sites -- the
+  `> 7' arm of load000 and the quit -- are guarded mutually exclusively, so a run
+  performs the paragraph exactly ONCE.
+  WHAT THE MIGRATION DOES NOT REPRODUCE is the SECOND leg: the same rewrites against
+  the ISAM parameter file at [general/general.cbl:L676-L691],
+  [sales/sales.cbl:L645-L657] and [purchase/purchase.cbl:L638-L650], because there is
+  one store and not two. That residue is carried as Q-CLI-OVERREWRITE-SECOND-LEG and
+  it is the only half still open.
+  SO SYSTOT-REC PARITY DEPENDS ON THAT KEY-FOUR REWRITE, WHICH IS IN PLACE, AND THIS
+  IS THE SCENARIO WHERE THE OVERLAP IS UNAVOIDABLE: every other definition can leave
+  the question latent, and this one cannot, because the totals record is the very
+  thing it exists to compare -- which is why SYSTOT-REC is on the affected-table
+  list. It is the unavoidable overlap of harness deviation D-4, it is recorded
+  honestly here rather than papered over, and it is arbitrated against the compiled
+  oracle in
+  docs/migration/ambiguity-resolutions.md.
+  KEY ONE IS COVERED TWICE -- BY THE DUMP AND BY A DIGEST OF IT. SYSTEM-REC is on this
+  file's affected-table list and in every capture, with exactly two of its 169 columns
+  withheld: `RDBMS-PASSWD char(12)' [copybooks/wssystem.cob:L139] and `PASS-WORD',
+  replaced on BOTH sides by harness/dump_tables.py's REDACTED_COLUMNS inside
+  render_value, because a dump is SELECT * and a capture is committed evidence. The
+  other 167 are compared by value. Both runners ALSO record a canonical digest of the
+  row before and after their dispatch and tests/conftest.py compares the two post-run
+  digests, which is a parity check over all 169 columns including those two -- a sha256
+  of the canonical dump is not the dump.
+  THE OBJECTION TO DECLARING THE ROW WAS MEASURED, NOT ARGUED. Its content depends on
+  what the route DID -- the run-date stamp, the IRS allocator, the one-shot latches, and
+  `Date-Form', itself a SYSTEM-REC column [copybooks/wssystem.cob:L127] the frozen date
+  sections write back -- so declaring it could in principle tie expected_table_effect to
+  fields no scenario reasons about. It does not: the digest HOLDS on all four scenarios
+  declaring `unchanged' and MOVES on every one declaring `changed'. This file declares
+  `changed', and the row is one of the things that moves.
+  IT IS NOT, AND MAY NEVER BE, RESOLVED WITH AN IGNORE-LIST IN THE DIFF STAGE.
+  That stage is required to have no ignore-list, no tolerance list and no
+  known-difference allowance: the comparison is bounded by ALL 22 IN-SCOPE
+  TABLES, and this file's affected-table list is the scenario's DECLARED EFFECT
+  rather than the bound. Suppressing a column there would turn the one table
+  this scenario is named after into the one table it does not actually check.
+  SYSTEM-REC IS LISTED, and in this scenario it earns its place more than
+  anywhere else: four operations run in order, each mutating the system record
+  in memory -- anomaly A-17's move [sales/sl060.cbl:L1173] among them -- and each
+  trading menu persists it on exit [sales/sales.cbl:L628-L657],
+  [purchase/purchase.cbl:L621-L651], which the headless Python routes reproduce
+  through args.overrewrite. Four sequential mutations are exactly the shape in
+  which a lost or doubled update hides, and it can only be observed if the table
+  is compared. Whether the two sides agree was MEASURED, not presumed (rule
+  R-6): both end with a byte-identical row, all 169 columns.
+  SYSDEFLT-REC AND SYSFINAL-REC REMAIN ABSENT FROM THE DECLARED LIST, on a
+  ground that does not apply to SYSTEM-REC: neither trading menu rewrites them
+  -- both exits touch keys 1 and 4 only, with no key-2 rewrite, unlike the
+  General menu, which acas_posting/cli/args.py::overrewrite reproduces by
+  writing key 2 only when the route loaded the defaults record -- and no
+  statement on any of these four routes changes their content. They are still
+  read and diffed, because the bound is all 22 in-scope tables, so they are
+  expected to match their seeded values on both sides.
+
+  gl_end_of_cycle IS DELIBERATELY NOT APPENDED TO THIS SCENARIO
+  Appending the end-of-cycle operation was considered and DECLINED, on six
+  grounds each backed by something readable in this checkout. The decision is
+  recorded here so that it is not re-litigated, and it is oracle-reversible:
+  docs/migration/ambiguity-resolutions.md is where it would be revisited, and
+  the only thing that could reverse it is measured compiled behaviour.
+    ONE. The mandated scenario set of the Agent Action Plan contains no
+    end-of-cycle case. Adding one would add a scenario the protocol does not
+    ask for, to the file whose subject is something else.
+    TWO. The nine period-total sites are the sole writers of the totals
+    record, which is what makes THIS scenario verifiable by inspecting one
+    table. Appending a fifth operation that touches other tables dilutes
+    exactly the property the scenario is built on.
+    THREE. gl080 WRITES NO PERIOD TOTAL. Searching general/gl080.cbl for any
+    of the nine target fields returns nothing, so the append would add no
+    tenth site and could not strengthen the claim.
+    FOUR. THIS SCENARIO'S AFFECTED-TABLE LIST WOULD HAVE TO GROW BY THREE. gl080
+    mutates the accounting cycle at [general/gl080.cbl:L334],
+    [general/gl080.cbl:L360] and [general/gl080.cbl:L363], and the quarter
+    counter at [general/gl080.cbl:L355] and [general/gl080.cbl:L357], the
+    latter being [copybooks/wssystem.cob:L110] -- all inside the system
+    record -- and separately stamps GLBATCH-REC and rewrites GLLEDGER-REC.
+    Appending it would mean this file bounded fifteen tables for the totals
+    claim and three more for an unrelated one.
+      A CORRECTION WORTH RECORDING, BECAUSE THE WRONG READING IS PLAUSIBLE. It is
+      tempting to argue that "gl080's OWN STATE CHANGES CANNOT BE PERSISTED BY THE
+      PYTHON SIDE" and that comparing them would be "an unavoidable divergence dressed
+      up as a test". THAT IS WRONG, and measurement is what shows it (rule R-6). The system record IS persisted on both sides: the menu exit does it
+      at [general/general.cbl:L656-L692] and the headless route reproduces that
+      same paragraph as args.overrewrite in
+      acas_posting/cli/gl_end_of_cycle.py. A dedicated end_of_cycle_gl scenario
+      compared SYSTEM-REC and found the cycle advance and the quarter wrap
+      byte-identical on the two sides -- measured, and then removed with that
+      scenario, the tree being held to the Agent
+      Action Plan's eight definitions. The ground is corrected rather than
+      deleted because a reader who acted on the old claim would have concluded
+      the comparison was impossible; it is not, and the measurement showed so.
+    FIVE. ITS ARCHIVE PATH WOULD PUT A HOST FILESYSTEM PATH INTO A SCENARIO
+    FILE. The archiving walk enters disk-change [general/gl080.cbl:L519],
+    reaches accept-option [general/gl080.cbl:L542], accepts a single digit
+    [general/gl080.cbl:L545], leaves on nine [general/gl080.cbl:L546-L547] and
+    RE-PROMPTS on anything that is not zero
+    [general/gl080.cbl:L548-L549] -- only zero proceeds -- and then accepts a
+    path [general/gl080.cbl:L553-L555] and RE-PROMPTS AGAIN if its first
+    character is a space [general/gl080.cbl:L556-L557]. Pinning a path here
+    would carry a host identity into a file that is required to have none
+    (rule R-6).
+    SIX. THE ANOMALIES THAT WOULD JUSTIFY THE APPEND HAVE A HOME ELSEWHERE.
+    A-2, the unbounded quarter subscript -- computed by a rounded divide at
+    [general/gl080.cbl:L328] and then used as an array subscript with NO bounds
+    check at [general/gl080.cbl:L345] -- stays in the arithmetic parity suite,
+    because driving an out-of-range subscript through the COMPILED oracle would
+    be a write into adjacent storage whose effect is undefined. A-3, the second
+    and independent rotating quarter counter at [general/gl080.cbl:L355-L357],
+    is pinned in the SAME suite --
+    tests/arithmetic/test_gl080_cycle_divide_rounded.py's
+    test_a3_current_quarter_rotates_independently_of_a and its siblings, which
+    make the counter and the subscript disagree and require that the subscript
+    write Q1 while the counter writes Ledger-Last and leaves Q4 alone. The
+    unit-level pin is the whole of it, and it is stated here rather than left to
+    be discovered.
+  CONSEQUENCE, STATED PLAINLY: gl_end_of_cycle is NOT appended to THIS file, and
+  the six grounds above are why. NO committed definition drives it, because the
+  Agent Action Plan's inventory names EIGHT scenario definitions and this tree is
+  held to it -- so gl080 has no table-state comparison behind it, and its coverage
+  is the arithmetic tier's, per ground SIX. Appending the operation here would be
+  wrong for grounds ONE through FIVE regardless.
+  `period` remains an INERT value HERE -- carried because it is part of the
+  seeded system record and because the key set is uniform, not because any
+  operation listed in THIS file divides by it. It is emphatically not inert in
+  gl080 itself, where `divide scycle by period giving a rounded`
+  [general/gl080.cbl:L328] is what selects the quarter.
+
+  THE SEED CONTRACT -- WHAT EACH OF THE NINE FLAT FILES MUST CARRY
+  The seeder reproduces the frozen loader contract of
+  [common/masterLD.sh:L93-L116], with the system-file block first, and the
+  scenario's seed directory is resolved RELATIVE to the directory holding this
+  file. Every money amount lives in these flat files as decimal text in the
+  frozen record layout; none of them appears as a YAML scalar anywhere (rule
+  R-2). Nothing below is arranged to make the totals come out tidy: the point
+  is that they come out exactly as the compiled programs make them come out
+  (rule R-4).
+    system.dat -- the block at [common/masterLD.sh:L51] onwards, which runs
+      systemLD, then sys4LD, then finalLD, then dfltLD, in that fixed order.
+      SYS4LD IS WHAT LOADS SYSTOT-REC, this file's focal table, so the seeded
+      row must start from a KNOWN NON-ZERO state: accumulating onto zero would
+      make an accumulation indistinguishable from a fresh insert. The record
+      must carry File-System-Used as one, a non-zero Cyclea, period one, date
+      form one, IRS-Instead a SPACE, Level-1 one, SL-Autogen and PL-Autogen
+      spaces, S-FLAG-P TWO AND P-FLAG-P TWO, and the RDBMS credential fields
+      described under the credential precondition below.
+    analysis.dat -- [common/masterLD.sh:L93]. Every analysis code the seeded
+      invoices reference, on BOTH sides, or the indexed reads will not find
+      them and the run stops short of the sites that matter.
+    value.dat -- [common/masterLD.sh:L116]. Likewise every value code,
+      including the Purchase groups selected by system byte
+      [purchase/pl055.cbl:L403].
+    salesled.dat -- [common/masterLD.sh:L112]. At least one customer carrying
+      TWO INVOICES, ONE CREDIT NOTE AND ONE PAYMENT, so that both Sales
+      average blocks and the Sales payment average are all reached. Its seven
+      binary-long statistics fields [copybooks/wssl.cob:L46-L52] and two money
+      fields [copybooks/wssl.cob:L54-L55] must be set so that the A-8
+      truncation is VISIBLE -- that is, so an accumulation receives a value
+      with non-zero pence and a divide leaves a non-zero remainder.
+    invoice.dat -- [common/masterLD.sh:L98], loading SAINVOICE-REC and
+      SAINV-LINES-REC together. Headers whose live-status byte is "L", NOT
+      pending and NOT already analysed-and-applied, so that they survive
+      sl055's filters [sales/sl055.cbl:L427-L436]; at least one of type two,
+      for SITE 1, and at least one of type three, for SITE 2. Optionally one
+      proforma of type four so that the skip at
+      [sales/sl055.cbl:L430-L431] is exercised rather than assumed.
+    openitm3.dat -- [common/masterLD.sh:L104]. At least one OPEN credit note,
+      type three and not closed, so that ba000-Cr-Swop fires and SITE 4 is
+      non-zero; at least one payment row of type five so that SITE 5 fires;
+      optionally a type-six row so the else-branch at
+      [sales/sl100.cbl:L407-L410] is covered; and a late deduction so that
+      SITE 3 is non-zero rather than an add of zero.
+    purchled.dat -- [common/masterLD.sh:L111]. The supplier mirror: two
+      invoices, one credit note and one payment, for the SAME supplier, so
+      that both Purchase average blocks and the Purchase payment average are
+      reached and the A-9 mirror's missing increment is observable.
+    pinvoice.dat -- [common/masterLD.sh:L107], loading PUINVOICE-REC and
+      PUINV-LINES-REC. At least one of type two for SITE 6 and one of type
+      three for SITE 7. NOTE THE ASYMMETRY: pl055 has neither a proforma nor a
+      pending filter, so a type-four row here is NOT skipped the way its Sales
+      counterpart is.
+    openitm5.dat -- [common/masterLD.sh:L105]. At least one open credit note,
+      so that SITE 8 is non-zero AND the suppressed second apportionment pass
+      of A-NEW-1 is exercised; and at least one payment row of type five so
+      that SITE 9 fires.
+  SEEDED BY NOTHING, EVER: the EIGHT OUT-OF-SCOPE NAMES of the same frozen
+  contract. The two automatic-generation files, the Sales one at
+  [common/masterLD.sh:L113] and the Purchase one at
+  [common/masterLD.sh:L108], are excluded by the decision recorded above; the
+  other six -- the two despatch-note files at
+  [common/masterLD.sh:L95] and [common/masterLD.sh:L96], the despatch file at
+  [common/masterLD.sh:L97], the purchase-payments file at
+  [common/masterLD.sh:L106], and the stock audit and stock control files at
+  [common/masterLD.sh:L114] and [common/masterLD.sh:L115] -- belong to
+  subsystems this cycle does not reach. Each is named by its locator rather
+  than by its filename, so that a search for a forbidden fixture name finds
+  nothing in this file.
+  AND system.dat IS EFFECTIVELY MANDATORY, not merely useful: without a system
+  record the menu calls the parameter-setup program INTERACTIVELY
+  [general/general.cbl:L385-L394], which on a headless runner is a hang rather
+  than an error.
+
+
+  THE CREDENTIAL PRECONDITION -- CANNOT BE SATISFIED FROM THIS DIRECTORY
+  The compiled side does not take connection details from a command line. It
+  reads them out of the system record it was seeded with:
+  RDBMS-DB-Name, RDBMS-User and RDBMS-Passwd at
+  [copybooks/wssystem.cob:L137-L139], and RDBMS-Port, RDBMS-Host and
+  RDBMS-Socket at [copybooks/wssystem.cob:L142-L144]. Every handler copies
+  that group into the connection block before dispatching -- for example
+  [common/acas012.cbl:L641] on the customer handler -- and the block it copies
+  into is RDB-Data [copybooks/wsfnctn.cob:L56], whose fields are DB-Schema
+  [copybooks/wsfnctn.cob:L57], DB-UName [copybooks/wsfnctn.cob:L58], DB-UPass
+  [copybooks/wsfnctn.cob:L59], DB-Host [copybooks/wsfnctn.cob:L60], DB-Socket
+  [copybooks/wsfnctn.cob:L61] and DB-Port [copybooks/wsfnctn.cob:L62].
+  THREE OF THEM HOLD AT MOST TWELVE CHARACTERS, so a longer value is silently
+  shortened by the move into it and the compiled leg would then connect as a
+  DIFFERENT ACCOUNT from the migrated leg -- and two captures taken as
+  different accounts are not comparable at all.
+  SO THE DATABASE ENVIRONMENT THE PYTHON SIDE USES MUST MATCH THE CREDENTIAL
+  FIELDS INSIDE THE SEEDED system.dat. That cannot be expressed in this file
+  and is deliberately not attempted here: no credential of any kind appears in
+  this directory. It is a property of the seed fixture and of the environment
+  the runners are given.
+
+  THE OTHER PRECONDITIONS, EACH A HANG RISK RATHER THAN A CLEAN FAILURE
+  Stated briefly, because on a headless runner each of these stops the run
+  without producing a comparison.
+    The menu shells require the curses exception environment
+    [general/general.cbl:L369-L370] and refuse to run below a 24 by 80
+    terminal, checking lines and then columns and gobacking on either
+    [general/general.cbl:L374-L383]. Note that pl055 ITSELF tolerates a
+    shorter terminal, folding the value up to 24
+    [purchase/pl055.cbl:L249-L254], but the menu that dispatches it does not,
+    so the menu's minimum is the binding one.
+    A missing system record makes the menu call the setup program
+    interactively [general/general.cbl:L385-L394].
+    A zero accounting cycle diverts to system setup
+    [general/general.cbl:L462-L463].
+    AUTOCOMMIT MUST BE OFF WHILE SEEDING. The batch loader says so in its own
+    header, that it uses commit and rollback so autocommit must be off in the
+    relational settings, and that it is on by default
+    [common/glbatchLD.cbl:L9-L12]. The seeded state depends on those commit
+    boundaries.
+
+  THE ACCEPTANCE PROTOCOL
+  TEN stages, one scenario at a time and nothing alongside it.
+  `harness/normalize.py --print-stages' is the registry and the authority. The
+  two stages a reader would not guess are stage 5, which re-seeds THE SAME
+  FIXTURE BYTES so the Python cycle starts from the state the COBOL cycle
+  started from rather than the state it left, and stage 9, which verifies both
+  captures are published BEFORE a single row is compared, because two PARTIAL
+  captures produce an empty diff and so pass a comparison that compared nothing.
+  harness/build_oracle.sh and harness/seed.sh --build-fixtures precede stage 1
+  and are not stages: the first runs once per image, the second once per change
+  to a scenario's seed records.
+  FOR THIS SCENARIO, stages 2 and 6 each drive FOUR OPERATIONS IN THE DECLARED
+  ORDER inside ONE invocation of their runner. Both runners resolve the ordered
+  `operations:' list and drive every entry sequentially, re-selecting the
+  operation -- and with it the menu, the executable and the keystroke plan --
+  before each one. There is no dump between the four, because the scenario's
+  subject is the state the whole declared sequence produces.
+  The diff must be EMPTY. That is the pass condition and the evidence is
+  recorded in
+  docs/migration/scenario-diff-evidence.md.
+  WHAT AN EMPTY DIFF PROVES HERE, SPECIFICALLY: that all nine period-total
+  accumulations landed on IDENTICAL VALUES in SYSTOT-REC -- through the A-8
+  double truncation, through the A-9 missing increments on both credit-note
+  paths, through A-10's three disagreeing guards -- whose third instance spells
+  its divide the other way round and computes the same value -- and
+  through the two write sites that add unconditionally where a reader would
+  expect them to be guarded. It also proves the two ledgers' own tables agree,
+  that the transfer table came back exactly as seeded, and that the four
+  automatic-generation tables are still empty.
+  Two runs of this scenario under the same pinned clock must additionally
+  produce byte-identical captures; that is what the determinism suite asserts.
+  BECAUSE BOTH CASH LATCHES ARE ONE-SHOT, the reset-and-re-seed stage is what
+  makes the second leg comparable to the first at all -- without it operations
+  2 and 4 would post nothing on the second leg and the diff would be empty for
+  the wrong reason.
+  This file's consumers are all in the checkout: the four documents under
+  docs/migration/, the eight modules under tests/scenarios/ and
+  harness/run_python_scenario.sh. Its seed FLAT FILES are not: the records are
+  declared above under seed_records and harness/seed.sh --build-fixtures builds
+  the files inside the image, because fifteen of the seventeen frozen loaders
+  read ORGANIZATION INDEXED or RELATIVE files whose on-disk form belongs to the
+  Berkeley DB version that image carries.
+
+  THE CONSUMER CONTRACT -- WHY SOME VALUES APPEAR UNDER TWO KEYS
+  This file serves consumers with two different reading strategies, so a few
+  values are published under both a grouped and a flat key. THE PAIRS ARE
+  ADJACENT AND MUST ALWAYS HOLD THE SAME VALUE; they are written side by side
+  precisely so that any drift is visible at a glance.
+    clock.to_day        and run_date_text
+    clock.run_date      and run_date_binary
+    system.date_form    and date_form
+    system.irs_instead  and irs_instead
+    seed.data_dir       and seed_dir
+    seed.files          and seed_files
+    operations item one and operation
+  The reason is measured, not assumed. The COBOL runner reads this file with a
+  plain reader that accepts TOP-LEVEL KEYS ONLY, with no leading whitespace
+  before the key, so a value nested under clock, system or seed is INVISIBLE to
+  it; the Python runner parses the whole document but REFUSES a nested block
+  under any key it actually consumes, because a block would read as empty and
+  change the run without saying so. The grouped blocks are the documented shape
+  and carry the values that have no flat consumer at all -- file_system_used,
+  cyclea, period, sl_autogen, pl_autogen, s_flag_p and p_flag_p are assertions
+  about the SEEDED RECORD rather than command-line inputs, which is why the
+  Python entry points expose no option for them.
+  operations IS A FLAT SEQUENCE OF OPERATION NAMES and holds nothing else --
+  no per-item subsystem, no per-item answer map, no per-item expectation --
+  because each runner owns the operation-to-subsystem map itself and because a
+  nested block under this key is refused outright. THIS FILE IS THE ONLY ONE
+  WITH MORE THAN ONE ITEM IN IT. expected_status is a flat sequence of whole
+  process statuses matching it POSITIONALLY, one per operation, and the
+  singular operation key names the FIRST of them as a fallback that neither
+  runner reaches while this list is present. The scenario NAME is published
+  once, as name, and the COBOL runner falls back to this file's own basename,
+  so the two agree by construction: name equals period_end_totals equals the
+  file stem.
+  ANSWER KEYS ARE SEMANTIC and are never a copy of a command-line option
+  spelling, because the option spellings belong to the entry points and are
+  discovered from them rather than guessed here. THIS FILE PROMOTES ONE ANSWER,
+  payment_post_confirm, AND IT COVERS BOTH CASH ROUTES: one invocation drives
+  all four operations, both cash programs ask the same question, and both
+  refuse to proceed without an answer, so one key answers both. Its value must
+  be YES or NO and there is NO DEFAULT, because the frozen programs have none
+  -- each blanks the reply field immediately before accepting it
+  [sales/sl100.cbl:L313], [purchase/pl100.cbl:L305] and each RE-ASKS ON A
+  BLANK [sales/sl100.cbl:L318-L319],
+  [purchase/pl100.cbl:L310-L311]. NO transfers to menu-exit before the first
+  file is opened, so declining would post nothing at all; YES is what makes
+  sites five and nine reachable. The prompt WORDING differs between the two
+  programs, right down to the bracket glyphs
+  [sales/sl100.cbl:L311-L312] versus [purchase/pl100.cbl:L303-L304], and that
+  divergence is preserved rather than harmonised.
+  THE THREE OTHER ANSWER KEYS ARE NOT DECLARED, because none of their routes is
+  on this path: the transfer-file clear belongs to the IRS route, and the two
+  end-of-cycle answers belong to the operation this file deliberately omits.
+  Leaving them unstated is what keeps this scenario's inputs exactly the inputs
+  the frozen cycle takes. The invoice and order routes promote NOTHING: sl055
+  and sl060 have only diagnostic acknowledgements, and pl060's own confirmation
+  prompt is ENTIRELY COMMENTED OUT [purchase/pl060.cbl:L362-L370], so there is
+  no question left on that route to answer.
+  subsystem IS THE EMPTY SCALAR HERE AND NOWHERE ELSE, for the reason given
+  under its own heading above; it is the one key whose value differs in kind
+  from its seven siblings, and it differs because this is the one file that
+  spans two menus.
+
+  LOCATOR PROVENANCE
+  Every line number cited above was read out of the frozen source in this
+  checkout; docs/migration/traceability.md carries the corrected-locator record.
+  Four spans are cited only here: the Purchase order-post dispatch paragraph is
+  [purchase/purchase.cbl:L752] with its commented-out autogen call and gate at
+  [purchase/purchase.cbl:L755-L758] and the four program dispatches at
+  [purchase/purchase.cbl:L759-L762]; the type-six else-branch in pl100 ends at
+  [purchase/pl100.cbl:L402]; the batch loader's autocommit caveat is
+  [common/glbatchLD.cbl:L9-L12]; and the menu's terminal-size check begins at
+  [general/general.cbl:L374]. G-L is a condition name on the installed-ledger
+  level byte at [copybooks/wssystem.cob:L85] and NOT on the fan-out switch at
+  [copybooks/wssystem.cob:L179-L181], which is what makes pure General Ledger mode
+  two seeded fields rather than one and what makes anomaly A-PL100-A legible.
+  THE FROZEN SOURCE IS READ AND NEVER EDITED: any diff under common, copybooks,
+  general, sales, purchase, irs, stock or mysql is a defect in the migration
+  however harmless it looks.
+# THE ONE KEY WHOSE VALUE DIFFERS IN KIND FROM ITS SEVEN SIBLINGS. This
+# scenario spans TWO menus, and the oracle-side runner refuses a file whose
+# subsystem disagrees with the subsystem of the operation it was asked to run
+# [harness/run_cobol_scenario.sh acas_select_operation]. Its map sends sl_invoice_post
+# and sl_cash_post to the Sales menu and pl_order_post and pl_payment_post to
+# the Purchase menu, so no single name is true for all four operations and
+# naming either menu would fail two of the four invocations on a cross-check
+# rather than on anything behavioural. The empty scalar is the only value that
+# is true for a two-menu file, and the guard reads it as "the file does not
+# say", so the subsystem comes from the operation being run. The key is kept
+# rather than dropped so the key set stays identical across all eight files;
+# nothing but that one cross-check reads it.
+subsystem: ""
+
+# THE COMPATIBILITY KEY, AND THE LOWEST-PRECEDENCE ONE. Both runners resolve
+# the ordered `operations:' list below and drive every entry, in that order, in
+# ONE invocation; both fall back to this singular key only when no list is
+# present. So for this file it is read by NEITHER runner, and it names the first
+# operation purely so that a reader who follows the fallback path arrives at a
+# coherent single-operation run rather than at nothing.
+#
+# It is kept, rather than dropped, so the key set stays identical across all
+# eight scenario files -- the other seven declare exactly one operation and are
+# therefore indifferent to which key supplies it.
+#
+# The precedence is identical on both sides -- repeated --operation first, then
+# `operations:', then this key -- at
+# [harness/run_cobol_scenario.sh acas_resolve_operations] and
+# [harness/run_python_scenario.sh acas_py_resolve_scenario], so one file cannot
+# resolve to different lists on the two legs of a comparison.
+operation: sl_invoice_post
+
+clock:
+  to_day: "21/09/2025"
+  run_date: 155127
+
+# Flat mirrors of the clock block, required by the oracle-side runner, which
+# reads top-level keys only. The text is passed through unchanged; its digits
+# are never reordered to match date_form.
+run_date_text: "21/09/2025"
+run_date_binary: 155127
+
+system:
+  file_system_used: 1
+  cyclea: 1
+  period: 1
+  date_form: 1
+  irs_instead: " "
+  sl_autogen: " "
+  pl_autogen: " "
+  s_flag_p: 2
+  p_flag_p: 2
+
+# Flat mirrors of the two system values the COBOL runner reads directly. The
+# fan-out switch must be PRESENT even though its value is a space: that space
+# is what selects the General Ledger alone [copybooks/wssystem.cob:L179-L181]
+# and, on this route, what makes anomaly A-PL100-A coherent at all
+# [purchase/pl100.cbl:L566-L570].  A-PL100-A was formerly numbered A-NEW-5 in
+# pl100_payment_posting.py alone; the register's A-NEW-5 is an unrelated
+# defect, so this one now carries a globally unique name.
+date_form: 1
+irs_instead: " "
+
+seed:
+  data_dir: period_end_totals
+  files:
+    - system.dat
+    - analysis.dat
+    - value.dat
+    - salesled.dat
+    - invoice.dat
+    - openitm3.dat
+    - purchled.dat
+    - pinvoice.dat
+    - openitm5.dat
+
+# Flat mirrors of the seed block, required by the seeder, which resolves a
+# relative directory against the directory holding this file. The order here is
+# membership only: the frozen loader order of [common/masterLD.sh:L93-L116] is
+# what actually runs, with the system block first -- and within that block
+# sys4LD, the step that loads this scenario's focal table.
+seed_dir: period_end_totals
+seed_files:
+  - system.dat
+  - analysis.dat
+  - value.dat
+  - salesled.dat
+  - invoice.dat
+  - openitm3.dat
+  - purchled.dat
+  - pinvoice.dat
+  - openitm5.dat
+
+# THE FOUR OPERATIONS, IN THE ONLY ORDER THAT IS CORRECT, and the only such
+# list in this directory. A flat sequence of operation NAMES and nothing else:
+# each runner owns the operation-to-subsystem map, so the subsystem is not
+# restated per item, and a nested block under this key is refused outright.
+# They run ONE AT A TIME, never together (rule R-3). The order is load-bearing:
+# operation 3 sets flags operation 4 reads [purchase/pl060.cbl:L373-L375],
+# operations 1 and 3 create the ledger rows operations 2 and 4 rewrite, and
+# anomaly A-17's write [sales/sl060.cbl:L1173] is read back by a LATER
+# operation [purchase/pl100.cbl:L564].
+operations:
+  - sl_invoice_post
+  - sl_cash_post
+  - pl_order_post
+  - pl_payment_post
+
+# The process status each operation is expected to end with, POSITIONALLY --
+# one per operation, in the same order. Zero four times is provable rather than
+# hopeful: the only code either extract program can raise is eight, and both
+# wrap that block in if FS-Cobol-Files-Used [sales/sl055.cbl:L326],
+# [sales/sl055.cbl:L344], [purchase/pl055.cbl:L266],
+# [purchase/pl055.cbl:L286], so with file_system_used at one it is unreachable;
+# the only other code the harness can observe is five, from
+# [general/gl070.cbl:L289], which this file never runs. A status that
+# contradicts this is reported as a behavioural difference and the capture is
+# still taken, so the table diff can corroborate it (R-4).
+expected_table_effect: changed
+
+expected_status:
+  - 0
+  - 0
+  - 0
+  - 0
+
+# THE ONE PROMOTED INTERACTIVE ANSWER, COVERING BOTH CASH ROUTES. Required by
+# both runners for sl_cash_post and pl_payment_post and defaulted by neither,
+# because the frozen programs have no default: each blanks the reply field
+# immediately before the accept [sales/sl100.cbl:L313],
+# [purchase/pl100.cbl:L305] and each re-asks for ever on a blank
+# [sales/sl100.cbl:L318-L319], [purchase/pl100.cbl:L310-L311]. It gates EVERY
+# database write those programs make -- NO transfers to menu-exit before the
+# first file is opened -- so YES is what makes period-total sites five
+# [sales/sl100.cbl:L404] and nine [purchase/pl100.cbl:L396] reachable, and
+# without it this scenario would reach only seven of its nine sites. The key is
+# SEMANTIC and is deliberately not a copy of the entry points' option spelling.
+payment_post_confirm: "YES"
+
+# WHAT `affected_tables` IS, AND WHAT IT IS NOT
+#
+# It is the DECLARED EFFECT of this scenario: the tables the runners assert
+# changed or unchanged against `expected_table_effect`, in the order declared.
+#
+# It is NOT the bound of the comparison. The capture and the diff are bounded by
+# ALL 22 IN-SCOPE TABLES -- `harness/dump_tables.py --all-in-scope` at stages 3
+# and 7 and `harness/diff_states.py --all-in-scope` at stage 10, which
+# both a hand-driven run and `tests/conftest.py` pass. A bound drawn from
+# what a scenario EXPECTS to move cannot show a difference in anything it did not
+# expect to move, and an empty diff is the single pass condition (AAP section
+# 0.8.5). In particular both cycles perform the menu's own `overrewrite.'
+# [general/general.cbl:L656-L672], which rewrites SYSTEM-REC under key 1,
+# SYSDEFLT-REC under key 2 and SYSTOT-REC under key 4 -- reproduced by
+# `acas_posting/cli/args.py::overrewrite' -- so those rows are compared on both
+# sides rather than omitted.
+affected_tables:
+  - ANALYSIS-REC
+  - GLBATCH-REC
+  - GLPOSTING-REC
+  - PSIRSPOST-REC
+  - PUINV-LINES-REC
+  - PUINVOICE-REC
+  - PUITM5-REC
+  - PULEDGER-REC
+  - SAINV-LINES-REC
+  - SAINVOICE-REC
+  - SAITM3-REC
+  - SALEDGER-REC
+  - SYSTEM-REC
+  - SYSTOT-REC
+  - VALUEANAL-REC
+
+# =============================================================================
+# THE SEED RECORDS
+# =============================================================================
+# Built into the declared flat files by harness/dump_tables.py --make-fixtures, which generates a
+# COBOL writer per file, compiles it against the FROZEN copybooks and calls the
+# FROZEN handler to write. Field names are spelled exactly as the frozen copybook
+# spells them, read from those definitions by the builder itself.
+#
+# EVERY VALUE IS A QUOTED STRING (rule R-2). COBOL's own MOVE performs the store, so
+# the frozen picture clause decides alignment, truncation toward zero and sign.
+#
+# THIS IS THE ONLY SCENARIO THAT SPANS BOTH TRADING LEDGERS, so it is the only one
+# whose analysis and value files carry BOTH system bytes: "S" for the Sales reads
+# [sales/sl055.cbl:L380] and "P" for the Purchase reads [purchase/pl055.cbl:L316].
+# A code present under one byte and absent under the other sends that ledger's read
+# down the emergency-create path and the run stops measuring what it came to measure.
+#
+# WHAT THIS SEED HAS TO ACHIEVE, and it is the strictest of the eight because the
+# focal table is written by NINE separate sites and every one of them ADDS:
+#   * SYSTOT-REC must start NON-ZERO. Accumulating onto zero would make an
+#     accumulation indistinguishable from a fresh insert, and this scenario exists to
+#     compare accumulations. That is relative record "4" below.
+#   * ONE CUSTOMER with TWO INVOICES, ONE CREDIT NOTE AND ONE PAYMENT, so that both
+#     Sales average blocks [sales/sl060.cbl:L816], [sales/sl060.cbl:L832] and the
+#     Sales payment average [sales/sl100.cbl:L497] are ALL reached.
+#   * ONE SUPPLIER with the same shape, for the Purchase mirror.
+#   * NON-ZERO activity counts and averages on both, so each guard takes its
+#     RECONSTITUTING branch rather than its zeroing one, and NON-ZERO PENCE
+#     everywhere, so the zero-decimal accumulator of A-8 actually discards something.
+#     A ROUND-POUND SEED WOULD HIDE A-8 COMPLETELY.
+#   * open credit notes on BOTH sides, so the fourth and eighth period totals are
+#     non-zero and the suppressed second apportionment pass is exercised.
+#   * payment rows of type 5 on both sides, so the fifth and ninth sites fire; a
+#     type-6 row on the Sales side so the else-branch at
+#     [sales/sl100.cbl:L405-L410] is covered rather than assumed; and a type-2 row
+#     carrying a non-zero batch number AND item, which is what sends sl100 into
+#     compute-sales-pay [sales/sl100.cbl:L341-L345] -- the variant with the SINGLE
+#     guard, anomaly A-10. Its divide is spelled BY rather than INTO and computes the
+#     same accumulator / counter value, so the guard is the divergence and the operand
+#     order is not.
+#   * LATE DEDUCTIONS on the open items, so the apportionment adds something rather
+#     than adding zero.
+# NOTHING BELOW IS ARRANGED TO MAKE THE TOTALS COME OUT TIDY (rule R-4).
+seed_records:
+
+  # system.dat IS FOUR DIFFERENT RECORDS IN ONE RELATIVE FILE, keyed by relative
+  # record number -- [copybooks/selsys.cob] declares it ORGANIZATION RELATIVE with
+  # relative key `rrn', and the four system loaders each go straight to one slot:
+  #   "1"  systemLD [common/systemLD.cbl:L227] -> SYSTEM-REC    (the parameter record)
+  #   "2"  dfltLD   [common/dfltLD.cbl:L221]   -> SYSDEFLT-REC  (wsdflt.cob)
+  #   "3"  finalLD  [common/finalLD.cbl:L221]  -> SYSFINAL-REC  (wsfinal.cob)
+  #   "4"  sys4LD   [common/sys4LD.cbl:L226]   -> SYSTOT-REC    (wssys4.cob)
+  # All four are 1024 bytes and ALL FOUR MUST BE PRESENT: masterLD runs every one of
+  # those loaders unconditionally [common/masterLD.sh:L50-L88] and the last is tested
+  # against zero rather than 63 [common/masterLD.sh:L83-L86], so an unwritten slot
+  # ABORTS the seed. Slot "4" IS THIS SCENARIO'S FOCAL TABLE.
+  system.dat:
+    "1":
+      - System-Record-Version-Prime: "3"
+        System-Record-Version-Secondary: "2"
+        Vat-Rate-1: "20.00"
+        Vat-Rate-2: "5.00"
+        Vat-Rate-3: "0.00"
+        Cyclea: "1"
+        Period: "1"
+        Run-Date: "155127"
+        File-System-Used: "1"
+        Date-Form: "1"
+        IRS-Instead: " "
+        SL-Autogen: " "
+        PL-Autogen: " "
+        S-Flag-P: "2"
+        P-Flag-P: "2"
+        Pass-Value: "0"
+        Level-1: "1"
+        Level-2: "1"
+        Level-3: "1"
+        Level-4: "1"
+        GL-SL-Sales-Ac: "2000"
+        GL-S-Debtors: "1100"
+        GL-BL-Purch-Ac: "5000"
+        GL-P-Creditors: "4100"
+        Vat-Ac: "2200"
+        Next-Batch: "1"
+        Next-Post: "1"
+        Current-Quarter: "1"
+        Page-Lines: "60"
+    # Nothing to pin: the GL defaults record, written INITIALIZEd so the slot EXISTS
+    # for dfltLD to read [copybooks/wsdflt.cob:L14-L19].
+    "2": {}
+    # Nothing to pin: the GL final-accounts record, a pure table of 26 headings
+    # [copybooks/wsfinal.cob:L11]. Written INITIALIZEd so the SLOT EXISTS for finalLD
+    # to read -- and MEASURED consequence, recorded here rather than left to be
+    # rediscovered: INITIALIZE sets an alphanumeric table to spaces, so finalLD's own
+    # test `if Final-Record = spaces' [common/finalLD.cbl:L243] is TRUE and it takes
+    # its "No Data - aborting Terminating nothing to do" path, returning zero and
+    # loading NOTHING. SYSFINAL-REC therefore stays empty, which is precisely the
+    # pre-state this scenario wants: the table is not among affected_tables and no
+    # in-scope program writes it. The slot is still declared, because a slot that does
+    # not exist at all is a read failure rather than a defined empty pre-state.
+    "3": {}
+    # THE FOCAL TABLE, AND IT STARTS FROM A KNOWN NON-ZERO STATE ON PURPOSE. All nine
+    # period-total sites ADD into these fields [copybooks/wssys4.cob:L9-L30]; from a
+    # zero start an accumulation and a fresh insert would leave the same value and the
+    # comparison could not tell them apart. The two spare fields of the PURCHASE group
+    # carry the SALES prefix -- anomaly A-20, [copybooks/wssys4.cob:L29-L30] -- and are
+    # named here exactly as the frozen copybook misnames them.
+    "4":
+      sl-os-bal-last-month: "11111.11"
+      sl-os-bal-this-month: "12222.22"
+      sl-invoices-this-month: "3333.33"
+      sl-credit-notes-this-month: "444.44"
+      sl-variance: "55.55"
+      sl-credit-deductions: "66.66"
+      sl-cn-unappl-this-month: "77.77"
+      sl-payments: "8888.88"
+      sl4-spare1: "0.00"
+      sl4-spare2: "0.00"
+      pl-os-bal-last-month: "9999.99"
+      pl-os-bal-this-month: "10101.01"
+      pl-invoices-this-month: "2121.21"
+      pl-credit-notes-this-month: "232.32"
+      pl-variance: "34.34"
+      pl-credit-deductions: "45.45"
+      pl-cn-unappl-this-month: "56.56"
+      pl-payments: "6767.67"
+      sl4-spare3: "0.00"
+      sl4-spare4: "0.00"
+
+  # SIX analysis codes: two Sales codes plus their roll-up, and two Purchase codes
+  # plus theirs. The roll-up rows are the ones each ledger re-reads for after
+  # blanking the second character [sales/sl055.cbl:L402-L409],
+  # [purchase/pl055.cbl:L340-L347], and omitting them would silently halve the number
+  # of accumulations the run performs.
+  analysis.dat:
+    - Pa-System: "S"
+      Pa-First: "A"
+      Pa-Second: "B"
+      Pa-Gl: "2000"
+      Pa-Desc: "Goods for resale"
+      Pa-Print: "ABG"
+    - Pa-System: "S"
+      Pa-First: "A"
+      Pa-Second: "C"
+      Pa-Gl: "2010"
+      Pa-Desc: "Services"
+      Pa-Print: "ACS"
+    - Pa-System: "S"
+      Pa-First: "A"
+      Pa-Second: " "
+      Pa-Gl: "2000"
+      Pa-Desc: "All trading - roll up"
+      Pa-Print: "A  "
+    - Pa-System: "P"
+      Pa-First: "P"
+      Pa-Second: "A"
+      Pa-Gl: "5000"
+      Pa-Desc: "Purchases for resale"
+      Pa-Print: "PAP"
+    - Pa-System: "P"
+      Pa-First: "P"
+      Pa-Second: "B"
+      Pa-Gl: "5100"
+      Pa-Desc: "Subcontract labour"
+      Pa-Print: "PBS"
+    - Pa-System: "P"
+      Pa-First: "P"
+      Pa-Second: " "
+      Pa-Gl: "5000"
+      Pa-Desc: "All purchases - roll up"
+      Pa-Print: "P  "
+
+  # One value-analysis record per analysis code, both ledgers, all with non-zero
+  # opening counts and values so an accumulation is distinguishable from an insert.
+  value.dat:
+    - va-system: "S"
+      va-first: "A"
+      va-second: "B"
+      va-gl: "2000"
+      va-desc: "Goods for resale"
+      va-print: "ABG"
+      va-t-this: "3"
+      va-t-last: "11"
+      va-t-year: "27"
+      va-v-this: "1234.56"
+      va-v-last: "4321.09"
+      va-v-year: "9876.54"
+    - va-system: "S"
+      va-first: "A"
+      va-second: "C"
+      va-gl: "2010"
+      va-desc: "Services"
+      va-print: "ACS"
+      va-t-this: "2"
+      va-t-last: "5"
+      va-t-year: "13"
+      va-v-this: "543.21"
+      va-v-last: "1111.11"
+      va-v-year: "2222.22"
+    - va-system: "S"
+      va-first: "A"
+      va-second: " "
+      va-gl: "2000"
+      va-desc: "All trading - roll up"
+      va-print: "A  "
+      va-t-this: "5"
+      va-t-last: "16"
+      va-t-year: "40"
+      va-v-this: "1777.77"
+      va-v-last: "5432.20"
+      va-v-year: "12098.76"
+    - va-system: "P"
+      va-first: "P"
+      va-second: "A"
+      va-gl: "5000"
+      va-desc: "Purchases for resale"
+      va-print: "PAP"
+      va-t-this: "4"
+      va-t-last: "9"
+      va-t-year: "31"
+      va-v-this: "2468.13"
+      va-v-last: "3579.24"
+      va-v-year: "8642.97"
+    - va-system: "P"
+      va-first: "P"
+      va-second: "B"
+      va-gl: "5100"
+      va-desc: "Subcontract labour"
+      va-print: "PBS"
+      va-t-this: "2"
+      va-t-last: "6"
+      va-t-year: "17"
+      va-v-this: "864.21"
+      va-v-last: "975.31"
+      va-v-year: "3141.59"
+    - va-system: "P"
+      va-first: "P"
+      va-second: " "
+      va-gl: "5000"
+      va-desc: "All purchases - roll up"
+      va-print: "P  "
+      va-t-this: "6"
+      va-t-last: "15"
+      va-t-year: "48"
+      va-v-this: "3332.34"
+      va-v-last: "4554.55"
+      va-v-year: "11784.56"
+
+  # ONE customer, live, with BOTH averages already non-zero -- the invoice average
+  # [copybooks/wssl.cob:L49] and the payment average [copybooks/wssl.cob:L51] -- so
+  # that both the invoice guard [sales/sl060.cbl:L819-L820] and the cash guard
+  # [sales/sl100.cbl:L499-L503] reconstitute a total instead of starting from zero.
+  # Both are binary-long, hence INTEGER, which is the second of A-8's two truncations;
+  # the first is the zero-decimal accumulator itself.
+  salesled.dat:
+    - WS-Sales-Key: "A001001"
+      Sales-Name: "Acme Trading Limited"
+      Sales-Addr1: "17 Long Lane"
+      Sales-Addr2: "Somewhere"
+      Sales-Phone: "01234 567890"
+      Sales-Ext: "0"
+      Sales-Email: "accounts@example.invalid"
+      Sales-Fax: " "
+      Sales-Status: "1"
+      Sales-Late: "0"
+      Sales-Dunning: "0"
+      Email-Invoice: "0"
+      Email-Statement: "0"
+      Email-Letters: "0"
+      Delivery-Tag: "0"
+      Notes-Tag: "0"
+      Sales-Credit: "30"
+      Sales-Discount: "2.50"
+      Sales-Late-Min: "0"
+      Sales-Late-Max: "0"
+      Sales-Limit: "50000"
+      Sales-Activety: "7"
+      Sales-Last-Inv: "155000"
+      Sales-Last-Pay: "155010"
+      Sales-Average: "813"
+      Sales-Pay-Activety: "4"
+      Sales-Pay-Average: "27"
+      Sales-Pay-Worst: "41"
+      Sales-Create-Date: "150000"
+      Sales-Current: "3456.78"
+      Sales-Last: "2345.67"
+      Turnover-Q1: "1111.11"
+      Turnover-Q2: "2222.22"
+      Turnover-Q3: "3333.33"
+      Turnover-Q4: "4444.44"
+      Sales-Stats-Date: "2509"
+      Sales-Unapplied: "123.45"
+      Sales-Partial-Ship-Flag: " "
+
+  # THREE SALES DOCUMENTS -- TWO INVOICES AND ONE CREDIT NOTE, which is the shape the
+  # contract requires so that both Sales average blocks are reached. Item number zero
+  # is the HEADER row [sales/sl055.cbl:L370-L371]; items one upward are LINE rows. The
+  # two views are REDEFINES of the same 137 bytes [copybooks/slwsinv2.cob:L38],
+  # [copybooks/slwsinv2.cob:L92], so a row sets one or the other and never both. All
+  # four header filters must pass [sales/sl055.cbl:L426-L438]: ih-status "I" so
+  # neither pending nor applied, ih-status-L "L", ih-update a space.
+  invoice.dat:
+    - WS-Invoice-Nos: "1"
+      WS-Item-Nos: "0"
+      ih-nos: "A00100"
+      ih-check: "1"
+      ih-date: "155127"
+      ih-order: "PO-77120"
+      ih-type: "2"
+      ih-ref: "INV-0001"
+      ih-description: "Goods and services September"
+      ih-p-c: "0.00"
+      ih-net: "1234.56"
+      ih-extra: "0.00"
+      ih-carriage: "12.34"
+      ih-vat: "249.38"
+      ih-discount: "0.00"
+      ih-e-vat: "0.00"
+      ih-c-vat: "2.46"
+      ih-status: "I"
+      ih-status-P: " "
+      ih-status-L: "L"
+      ih-status-C: " "
+      ih-status-A: " "
+      ih-status-I: " "
+      ih-lines: "1"
+      ih-deduct-days: "14"
+      ih-deduct-amt: "24.69"
+      ih-deduct-vat: "4.93"
+      ih-days: "30"
+      ih-cr: "0"
+      ih-day-book-flag: " "
+      ih-update: " "
+    - WS-Invoice-Nos: "1"
+      WS-Item-Nos: "1"
+      il-product: "WIDGET-STD"
+      il-pa: "AB"
+      il-qty: "9"
+      il-type: "2"
+      il-description: "Standard widget"
+      il-net: "1234.56"
+      il-unit: "137.17"
+      il-discount: "0.00"
+      il-vat: "246.91"
+      il-vat-code: "1"
+      il-update: " "
+      il-Back-Ordered: " "
+    - WS-Invoice-Nos: "2"
+      WS-Item-Nos: "0"
+      ih-nos: "A00100"
+      ih-check: "1"
+      ih-date: "155127"
+      ih-order: "PO-77121"
+      ih-type: "2"
+      ih-ref: "INV-0002"
+      ih-description: "Second invoice same month"
+      ih-p-c: "0.00"
+      ih-net: "876.53"
+      ih-extra: "0.00"
+      ih-carriage: "0.00"
+      ih-vat: "175.31"
+      ih-discount: "0.00"
+      ih-e-vat: "0.00"
+      ih-c-vat: "0.00"
+      ih-status: "I"
+      ih-status-P: " "
+      ih-status-L: "L"
+      ih-status-C: " "
+      ih-status-A: " "
+      ih-status-I: " "
+      ih-lines: "1"
+      ih-deduct-days: "0"
+      ih-deduct-amt: "0.00"
+      ih-deduct-vat: "0.00"
+      ih-days: "30"
+      ih-cr: "0"
+      ih-day-book-flag: " "
+      ih-update: " "
+    - WS-Invoice-Nos: "2"
+      WS-Item-Nos: "1"
+      il-product: "FITTING-HR"
+      il-pa: "AC"
+      il-qty: "7"
+      il-type: "2"
+      il-description: "Fitting labour"
+      il-net: "876.53"
+      il-unit: "125.22"
+      il-discount: "0.00"
+      il-vat: "175.31"
+      il-vat-code: "1"
+      il-update: " "
+      il-Back-Ordered: " "
+    - WS-Invoice-Nos: "3"
+      WS-Item-Nos: "0"
+      ih-nos: "A00100"
+      ih-check: "1"
+      ih-date: "155127"
+      ih-order: "PO-77122"
+      ih-type: "3"
+      ih-ref: "CRN-0003"
+      ih-description: "Returned widgets"
+      ih-p-c: "0.00"
+      ih-net: "123.45"
+      ih-extra: "0.00"
+      ih-carriage: "0.00"
+      ih-vat: "24.69"
+      ih-discount: "0.00"
+      ih-e-vat: "0.00"
+      ih-c-vat: "0.00"
+      ih-status: "I"
+      ih-status-P: " "
+      ih-status-L: "L"
+      ih-status-C: " "
+      ih-status-A: " "
+      ih-status-I: " "
+      ih-lines: "1"
+      ih-deduct-days: "0"
+      ih-deduct-amt: "0.00"
+      ih-deduct-vat: "0.00"
+      ih-days: "30"
+      ih-cr: "0"
+      ih-day-book-flag: " "
+      ih-update: " "
+    - WS-Invoice-Nos: "3"
+      WS-Item-Nos: "1"
+      il-product: "WIDGET-STD"
+      il-pa: "AB"
+      il-qty: "1"
+      il-type: "3"
+      il-description: "Widget returned faulty"
+      il-net: "123.45"
+      il-unit: "123.45"
+      il-discount: "0.00"
+      il-vat: "24.69"
+      il-vat-code: "1"
+      il-update: " "
+      il-Back-Ordered: " "
+
+  # FOUR SALES OPEN ITEMS, one per route sl100 can take. Their invoice keys start at
+  # 10 because sl060 phase 1 first writes OTM3 rows for invoice headers 1, 2 and 3;
+  # pre-seeding those same keys produces FS-Reply 22 and an acknowledgement loop
+  # instead of the intended four-operation journey. The renumbering preserves key
+  # order and every accounting field. The type is what selects the route: sl100
+  # discards anything that is not 2, 5 or 6 outright
+  # [sales/sl100.cbl:L338-L339].
+  #   type 2, batch and item BOTH non-zero -> compute-sales-pay
+  #     [sales/sl100.cbl:L341-L345], which is the average variant with the SINGLE
+  #     guard [sales/sl100.cbl:L506] where the other two guard on a pair -- A-10. Its
+  #     divide [sales/sl100.cbl:L511] is spelled BY rather than INTO and computes the
+  #     same accumulator / counter value, so the operand order is not a divergence.
+  #   type 5, OPEN, batch and item non-zero -> THE NINTH... no, the FIFTH period
+  #     total: add oi-paid to t-paid sl-payments [sales/sl100.cbl:L404].
+  #   type 6 -> the else-branch [sales/sl100.cbl:L405-L410], which adds to the
+  #     journal totals and to NO period total. Present so the branch is covered
+  #     rather than assumed.
+  #   type 3, OPEN -> the credit note ba000-Cr-Swop needs
+  #     [sales/sl060.cbl:L671-L672], carrying a LATE DEDUCTION so the apportionment
+  #     adds something rather than zero.
+  openitm3.dat:
+    - OI-Nos: "A00100"
+      OI-Check: "1"
+      OI-Invoice: "10"
+      OI-B-Nos: "9"
+      OI-B-Item: "1"
+      OI-Date: "155127"
+      OI-Type: "2"
+      OI-Description: "Invoice awaiting cash calc"
+      OI-Hold-flag: " "
+      OI-Unapl: " "
+      OI-P-C: "0.00"
+      OI-Net: "1234.56"
+      OI-Extra: "0.00"
+      OI-Carriage: "12.34"
+      OI-Vat: "249.38"
+      OI-Discount: "0.00"
+      OI-E-Vat: "0.00"
+      OI-C-Vat: "2.46"
+      OI-Paid: "0.00"
+      OI-Status: "0"
+      OI-Deduct-Days: "14"
+      OI-Deduct-Amt: "24.69"
+      OI-Deduct-Vat: "4.93"
+      OI-Days: "23"
+      OI-Cr: "0"
+      OI-Applied: " "
+      OI-Date-Cleared: "0"
+    - OI-Nos: "A00100"
+      OI-Check: "1"
+      OI-Invoice: "11"
+      OI-B-Nos: "9"
+      OI-B-Item: "2"
+      OI-Date: "155127"
+      OI-Type: "5"
+      OI-Description: "Payment on account"
+      OI-Hold-flag: " "
+      OI-Unapl: " "
+      OI-P-C: "0.00"
+      OI-Net: "789.01"
+      OI-Extra: "0.00"
+      OI-Carriage: "0.00"
+      OI-Vat: "0.00"
+      OI-Discount: "0.00"
+      OI-E-Vat: "0.00"
+      OI-C-Vat: "0.00"
+      OI-Paid: "802.35"
+      OI-Status: "0"
+      OI-Deduct-Days: "7"
+      OI-Deduct-Amt: "13.34"
+      OI-Deduct-Vat: "2.66"
+      OI-Days: "19"
+      OI-Cr: "0"
+      OI-Applied: " "
+      OI-Date-Cleared: "0"
+    - OI-Nos: "A00100"
+      OI-Check: "1"
+      OI-Invoice: "13"
+      OI-B-Nos: "9"
+      OI-B-Item: "3"
+      OI-Date: "155127"
+      OI-Type: "6"
+      OI-Description: "Unapplied cash journal"
+      OI-Hold-flag: " "
+      OI-Unapl: "U"
+      OI-P-C: "0.00"
+      OI-Net: "55.51"
+      OI-Extra: "0.00"
+      OI-Carriage: "0.00"
+      OI-Vat: "0.00"
+      OI-Discount: "0.00"
+      OI-E-Vat: "0.00"
+      OI-C-Vat: "0.00"
+      OI-Paid: "55.51"
+      OI-Status: "0"
+      OI-Deduct-Days: "0"
+      OI-Deduct-Amt: "0.00"
+      OI-Deduct-Vat: "0.00"
+      OI-Days: "11"
+      OI-Cr: "0"
+      OI-Applied: " "
+      OI-Date-Cleared: "0"
+    - OI-Nos: "A00100"
+      OI-Check: "1"
+      OI-Invoice: "12"
+      OI-B-Nos: "9"
+      OI-B-Item: "4"
+      OI-Date: "155127"
+      OI-Type: "3"
+      OI-Description: "Returned widgets"
+      OI-Hold-flag: " "
+      OI-Unapl: " "
+      OI-P-C: "0.00"
+      OI-Net: "123.45"
+      OI-Extra: "0.00"
+      OI-Carriage: "0.00"
+      OI-Vat: "24.69"
+      OI-Discount: "0.00"
+      OI-E-Vat: "0.00"
+      OI-C-Vat: "0.00"
+      OI-Paid: "0.00"
+      OI-Status: "0"
+      OI-Deduct-Days: "14"
+      OI-Deduct-Amt: "6.17"
+      OI-Deduct-Vat: "1.23"
+      OI-Days: "30"
+      OI-Cr: "0"
+      OI-Applied: " "
+      OI-Date-Cleared: "0"
+
+  # ONE supplier, the Purchase mirror, with both averages non-zero for the same
+  # reason -- so that A-9's missing increment on the credit-note path is OBSERVABLE
+  # rather than merely present.
+  purchled.dat:
+    - WS-Purch-Key: "S001001"
+      Purch-Name: "Northern Supplies Ltd"
+      Purch-Addr1: "4 Mill Street"
+      Purch-Addr2: "Elsewhere"
+      Purch-Phone: "01987 654321"
+      Purch-Ext: "0"
+      Purch-Email: "payables@example.invalid"
+      Purch-Fax: " "
+      Purch-Status: "1"
+      Purch-Notes-Tag: "0"
+      Purch-Credit: "30"
+      Purch-Discount: "1.75"
+      Purch-Limit: "40000"
+      Purch-Activety: "6"
+      Purch-Last-inv: "155020"
+      Purch-Last-pay: "155030"
+      Purch-Average: "642"
+      Purch-Pay-Activety: "3"
+      Purch-Pay-Average: "34"
+      Purch-Pay-Worst: "52"
+      Purch-Create-Date: "150000"
+      Purch-Current: "2468.13"
+      Purch-Last: "1357.91"
+      Turnover-q1: "1010.10"
+      Turnover-q2: "2020.20"
+      Turnover-q3: "3030.30"
+      Turnover-q4: "4040.40"
+      Purch-Stats-Date: "2509"
+      Purch-Unapplied: "234.56"
+      Purch-Accountno: "12345678"
+      # purchMT receives this native BINARY-LONG through `PIC 9(08) COMP`; a
+      # non-zero six-digit value is byte-reinterpreted above the frozen
+      # `mediumint unsigned` range. Zero is representable and this posting route
+      # never reads the sort code.
+      Purch-SortCode: "0"
+
+  # THREE PURCHASE DOCUMENTS -- two invoices and one credit note, mirroring the Sales
+  # side. NO PROFORMA, deliberately: pl055 has neither a proforma filter nor a pending
+  # filter [purchase/pl055.cbl:L363-L364], so a type-4 row here would be PROCESSED
+  # rather than skipped and would change what this scenario measures. The asymmetry
+  # with the Sales side is preserved rather than harmonised (rule R-4). The layout is
+  # [copybooks/plwspinv2.cob], the view pl055 itself copies.
+  pinvoice.dat:
+    - ih-invoice: "1"
+      ih-test: "0"
+      ih-nos: "S00100"
+      ih-check: "1"
+      ih-date: "155127"
+      ih-order: "SO-31009"
+      ih-type: "2"
+      ih-ref: "PIN-0001"
+      ih-p-c: "0.00"
+      ih-net: "2468.13"
+      ih-extra: "0.00"
+      ih-carriage: "24.68"
+      ih-vat: "498.56"
+      ih-discount: "0.00"
+      ih-e-vat: "0.00"
+      ih-c-vat: "4.94"
+      ih-status: "I"
+      ih-lines: "1"
+      ih-deduct-days: "14"
+      ih-deduct-amt: "49.36"
+      ih-deduct-vat: "9.87"
+      ih-days: "30"
+      ih-cr: "0"
+      ih-day-book-flag: " "
+      ih-update: " "
+    - il-invoice: "1"
+      il-line: "1"
+      il-product: "STOCK-BULK"
+      il-pa: "PA"
+      il-qty: "11"
+      il-type: "2"
+      il-description: "Bulk stock purchase"
+      il-net: "2468.13"
+      il-unit: "224.37"
+      il-discount: "0.00"
+      il-vat: "493.62"
+      il-vat-code: "1"
+      il-update: " "
+    - ih-invoice: "2"
+      ih-test: "0"
+      ih-nos: "S00100"
+      ih-check: "1"
+      ih-date: "155127"
+      ih-order: "SO-31010"
+      ih-type: "2"
+      ih-ref: "PIN-0002"
+      ih-p-c: "0.00"
+      ih-net: "864.21"
+      ih-extra: "0.00"
+      ih-carriage: "0.00"
+      ih-vat: "172.84"
+      ih-discount: "0.00"
+      ih-e-vat: "0.00"
+      ih-c-vat: "0.00"
+      ih-status: "I"
+      ih-lines: "1"
+      ih-deduct-days: "0"
+      ih-deduct-amt: "0.00"
+      ih-deduct-vat: "0.00"
+      ih-days: "30"
+      ih-cr: "0"
+      ih-day-book-flag: " "
+      ih-update: " "
+    - il-invoice: "2"
+      il-line: "1"
+      il-product: "LABOUR-SUB"
+      il-pa: "PB"
+      il-qty: "9"
+      il-type: "2"
+      il-description: "Subcontract fitting"
+      il-net: "864.21"
+      il-unit: "96.02"
+      il-discount: "0.00"
+      il-vat: "172.84"
+      il-vat-code: "1"
+      il-update: " "
+    - ih-invoice: "3"
+      ih-test: "0"
+      ih-nos: "S00100"
+      ih-check: "1"
+      ih-date: "155127"
+      ih-order: "SO-31011"
+      ih-type: "3"
+      ih-ref: "PCR-0003"
+      ih-p-c: "0.00"
+      ih-net: "246.81"
+      ih-extra: "0.00"
+      ih-carriage: "0.00"
+      ih-vat: "49.36"
+      ih-discount: "0.00"
+      ih-e-vat: "0.00"
+      ih-c-vat: "0.00"
+      ih-status: "I"
+      ih-lines: "1"
+      ih-deduct-days: "0"
+      ih-deduct-amt: "0.00"
+      ih-deduct-vat: "0.00"
+      ih-days: "30"
+      ih-cr: "0"
+      ih-day-book-flag: " "
+      ih-update: " "
+    - il-invoice: "3"
+      il-line: "1"
+      il-product: "STOCK-BULK"
+      il-pa: "PA"
+      il-qty: "1"
+      il-type: "3"
+      il-description: "Short delivery credit"
+      il-net: "246.81"
+      il-unit: "246.81"
+      il-discount: "0.00"
+      il-vat: "49.36"
+      il-vat-code: "1"
+      il-update: " "
+
+  # THREE PURCHASE OPEN ITEMS: an invoice awaiting the cash calculation, a PAYMENT of
+  # type 5 so the ninth period total fires [purchase/pl100.cbl:L396], and an OPEN
+  # CREDIT NOTE so the eighth fires [purchase/pl060.cbl:L628] and the suppressed
+  # second apportionment pass is exercised. Their keys start at 10 so pl060 can first
+  # create the OTM5 rows for invoice headers 1 through 3 without a duplicate-key
+  # acknowledgement loop; relative order and accounting content are unchanged. Both
+  # the invoice and the credit note carry LATE DEDUCTIONS. Note the Purchase open-item
+  # record carries an order and a reference where the Sales one carries a description
+  # [copybooks/plwsoi.cob].
+  openitm5.dat:
+    - OI-Nos: "S00100"
+      OI-Check: "1"
+      OI-Invoice: "10"
+      OI-B-Nos: "8"
+      OI-B-Item: "1"
+      OI-Date: "155127"
+      OI-Type: "2"
+      OI-order: "SO-31009"
+      OI-ref: "PIN-0001"
+      OI-hold-flag: " "
+      OI-unapl: " "
+      OI-P-C: "0.00"
+      OI-Net: "2468.13"
+      OI-Extra: "0.00"
+      OI-Carriage: "24.68"
+      OI-Vat: "498.56"
+      OI-Discount: "0.00"
+      OI-E-Vat: "0.00"
+      OI-C-Vat: "4.94"
+      OI-Paid: "0.00"
+      OI-Status: "0"
+      OI-Deduct-Days: "14"
+      OI-Deduct-Amt: "49.36"
+      OI-Deduct-Vat: "9.87"
+      OI-Days: "21"
+      OI-CR: "0"
+      OI-Applied: " "
+      OI-Date-Cleared: "0"
+    - OI-Nos: "S00100"
+      OI-Check: "1"
+      OI-Invoice: "11"
+      OI-B-Nos: "8"
+      OI-B-Item: "2"
+      OI-Date: "155127"
+      OI-Type: "5"
+      OI-order: "SO-31010"
+      OI-ref: "PAY-0002"
+      OI-hold-flag: " "
+      OI-unapl: " "
+      OI-P-C: "0.00"
+      OI-Net: "1037.05"
+      OI-Extra: "0.00"
+      OI-Carriage: "0.00"
+      OI-Vat: "0.00"
+      OI-Discount: "0.00"
+      OI-E-Vat: "0.00"
+      OI-C-Vat: "0.00"
+      OI-Paid: "1054.98"
+      OI-Status: "0"
+      OI-Deduct-Days: "7"
+      OI-Deduct-Amt: "17.93"
+      OI-Deduct-Vat: "3.58"
+      OI-Days: "17"
+      OI-CR: "0"
+      OI-Applied: " "
+      OI-Date-Cleared: "0"
+    - OI-Nos: "S00100"
+      OI-Check: "1"
+      OI-Invoice: "12"
+      OI-B-Nos: "8"
+      OI-B-Item: "3"
+      OI-Date: "155127"
+      OI-Type: "3"
+      OI-order: "SO-31011"
+      OI-ref: "PCR-0003"
+      OI-hold-flag: " "
+      OI-unapl: " "
+      OI-P-C: "0.00"
+      OI-Net: "246.81"
+      OI-Extra: "0.00"
+      OI-Carriage: "0.00"
+      OI-Vat: "49.36"
+      OI-Discount: "0.00"
+      OI-E-Vat: "0.00"
+      OI-C-Vat: "0.00"
+      OI-Paid: "0.00"
+      OI-Status: "0"
+      OI-Deduct-Days: "14"
+      OI-Deduct-Amt: "12.34"
+      OI-Deduct-Vat: "2.46"
+      OI-Days: "30"
+      OI-CR: "0"
+      OI-Applied: " "
+      OI-Date-Cleared: "0"

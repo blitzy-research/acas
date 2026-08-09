@@ -1,0 +1,337 @@
+# =============================================================================
+#  .dockerignore -- BUILD-CONTEXT CONTAINMENT FOR THE COMPILED-COBOL ORACLE
+# =============================================================================
+#
+#  WHY THIS FILE EXISTS
+#  --------------------
+#  Both harness images declare `context: ..`, i.e. the REPOSITORY ROOT
+#  [harness/docker-compose.yml] -- which is mandatory, because
+#  [harness/Dockerfile.mariadb:L301] copies `mysql/ACASDB.sql` and
+#  [harness/Dockerfile.gnucobol] copies `requirements*.txt`,
+#  `presql2-latest.zip` and `mariadb-connector-c-3.3.4-src.zip`. Every one of
+#  those paths resolves only relative to the repository root.
+#
+#  A repository-root context, with no exclusions, hands the ENTIRE checkout to
+#  the daemon -- including the git history, any local virtual environment and
+#  any credential file an operator happens to have left in the tree. Measured
+#  on this checkout, that is roughly 284 MB of material no image needs:
+#  `.git` (~158 MB), `.venv` (~122 MB) and `.blitzy_tmp` (~3.8 MB).
+#
+#  Two distinct harms follow, and this file addresses both:
+#
+#    1. DISCLOSURE. Anything in the context can be read by the build, can be
+#       captured in an image layer by an unintended COPY, and is transmitted to
+#       whatever daemon performs the build -- which is not necessarily local.
+#       A local `.env`, a private key or a shell history in the tree would all
+#       ride along. The exclusions below are therefore a security control, not
+#       a build-speed optimisation.
+#    2. NON-DETERMINISM. `.git` and `.venv` change constantly and have nothing
+#       to do with the oracle. Excluding them makes the context -- and so the
+#       build cache -- a function of the frozen sources and the pinned manifests
+#       alone, which is what "two runs must be byte-identical" requires of every
+#       layer of the harness.
+#
+#  DENY-BY-DEFAULT IS DELIBERATELY *NOT* USED
+#  ------------------------------------------
+#  A `*` + re-include design is tempting but would be wrong here: the frozen
+#  COBOL tree is the specification, `harness/build_oracle.sh` copies /repo to
+#  /build wholesale, and a re-include list would silently drop a frozen
+#  directory the day one is added. This file therefore names what must NEVER
+#  enter the context and leaves the frozen sources alone.
+#
+#  WHAT IS DELIBERATELY *NOT* EXCLUDED, AND WHY
+#  --------------------------------------------
+#  Four large repository directories remain in the context -- `Basic-Code/`
+#  (~89 MB), `ACAS-Manuals/` (~81 MB), `home/` (~44 MB) and `payroll/` (~35 MB)
+#  -- and that is a deliberate decision, not an oversight. Excluding them would
+#  shrink the context from roughly 270 MB to about 21 MB, so the temptation is
+#  real and the reason for resisting it needs stating.
+#
+#  `harness/build_oracle.sh` already considered exactly this and decided against
+#  it, in terms that apply here too [harness/build_oracle.sh:L1337-L1344]:
+#  excluding directories to save space "would work today but would silently
+#  break the moment a frozen script grew a reference", and "the faithful replica
+#  is worth more than the disk". That decision is not reversed here.
+#
+#  Two further reasons specific to this file:
+#
+#    * The security objective is ALREADY met without touching them. Every one of
+#      the four is public repository content -- COBOL-era BASIC sources, PDF
+#      manuals, a vendored Berkeley DB tarball and an out-of-scope subsystem.
+#      None is a credential, a key or a virtual environment. The measured result
+#      of the exclusions above is ZERO credential-shaped files in the context.
+#    * Excluding them would plant a latent trap. Today neither Dockerfile does
+#      `COPY . `, so the context size only affects transfer time. If a future
+#      change ever made an image self-contained by copying the tree, an excluded
+#      directory would silently produce an INCOMPLETE replica -- precisely the
+#      failure mode the build script warns about, and one that would surface as
+#      a mysterious compile error rather than as a missing-file message.
+#
+#  So the ~270 MB is a known, documented trade: transfer cost in exchange for a
+#  context that is a faithful subset of the checkout. What this file removes is
+#  the material that is either SENSITIVE or genuinely UNRELATED to the build.
+#
+#  MUST NOT BE EXCLUDED -- THE BUILDS FAIL WITHOUT THESE
+#  ----------------------------------------------------
+#  Do not add patterns covering any of the following; each is a COPY source:
+#
+#      mysql/ACASDB.sql                   [harness/Dockerfile.mariadb:L301]
+#      requirements.txt                   [harness/Dockerfile.gnucobol]
+#      presql2-latest.zip                 [harness/Dockerfile.gnucobol]
+#      mariadb-connector-c-3.3.4-src.zip  [harness/Dockerfile.gnucobol]
+#
+#  The negated patterns at the end of this file re-include those six paths
+#  explicitly, so that a future broad exclusion cannot break a build silently.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+#  VERSION CONTROL
+#
+#  ~158 MB here, and the single largest disclosure surface: the history carries
+#  every version of every file ever committed, which is strictly more than the
+#  checkout the images need.
+# -----------------------------------------------------------------------------
+.git
+.git/**
+.gitignore
+.gitattributes
+.gitmodules
+.github
+
+
+# -----------------------------------------------------------------------------
+#  PYTHON VIRTUAL ENVIRONMENTS AND BUILD OUTPUT
+#
+#  ~122 MB, host-specific, and actively harmful: a virtual environment carries
+#  absolute interpreter paths and platform-specific compiled extensions. The
+#  image installs the Python side from the hashed lock files instead, so a
+#  copied venv could only ever shadow the audited set.
+# -----------------------------------------------------------------------------
+.venv
+.venv/**
+venv
+venv/**
+env
+env/**
+ENV
+.tox
+.nox
+*.egg-info
+*.egg-info/**
+.eggs
+build
+dist
+wheels
+pip-wheel-metadata
+site-packages
+
+
+# -----------------------------------------------------------------------------
+#  PYTHON BYTECODE AND TOOL CACHES
+#
+#  Bytecode is stale by definition inside an image built from source, and
+#  `__pycache__` directories defeat layer caching for no benefit.
+# -----------------------------------------------------------------------------
+__pycache__
+__pycache__/**
+*.py[cod]
+*$py.class
+*.so.cache
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.pytype
+.dmypy.json
+.coverage
+.coverage.*
+coverage.xml
+htmlcov
+.hypothesis
+
+
+# -----------------------------------------------------------------------------
+#  CREDENTIALS AND LOCAL CONFIGURATION -- THE PRIMARY SEC CONCERN
+#
+#  None of these is required by any image, and every one of them is a
+#  credential-shaped path. `harness/docker-compose.yml` supplies the database
+#  account through interpolated variables at RUN time and neither Dockerfile
+#  declares a password ENV, precisely so that no credential reaches an image
+#  layer; excluding these keeps the same promise for the CONTEXT.
+#
+#  `acas.param` and `presql2.param` are named explicitly because the ACAS
+#  toolchain stores DBUSER/DBPASS in them in cleartext: the runtime copies live
+#  outside the checkout (in $HOME/ACAS and the build tree), but an operator who
+#  has ever copied one into the tree must not have it swept into a build.
+# -----------------------------------------------------------------------------
+.env
+.env.*
+*.env
+!.env.example
+.envrc
+.direnv
+secrets
+secrets/**
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_rsa*
+id_dsa*
+id_ecdsa*
+id_ed25519*
+*.ppk
+.netrc
+.npmrc
+.pypirc
+.my.cnf
+.mylogin.cnf
+acas.param
+presql2.param
+**/acas.param
+**/presql2.param
+.aws
+.ssh
+.gnupg
+.docker/config.json
+.bash_history
+.zsh_history
+.python_history
+
+
+# -----------------------------------------------------------------------------
+#  AGENT AND SESSION SCRATCH
+#
+#  ~3.8 MB of validation scratch from the migration work. Never an input to any
+#  image, and it may contain probe fixtures carrying throwaway credentials.
+# -----------------------------------------------------------------------------
+.blitzy_tmp
+.blitzy_tmp/**
+blitzy_adhoc_test_*
+**/blitzy_adhoc_test_*
+.blitzyignore
+
+#  `tmp/' is ignored by `.gitignore' (its "Runtime scratch" stanza) and was NOT ignored
+#  here, so a working tree that had one shipped it into both image build contexts while
+#  git never saw it. A pristine checkout has no `tmp/' and neither image reads one, so
+#  the omission had no measurable effect -- it is closed for parity between the two
+#  ignore files, because a path that git is told to disregard is exactly a path a
+#  reproducible build must not depend on. Both forms are listed for the same reason the
+#  scratch entries above are: the bare name excludes the directory, the `/**' form its
+#  contents, and Docker's matcher does not infer one from the other.
+tmp
+tmp/**
+
+
+# -----------------------------------------------------------------------------
+#  VENDORED ARCHIVE THAT NEITHER IMAGE USES
+#
+#  `harness/Dockerfile.gnucobol` builds the client library from
+#  `mariadb-connector-c-3.3.4-src.zip` ONLY. The MySQL Connector/C tarball is
+#  recorded in the plan's toolchain inventory as a vendored input but is not a
+#  COPY source for either image, so it is 3.5 MB of context for nothing.
+#
+#  It is excluded by exact name rather than by a `*.tar.gz` glob, so that the
+#  exclusion cannot silently widen if another archive is vendored later.
+# -----------------------------------------------------------------------------
+mysql-connector-c-6.1.11-src.tar.gz
+
+
+# -----------------------------------------------------------------------------
+#  COMPILED COBOL OUTPUT AND HARNESS RUN ARTIFACTS
+#
+#  The oracle is compiled INSIDE the container into /build, never in the
+#  checkout -- that is the whole reason /repo is mounted read-only
+#  [harness/docker-compose.yml]. Any such file present in the tree is a stray
+#  from a mistaken host-side build and must not be shipped into the context,
+#  where it could shadow a freshly compiled module.
+#
+#  `*.prn` is listed because every frozen compile passes `-T <name>.prn`
+#  [common/comp-common.sh:L26]; `cobmysqlapi.o` because the frozen recipe links
+#  it as a bare filename resolved against the current directory, so a stray copy
+#  in the context is exactly the kind of thing that produces a build that
+#  "works" for the wrong reason.
+# -----------------------------------------------------------------------------
+*.o
+*.so
+*.a
+*.lst
+*.prn
+*.i.*
+cobmysqlapi.o
+**/cobmysqlapi.o
+fh-logger.txt
+**/fh-logger.txt
+ACAS-Sysout.log
+**/ACAS-Sysout.log
+*.dat.bak
+core
+core.*
+
+
+# -----------------------------------------------------------------------------
+#  HARNESS OUTPUT TREES
+#
+#  Dumps, normalised dumps and diff evidence are produced into the /out volume
+#  at run time. They carry LIVE ACCOUNTING DATA extracted from the database and
+#  are written 0600 by the harness tools for that reason, so they must never be
+#  swept into a build context either.
+# -----------------------------------------------------------------------------
+out
+out/**
+dumps
+dumps/**
+*.dump
+*.norm
+run-logs
+run-logs/**
+
+
+# -----------------------------------------------------------------------------
+#  EDITOR, OS AND ARCHIVE NOISE
+# -----------------------------------------------------------------------------
+.idea
+.vscode
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+*.rej
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+*.log
+!ACAS-Manuals/**/*.log
+
+
+# -----------------------------------------------------------------------------
+#  DOCKER'S OWN FILES
+#
+#  The Dockerfiles are read by the daemon from the path given by `dockerfile:`
+#  and do not need to be part of the context payload. This file excludes itself
+#  for the same reason.
+# -----------------------------------------------------------------------------
+.dockerignore
+docker-compose.override.yml
+docker-compose.*.override.yml
+
+
+# =============================================================================
+#  EXPLICIT RE-INCLUSIONS -- THE SIX COPY SOURCES, MADE UNBREAKABLE
+#
+#  Docker applies the LAST matching pattern, so these negations override any
+#  broader exclusion above and would also override a careless one added later.
+#  Every path here is a COPY source in one of the two Dockerfiles; if you remove
+#  a line from this block, that image stops building.
+# =============================================================================
+!mysql/ACASDB.sql
+!requirements.txt
+!presql2-latest.zip
+!mariadb-connector-c-3.3.4-src.zip

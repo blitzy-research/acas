@@ -1,0 +1,106 @@
+# ---------------------------------------------------------------------------
+# ACAS repository ignore rules
+#
+# Scope note: build-artifact rules below are deliberately SCOPED to the
+# directories the GnuCOBOL oracle is built in (common/ general/ sales/
+# purchase/ irs/ stock/). payroll/ already tracks *.so and *.prn files that
+# ship with the archive, so no repository-wide *.so / *.prn rule is used.
+# ---------------------------------------------------------------------------
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.installed.cfg
+
+# --- Virtual environments ---------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# --- Test / coverage caches -------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# --- GnuCOBOL oracle build artifacts (scoped; see note above) ---------------
+common/*.o
+common/*.so
+common/*.prn
+common/*.c.l.h
+common/*.c.h
+common/*.i.dump
+common/cobmysqlapi.o
+general/*.o
+general/*.so
+general/*.prn
+general/*.c.l.h
+general/*.c.h
+general/*.i.dump
+sales/*.o
+sales/*.so
+sales/*.prn
+sales/*.c.l.h
+sales/*.c.h
+sales/*.i.dump
+purchase/*.o
+purchase/*.so
+purchase/*.prn
+purchase/*.c.l.h
+purchase/*.c.h
+purchase/*.i.dump
+irs/*.o
+irs/*.so
+irs/*.prn
+irs/*.c.l.h
+irs/*.c.h
+irs/*.i.dump
+stock/*.o
+stock/*.so
+stock/*.prn
+stock/*.c.l.h
+stock/*.c.h
+stock/*.i.dump
+
+# Executables produced by `cobc -x` for the menu shells
+/general/general
+/sales/sales
+/purchase/purchase
+/irs/irs
+/stock/stock
+/common/presql2
+/common/bldcopy2
+
+# --- Credentials / local runtime parameters (NEVER commit) ------------------
+# common/acas-get-params.cbl reads acas.param; the JC preSQL translator reads
+# presql2.param. Both hold database user names and passwords.
+acas.param
+presql2.param
+*.param.local
+.env
+.env.*
+!.env.example
+
+# --- Runtime scratch --------------------------------------------------------
+pretrans.tmp
+postrans.tmp
+SYS-DISPLAY.log
+*.log
+tmp/
+.DS_Store
+
+# --- Agent / tooling scratch ------------------------------------------------
+blitzy/screenshots/
+blitzy/screen_recordings/
